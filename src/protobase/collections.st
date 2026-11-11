@@ -237,7 +237,7 @@ _PBOpLog >> _previous
 "log, complete and consumed are the runtime-only fields of the operation log
  (see the module comment); every instance has them, set once by _setLog:complete:
  before the atom is initialised."
-PBAtom subclass: #PBIndexedCollection instanceVariableNames: 'log complete consumed' classVariableNames: 'Shapes'.
+PBAtom subclass: #PBIndexedCollection instanceVariableNames: 'log complete consumed'.
 
 PBIndexedCollection class >> typeName
   ^ 'proto_db.collections.IndexedCollection'.
@@ -315,17 +315,6 @@ PBIndexedCollection class >> new
 PBIndexedCollection class >> _emptyValueOf: aField
   ^ nil.
 
-"The PBMapKeyIndex of persistedFields: computed once for the built-in
- classes when the module loads (Shapes), on each call for another class."
-PBIndexedCollection class >> _fieldIndex
-  ^ Shapes at: self ifAbsent: [PBMapKeyIndex on: self persistedFields].
-
-PBIndexedCollection class >> _initializeShapes
-  | shapes |
-  shapes := Dictionary new.
-  { PBList. PBDictionary. PBHashDictionary. PBSet. PBCountedSet. PBRepeatedKeysDictionary } do: [:each |
-    shapes at: each put: (PBMapKeyIndex on: each persistedFields)].
-  Shapes := shapes.
 
 "=== the operation log ==="
 
@@ -441,9 +430,10 @@ PBIndexedCollection >> _newVersion
   ^ self _withRoot: (self stateAt: 'root') count: (self stateAt: 'count') log: log complete: self logComplete.
 
 PBIndexedCollection >> _withRoot: aRoot count: aCount log: aLog complete: aBoolean
-  | cls fields values |
+  | cls shape fields values |
   cls := self class.
-  fields := cls persistedFields.
+  shape := cls _recordShape.
+  fields := shape persisted.
   values := Array new: fields size.
   1 to: fields size do: [:i |
     | f |
@@ -451,7 +441,7 @@ PBIndexedCollection >> _withRoot: aRoot count: aCount log: aLog complete: aBoole
     values at: i put: (f = 'root'
       ifTrue: [aRoot]
       ifFalse: [f = 'count' ifTrue: [aCount] ifFalse: [self stateAt: f]])].
-  ^ cls _unsavedWithState: (PBFrozenDict _keys: fields index: cls _fieldIndex values: values) tag: nil
+  ^ cls _unsavedWithState: (PBFrozenDict _keys: fields index: shape persistedIndex values: values) tag: nil
     log: aLog complete: aBoolean.
 
 "The elements of aCollection (a collection of this module, or anything else
@@ -1101,4 +1091,3 @@ PBRepeatedKeysDictionary >> items
 
 { PBIndexSet. PBIndexedCollection. PBList. PBDictionary. PBHashDictionary. PBHashBuckets. PBSet.
   PBCountedSet. PBRepeatedKeysDictionary } do: [:each | PBTypeRegistry register: each].
-PBIndexedCollection _initializeShapes.

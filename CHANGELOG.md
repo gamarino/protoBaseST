@@ -112,13 +112,19 @@
 - The invalid `log` vectors (framed log files, read by ProtoBase only in its cluster and
   tiered storage) are justified skips of `tests/conformance/cluster.st` (ruling R14); the
   runner prints the `SKIP:` lines of a passing test under its `PASS` line.
-- Record field access in a few dispatches (plan Task 16b, ruling R15): a class with fixed
-  fields has a record shape (`_PBRecordShape`: its `persistedFields`, their shared
-  `PBMapKeyIndex`, its tag, its integer fields), and each record of it carries a slots Array,
-  the values of its fields in `persistedFields` order, built once when the record is built or
-  loaded and published once by compare-and-swap. The accessors of `PBPosNode`, `PBKeyNode`,
-  `PBCountedKeyNode` and `PBValueBox` read a literal slot number, held to `persistedFields` by
-  `tests/unit/record_slots.st`. `height`, `count` and `weight` are checked once per record. A
-  loaded record in `persistedFields` order shares the class's keys and index. The bytes, `=`,
+- Record field access in a few dispatches (plan Task 16b, ruling R15): every atom class has a
+  record shape (`_PBRecordShape`: its `persistedFields` with a shared `PBMapKeyIndex`, its slot
+  order, its integer fields), built from its declarations when it is registered or first
+  needed and published once. Each record carries a slots Array, built once when the record is
+  built or loaded and published once by compare-and-swap. A class that declares `slotFields`
+  reads them through accessors with literal slot numbers (`PBPosNode`, `PBKeyNode`,
+  `PBCountedKeyNode`, `PBValueBox`; an application subclass inherits the layout, may reorder
+  its `persistedFields` and may add fields, read with `_slotAt:`); a subclass whose layout
+  cannot hold is refused when it is registered. `tests/unit/record_slots.st` holds every
+  literal to `slotFields` for every registered class. Integer fields are checked once per
+  record (an optional one may be absent); the AVL writes, which compute them, are not checked
+  again. A loaded record in persisted order shares its class's keys and index (the decoder
+  builds no index for it). The walks check each child with one send, `check:` installs one
+  handler per tree, and the index and root checks of `PBAvl` use no blocks. The bytes, `=`,
   `hash` and the save are unchanged. `bench/run_avl.sh` measures the AVL workload against
-  ProtoBase.
+  ProtoBase, interleaved, for any binary and source tree.

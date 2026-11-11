@@ -24,14 +24,17 @@ another built-in kind, or a value that is not a node, is PBCorruptionError,
 and an opaque atom (a type with no class here) is PBNotSupportedError naming
 the type (format spec, 'Atoms of unknown types': its use where a built-in
 type is expected). The integer fields of a node (height, count, weight) must
-be Integers: each record's are checked once, when it is built or loaded.
+be Integers: each record's are checked once, when it is loaded or built from
+a caller's state (the writes compute them, and are not checked again).
 
 A node reads its fields from its slots (plan Task 16b, _PBRecordShape in
-registry.st): an Array of the values of its persistedFields, in that order,
-built once per record and published once by compare-and-swap; each accessor
-reads a literal slot number, which tests/unit/record_slots.st holds to
-persistedFields. The state (a PBFrozenDict in the record's order) stays the
-record: the slots are never persisted, compared or hashed.
+registry.st): an Array of the values of its slotFields (for the built-in
+classes, their persistedFields), in that order, built once per record and
+published once by compare-and-swap; each accessor reads a literal slot
+number, which tests/unit/record_slots.st holds to slotFields. An application
+subclass inherits the layout (it may reorder its persistedFields or add
+fields). The state (a PBFrozenDict in the record's order) stays the record:
+the slots are never persisted, compared or hashed.
 
 Writes (plan Task 14) are PBAvl's class methods, the functions of ProtoBase's
 avl.py over a root node, or nil for the empty tree:
@@ -80,7 +83,7 @@ Import from: 'protobase/keys'.
 
 "=== the node classes ========================================================"
 
-PBAtom subclass: #PBNode classVariableNames: 'Shapes'.
+PBAtom subclass: #PBNode.
 
 PBNode class >> typeName
   ^ 'proto_db.avl._Node'.
@@ -94,14 +97,10 @@ PBNode class >> persistedFields
 PBNode class >> integerFields
   ^ #('height' 'count').
 
-"The record shape of this class (_PBRecordShape): the concrete node classes
- have one; PBNode, the abstract type, reads its fields by name."
-PBNode class >> _recordShape
-  ^ Shapes at: self ifAbsent: nil.
-
-"The fields of a node read by name (stateAt:); each concrete class reads its
- slots instead, at the literal slot number of the field in its persistedFields
- (tests/unit/record_slots.st holds each literal to persistedFields)."
+"The fields of a node read by name (stateAt:): PBNode, the abstract type,
+ declares no slotFields. Each concrete class reads its slots instead, at the
+ literal slot number of the field in its slotFields, which are its
+ persistedFields (tests/unit/record_slots.st holds each literal)."
 
 PBNode >> left
   ^ self stateAt: 'left'.
@@ -134,6 +133,11 @@ PBPosNode class >> requiredFields
 
 PBPosNode class >> persistedFields
   ^ #('value' 'left' 'right' 'height' 'count').
+
+"The slots the accessors below read: PBPosNode's persistedFields (named, not
+ self: a subclass that reorders its persistedFields keeps this layout)."
+PBPosNode class >> slotFields
+  ^ PBPosNode persistedFields.
 
 "The accessors read the slots: value 1, left 2, right 3, height 4, count 5."
 PBPosNode >> storedValue
@@ -172,6 +176,9 @@ PBKeyNode class >> requiredFields
 
 PBKeyNode class >> persistedFields
   ^ #('key' 'value' 'left' 'right' 'height' 'count').
+
+PBKeyNode class >> slotFields
+  ^ PBKeyNode persistedFields.
 
 "The accessors read the slots: key 1, value 2, left 3, right 4, height 5,
  count 6 (PBCountedKeyNode keeps them and adds weight 7)."
@@ -234,6 +241,10 @@ PBCountedKeyNode class >> requiredFields
 PBCountedKeyNode class >> persistedFields
   ^ #('key' 'value' 'left' 'right' 'height' 'count' 'weight').
 
+"PBKeyNode's slots, then weight."
+PBCountedKeyNode class >> slotFields
+  ^ PBCountedKeyNode persistedFields.
+
 PBCountedKeyNode class >> integerFields
   ^ #('height' 'count' 'weight').
 
@@ -253,8 +264,8 @@ PBValueBox class >> requiredFields
 PBValueBox class >> persistedFields
   ^ #('value').
 
-PBValueBox class >> _recordShape
-  ^ PBNode _shapeOf: self.
+PBValueBox class >> slotFields
+  ^ PBValueBox persistedFields.
 
 "The boxed value: slot 1."
 PBValueBox >> value
@@ -263,31 +274,14 @@ PBValueBox >> value
 
 { PBNode. PBPosNode. PBKeyNode. PBCountedKeyNode. PBValueBox } do: [:each | PBTypeRegistry register: each].
 
-"The record shape of each concrete class (plan Tasks 14 and 16b,
- _PBRecordShape), computed once, when the module loads: its fields and their
- index are shared by every state the writes build (never changed), and its
- records read their fields from slots."
-PBNode class >> _initializeShapes
-  | shapes |
-  shapes := Dictionary new.
-  { PBPosNode. PBKeyNode. PBCountedKeyNode. PBValueBox } do: [:each |
-    shapes at: each put: (_PBRecordShape of: each)].
-  Shapes := shapes.
-
-"The record shape of aClass, a concrete node class or PBValueBox."
-PBNode class >> _shapeOf: aClass
-  ^ Shapes at: aClass.
-
-"A new, unsaved atom of aClass whose state holds anArray, the values of
- aClass persistedFields in order (anArray is also its slots: never changed)."
+"A new, unsaved atom of aClass whose slots are anArray: the values of the
+ slotFields of the built-in class aClass descends from, in order (a node
+ class's or PBValueBox's), computed by the writes (PBAtom class >>
+ _unsavedWithSlots:). For the built-in classes the state shares the class's
+ keys and anArray; a subclass's state follows its own persistedFields, and a
+ later field of it is absent."
 PBNode class >> _new: aClass values: anArray
-  | shape |
-  shape := Shapes at: aClass.
-  ^ aClass
-    _unsavedWithState: (PBFrozenDict _keys: shape fields index: shape index values: anArray)
-    tag: shape tag.
-
-PBNode _initializeShapes.
+  ^ aClass _unsavedWithSlots: anArray.
 
 "=== the walks ==============================================================="
 
@@ -311,6 +305,12 @@ _PBTree class >> node: aNode kind: aKind in: anOwner
   "A node of exactly aKind first: the common case of every walk and write."
   aNode class == aKind ifTrue: [^ aNode].
   (aNode isKindOf: aKind) ifTrue: [^ aNode].
+  ^ self notNode: aNode kind: aKind in: anOwner.
+
+"The refusal of aValue, neither nil nor an atom of aKind, met in anOwner: an
+ opaque atom is PBNotSupportedError naming its type, anything else
+ PBCorruptionError."
+_PBTree class >> notNode: aNode kind: aKind in: anOwner
   (aNode isKindOf: PBOpaqueAtom) ifTrue: [
     ^ PBNotSupportedError signal: 'the ' , aNode tag , ' atom ' , aNode printString
       , ' is used where a ' , aKind typeName , ' is expected (in ' , anOwner printString
@@ -334,31 +334,38 @@ _PBTree class >> count: aRoot kind: aKind in: anOwner
 
 "Evaluates aBlock with each node of the tree aRoot, in order (explicit stack)."
 _PBTree class >> nodesOf: aRoot kind: aKind in: anOwner do: aBlock
-  | stack node |
+  "A child of the root's class is accepted at once (a tree has one node
+   class); another one is checked against aKind as node:kind:in: checks it."
+  | stack node same |
   stack := OrderedCollection new.
   node := self node: aRoot kind: aKind in: anOwner.
+  same := node class.
   [stack notEmpty or: [node notNil]] whileTrue: [
     [node notNil] whileTrue: [
       stack addLast: node.
-      node := self node: node left kind: aKind in: anOwner].
+      node := node left.
+      node isNil ifFalse: [node class == same ifFalse: [node := self node: node kind: aKind in: anOwner]]].
     node := stack removeLast.
     aBlock value: node.
-    node := self node: node right kind: aKind in: anOwner].
+    node := node right.
+    node isNil ifFalse: [node class == same ifFalse: [node := self node: node kind: aKind in: anOwner]]].
 
 "The node at position anIndex (0-based, 0 <= anIndex < count) of a positional
  tree (pos_get). A tree whose counts do not lead to a node is PBCorruptionError."
 _PBTree class >> nodeAt: anIndex of: aRoot in: anOwner
-  | node index leftCount |
-  node := self node: aRoot kind: PBPosNode in: anOwner.
+  "Each child is read once and checked by one send (_pbPosNodeIn:)."
+  | node index left leftCount |
+  node := aRoot _pbPosNodeIn: anOwner.
   index := anIndex.
   [node notNil] whileTrue: [
-    leftCount := self count: node left kind: PBPosNode in: anOwner.
+    left := node left _pbPosNodeIn: anOwner.
+    leftCount := left isNil ifTrue: [0] ifFalse: [left count].
     index < leftCount
-      ifTrue: [node := self node: node left kind: PBPosNode in: anOwner]
+      ifTrue: [node := left]
       ifFalse: [
         index = leftCount ifTrue: [^ node].
         index := index - leftCount - 1.
-        node := self node: node right kind: PBPosNode in: anOwner]].
+        node := node right _pbPosNodeIn: anOwner]].
   ^ PBCorruptionError signal: 'the positional tree of ' , anOwner printString , ' has no node at '
     , anIndex printString , ': its counts are inconsistent'.
 
@@ -366,12 +373,34 @@ _PBTree class >> nodeAt: anIndex of: aRoot in: anOwner
  nil (key_get)."
 _PBTree class >> nodeWithKey: anOrderKey of: aRoot in: anOwner
   | node c |
-  node := self node: aRoot kind: PBKeyNode in: anOwner.
+  node := aRoot _pbKeyNodeIn: anOwner.
   [node notNil] whileTrue: [
     c := anOrderKey compareWith: node orderKey.
     c = 0 ifTrue: [^ node].
-    node := self node: (c < 0 ifTrue: [node left] ifFalse: [node right]) kind: PBKeyNode in: anOwner].
+    node := (c < 0 ifTrue: [node left] ifFalse: [node right]) _pbKeyNodeIn: anOwner].
   ^ nil.
+
+"The checks of a descent, one send per child: the receiver as a node of a
+ positional (_pbPosNodeIn:) or keyed (_pbKeyNodeIn:) tree of anOwner. A node
+ of that kind (a subclass included, as isKindOf:) answers itself, nil answers
+ nil, anything else is refused as _PBTree notNode:kind:in: refuses it."
+Object >> _pbPosNodeIn: anOwner
+  ^ _PBTree notNode: self kind: PBPosNode in: anOwner.
+
+UndefinedObject >> _pbPosNodeIn: anOwner
+  ^ nil.
+
+PBPosNode >> _pbPosNodeIn: anOwner
+  ^ self.
+
+Object >> _pbKeyNodeIn: anOwner
+  ^ _PBTree notNode: self kind: PBKeyNode in: anOwner.
+
+UndefinedObject >> _pbKeyNodeIn: anOwner
+  ^ nil.
+
+PBKeyNode >> _pbKeyNodeIn: anOwner
+  ^ self.
 
 "=== new nodes (plan Task 14) ================================================="
 
@@ -494,12 +523,20 @@ PBAvl class >> valueBoxMin
 
 "aRoot is nil or a node of aKind; PBValidationError otherwise."
 PBAvl class >> _root: aRoot kind: aKind
-  (aRoot isNil or: [aRoot isKindOf: aKind]) ifTrue: [^ aRoot].
+  "Nested ifTrue: (inlined), not or: (a block): every operation checks its root."
+  aRoot isNil ifTrue: [^ nil].
+  aRoot class == aKind ifTrue: [^ aRoot].
+  (aRoot isKindOf: aKind) ifTrue: [^ aRoot].
   ^ PBValidationError signal: 'PBAvl: a ' , aKind typeName , ' tree (or nil) was expected, not '
     , (PBKeys _preview: aRoot).
 
 "anIndex is an Integer (not a Boolean) in 0..anUpper; PBValidationError otherwise."
 PBAvl class >> _index: anIndex upTo: anUpper
+  "The common case first, with nested ifTrue: (inlined), not and: (blocks):
+   every positional operation checks its index."
+  anIndex isInteger ifTrue: [
+    anIndex == true ifFalse: [anIndex == false ifFalse: [
+      anIndex >= 0 ifTrue: [anIndex <= anUpper ifTrue: [^ anIndex]]]]].
   (anIndex isInteger and: [anIndex ~~ true and: [anIndex ~~ false]]) ifFalse: [
     ^ PBValidationError signal: 'PBAvl: an index must be an Integer, not ' , (PBKeys _preview: anIndex)].
   (anIndex between: 0 and: anUpper) ifFalse: [
@@ -831,23 +868,23 @@ PBAvl class >> check: aRoot
     ^ self _corrupt: 'implausible root height ' , maxDepth printString , ' at ' , aRoot printString].
   ^ self _check: aRoot kind: kind maxDepth: maxDepth keyed: kind ~~ PBPosNode weighted: kind == PBCountedKeyNode.
 
-"aBlock's value, with a PBValidationError it signals reported as corruption of
- aNode's aWhat. Only that exact class is the refusal of an invalid value: any
- subclass (PBClosedError, PBReferenceError: a load) passes as it is."
-PBAvl class >> _valid: aWhat of: aNode do: aBlock
-  ^ aBlock on: PBValidationError do: [:e |
-    e class == PBValidationError ifFalse: [^ e pass].
-    self _corrupt: 'the ' , aWhat , ' of ' , aNode printString , ' is not valid: ' , e messageText]
-
 "The walk of check:. A stack entry is { node. left. right. depth } before its
  children are checked and { node. left. right. nil } after; a result is
- { height. count. min order key. max order key. weight }."
+ { height. count. min order key. max order key. weight }.
+
+ One handler covers the walk. While a node's key or weighted value is
+ validated, what names it and validated holds the node; a PBValidationError
+ signalled then is reported as corruption of that node's key or weighted
+ value. Only that exact class is the refusal of an invalid value: any subclass
+ (PBClosedError, PBReferenceError: a load), and any error signalled outside
+ those two validations, passes as it is."
 PBAvl class >> _check: aRoot kind: kind maxDepth: maxDepth keyed: keyed weighted: weighted
-  | empty results stack |
+  | empty results stack what validated |
   empty := { 0. 0. nil. nil. 0 }.
   results := OrderedCollection new.
   stack := OrderedCollection new.
-  stack addLast: (self _checkEntry: aRoot kind: kind depth: 1 maxDepth: maxDepth).
+  what := nil.
+  [stack addLast: (self _checkEntry: aRoot kind: kind depth: 1 maxDepth: maxDepth).
   [stack notEmpty] whileTrue: [
     | entry node left right depth |
     entry := stack removeLast.
@@ -884,7 +921,10 @@ PBAvl class >> _check: aRoot kind: kind maxDepth: maxDepth keyed: keyed weighted
           | k |
           "Recomputed from the key, as check_invariants does, and compared with
            the cached one: the verifier never trusts what the writer cached."
-          k := self _valid: 'key' of: node do: [PBKeys orderKey: node key].
+          validated := node.
+          what := 'key'.
+          k := PBKeys orderKey: node key.
+          what := nil.
           node knownOrderKey isNil ifFalse: [
             (k compareWith: node knownOrderKey) = 0 ifFalse: [
               ^ self _corrupt: 'the cached order key of ' , node printString , ' differs from the key''s ('
@@ -898,13 +938,19 @@ PBAvl class >> _check: aRoot kind: kind maxDepth: maxDepth keyed: keyed weighted
         weight := 0.
         weighted ifTrue: [
           | own |
-          own := self _valid: 'weighted value' of: node do: [_PBTree countOfPair: node value].
+          validated := node.
+          what := 'weighted value'.
+          own := _PBTree countOfPair: node value.
+          what := nil.
           weight := node weight.
           weight = (own + (leftRes at: 5) + (rightRes at: 5)) ifFalse: [
             ^ self _corrupt: 'wrong weight ' , weight printString , ' at ' , node printString , ': its own count is '
               , own printString , ', the children weights ' , (leftRes at: 5) printString , ' and '
               , (rightRes at: 5) printString]].
-        results addLast: { height. count. nmin. nmax. weight }]].
+        results addLast: { height. count. nmin. nmax. weight }]]]
+    on: PBValidationError do: [:e |
+      (what isNil or: [e class ~~ PBValidationError]) ifTrue: [^ e pass].
+      self _corrupt: 'the ' , what , ' of ' , validated printString , ' is not valid: ' , e messageText].
   ^ aRoot.
 
 "The stack entry of aNode at aDepth: its children read once and checked (a node
@@ -916,7 +962,10 @@ PBAvl class >> _checkEntry: aNode kind: kind depth: depth maxDepth: maxDepth
   ^ { aNode. self _child: aNode left of: aNode kind: kind. self _child: aNode right of: aNode kind: kind. depth }.
 
 PBAvl class >> _child: aChild of: aNode kind: kind
+  "A child of the tree's exact class first (the common case, with no isKindOf:)."
   | child |
+  aChild isNil ifTrue: [^ nil].
+  aChild class == kind ifTrue: [^ aChild].
   child := _PBTree node: aChild kind: PBNode in: aNode.
   child isNil ifTrue: [^ nil].
   child class == kind ifFalse: [

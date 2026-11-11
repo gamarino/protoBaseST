@@ -62,16 +62,24 @@ def main():
         state["sum"] = s
     report("keyPut-replace", 500, timed(key_replace), state["sum"], sum(i * 10 for i in range(1, 501)))
 
-    def check(root):
-        def run():
-            s = 0
-            for _ in range(3):
-                avl.check_invariants(root)
-                s += root.count
-            state["sum"] = s
-        return run
-    report("check-pos", 3, timed(check(state["pos"])), state["sum"], 3 * n)
-    report("check-key", 3, timed(check(state["key"])), state["sum"], 3 * n)
+    # check_invariants answers None: the in-order fold after it proves the walked tree.
+    def check_pos():
+        s = 0
+        for _ in range(3):
+            avl.check_invariants(state["pos"])
+            for v in avl.pos_iter(state["pos"]):
+                s += 1 + v
+        state["sum"] = s
+    report("check-pos", 3, timed(check_pos), state["sum"], 3 * (n + sum(i * 10 for i in range(1, n + 1))))
+
+    def check_key():
+        s = 0
+        for _ in range(3):
+            avl.check_invariants(state["key"])
+            for k, v in avl.key_iter(state["key"]):
+                s += 1 + k + v
+        state["sum"] = s
+    report("check-key", 3, timed(check_key), state["sum"], 3 * (n + sum(i + i * 10 for i in range(1, n + 1))))
     print("avl_workload ok")
 
 

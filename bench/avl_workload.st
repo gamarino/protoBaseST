@@ -8,6 +8,12 @@
  Python mirror computes the same one): a wrong result signals an Error and the run exits
  non-zero. The last line is 'avl_workload ok'.
 
+ check-pos and check-key run check: and then an in-order fold over the same tree (nodesDo:;
+ ProtoBase pos_iter / key_iter), both timed: check: answers only its root (check_invariants
+ answers None), so the fold's checksum (nodes visited plus the sum of the keys and values)
+ is what proves the tree walked is the one built. That check: verifies the invariants is the
+ unit tests' concern (tests/unit/avl_check_invariants.st).
+
  Usage: protost avl_workload.st"
 Import from: 'protobase'.
 | time report n reps pos key us sum expected r |
@@ -46,13 +52,17 @@ us := time value: [1 to: 500 do: [:i |
   sum := sum + (r at: 3)]].
 report value: 'keyPut-replace' value: 500 value: us value: sum value: ((1 to: 500) inject: 0 into: [:a :i | a + (i * 10)]).
 
-"Three whole-tree checks each; the checksum is the node count checked."
+"Three whole-tree checks each, each followed by the fold (see the header)."
 sum := 0.
-us := time value: [3 timesRepeat: [sum := sum + (PBAvl check: pos) count]].
-report value: 'check-pos' value: 3 value: us value: sum value: 3 * n.
+us := time value: [3 timesRepeat: [
+  PBAvl nodesDo: [:node | sum := sum + 1 + node value] over: (PBAvl check: pos)]].
+report value: 'check-pos' value: 3 value: us value: sum
+  value: 3 * (n + ((1 to: n) inject: 0 into: [:a :i | a + (i * 10)])).
 
 sum := 0.
-us := time value: [3 timesRepeat: [sum := sum + (PBAvl check: key) count]].
-report value: 'check-key' value: 3 value: us value: sum value: 3 * n.
+us := time value: [3 timesRepeat: [
+  PBAvl nodesDo: [:node | sum := sum + 1 + node key + node value] over: (PBAvl check: key)]].
+report value: 'check-key' value: 3 value: us value: sum
+  value: 3 * (n + ((1 to: n) inject: 0 into: [:a :i | a + i + (i * 10)])).
 
 'avl_workload ok' displayNl.

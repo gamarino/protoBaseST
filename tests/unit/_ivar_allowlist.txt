@@ -2,9 +2,11 @@
 # variable. Each is a private initialiser called once by a class-side constructor
 # (or, for PBMissing and PBZoneKeys, once when the module loads). One entry per line:
 # Class>>selector or Class class>>selector.
-# PBAtom>>_slots is not an initialiser: it publishes the runtime-only slots field once, by
-# compare-and-swap from nil (setInstVar:from:to:), always from the installed envelope (Task 16b).
+# PBAtom>>_slots and PBAtom>>_installState: are not initialisers: they publish the runtime-only
+# slots field once, by compare-and-swap from nil (setInstVar:from:to:), always from the installed
+# envelope (Task 16b).
 PBAtom>>_slots
+PBAtom>>_installState:
 _PBSequence>>_setItems:
 PBFrozenDict>>_setKeys:values:index:
 PBOrderKey>>_setRank:payload:
@@ -17,7 +19,8 @@ PBUnresolvedRef>>_setPointer:tag:
 PBZoneKeys class>>_initializeKeys
 PBTypeRegistry class>>_initializeRegistry
 PBAtom>>_setOid:pointer:storage:
-_PBRecordShape>>_setFields:index:tag:integerSlots:
+_PBRecordShape>>_setPersisted:index:fields:persistedSlots:integerSlots:optional:required:
+_PBRecordShape class>>_initializeTable
 PBOpaqueAtom>>_setReferencedName:
 PBSegmentHeader>>_setVersion:segment:
 PBRecordHeader>>_setKind:length:payloadCrc:
@@ -36,9 +39,7 @@ PBTxState class>>_initializeMarks
 PBOrderKey class>>_initializeInfinities
 _PBLoadResolver>>_setStorage:chain:
 _PBReadMap>>_setEntries:
-PBNode class>>_initializeShapes
 PBKeyNode>>_setOid:pointer:storage:
 _PBPlace>>_setPointer:storage:
-PBIndexedCollection class>>_initializeShapes
 PBIndexedCollection>>_setLog:complete:
 _PBOpLog>>_setPrevious:op:

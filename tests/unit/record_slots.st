@@ -1,15 +1,18 @@
-"EXPECT: ok 81"
-"Plan Task 16b (ruling R15): a record of a class with a fixed shape (PBPosNode, PBKeyNode,
- PBCountedKeyNode, PBValueBox) reads its fields from a slots Array: the values of
- persistedFields, in that order, built once per record and published once by
- compare-and-swap. Each accessor reads a literal slot number; this test fails if a literal
- disagrees with the class's persistedFields, so a reorder of persistedFields (or of an
- accessor) is caught. The accessors answer the same values for a node built in memory, a
- loaded record, and a loaded record whose attributes are in another order (the record's
- order is kept: the bytes do not change). The integer fields (height, count, weight) are
- checked once, when the record is loaded or built, whatever field is read first. A loser
- of the load race reads the slots of the installed envelope, forced through a seam, never
- by timing."
+"EXPECT: ok 150"
+"Plan Task 16b (ruling R15, fix round 1): every atom class has a record shape
+ (_PBRecordShape), and each record carries a slots Array, the values of its fields in slot
+ order, built once per record and published once by compare-and-swap. A class that declares
+ slotFields reads them through accessors with literal slot numbers. This test takes the
+ classes from the type registry (the built-in ones and the application subclasses below) and
+ fails for a class that declares slotFields and has no accessor table here, and for an
+ accessor whose literal disagrees with its class's slotFields: a reorder of the built-in
+ persistedFields (which are their slotFields) is caught. The accessors answer the same values
+ for a record built in memory, loaded, and loaded with its attributes reversed (the record's
+ order is kept: the bytes do not change). A loaded record in persisted order shares its
+ class's keys (no index of its own), for every registered class. The integer fields (height,
+ count, weight) are checked once, when the record is loaded or built from a caller's state,
+ whatever field is read first. A loser of the load race reads the slots of the installed
+ envelope, forced through a seam, never by timing."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_sink'.
@@ -32,17 +35,45 @@ RacingLoadSink >> loadAt: aPointer expecting: aTag within: aChain
   r isNil ifFalse: [r left].
   ^ envelope.
 
-| c accessors markers sink build saveLoad stub node reversed racing inner bad ptr seg |
+"An application keyed node whose records order their attributes differently: it keeps
+ PBKeyNode's slot layout (inherited slotFields) and accessors."
+PBKeyNode subclass: #ReorderedNode.
+ReorderedNode class >> typeName
+  ^ 'slotstest.ReorderedNode'.
+ReorderedNode class >> persistedFields
+  ^ #('left' 'right' 'key' 'value' 'height' 'count').
+
+"An application keyed node with a later, optional integer field and its own accessor."
+PBKeyNode subclass: #ExtendedNode.
+ExtendedNode class >> typeName
+  ^ 'slotstest.ExtendedNode'.
+ExtendedNode class >> persistedFields
+  ^ #('key' 'value' 'left' 'right' 'height' 'count' 'priority').
+ExtendedNode class >> slotFields
+  ^ ExtendedNode persistedFields.
+ExtendedNode class >> integerFields
+  ^ #('height' 'count' 'priority').
+ExtendedNode >> priority
+  ^ self _slotAt: 7.
+
+| c accessors markers sink build saveLoad stub node reversed racing inner bad ptr seg classes keyTable |
 c := Check new.
-"The accessor of each persisted field (the stored value of a node; a box's value)."
+PBTypeRegistry register: ReorderedNode; register: ExtendedNode.
+"The accessor of each slot field, per class that declares slotFields."
+keyTable := { 'key' -> #key. 'value' -> #storedValue. 'left' -> #left. 'right' -> #right. 'height' -> #height. 'count' -> #count }.
 accessors := Dictionary new.
 accessors at: PBPosNode put: { 'value' -> #storedValue. 'left' -> #left. 'right' -> #right. 'height' -> #height. 'count' -> #count }.
-accessors at: PBKeyNode put: { 'key' -> #key. 'value' -> #storedValue. 'left' -> #left. 'right' -> #right. 'height' -> #height. 'count' -> #count }.
-accessors at: PBCountedKeyNode put: { 'key' -> #key. 'value' -> #storedValue. 'left' -> #left. 'right' -> #right. 'height' -> #height. 'count' -> #count. 'weight' -> #weight }.
+accessors at: PBKeyNode put: keyTable.
+accessors at: ReorderedNode put: keyTable.
+accessors at: PBCountedKeyNode put: keyTable , { 'weight' -> #weight }.
+accessors at: ExtendedNode put: keyTable , { 'priority' -> #priority }.
 accessors at: PBValueBox put: { 'value' -> #value }.
+"The registered classes, from the registry."
+classes := (PBTypeRegistry _table values collect: [:entry | entry at: 1]) asSet asArray
+  sort: [:a :b | a name <= b name].
 "A distinct Integer per field name, whatever its position."
 markers := Dictionary new.
-#('key' 'value' 'left' 'right' 'height' 'count' 'weight') doWithIndex: [:f :i | markers at: f put: 100 + i].
+classes do: [:cls | cls persistedFields do: [:f | markers at: f ifAbsent: [markers at: f put: 100 + markers size]]].
 "An in-memory atom of aClass holding the marker of each field, in the order of aFieldArray."
 build := [:aClass :aFieldArray |
   aClass _unsavedWithState: (PBFrozenDict withAssociations: (aFieldArray collect: [:f | f -> (markers at: f)]))].
@@ -50,21 +81,29 @@ sink := SegmentSink segment: (ByteArray fromHex: '16b016b016b016b016b016b016b016
 "A fresh stub of anAtom, saved first."
 saveLoad := [:anAtom | anAtom _saveInto: sink. anAtom unloadedCopy].
 
-{ PBPosNode. PBKeyNode. PBCountedKeyNode. PBValueBox } do: [:cls |
-  | fields table cases |
-  fields := cls persistedFields.
-  table := accessors at: cls.
-  c that: cls name , ': one accessor per persisted field' is: (table collect: [:a | a key]) asSet equals: fields asSet.
-  cases := { 'built'. build value: cls value: fields.
-    'loaded'. saveLoad value: (build value: cls value: fields).
-    'loaded, attributes reversed'. saveLoad value: (build value: cls value: fields reversed) }.
+c that: 'the registry lists the application node classes' isTrue: ((classes includes: ReorderedNode) and: [classes includes: ExtendedNode]).
+(classes select: [:cls | cls slotFields notNil]) do: [:cls |
+  | slotFields table cases |
+  slotFields := cls slotFields.
+  table := accessors at: cls ifAbsent: [#()].
+  c that: cls name , ': one accessor per slot field' is: (table collect: [:a | a key]) asSet equals: slotFields asSet.
+  cases := { 'built'. build value: cls value: cls persistedFields.
+    'loaded'. saveLoad value: (build value: cls value: cls persistedFields).
+    'loaded, attributes reversed'. saveLoad value: (build value: cls value: cls persistedFields reversed) }.
   1 to: cases size by: 2 do: [:k |
     | how atom |
     how := cases at: k.
     atom := cases at: k + 1.
     table do: [:a |
-      c that: cls name , ' ' , how , ': ' , a value , ' reads slot ' , (fields indexOf: a key) printString
+      c that: cls name , ' ' , how , ': ' , a value , ' reads slot ' , (slotFields indexOf: a key) printString
         is: (atom perform: a value) equals: (markers at: a key)]]].
+"The built-in layouts are their record order: their writes share the keys and the slots."
+{ PBPosNode. PBKeyNode. PBCountedKeyNode. PBValueBox } do: [:cls |
+  c that: cls name , ': slotFields are persistedFields' is: cls slotFields equals: cls persistedFields].
+"Every registered class: a loaded record in persisted order shares the class's keys."
+(classes reject: [:cls | cls persistedFields isEmpty]) do: [:cls |
+  stub := saveLoad value: (build value: cls value: cls persistedFields).
+  c that: cls name , ': a loaded record shares the class keys' isTrue: (stub state _hasKeys: cls _recordShape persisted)].
 
 "The record's order is kept: a reversed record re-encodes to its own bytes."
 reversed := build value: PBKeyNode value: PBKeyNode persistedFields reversed.

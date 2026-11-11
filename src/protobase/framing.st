@@ -339,7 +339,7 @@ PBAtomEnvelope class >> decode: aByteArray expecting: aTypeTag
  leading _, not oid, atom_pointer or context, no name twice), or a value is
  not a canonical value."
 PBAtomEnvelope class >> decode: aByteArray expecting: aTypeTag resolver: aResolver
-  | map t oid s keys names pairs |
+  | map t oid s keys names pairs values shape shared fieldNames |
   (aByteArray isKindOf: ByteArray) ifFalse: [
     ^ PBValidationError signal: 'PBAtomEnvelope decode: a ByteArray was expected, not ' , aByteArray class name].
   map := _PBFrame decodeMsgpack: aByteArray what: 'PBAtomEnvelope'.
@@ -354,15 +354,26 @@ PBAtomEnvelope class >> decode: aByteArray expecting: aTypeTag resolver: aResolv
   ((oid isKindOf: ByteArray) and: [oid size = 16]) ifFalse: [
     ^ self _corrupt: 'the oid is not 16 bytes: ' , oid printString].
   (s isKindOf: MessagePackMap) ifFalse: [^ self _corrupt: 'the state is not a map'].
-  names := Set new.
-  pairs := s associations collect: [:each |
+  pairs := s associations.
+  fieldNames := pairs collect: [:each | each key].
+  "A record in the persisted order of its class (ProtoBase writes the attributes
+   in constructor order) shares the class's keys and index (_PBRecordShape): its
+   names are distinct, and it needs no index of its own."
+  shape := PBTypeRegistry recordShapeForTag: t.
+  shared := shape notNil and: [fieldNames = shape persisted].
+  names := shared ifTrue: [nil] ifFalse: [Set new].
+  values := pairs collect: [:each |
     | why |
     why := self _nameProblem: each key.
     why isNil ifFalse: [^ self _corrupt: why].
-    (names includes: each key) ifTrue: [^ self _corrupt: 'the attribute ' , each key printString , ' appears twice'].
-    names add: each key.
-    each key -> (PBCodec fromWire: each value resolver: aResolver)].
-  ^ self basicNew _setTag: t oid: oid state: (PBFrozenDict withAssociations: pairs).
+    names isNil ifFalse: [
+      (names includes: each key) ifTrue: [^ self _corrupt: 'the attribute ' , each key printString , ' appears twice'].
+      names add: each key].
+    PBCodec fromWire: each value resolver: aResolver].
+  shared ifTrue: [
+    ^ self basicNew _setTag: t oid: oid state: (PBFrozenDict _keys: shape persisted index: shape persistedIndex values: values)].
+  ^ self basicNew _setTag: t oid: oid state: (PBFrozenDict withAssociations:
+    ((1 to: fieldNames size) asArray collect: [:i | (fieldNames at: i) -> (values at: i)])).
 
 PBAtomEnvelope class >> _corrupt: aString
   ^ PBCorruptionError signal: 'PBAtomEnvelope: ' , aString.
