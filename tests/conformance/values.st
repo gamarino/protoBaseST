@@ -1,4 +1,4 @@
-"EXPECT: values 72/73 expected 1 decode-only 5/6 expected 1 read-not-rewritten 0/3 expected 3"
+"EXPECT: values 72/73 expected 1 decode-only 5/6 expected 1 read-not-rewritten 2/3 expected 1"
 "The value vectors of the manifest, three sections (README, 'Using the vectors', 1 and 2):
    values                     decoding the file describes as the entry's value, and the
                               encoding of the value built from that description is the file's bytes

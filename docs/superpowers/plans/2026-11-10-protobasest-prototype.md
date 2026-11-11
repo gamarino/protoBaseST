@@ -406,7 +406,10 @@ Read ProtoBase's code before guessing a behaviour.
   - `PBCodec` reduces a `UUID` subclass to its base value from the base instance variables.
     Today it signals `PBNotSupportedError`, because the layout is unknown before this task.
   - Run `tests/unit/codec_tagged_uuid.st`, which must pass, not SKIP.
-  - Remove `values/uuid` from Task 8's expected-differences list.
+  - Remove `values/uuid` from Task 8's expected-differences list, and the uuid rows of the
+    key runners (Task 10: `order`, `hashes`, `exact_tokens`); their EXPECT lines become
+    `order ascending 43/43 equal 4/4 unorderable 5/5`, `hashes 36/36 atom_hashes 3/3` and
+    `exact_tokens 34/34 atom_tokens 3/3`.
 
 ---
 
@@ -620,15 +623,21 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   | `values/uuid` | decode: `PBNotSupportedError` | `lib/uuid.st` is not in protoST 0.9.0 | Task 5, Step 6 |
   | `values_decode_only/datetime-zone-format3` | decodes to a `PBLegacyZoneDateTime` (wall clock), not the instant; re-encoding it is `PBValidationError` | the instant needs a tz database (design §4.3) | permanent, design §4.3 |
   | `values_read_not_rewritten/map-zone-key-format3` | re-encoding is refused, as listed; the decoded keys are the format-3 wall clocks, not instants | the same | permanent, design §4.3 |
-  | `values_read_not_rewritten/map-nan-keys-format3` | re-encodes instead of `PBValidationError` | the NaN-token conflict of a writer is `PBKeys checkMapKeys:` | Task 10 |
-  | `values_read_not_rewritten/map-decimal-nan-keys-format3` | the same | the same | Task 10 |
   | `invalid/value-instant-wall-out-of-range` | accepted and presented in UTC | the wall-clock range needs the zone's rules; the format spec (Known gaps) lets a reader without a database present the instant in UTC | permanent, design §4.3 |
-  | `invalid/map-key-bool-and-int` | accepted | the cross-kind conflict rule needs order keys | Task 10 |
-  | `invalid/map-key-equal-numbers` | accepted | the same | Task 10 |
+  | `order/uuid 00000000000000000000000000000001`, `order/uuid ff000000000000000000000000000000` | stage `order`: `PBNotSupportedError` | the value cannot be built: `lib/uuid.st` is not in protoST 0.9.0 | Task 5, Step 6 |
+  | `hashes/uuid ffffffffffffffffffffffffffffffff`, `hashes/uuid 12345678123456781234567812345678` | stage `hash`: `PBNotSupportedError` | the same | Task 5, Step 6 |
+  | `exact_tokens/uuid 12345678123456781234567812345678` | stage `token`: `PBNotSupportedError` | the same | Task 5, Step 6 |
 
   Removed by Task 9: `values_decode_only/ref-format2`, `ref-name-of-builtin` and `ref-alias`
   (the reader maps a built-in name to its alias and an application alias to its declared name
   through `PBTypeRegistry`; the runner now matches them).
+
+  Removed by Task 10: `values_read_not_rewritten/map-nan-keys-format3` and
+  `map-decimal-nan-keys-format3` (the writer's map-key rule, `PBKeys checkMapKeys:reading:`,
+  refuses two NaN keys of one exact token), `invalid/map-key-bool-and-int` and
+  `map-key-equal-numbers` (`PBFrozenDict` keys follow the order-key rule). Added by Task 10:
+  the uuid rows of the key runners (`order`, `hashes`, `exact_tokens`; their manifest
+  sections have no ids, so a runner names a value `kind body`).
 - [ ] **Step 4:** run. Expected: PASS, with exactly the expected differences above. A
   failing vector that is not listed is a codec bug (fix it in Task 7's files); never edit a
   vector, and never add an entry without a reason and a removing task (or "permanent" with
@@ -738,9 +747,12 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
 **Files:**
 - Create: `src/protobase/keys.st` (`PBOrderKey`, `PBKeys`).
 - Test:
-  - `tests/conformance/order.st` (`EXPECT: order ascending N equal N unorderable N ok`);
-  - `tests/conformance/hashes.st` (`EXPECT: hashes 36/36 atom_hashes 3/3`);
-  - `tests/conformance/tokens.st` (`EXPECT: exact_tokens 34/34 atom_tokens 3/3`);
+  - `tests/conformance/order.st`
+    (`EXPECT: order ascending 41/43 expected 2 equal 4/4 unorderable 5/5`);
+  - `tests/conformance/hashes.st` (`EXPECT: hashes 34/36 expected 2 atom_hashes 3/3`);
+  - `tests/conformance/tokens.st` (`EXPECT: exact_tokens 33/34 expected 1 atom_tokens 3/3`);
+  - the uuid vectors are expected differences until Task 5 (`lib/uuid.st`); Task 5 Step 6
+    removes them and the counts become `43/43`, `36/36` and `34/34`;
   - `tests/unit/keys_bit_length.st`;
   - `tests/unit/keys_map_key_rule.st`.
 
@@ -748,7 +760,9 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
 - Consumes: Tasks 7-9.
 - Produces:
   - `PBKeys class >> orderKey: aValue` → a `PBOrderKey` (`rank`, `payload`). The payload for
-    rank 3 is an exact Integer or Fraction, or `#negInf`/`#posInf`. A NaN, or a list, map or
+    rank 3 is an exact Integer or Fraction (a float's exact value), a finite `Decimal` (kept as
+    is: its exact value may be a power of ten too large to build; compared by `Decimal`'s exact
+    comparison and hashed by its residue), or `#negInf`/`#posInf`. A NaN, or a list, map or
     tuple holding one, signals `PBValidationError`.
   - `PBOrderKey >> < other`, `= other`, `hash`.
   - `PBKeys class >> compare: a with: b` → -1, 0 or 1.

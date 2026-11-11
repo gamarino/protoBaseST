@@ -10,7 +10,8 @@ stages is an Array of { stage. error class name }: the class name is nil when th
 fails by a mismatch (no error), else the PBDBError class it signals; both must match.
 
 section is the manifest section ('values', 'values_decode_only',
-'values_read_not_rewritten', 'invalid'). stages are the checks of the vector
+'values_read_not_rewritten', 'invalid', 'order', 'hashes', 'exact_tokens'; the
+key runners name a value 'kind body', as _keyvectors.st does). stages are the checks of the vector
 that fail, exactly (a vector that fails a stage or an error class not listed, or passes a listed
 one, is a FAIL of the runner, so the list cannot go stale):
 
@@ -20,6 +21,9 @@ one, is a FAIL of the runner, so the list cannot go stale):
   refuse     the decoded value is re-encoded instead of refused (PBValidationError)
   accepted   an invalid vector is accepted instead of refused
   refusal    (never listed) an invalid vector is refused with the wrong class
+  order      (order.st) the value does not order after every earlier one
+  hash       (hashes.st) the value's hash key is not the listed one
+  token      (tokens.st) the value's exact token is not the listed one
 
 removedBy is a plan task, or 'permanent, design 4.3' (the design spec, section
 4.3: no time-zone database)."
@@ -37,21 +41,24 @@ ExpectedDifferences class >> all
     { 'values_read_not_rewritten'. 'map-zone-key-format3'. #(#('decode' nil)).
       're-encoding is refused, as listed; the decoded keys are the format-3 wall clocks, not instants'.
       'permanent, design 4.3' }.
-    { 'values_read_not_rewritten'. 'map-nan-keys-format3'. #(#('refuse' nil)).
-      're-encodes instead of PBValidationError: the NaN-token conflict of a writer is PBKeys checkMapKeys:'.
-      'Task 10' }.
-    { 'values_read_not_rewritten'. 'map-decimal-nan-keys-format3'. #(#('refuse' nil)).
-      're-encodes instead of PBValidationError: the NaN-token conflict of a writer is PBKeys checkMapKeys:'.
-      'Task 10' }.
     { 'invalid'. 'value-instant-wall-out-of-range'. #(#('accepted' nil)).
       'accepted and presented in UTC: the wall-clock range needs the zone''s rules; the format spec (Known gaps) lets a reader without a database present the instant in UTC'.
       'permanent, design 4.3' }.
-    { 'invalid'. 'map-key-bool-and-int'. #(#('accepted' nil)).
-      'accepted: the cross-kind conflict rule needs order keys'.
-      'Task 10' }.
-    { 'invalid'. 'map-key-equal-numbers'. #(#('accepted' nil)).
-      'accepted: the cross-kind conflict rule needs order keys'.
-      'Task 10' } }.
+    { 'order'. 'uuid 00000000000000000000000000000001'. #(#('order' 'PBNotSupportedError')).
+      'the value cannot be built: lib/uuid.st is not in protoST 0.9.0 (PBNotation build: signals PBNotSupportedError)'.
+      'Task 5, Step 6' }.
+    { 'order'. 'uuid ff000000000000000000000000000000'. #(#('order' 'PBNotSupportedError')).
+      'the value cannot be built: lib/uuid.st is not in protoST 0.9.0 (PBNotation build: signals PBNotSupportedError)'.
+      'Task 5, Step 6' }.
+    { 'hashes'. 'uuid ffffffffffffffffffffffffffffffff'. #(#('hash' 'PBNotSupportedError')).
+      'the value cannot be built: lib/uuid.st is not in protoST 0.9.0 (PBNotation build: signals PBNotSupportedError)'.
+      'Task 5, Step 6' }.
+    { 'hashes'. 'uuid 12345678123456781234567812345678'. #(#('hash' 'PBNotSupportedError')).
+      'the value cannot be built: lib/uuid.st is not in protoST 0.9.0 (PBNotation build: signals PBNotSupportedError)'.
+      'Task 5, Step 6' }.
+    { 'exact_tokens'. 'uuid 12345678123456781234567812345678'. #(#('token' 'PBNotSupportedError')).
+      'the value cannot be built: lib/uuid.st is not in protoST 0.9.0 (PBNotation build: signals PBNotSupportedError)'.
+      'Task 5, Step 6' } }.
 
 "The entries of one section, as an OrderedCollection."
 ExpectedDifferences class >> forSection: aSection

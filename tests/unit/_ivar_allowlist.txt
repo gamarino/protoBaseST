@@ -3,7 +3,9 @@
 # (or, for PBMissing and PBZoneKeys, once when the module loads). One entry per line:
 # Class>>selector or Class class>>selector.
 _PBSequence>>_setItems:
-PBFrozenDict>>_setKeys:values:
+PBFrozenDict>>_setKeys:values:index:
+PBOrderKey>>_setRank:payload:
+PBMapKeyIndex>>_setKeys:ids:loose:legacy:
 PBMissing class>>_initializeDefault
 PBMutableObject>>_setCellName:
 PBAtomPointer>>_setSegmentBytes:offset:

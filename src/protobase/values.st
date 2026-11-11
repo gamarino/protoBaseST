@@ -18,11 +18,13 @@ instance variable, and no accessor answers internal state that a caller could
 change (associations and asArray answer fresh copies). The constructors are
 shallow: PBCodec canonical: is what freezes a whole tree.
 
-Equality. Until the order keys of the format exist (plan Task 10), keys and
-items compare with protoST's = within one class only (1 and 1.0 are different
-keys here, as are 1 and true); Task 10 replaces this by order-key comparison.
-hash is deliberately cheap and safe (it never hashes an item, so a Decimal of
-untrusted input is never hashed): the size and the class.
+Keys. A PBFrozenDict's keys follow the map-key rule of the format (keys.st,
+PBMapKeyIndex): true, 1, 1.0 and Decimal 1.00 are one key, so a map holding
+two of them is refused, and a lookup by any of them finds the one it holds.
+Items of a list or tuple, and the values of a map, still compare with
+protoST's = within one class (_PBItems same:as:). hash is deliberately cheap
+and safe (it never hashes an item, so a Decimal of untrusted input is never
+hashed): the size and the class.
 
 K14: instance-side methods are reachable from the class object, so =, hash,
 printOn: and name answer what a class answers when sent to a class object.
@@ -32,15 +34,17 @@ This module also gives every DateTime isLegacyZone (false), and defines
 PBLegacyZoneDateTime, the format-3 ['zone', key] datetime (Spec 4.3)."
 
 Import from: 'protobase/errors'.
+Import from: 'protobase/keys'.
 Import from: 'calendar'.
 
-"=== item equality (until Task 10's order keys) ============================"
+"=== item equality ========================================================="
 
-"Item and key equality of the containers: identity, else the same class and
- =. A NaN is never = to itself, but one NaN object is the same item as itself.
- A format-3 zone datetime against another DateTime is decided by its own =,
- which signals PBNotSupportedError whenever the answer needs the zone's
- offsets (never an assumed 'not equal')."
+"Item equality of the containers' items and of a map's values: identity, else
+ the same class and =. A NaN is never = to itself, but one NaN object is the
+ same item as itself. A format-3 zone datetime against another DateTime is
+ decided by its own =, which signals PBNotSupportedError whenever the answer
+ needs the zone's offsets (never an assumed 'not equal'). Map keys follow the
+ map-key rule instead (keys.st)."
 Object subclass: #_PBItems.
 
 _PBItems class >> same: a as: b
@@ -52,180 +56,10 @@ _PBItems class >> same: a as: b
   a class == b class ifFalse: [^ false].
   ^ a = b.
 
-"A probe of k: two items that are the same item (same:as:) have = probes, so
- a map checks its keys for duplicates through a Dictionary of probes, in
- linear time. Building one is cheap and safe on untrusted input: no power of
- ten and no Decimal hash. A NaN's probe is its identity; an object of
- another class falls back to its class name (checked pairwise)."
-_PBItems class >> probe: k
-  ^ self probe: k coarse: false.
-
-"With coarse true, every aware or format-3 datetime has one probe (#('zoned')),
- and numbers compare as the format's map keys do (the order-key rule: true,
- 1, 1.0 and Decimal 1.00 are one key): checkDecidableKeys: groups keys that
- may differ only in such datetimes."
-_PBItems class >> probe: k coarse: aBoolean
-  (aBoolean and: [self _isZoned: k]) ifTrue: [^ #('zoned')].
-  (aBoolean and: [self _isNumeric: k]) ifTrue: [^ self _numericProbe: k].
-  k isNil ifTrue: [^ #('nil')].
-  k == true ifTrue: [^ #('true')].
-  k == false ifTrue: [^ #('false')].
-  k isClassObject ifTrue: [^ { 'class'. k name }].
-  k isInteger ifTrue: [^ { 'int'. k }].
-  k isFloat ifTrue: [
-    k isNaN ifTrue: [^ { 'nan'. k identityHash }].
-    ^ { 'float'. k = 0.0 ifTrue: [0] ifFalse: [k] }].
-  k isString ifTrue: [^ { 'str'. k }].
-  (k isKindOf: ByteArray) ifTrue: [^ { 'bytes'. k hex }].
-  (k isKindOf: Decimal) ifTrue: [^ self _decimalProbe: k].
-  (k isKindOf: DateTime) ifTrue: [
-    k isLegacyZone ifTrue: [^ { 'dt-format3'. k zone key. k localOrdinalMicroseconds }].
-    k isNaive ifTrue: [^ { 'dt-naive'. k localOrdinalMicroseconds }].
-    ^ { 'dt-aware'. k utcOrdinalMicroseconds }].
-  (k isKindOf: TimeOfDay) ifTrue: [^ { 'time'. k _offset isNil. k _key }].
-  (k isKindOf: CalendarDate) ifTrue: [^ { 'date'. k ordinal }].
-  (k isKindOf: TimeSpan) ifTrue: [^ { 'td'. k totalMicroseconds }].
-  (k isKindOf: _PBSequence) ifTrue: [
-    ^ { k class name. k asArray collect: [:each | self probe: each coarse: aBoolean] }].
-  (k isKindOf: PBMutableObject) ifTrue: [^ { 'mut'. k name }].
-  (k isKindOf: PBUnresolvedRef) ifTrue: [
-    ^ { 'ref'. k pointer segmentHex. k pointer offset. k tag }].
-  k class name = 'UUID' ifTrue: [^ { 'uuid'. k bytes hex }].
-  ^ { 'other'. k class name }.
-
-_PBItems class >> _isNumeric: k
-  k isClassObject ifTrue: [^ false].
-  ^ k == true or: [k == false or: [k isInteger or: [k isFloat or: [k isKindOf: Decimal]]]].
-
-"Numerically equal bools, integers, floats and decimals have one probe: a
- decimal's (sign, digits without trailing zeros, exponent), or one probe for
- zero, one per infinite sign; a NaN is itself only. A float is converted
- exactly (its binary fraction has a finite decimal expansion, at most 1074
- digits); a decimal is never expanded, so a huge exponent costs nothing."
-_PBItems class >> _numericProbe: k
-  | f n d k2 |
-  k == true ifTrue: [^ self _numericProbe: 1].
-  k == false ifTrue: [^ self _numericProbe: 0].
-  (k isKindOf: Decimal) ifTrue: [
-    | p |
-    p := self _decimalProbe: k.
-    (p first = 'nan') ifTrue: [^ p].
-    ^ { 'num' } , (p copyFrom: 2 to: p size)].
-  k isFloat ifTrue: [
-    k isNaN ifTrue: [^ { 'nan'. k identityHash }].
-    k isInfinite ifTrue: [^ { 'num'. k < 0 ifTrue: [1] ifFalse: [0] }].
-    k = 0.0 ifTrue: [^ #('num')].
-    f := k asExactFraction.
-    f isInteger ifTrue: [^ self _numericProbe: f].
-    n := f numerator. d := f denominator. k2 := 0.
-    [d > 1] whileTrue: [d := d // 2. k2 := k2 + 1].
-    "n / 2^k2 = n * 5^k2 / 10^k2; n is odd, so the digits end in 5, not 0."
-    ^ { 'num'. n < 0 ifTrue: [1] ifFalse: [0]. (n abs * (5 raisedTo: k2)) printString. k2 negated }].
-  k = 0 ifTrue: [^ #('num')].
-  ^ { 'num' } , ((self _decimalProbe: (Decimal sign: (k < 0 ifTrue: [1] ifFalse: [0]) coefficient: k abs exponent: 0)) copyFrom: 2 to: 4).
-
-"Equal decimals have one probe: the sign, the coefficient's digits without
- trailing zeros and the matching exponent (zero has one probe, -0 included)."
-_PBItems class >> _decimalProbe: d
-  | digits zeros |
-  d isNaN ifTrue: [^ { 'nan'. d identityHash }].
-  d isInfinite ifTrue: [^ { 'dec-inf'. d sign }].
-  d isZero ifTrue: [^ #('dec-zero')].
-  digits := d coefficient printString.
-  zeros := 0.
-  [(digits at: digits size - zeros) = $0] whileTrue: [zeros := zeros + 1].
-  ^ { 'dec'. d sign. digits copyFrom: 1 to: digits size - zeros. d exponent + zeros }.
-
 "The most a fixed offset or a zone's offset moves a wall clock from its
  instant (|offset| < 24 h, format spec 'Canonical values')."
 _PBItems class >> offsetWindow
-  ^ 86399999999.
-
-"Signals PBNotSupportedError when two keys of aKeyArray could conflict and
- only the zone's offsets can tell (format spec, 'Map keys' and 'Known gaps').
- That is exactly when the two keys are equal under the order-key rule at
- every position (the key itself, or each item of a tuple key) except
- positions holding datetimes (numbers fold: true, 1, 1.0 and Decimal 1.00 are
- one key), and at one such position one key holds a format-3 zone datetime
- and the other either an aware datetime whose instant lies within 24 h of its
- wall clock, or a format-3 datetime of another zone whose wall clock lies
- within 48 h. Format-3 datetimes of one zone conflict exactly when their wall
- clocks are equal (fold ignored), which needs no offset. Linear apart from a
- sort per datetime position: keys are grouped by a probe in which every aware
- or format-3 datetime is one token."
-_PBItems class >> checkDecidableKeys: aKeyArray
-  | buckets |
-  (aKeyArray anySatisfy: [:k | self _holdsLegacy: k]) ifFalse: [^ self].
-  buckets := Dictionary new.
-  aKeyArray do: [:k |
-    (buckets at: (self probe: k coarse: true) ifAbsentPut: [OrderedCollection new]) add: k].
-  buckets keysAndValuesDo: [:probe :bucket |
-    bucket size > 1 ifTrue: [
-      (self _zonedPathsOf: bucket first prefix: #()) do: [:path |
-        self _checkDateTimes: (bucket collect: [:k | self _at: path in: k])]]].
-
-_PBItems class >> _holdsLegacy: k
-  (k isKindOf: _PBSequence) ifTrue: [^ k asArray anySatisfy: [:each | self _holdsLegacy: each]].
-  ^ (k isKindOf: DateTime) and: [k isClassObject not and: [k isLegacyZone]].
-
-_PBItems class >> _isZoned: k
-  ^ (k isKindOf: DateTime) and: [k isClassObject not and: [k isNaive not]].
-
-"The index paths, within k, of its aware and format-3 datetimes."
-_PBItems class >> _zonedPathsOf: k prefix: anArray
-  | out |
-  (self _isZoned: k) ifTrue: [^ OrderedCollection with: anArray].
-  out := OrderedCollection new.
-  (k isKindOf: _PBSequence) ifTrue: [
-    k keysAndValuesDo: [:i :each | out addAll: (self _zonedPathsOf: each prefix: anArray , { i })]].
-  ^ out.
-
-_PBItems class >> _at: aPath in: k
-  | v |
-  v := k.
-  aPath do: [:i | v := v at: i].
-  ^ v.
-
-"Datetimes at one position of keys that match everywhere else."
-_PBItems class >> _checkDateTimes: aCollection
-  | w legacy aware utcs sorted n next |
-  w := self offsetWindow.
-  legacy := (aCollection select: [:each | each isLegacyZone]) asArray.
-  legacy isEmpty ifTrue: [^ self].
-  aware := ((aCollection reject: [:each | each isLegacyZone]) asArray)
-    sort: [:a :b | a utcOrdinalMicroseconds <= b utcOrdinalMicroseconds].
-  utcs := aware collect: [:each | each utcOrdinalMicroseconds].
-  legacy do: [:l |
-    | i |
-    i := self _firstIndexIn: utcs atLeast: l localOrdinalMicroseconds - w.
-    (i <= utcs size and: [(utcs at: i) <= (l localOrdinalMicroseconds + w)]) ifTrue: [
-      ^ self _undecidable: l and: (aware at: i)]].
-  sorted := legacy copy sort: [:a :b | a localOrdinalMicroseconds <= b localOrdinalMicroseconds].
-  n := sorted size.
-  next := Array new: n.
-  n - 1 to: 1 by: -1 do: [:i |
-    next at: i put: (((sorted at: i + 1) zone = (sorted at: i) zone)
-      ifTrue: [next at: i + 1] ifFalse: [i + 1])].
-  1 to: n - 1 do: [:i |
-    | j |
-    j := next at: i.
-    (j notNil and: [(sorted at: j) localOrdinalMicroseconds - (sorted at: i) localOrdinalMicroseconds <= (2 * w)])
-      ifTrue: [^ self _undecidable: (sorted at: i) and: (sorted at: j)]].
-
-"The first index of aSortedArray whose element is >= x (size + 1 if none)."
-_PBItems class >> _firstIndexIn: aSortedArray atLeast: x
-  | lo hi |
-  lo := 1. hi := aSortedArray size + 1.
-  [lo < hi] whileTrue: [
-    | mid |
-    mid := (lo + hi) // 2.
-    (aSortedArray at: mid) < x ifTrue: [lo := mid + 1] ifFalse: [hi := mid]].
-  ^ lo.
-
-_PBItems class >> _undecidable: aLegacy and: other
-  ^ PBNotSupportedError signal: 'A map whose keys hold the format-3 zone datetime ' , aLegacy printString
-    , ' and ' , other printString , ' at the same position: whether they conflict needs the offsets of '
-    , aLegacy zone key , ', and protoBaseST has no time-zone database (design 4.3)'.
+  ^ PBKeys offsetWindow.
 
 "=== the two sequence kinds ================================================="
 
@@ -311,13 +145,16 @@ _PBSequence subclass: #PBTuple.
 
 "ProtoBase FrozenDict: the map kind (@map). Insertion order is kept and is
  part of the value's bytes; = ignores it, as Python's dict equality does."
-Object subclass: #PBFrozenDict instanceVariableNames: 'keys values'.
+Object subclass: #PBFrozenDict instanceVariableNames: 'keys values index'.
 
-"anArray holds Associations, in insertion order. Two keys that are the same
- item signal PBValidationError (a map is never collapsed); keys whose
- conflicts need a time-zone database signal PBNotSupportedError."
+"anArray holds Associations, in insertion order. Two keys that conflict under
+ the map-key rule (keys.st, PBMapKeyIndex: true, 1, 1.0 and Decimal 1.00 are
+ one key; one object twice) signal PBValidationError (a map is never
+ collapsed); keys whose conflicts need a time-zone database signal
+ PBNotSupportedError. Two NaN objects are two keys (a reader keeps format-3
+ NaN keys); PBCodec refuses them when it writes the map."
 PBFrozenDict class >> withAssociations: anArray
-  | ks vs buckets |
+  | ks vs |
   ((anArray isKindOf: Array) or: [anArray isKindOf: OrderedCollection]) ifFalse: [
     ^ PBValidationError signal: 'PBFrozenDict withAssociations: an Array of Associations was expected, not a '
       , anArray class name].
@@ -331,22 +168,14 @@ PBFrozenDict class >> withAssociations: anArray
         , each class name].
     ks at: i put: each key.
     vs at: i put: each value].
-  _PBItems checkDecidableKeys: ks.
-  buckets := Dictionary new.
-  1 to: ks size do: [:i |
-    | bucket |
-    bucket := buckets at: (_PBItems probe: (ks at: i)) ifAbsentPut: [OrderedCollection new].
-    bucket do: [:j |
-      (_PBItems same: (ks at: j) as: (ks at: i)) ifTrue: [
-        ^ PBValidationError signal: 'PBFrozenDict: the key ' , (ks at: i) printString , ' appears twice']].
-    bucket add: i].
-  ^ self basicNew _setKeys: ks values: vs.
+  ^ self basicNew _setKeys: ks values: vs index: (PBMapKeyIndex on: ks).
 
-PBFrozenDict >> _setKeys: aKeyArray values: aValueArray
+PBFrozenDict >> _setKeys: aKeyArray values: aValueArray index: aPBMapKeyIndex
   "Runs once, on a fresh instance."
   keys isNil ifFalse: [^ PBUserError signal: 'PBFrozenDict is immutable'].
   keys := aKeyArray.
   values := aValueArray.
+  index := aPBMapKeyIndex.
   ^ self.
 
 PBFrozenDict >> size
@@ -358,9 +187,9 @@ PBFrozenDict >> isEmpty
 PBFrozenDict >> notEmpty
   ^ keys notEmpty.
 
+"The position of aKey under the map-key rule (1.0 finds the key 1), or 0."
 PBFrozenDict >> _indexOfKey: aKey
-  1 to: keys size do: [:i | (_PBItems same: (keys at: i) as: aKey) ifTrue: [^ i]].
-  ^ 0.
+  ^ index indexOf: aKey.
 
 "The value at aKey; an absent key signals KeyNotFound."
 PBFrozenDict >> at: aKey

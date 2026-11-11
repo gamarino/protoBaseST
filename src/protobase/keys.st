@@ -1,0 +1,601 @@
+"-- keys.st: order keys, hash keys, exact tokens and the map-key rule --
+
+The functions of the value model that keyed structures place their keys by
+(ProtoBase format spec v2.0.0rc1, 'Order, equality and hashing' and 'Map
+keys'; ProtoBase proto_db/values.py):
+
+  PBKeys orderKey: aValue          a PBOrderKey (rank, payload); a NaN, a list,
+                                   a map, or a tuple holding one: PBValidationError
+  PBKeys compare: a with: b        -1, 0 or 1, by order key
+  PBKeys isOrderable: aValue       whether orderKey: accepts aValue
+  PBKeys hashKey: aValue           the signed 64-bit BLAKE2b-8 of feed(rank, payload)
+  PBKeys exactToken: aValue        the canonical msgpack bytes, every atom {'@ref': nil}
+  PBKeys checkMapKeys: aDict       the writer's map-key rule (PBValidationError)
+  PBKeys checkMapKeys: keys reading: aBoolean
+                                   the writer's or the reader's rule over an Array of keys
+
+aValue is a canonical value, as PBCodec canonical: or decode: answers it: a
+host object outside the format (a Fraction, a Symbol, an Array) is refused.
+
+Ranks: 0 missing, 1 nil, 2 bool, 3 number, 4 str, 5 bytes, 6 date, 7 naive
+time and time in an IANA zone, 8 fixed-offset time, 9 naive datetime, 10
+aware datetime, 11 timedelta, 12 uuid, 13 tuple, 14 atom, 15 mutable handle.
+
+The payload of rank 3 is an Integer or a Fraction (a float's exact value), a
+finite Decimal, or #negInf / #posInf. A decimal stays a Decimal: its exact
+value may be a power of ten too large to build (an untrusted 1E+999999999), so
+it is compared by Decimal's own exact comparison, which never expands a large
+exponent, and hashed through its residue modulo 2^61 - 1, computed digit by
+digit with a modular power (protoST has no raisedTo:modulo:). Decimal>>hash is
+never used. A naive and an aware datetime are ranks 9 and 10, never compared
+with < between them; aware instants come from utcOrdinalMicroseconds.
+
+Map keys. Each key has a map-key id: its order key with every bool read as the
+number 0 or 1 (true, 1, 1.0 and Decimal 1.00 are one key). Two keys of one map
+conflict when their ids are equal: keys are bucketed in a Dictionary by id, in
+linear time, never compared pairwise. A NaN key is identified by its exact
+token when written (two NaNs of one encoding conflict) and by itself when read
+(format 3 kept such keys as two). A format-3 zone datetime (PBLegacyZoneDateTime)
+can be read as a key: it is identified by its zone and wall clock, and keys
+whose conflict would need the zone's offsets signal PBNotSupportedError
+(checkDecidableKeys:, design 4.3). PBMapKeyIndex is the index of a
+PBFrozenDict: its construction is the reader's rule, its lookups the same ids.
+
+This module needs no other protoBaseST module when it loads: the value classes
+(values.st, which imports it) and PBCodec are looked up when a method runs."
+
+Import from: 'protobase/errors'.
+Import from: 'decimal'.
+Import from: 'calendar'.
+
+"=== PBOrderKey ==============================================================="
+
+"An order key: a rank (0 to 15) and a payload of that rank. Keys compare by
+ rank, then by payload; = and hash agree, and hash never hashes a Decimal."
+Object subclass: #PBOrderKey instanceVariableNames: 'rank payload'.
+
+PBOrderKey class >> rank: anInteger payload: anObject
+  ((anInteger isInteger) and: [anInteger between: 0 and: 15]) ifFalse: [
+    ^ PBValidationError signal: 'PBOrderKey: a rank from 0 to 15 was expected, not ' , anInteger printString].
+  ^ self basicNew _setRank: anInteger payload: anObject.
+
+PBOrderKey >> _setRank: anInteger payload: anObject
+  "Runs once, on a fresh instance."
+  rank isNil ifFalse: [^ PBUserError signal: 'PBOrderKey is immutable'].
+  rank := anInteger.
+  payload := anObject.
+  ^ self.
+
+PBOrderKey >> rank
+  ^ rank.
+
+"The payload (a tuple's is a fresh Array of the items' order keys)."
+PBOrderKey >> payload
+  ^ rank = 13 ifTrue: [payload copy] ifFalse: [payload].
+
+PBOrderKey >> _payload
+  ^ payload.
+
+"-1, 0 or 1."
+PBOrderKey >> compareWith: other
+  rank = other rank ifFalse: [^ rank < other rank ifTrue: [-1] ifFalse: [1]].
+  ^ PBKeys _comparePayload: payload with: other _payload rank: rank.
+
+PBOrderKey >> < other
+  ^ (self compareWith: other) < 0.
+
+PBOrderKey >> <= other
+  ^ (self compareWith: other) <= 0.
+
+PBOrderKey >> > other
+  ^ (self compareWith: other) > 0.
+
+PBOrderKey >> >= other
+  ^ (self compareWith: other) >= 0.
+
+PBOrderKey >> = anObject
+  self isClassObject ifTrue: [^ self == anObject].
+  (anObject isClassObject not and: [anObject class == PBOrderKey]) ifFalse: [^ false].
+  ^ (self compareWith: anObject) = 0.
+
+"Equal keys have equal hashes: a number hashes by its residue modulo 2^61 - 1,
+ so 1, 1.0 and Decimal 1.00 agree, and a huge decimal costs a modular power."
+PBOrderKey >> hash
+  | h |
+  self isClassObject ifTrue: [^ self identityHash].
+  rank = 3 ifTrue: [
+    h := payload isSymbol ifTrue: [payload hash] ifFalse: [PBKeys residue: payload].
+    ^ (h bitXor: rank) \\ 1073741824].
+  rank = 13 ifTrue: [
+    h := payload size.
+    payload do: [:each | h := (h * 31 + each hash) \\ 1073741824].
+    ^ (h bitXor: rank) \\ 1073741824].
+  ^ (payload hash bitXor: rank) \\ 1073741824.
+
+PBOrderKey >> printOn: aStream
+  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
+  aStream nextPutAll: 'PBOrderKey('; print: rank; nextPutAll: ', '; print: payload; nextPut: $).
+
+"=== PBKeys ==================================================================="
+
+Object subclass: #PBKeys.
+
+"The modulus of the numeric hash, the Mersenne prime 2^61 - 1."
+PBKeys class >> modulus
+  ^ 2305843009213693951.
+
+"=== order keys ==============================================================="
+
+"The order key of aValue (FS 'Order keys'). A NaN, a list, a map, a tuple
+ holding one, or an object outside the format signals PBValidationError; a
+ format-3 zone datetime, or a reference decoded without a resolver (its oid
+ is unknown), signals PBNotSupportedError."
+PBKeys class >> orderKey: aValue
+  ^ self _orderKey: aValue.
+
+PBKeys class >> compare: a with: b
+  ^ (self orderKey: a) compareWith: (self orderKey: b).
+
+"True when orderKey: accepts aValue, false when it signals PBValidationError
+ (PBNotSupportedError passes: whether a format-3 zone datetime orders is not
+ known without its zone's rules)."
+PBKeys class >> isOrderable: aValue
+  ^ [self orderKey: aValue. true] on: PBValidationError do: [:e | e return: false].
+
+PBKeys class >> _key: aRank payload: aPayload
+  ^ PBOrderKey rank: aRank payload: aPayload.
+
+PBKeys class >> _refuse: aValue because: aString
+  ^ PBValidationError signal: 'PBKeys: ' , aString , ': ' , (self _preview: aValue).
+
+PBKeys class >> _preview: anObject
+  | text |
+  text := [anObject printString] on: Error do: [:e | e return: 'a ' , anObject class name].
+  ^ text size <= 80 ifTrue: [text] ifFalse: [(text copyFrom: 1 to: 77) , '...'].
+
+PBKeys class >> _orderKey: v
+  | uuid |
+  v isNil ifTrue: [^ self _key: 1 payload: 0].
+  v == false ifTrue: [^ self _key: 2 payload: 0].
+  v == true ifTrue: [^ self _key: 2 payload: 1].
+  v isClassObject ifTrue: [^ self _refuse: v because: 'a class is not a value'].
+  v isInteger ifTrue: [^ self _key: 3 payload: v].
+  v isFloat ifTrue: [
+    v isNaN ifTrue: [^ self _refuse: v because: 'a NaN cannot be used as a key'].
+    v isInfinite ifTrue: [^ self _key: 3 payload: (v > 0 ifTrue: [#posInf] ifFalse: [#negInf])].
+    ^ self _key: 3 payload: v asExactFraction].
+  (v isKindOf: Decimal) ifTrue: [
+    v isNaN ifTrue: [^ self _refuse: v because: 'a NaN cannot be used as a key'].
+    v isInfinite ifTrue: [^ self _key: 3 payload: (v sign = 0 ifTrue: [#posInf] ifFalse: [#negInf])].
+    ^ self _key: 3 payload: v].
+  v isSymbol ifTrue: [^ self _refuse: v because: 'a Symbol is not a value of format 4 (the @sym kind is reserved)'].
+  v isString ifTrue: [^ self _key: 4 payload: v].
+  (v isKindOf: ByteArray) ifTrue: [^ self _key: 5 payload: v].
+  (v isKindOf: DateTime) ifTrue: [
+    v isLegacyZone ifTrue: [^ v _unsupported: 'order key'].
+    v isNaive ifTrue: [^ self _key: 9 payload: v localOrdinalMicroseconds].
+    ^ self _key: 10 payload: v utcOrdinalMicroseconds].
+  (v isKindOf: CalendarDate) ifTrue: [^ self _key: 6 payload: v ordinal].
+  (v isKindOf: TimeOfDay) ifTrue: [
+    v _offset isNil ifTrue: [^ self _key: 7 payload: v microsecondsSinceMidnight].
+    ^ self _key: 8 payload: v microsecondsSinceMidnight - v _offset].
+  (v isKindOf: TimeSpan) ifTrue: [^ self _key: 11 payload: v totalMicroseconds].
+  v == PBMissing default ifTrue: [^ self _key: 0 payload: 0].
+  uuid := PBCodec _uuidClass.
+  (uuid notNil and: [v isKindOf: uuid]) ifTrue: [^ self _key: 12 payload: (self _unsignedBigEndian: v bytes)].
+  (v isKindOf: PBTuple) ifTrue: [^ self _key: 13 payload: (v asArray collect: [:each | self _orderKey: each])].
+  (v isKindOf: PBMutableObject) ifTrue: [^ self _key: 15 payload: v name].
+  (v isKindOf: PBAtom) ifTrue: [^ self _key: 14 payload: (self _unsignedBigEndian: (self _oidBytes: v oid))].
+  (v isKindOf: PBUnresolvedRef) ifTrue: [
+    ^ PBNotSupportedError signal: 'PBKeys: ' , v printString
+      , ' was decoded without a resolver: its oid, which is its order key, is not known'].
+  ((v isKindOf: PBFrozenList) or: [(v isKindOf: Array) or: [v isKindOf: OrderedCollection]]) ifTrue: [
+    ^ self _refuse: v because: 'a list is not an orderable key'].
+  ((v isKindOf: PBFrozenDict) or: [v isKindOf: Dictionary]) ifTrue: [
+    ^ self _refuse: v because: 'a map is not an orderable key'].
+  ^ self _refuse: v because: 'a ' , v class name , ' is not a value of format 4'.
+
+PBKeys class >> _oidBytes: anOid
+  (anOid isKindOf: ByteArray) ifTrue: [^ anOid].
+  ^ anOid bytes.
+
+PBKeys class >> _unsignedBigEndian: aByteArray
+  | n |
+  n := 0.
+  aByteArray do: [:b | n := n * 256 + b].
+  ^ n.
+
+"Payloads of one rank."
+PBKeys class >> _comparePayload: a with: b rank: aRank
+  aRank = 3 ifTrue: [^ self _compareNumber: a with: b].
+  (aRank = 4 or: [aRank = 15]) ifTrue: [^ self _compareString: a with: b].
+  aRank = 5 ifTrue: [^ self _compareBytes: a with: b].
+  aRank = 13 ifTrue: [^ self _compareTuple: a with: b].
+  a = b ifTrue: [^ 0].
+  ^ a < b ifTrue: [-1] ifFalse: [1].
+
+"Exact: an Integer, a Fraction, a finite Decimal; the infinities at the ends.
+ A Decimal is compared from its own side (Decimal _orderWith:), which never
+ expands a large exponent."
+PBKeys class >> _compareNumber: a with: b
+  a == b ifTrue: [^ 0].
+  a == #negInf ifTrue: [^ -1].
+  b == #negInf ifTrue: [^ 1].
+  a == #posInf ifTrue: [^ 1].
+  b == #posInf ifTrue: [^ -1].
+  (a isKindOf: Decimal) ifTrue: [^ a _orderWith: b].
+  (b isKindOf: Decimal) ifTrue: [^ (b _orderWith: a) negated].
+  a = b ifTrue: [^ 0].
+  ^ a < b ifTrue: [-1] ifFalse: [1].
+
+"Code point order."
+PBKeys class >> _compareString: a with: b
+  | n |
+  n := a size min: b size.
+  1 to: n do: [:i |
+    | x y |
+    x := (a at: i) asInteger.
+    y := (b at: i) asInteger.
+    x = y ifFalse: [^ x < y ifTrue: [-1] ifFalse: [1]]].
+  ^ (a size - b size) sign.
+
+"Unsigned lexicographic order."
+PBKeys class >> _compareBytes: a with: b
+  | n |
+  n := a size min: b size.
+  1 to: n do: [:i |
+    | x y |
+    x := a at: i.
+    y := b at: i.
+    x = y ifFalse: [^ x < y ifTrue: [-1] ifFalse: [1]]].
+  ^ (a size - b size) sign.
+
+"Lexicographic over the items' order keys; a shorter prefix orders first."
+PBKeys class >> _compareTuple: a with: b
+  | n |
+  n := a size min: b size.
+  1 to: n do: [:i |
+    | c |
+    c := (a at: i) compareWith: (b at: i).
+    c = 0 ifFalse: [^ c]].
+  ^ (a size - b size) sign.
+
+"=== hash keys ================================================================"
+
+"The hash key of aValue (FS 'Hash keys'): BLAKE2b with an 8-byte digest over
+ feed(rank, payload), read as a signed little-endian 64-bit Integer. Equal
+ keys have equal hashes; an unorderable value signals as orderKey: does."
+PBKeys class >> hashKey: aValue
+  | digest u |
+  digest := (self feed: (self orderKey: aValue)) blake2b: 8.
+  u := 0.
+  8 to: 1 by: -1 do: [:i | u := u * 256 + (digest at: i)].
+  u >= (1 bitShift: 63) ifTrue: [u := u - (1 bitShift: 64)].
+  ^ u.
+
+"The bytes the hash of anOrderKey is computed over."
+PBKeys class >> feed: anOrderKey
+  | w |
+  w := WriteStream on: ByteArray new.
+  self _feed: anOrderKey on: w.
+  ^ w bytesContents.
+
+PBKeys class >> _feed: aKey on: w
+  | rank payload |
+  rank := aKey rank.
+  payload := aKey _payload.
+  w putByte: rank.
+  rank = 3 ifTrue: [
+    payload == #posInf ifTrue: [^ w putBytes: '+inf' utf8Encoded].
+    payload == #negInf ifTrue: [^ w putBytes: '-inf' utf8Encoded].
+    ^ w nextPutUnsigned: (self residue: payload) width: 8 bigEndian: false].
+  rank = 13 ifTrue: [
+    w nextPutUnsigned: payload size width: 8 bigEndian: false.
+    payload do: [:each | self _feed: each on: w].
+    ^ self].
+  (rank = 4 or: [rank = 15]) ifTrue: [^ self _feedData: payload utf8Encoded on: w].
+  rank = 5 ifTrue: [^ self _feedData: payload on: w].
+  ^ self _feedData: (self signedBytes: payload) on: w.
+
+PBKeys class >> _feedData: aByteArray on: w
+  w nextPutUnsigned: aByteArray size width: 8 bigEndian: false.
+  aByteArray isEmpty ifFalse: [
+    w putBytes: (aByteArray class == ByteArray ifTrue: [aByteArray] ifFalse: [ByteArray withAll: aByteArray asArray])].
+
+"The number of bits of |anInteger| without its leading zeros (Python's
+ int.bit_length): 0 for 0, 1 for -1, 8 for -128. Never highBit of a negative."
+PBKeys class >> bitLength: anInteger
+  ^ anInteger abs highBit.
+
+"anInteger in two's complement, little-endian, in bitLength // 8 + 1 bytes:
+ 0 is 00, 255 is ff 00, -1 is ff, -128 is 80 ff."
+PBKeys class >> signedBytes: anInteger
+  | n u |
+  n := (self bitLength: anInteger) // 8 + 1.
+  u := anInteger < 0 ifTrue: [anInteger + (1 bitShift: 8 * n)] ifFalse: [anInteger].
+  ^ ByteArray withAll: ((0 to: n - 1) asArray collect: [:i | (u bitShift: -8 * i) bitAnd: 255]).
+
+"base ^ e mod m by square and multiply (e >= 0, m >= 1)."
+PBKeys class >> modPow: base exp: e mod: m
+  | result b x |
+  (e isInteger and: [e >= 0]) ifFalse: [
+    ^ PBValidationError signal: 'PBKeys modPow: a non-negative integer exponent was expected, not ' , e printString].
+  (m isInteger and: [m >= 1]) ifFalse: [
+    ^ PBValidationError signal: 'PBKeys modPow: a modulus >= 1 was expected, not ' , m printString].
+  result := 1 \\ m.
+  b := base \\ m.
+  x := e.
+  [x > 0] whileTrue: [
+    (x bitAnd: 1) = 1 ifTrue: [result := result * b \\ m].
+    b := b * b \\ m.
+    x := x bitShift: -1].
+  ^ result.
+
+"The residue modulo P = 2^61 - 1 of an exact number, in 0 .. P - 1 (FS 'Hash
+ keys'): n mod P for an Integer; n * d^(P-2) mod P for a Fraction n/d; for a
+ finite Decimal the coefficient mod P times 10^e mod P (10^e as the inverse of
+ 10^-e when e < 0), negated mod P when the sign is 1. Equal numbers have equal
+ residues, and no power of ten is ever built."
+PBKeys class >> residue: aNumber
+  | p r |
+  p := self modulus.
+  aNumber isInteger ifTrue: [^ aNumber \\ p].
+  (aNumber isKindOf: Fraction) ifTrue: [
+    ^ aNumber numerator * (self modPow: aNumber denominator exp: p - 2 mod: p) \\ p].
+  ((aNumber isKindOf: Decimal) and: [aNumber isFinite]) ifTrue: [
+    r := aNumber coefficient \\ p.
+    r := aNumber exponent >= 0
+      ifTrue: [r * (self modPow: 10 exp: aNumber exponent mod: p) \\ p]
+      ifFalse: [r * (self modPow: self _inverseOfTen exp: aNumber exponent negated mod: p) \\ p].
+    ^ aNumber sign = 1 ifTrue: [(p - r) \\ p] ifFalse: [r]].
+  ^ PBValidationError signal: 'PBKeys residue: an Integer, a Fraction or a finite Decimal was expected, not '
+    , (self _preview: aNumber).
+
+"10^(P-2) mod P, the inverse of 10 modulo P."
+PBKeys class >> _inverseOfTen
+  ^ self modPow: 10 exp: self modulus - 2 mod: self modulus.
+
+"=== exact tokens ============================================================="
+
+"The exact token of aValue (FS 'Exact tokens'): the msgpack bytes of its
+ canonical encoding, with every atom, at any depth, written {'@ref': nil}.
+ An atom's token is the 7 bytes 81 a4 40 72 65 66 c0."
+PBKeys class >> exactToken: aValue
+  ^ MessagePack encode: (PBCodec toWire: aValue atomRef: PBCodec tokenRef).
+
+"=== map keys ================================================================="
+
+"The writer's rule over the keys of aPBFrozenDict (PBValidationError)."
+PBKeys class >> checkMapKeys: aPBFrozenDict
+  ^ self checkMapKeys: aPBFrozenDict keys reading: false.
+
+"The map-key rule over anArray of keys (FS 'Map keys'). A writer (aBoolean
+ false) refuses a key that can never be a map key (a list, a map, a
+ signaling NaN, a datetime in an IANA zone, a tuple holding one) and two keys
+ that conflict, NaNs of one encoding included. A reader (true) is the rule a
+ PBFrozenDict is built under (PBMapKeyIndex): NaN keys are distinct and
+ format-3 zone datetimes are accepted. Both signal PBValidationError; a
+ conflict that needs a zone's offsets signals PBNotSupportedError."
+PBKeys class >> checkMapKeys: anArray reading: aBoolean
+  | ids |
+  aBoolean ifTrue: [PBMapKeyIndex on: anArray asArray. ^ self].
+  ids := Dictionary new.
+  anArray do: [:k |
+    | id |
+    id := self _keyId: k mode: #write.
+    (ids includesKey: id) ifTrue: [
+      ^ PBValidationError signal: 'PBCodec: the map keys ' , (self _preview: (ids at: id)) , ' and '
+        , (self _preview: k) , ' conflict (format spec, ''Map keys'')'].
+    ids at: id put: k].
+
+"The map-key id of k, or nil for a key identified only by itself (a NaN, or
+ a tuple holding one, when read). aMode is:
+   #write  the writer's rule: a key that can never be a map key signals
+           PBValidationError; a NaN is identified by its exact token
+   #read   the reader's rule, and lookups: a NaN is itself (nil); a format-3
+           zone datetime is its zone and wall clock; a key outside the rule
+           (a list, a map, an instant-form datetime, a non-value) is kept
+           apart by its own =
+   #coarse as #read, but every aware or format-3 datetime is one id: keys
+           equal everywhere except at datetime positions share an id
+           (checkDecidableKeys:)."
+PBKeys class >> _keyId: k mode: aMode
+  | reason |
+  k isClassObject ifTrue: [^ { 'other'. k }].
+  aMode == #write ifTrue: [
+    reason := self _unkeyableReason: k legacyAllowed: false.
+    reason isNil ifFalse: [^ PBValidationError signal: 'PBCodec: ' , reason]].
+  k == true ifTrue: [^ self _key: 3 payload: 1].
+  k == false ifTrue: [^ self _key: 3 payload: 0].
+  ((k isFloat or: [k isKindOf: Decimal]) and: [k isNaN]) ifTrue: [
+    ^ aMode == #write ifTrue: [{ 'nan'. self exactToken: k }] ifFalse: [nil]].
+  (k isKindOf: DateTime) ifTrue: [
+    (aMode == #coarse and: [k isNaive not]) ifTrue: [^ #('zoned')].
+    k isLegacyZone ifTrue: [^ { 'format-3'. k zone key. k localOrdinalMicroseconds }]].
+  (k isKindOf: PBTuple) ifTrue: [
+    | ids |
+    ids := k asArray collect: [:each | self _keyId: each mode: aMode].
+    (ids includes: nil) ifTrue: [^ nil].
+    ^ { 'tuple' } , ids].
+  "An atom: its oid when it is not saved; else its pointer, which names one
+   atom and needs no load (a map read from a record does not load its keys)."
+  ((k isKindOf: PBAtom) and: [k pointer notNil]) ifTrue: [^ { 'pointer'. k pointer }].
+  (k isKindOf: PBUnresolvedRef) ifTrue: [^ { 'pointer'. k pointer }].
+  aMode == #write ifTrue: [^ self _orderKey: k].
+  ^ [self _orderKey: k] on: PBValidationError do: [:e | e return: { 'other'. k }].
+
+"Why k can never be a map key (FS 'Map keys'), or nil. With aBoolean true (a
+ reader), a format-3 zone datetime is accepted: format 3 wrote such keys."
+PBKeys class >> _unkeyableReason: k legacyAllowed: aBoolean
+  k isClassObject ifTrue: [^ nil].
+  (k isKindOf: PBFrozenList) ifTrue: [^ 'a list cannot be a map key'].
+  (k isKindOf: PBFrozenDict) ifTrue: [^ 'a map cannot be a map key'].
+  ((k isKindOf: Decimal) and: [k isSignaling]) ifTrue: [^ 'a signaling decimal NaN cannot be a map key'].
+  ((k isKindOf: DateTime) and: [k isLegacyZone]) ifTrue: [
+    ^ aBoolean ifTrue: [nil] ifFalse: ['a datetime in an IANA time zone cannot be a map key']].
+  ((k isKindOf: DateTime) and: [k isInstantForm]) ifTrue: [
+    ^ 'a datetime in an IANA time zone cannot be a map key: use its UTC or fixed-offset form'].
+  (k isKindOf: PBTuple) ifTrue: [
+    k do: [:each |
+      | r |
+      r := self _unkeyableReason: each legacyAllowed: aBoolean.
+      r isNil ifFalse: [^ r , ' (inside a tuple)']]].
+  ^ nil.
+
+"=== format-3 zone keys (design 4.3) ========================================="
+
+"The most a fixed offset or a zone's offset moves a wall clock from its
+ instant (|offset| < 24 h, format spec 'Canonical values')."
+PBKeys class >> offsetWindow
+  ^ 86399999999.
+
+"Signals PBNotSupportedError when two keys of aKeyArray could conflict and
+ only the zone's offsets can tell (format spec, 'Map keys' and 'Known gaps').
+ That is exactly when the two keys are equal under the map-key rule at every
+ position (the key itself, or each item of a tuple key) except positions
+ holding datetimes, and at one such position one key holds a format-3 zone
+ datetime and the other either an aware datetime whose instant lies within
+ 24 h of its wall clock, or a format-3 datetime of another zone whose wall
+ clock lies within 48 h. Format-3 datetimes of one zone conflict exactly when
+ their wall clocks are equal (fold ignored), which needs no offset and is the
+ id's business. Linear apart from a sort per datetime position: keys are
+ bucketed by their coarse map-key id, in which every aware or format-3
+ datetime is one token."
+PBKeys class >> checkDecidableKeys: aKeyArray
+  | buckets |
+  (aKeyArray anySatisfy: [:k | self _holdsLegacy: k]) ifFalse: [^ self].
+  buckets := Dictionary new.
+  aKeyArray do: [:k |
+    | id |
+    id := self _keyId: k mode: #coarse.
+    id isNil ifFalse: [(buckets at: id ifAbsentPut: [OrderedCollection new]) add: k]].
+  buckets keysAndValuesDo: [:id :bucket |
+    bucket size > 1 ifTrue: [
+      (self _zonedPathsOf: bucket first prefix: #()) do: [:path |
+        self _checkDateTimes: (bucket collect: [:k | self _at: path in: k])]]].
+
+"True when k is, or a tuple k holds, a format-3 zone datetime."
+PBKeys class >> _holdsLegacy: k
+  k isClassObject ifTrue: [^ false].
+  (k isKindOf: PBTuple) ifTrue: [^ k asArray anySatisfy: [:each | self _holdsLegacy: each]].
+  ^ (k isKindOf: DateTime) and: [k isLegacyZone].
+
+PBKeys class >> _isZoned: k
+  ^ k isClassObject not and: [(k isKindOf: DateTime) and: [k isNaive not]].
+
+"The index paths, within k, of its aware and format-3 datetimes."
+PBKeys class >> _zonedPathsOf: k prefix: anArray
+  | out |
+  (self _isZoned: k) ifTrue: [^ OrderedCollection with: anArray].
+  out := OrderedCollection new.
+  (k isClassObject not and: [k isKindOf: PBTuple]) ifTrue: [
+    k keysAndValuesDo: [:i :each | out addAll: (self _zonedPathsOf: each prefix: anArray , { i })]].
+  ^ out.
+
+PBKeys class >> _at: aPath in: k
+  | v |
+  v := k.
+  aPath do: [:i | v := v at: i].
+  ^ v.
+
+"Datetimes at one position of keys that match everywhere else."
+PBKeys class >> _checkDateTimes: aCollection
+  | w legacy aware utcs sorted n next |
+  w := self offsetWindow.
+  legacy := (aCollection select: [:each | each isLegacyZone]) asArray.
+  legacy isEmpty ifTrue: [^ self].
+  aware := ((aCollection reject: [:each | each isLegacyZone]) asArray)
+    sort: [:a :b | a utcOrdinalMicroseconds <= b utcOrdinalMicroseconds].
+  utcs := aware collect: [:each | each utcOrdinalMicroseconds].
+  legacy do: [:l |
+    | i |
+    i := self _firstIndexIn: utcs atLeast: l localOrdinalMicroseconds - w.
+    (i <= utcs size and: [(utcs at: i) <= (l localOrdinalMicroseconds + w)]) ifTrue: [
+      ^ self _undecidable: l and: (aware at: i)]].
+  sorted := legacy copy sort: [:a :b | a localOrdinalMicroseconds <= b localOrdinalMicroseconds].
+  n := sorted size.
+  next := Array new: n.
+  n - 1 to: 1 by: -1 do: [:i |
+    next at: i put: (((sorted at: i + 1) zone = (sorted at: i) zone)
+      ifTrue: [next at: i + 1] ifFalse: [i + 1])].
+  1 to: n - 1 do: [:i |
+    | j |
+    j := next at: i.
+    (j notNil and: [(sorted at: j) localOrdinalMicroseconds - (sorted at: i) localOrdinalMicroseconds <= (2 * w)])
+      ifTrue: [^ self _undecidable: (sorted at: i) and: (sorted at: j)]].
+
+"The first index of aSortedArray whose element is >= x (size + 1 if none)."
+PBKeys class >> _firstIndexIn: aSortedArray atLeast: x
+  | lo hi |
+  lo := 1. hi := aSortedArray size + 1.
+  [lo < hi] whileTrue: [
+    | mid |
+    mid := (lo + hi) // 2.
+    (aSortedArray at: mid) < x ifTrue: [lo := mid + 1] ifFalse: [hi := mid]].
+  ^ lo.
+
+PBKeys class >> _undecidable: aLegacy and: other
+  ^ PBNotSupportedError signal: 'A map whose keys hold the format-3 zone datetime ' , aLegacy printString
+    , ' and ' , other printString , ' at the same position: whether they conflict needs the offsets of '
+    , aLegacy zone key , ', and protoBaseST has no time-zone database (design 4.3)'.
+
+"=== PBMapKeyIndex ============================================================"
+
+"The key index of a PBFrozenDict, built once with it: map-key id -> position
+ (the reader's rule, PBKeys _keyId:mode: #read), and the positions of keys
+ identified only by themselves (NaNs). Building it refuses two keys with one
+ id, or one object twice, with PBValidationError ('appears twice': a map is
+ never collapsed), and runs checkDecidableKeys: when a key holds a format-3
+ zone datetime. Never exposed, never changed after it is built."
+Object subclass: #PBMapKeyIndex instanceVariableNames: 'keys ids loose legacy'.
+
+PBMapKeyIndex class >> on: aKeyArray
+  | ids loose seen legacy |
+  legacy := aKeyArray anySatisfy: [:k | PBKeys _holdsLegacy: k].
+  legacy ifTrue: [PBKeys checkDecidableKeys: aKeyArray].
+  ids := Dictionary new.
+  loose := OrderedCollection new.
+  seen := Dictionary new.
+  1 to: aKeyArray size do: [:i |
+    | k id |
+    k := aKeyArray at: i.
+    id := PBKeys _keyId: k mode: #read.
+    id isNil
+      ifTrue: [
+        | bucket |
+        "One object twice: bucketed by identity hash, then compared by identity."
+        bucket := seen at: k identityHash ifAbsentPut: [OrderedCollection new].
+        (bucket anySatisfy: [:j | (aKeyArray at: j) == k]) ifTrue: [^ self _twice: k as: k].
+        bucket add: i.
+        loose add: i]
+      ifFalse: [
+        (ids includesKey: id) ifTrue: [^ self _twice: k as: (aKeyArray at: (ids at: id))].
+        ids at: id put: i]].
+  ^ self basicNew _setKeys: aKeyArray copy ids: ids loose: loose asArray legacy: legacy.
+
+PBMapKeyIndex class >> _twice: aKey as: anEarlierKey
+  | text earlier |
+  text := PBKeys _preview: aKey.
+  earlier := PBKeys _preview: anEarlierKey.
+  ^ PBValidationError signal: 'PBFrozenDict: the key ' , text , ' appears twice'
+    , (earlier = text ifTrue: [''] ifFalse: [' (it conflicts with the key ' , earlier , ', format spec ''Map keys'')']).
+
+PBMapKeyIndex >> _setKeys: aKeyArray ids: aDictionary loose: anArray legacy: aBoolean
+  "Runs once, on a fresh instance."
+  keys isNil ifFalse: [^ PBUserError signal: 'PBMapKeyIndex is immutable'].
+  keys := aKeyArray.
+  ids := aDictionary.
+  loose := anArray.
+  legacy := aBoolean.
+  ^ self.
+
+"The position of aKey (1-based), or 0. A lookup that needs a zone's offsets
+ to answer signals PBNotSupportedError."
+PBMapKeyIndex >> indexOf: aKey
+  | id |
+  (legacy or: [PBKeys _holdsLegacy: aKey]) ifTrue: [PBKeys checkDecidableKeys: keys , { aKey }].
+  id := PBKeys _keyId: aKey mode: #read.
+  id isNil ifTrue: [
+    loose do: [:i | (keys at: i) == aKey ifTrue: [^ i]].
+    ^ 0].
+  ^ ids at: id ifAbsent: [0].

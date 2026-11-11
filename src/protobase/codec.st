@@ -64,6 +64,7 @@ MessagePackMap, so the bytes keep their order."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/values'.
+Import from: 'protobase/keys'.
 Import from: 'decimal'.
 Import from: 'calendar'.
 Import from: 'protobase/zonekeys'.
@@ -327,36 +328,14 @@ PBCodec class >> _canonicalMap: v depth: d
     k := self _canonical: (ks at: i) depth: d.
     val := self _canonical: (vs at: i) depth: d.
     (k == (ks at: i) and: [val == (vs at: i)]) ifFalse: [same := false].
-    self _checkMapKey: k.
     k -> val].
+  "The writer's map-key rule (format spec 'Map keys', PBKeys): a key that can
+   never be a map key, and two keys that conflict (1 and 1.0, two NaNs of one
+   encoding), signal PBValidationError. A PBFrozenDict was built under the
+   reader's rule, which keeps NaN keys of one encoding apart."
+  PBKeys checkMapKeys: (pairs collect: [:each | each key]) reading: false.
   same ifTrue: [^ v].
   ^ PBFrozenDict withAssociations: pairs.
-
-"Signals PBValidationError for a value that can never be a map key (format
- spec 'Map keys'): a list, a map, a signaling decimal NaN, a datetime in an
- IANA zone, or a tuple holding one. The conflict rule between keys (1 and
- 1.0, two aware datetimes of one instant) comes with the order keys (plan
- Task 10); until then a map refuses only keys that are the same item."
-PBCodec class >> _checkMapKey: k
-  | reason |
-  reason := self _unkeyableReason: k legacyAllowed: false.
-  reason isNil ifFalse: [^ PBValidationError signal: 'PBCodec: ' , reason].
-  ^ k.
-
-PBCodec class >> _unkeyableReason: k legacyAllowed: aBoolean
-  (k isKindOf: PBFrozenList) ifTrue: [^ 'a list cannot be a map key'].
-  (k isKindOf: PBFrozenDict) ifTrue: [^ 'a map cannot be a map key'].
-  ((k isKindOf: Decimal) and: [k isSignaling]) ifTrue: [^ 'a signaling decimal NaN cannot be a map key'].
-  (k isKindOf: PBLegacyZoneDateTime) ifTrue: [
-    ^ aBoolean ifTrue: [nil] ifFalse: ['a datetime in an IANA time zone cannot be a map key']].
-  ((k isKindOf: DateTime) and: [k isInstantForm]) ifTrue: [
-    ^ 'a datetime in an IANA time zone cannot be a map key: use its UTC or fixed-offset form'].
-  (k isKindOf: PBTuple) ifTrue: [
-    k do: [:each |
-      | r |
-      r := self _unkeyableReason: each legacyAllowed: aBoolean.
-      r isNil ifFalse: [^ r , ' (inside a tuple)']]].
-  ^ nil.
 
 "=== encoding ================================================================="
 
@@ -642,9 +621,13 @@ PBCodec class >> _decodeMap: aBody resolver: aResolver
     ((pair isKindOf: Array) and: [pair size = 2]) ifFalse: [
       ^ self _corrupt: '@map' body: aBody because: 'each entry is a [key, value] array'].
     k := self fromWire: (pair at: 1) resolver: aResolver.
-    reason := self _unkeyableReason: k legacyAllowed: true.
+    reason := PBKeys _unkeyableReason: k legacyAllowed: true.
     reason isNil ifFalse: [^ self _corrupt: '@map' body: aBody because: reason].
     k -> (self fromWire: (pair at: 2) resolver: aResolver)].
+  "The reader's map-key rule (PBKeys checkMapKeys:reading: true) is the rule
+   PBFrozenDict withAssociations: builds under: conflicting keys are
+   PBValidationError, read as corruption; NaN keys of one encoding (format 3)
+   stay two keys."
   ^ [PBFrozenDict withAssociations: pairs] on: PBValidationError do: [:e |
     self _corrupt: '@map' body: aBody because: e messageText].
 

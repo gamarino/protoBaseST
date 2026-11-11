@@ -153,7 +153,7 @@ c that: 'a lookup by an aware key in a map of format-3 keys' signals: PBNotSuppo
 c that: 'a tuple holding a format-3 datetime against an aware one' signals: PBNotSupportedError during: [
   (PBTuple withAll: { legacy }) = (PBTuple withAll: { ny })].
 
-"Duplicate keys are found through probes, for every kind of key: equal values of one class."
+"Duplicate keys are found through map-key ids (PBKeys), for every kind of key: equal values of one class."
 { { Decimal fromString: '1.20'. Decimal fromString: '1.2' }.
   { Decimal fromString: '0'. Decimal fromString: '-0E+5' }.
   { 0.0. -0.0 }.
@@ -166,11 +166,13 @@ c that: 'a tuple holding a format-3 datetime against an aware one' signals: PBNo
 } doWithIndex: [:pair :i |
   c that: 'duplicate keys ' , i printString signals: PBValidationError containing: 'twice' during: [
     PBFrozenDict withAssociations: { (pair at: 1) -> 1. (pair at: 2) -> 2 }]].
-"Different classes stay different keys until Task 10's order keys; two NaNs are two keys."
-c that: '1 and 1.0' is: (PBFrozenDict withAssociations: { 1 -> 'a'. 1.0 -> 'b' }) size equals: 2.
+"Keys of different classes conflict under the map-key rule (FS 'Map keys': 1 and 1.0
+ are one key; keys_map_key_rule.st); two NaN objects are two keys when read."
+c that: '1 and 1.0' signals: PBValidationError containing: 'twice' during: [
+  PBFrozenDict withAssociations: { 1 -> 'a'. 1.0 -> 'b' }].
 c that: 'two NaN objects' is: (PBFrozenDict withAssociations: {
   (PBCodec decode: (Check bytes: 'cb7ff8000000000000')) -> 1. (PBCodec decode: (Check bytes: 'cb7ff8000000000000')) -> 2 }) size equals: 2.
-"A large map is checked through the probes (it would be 12.5 million comparisons pairwise)."
+"A large map is checked through the map-key ids (it would be 12.5 million comparisons pairwise)."
 c that: 'a map of 5000 decimal keys' is: (PBFrozenDict withAssociations:
   ((1 to: 5000) asArray collect: [:i | (Decimal sign: 0 coefficient: i exponent: -2) -> i])) size equals: 5000.
 

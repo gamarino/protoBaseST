@@ -6,6 +6,7 @@ Import from: 'protobase/<name>'. Applications import this one:
   Import from: 'protobase'.
 "
 Import from: 'protobase/errors'.
+Import from: 'protobase/keys'.
 Import from: 'protobase/values'.
 Import from: 'protobase/registry'.
 Import from: 'protobase/codec'.
