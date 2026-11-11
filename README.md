@@ -10,6 +10,41 @@ Status: proposal prototype for discussion at the FAST Smalltalk workshop (2026-1
 
 Design: [docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md](docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md)
 
+## Values and the codec
+
+A value stored in a database is a *canonical value* of the format (format spec, "Canonical
+values"). `src/protobase/values.st` and `src/protobase/codec.st` hold them:
+
+| Format kind | protoST class | Notes |
+|---|---|---|
+| nil, bool, int, float, str, bytes | `nil`, `true`/`false`, `Integer`, `Float`, `String`, `ByteArray` | an integer outside -2^63..2^64-1 is `{"@int": hex}`; floats keep their 64 bits |
+| decimal, date, time, datetime, timedelta | `Decimal`, `CalendarDate`, `TimeOfDay`, `DateTime`, `TimeSpan` (protoST `lib/`) | `@dec` is the to-scientific-string |
+| uuid | `UUID` (protoST `lib/uuid.st`) | until that library exists, `@uuid` is refused with `PBNotSupportedError` |
+| list, tuple, map | `PBFrozenList`, `PBTuple`, `PBFrozenDict` | immutable; `at:` is 1-based; a map keeps its insertion order |
+| missing, mutable | `PBMissing default`, `PBMutableObject name: 'cell'` | |
+| ref | `PBUnresolvedRef` (decoded without a resolver), later the atom | |
+
+```smalltalk
+bytes := PBCodec encode: (PBTuple withAll: { 1. 'x'. Decimal fromString: '1.20' }).
+value := PBCodec decode: bytes.                       "a PBTuple"
+PBCodec canonical: #(1 2).                            "a PBFrozenList"
+PBCodec encode: #paidInFull.                          "PBValidationError: a Symbol cannot be stored"
+```
+
+`PBCodec canonical:` refuses, with `PBValidationError` naming the class, a `Symbol`, a `Fraction`,
+a `Character`, a `Dictionary` (its order is unspecified; use `PBFrozenDict`), a `Set`, a `Bag`, an
+`Interval`, a block and any other object. A subclass of a mapped class is stored as its base value.
+`PBCodec decode:` refuses malformed bytes with `PBCorruptionError`.
+
+Time zones (design §4.3): there is no time-zone database. A zone key is accepted when the system's
+zoneinfo directory holds it. An instant within one day of year 1 or year 9999 is refused with
+`PBNotSupportedError`, since its wall clock in the zone may leave the calendar's range. A format-3
+`["zone", key]` datetime is read as a `PBLegacyZoneDateTime` (`isLegacyZone` answers true), is
+never written, and signals `PBNotSupportedError` when it is ordered or hashed.
+
+Until the order keys exist (plan Task 10), the keys of a `PBFrozenDict` and the items of a list
+compare with `=` within one class: `1` and `1.0` are different keys there.
+
 ## Running the tests
 
 The tests need a protoST binary 0.9.0 or newer (run from a protoST checkout on the branch that

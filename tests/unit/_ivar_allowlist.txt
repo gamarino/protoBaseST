@@ -1,0 +1,10 @@
+# Spec 12.6: the only methods of src/protobase/*.st that assign an instance or class
+# variable. Each is a private initialiser called once by a class-side constructor
+# (or, for PBMissing, once when its module loads). One entry per line:
+# Class>>selector or Class class>>selector.
+_PBSequence>>_setItems:
+PBFrozenDict>>_setKeys:values:
+PBMissing class>>_initializeDefault
+PBMutableObject>>_setCellName:
+PBAtomPointer>>_setSegmentBytes:offset:
+PBUnresolvedRef>>_setPointer:tag:
