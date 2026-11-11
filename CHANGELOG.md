@@ -118,10 +118,13 @@
   needed and published once. Each record carries a slots Array, built once when the record is
   built or loaded and published once by compare-and-swap. A class that declares `slotFields`
   reads them through accessors with literal slot numbers (`PBPosNode`, `PBKeyNode`,
-  `PBCountedKeyNode`, `PBValueBox`; an application subclass inherits the layout, may reorder
-  its `persistedFields` and may add fields, read with `_slotAt:`; the AVL writes carry such a
-  field, present or absent, into every copy of a node); a subclass whose layout cannot hold,
-  or whose `persistedFields` name a field twice, is refused when it is registered. `tests/unit/record_slots.st` holds every
+  `PBCountedKeyNode`, `PBValueBox`; an application subclass of a keyed node class inherits
+  the layout, may reorder its `persistedFields` and may add fields, read with `_slotAt:`; the
+  AVL writes carry such a field, present or absent, into every copy of a node); a subclass
+  whose layout cannot hold, or whose `persistedFields` name a field twice, is refused when it
+  is registered. Positional trees are not subclassable, as ProtoBase's `PosNode`: their writes
+  build `PBPosNode` only, and a `PBPosNode` subclass is refused when it is registered, built
+  or given to a positional operation. `tests/unit/record_slots.st` holds every
   literal to `slotFields` for every registered class. Integer fields are checked once per
   record (an optional one may be absent); the AVL writes, which compute them, are not checked
   again. A loaded record in persisted order shares its class's keys and index (the decoder

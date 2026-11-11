@@ -335,6 +335,12 @@ PBAtom class >> requiredFields
 PBAtom class >> persistedFields
   ^ #().
 
+"Answers self when this class may have records; signals PBUserError (a class
+ declaration error) otherwise. Checked when its record shape is built, so when
+ it is registered (PBPosNode refuses its subclasses)."
+PBAtom class >> _checkRecordClass
+  ^ self.
+
 "The persisted fields whose value must be an Integer (not a Boolean), checked
  once per record when it is loaded or built from a caller's state:
  PBCorruptionError otherwise. A field that is not required may be absent (nil:
@@ -806,6 +812,7 @@ _PBRecordShape class >> for: aClass
  inherits would read the wrong slots)."
 _PBRecordShape class >> build: aClass
   | persisted slotFields inherited fields required ints optional |
+  aClass _checkRecordClass.
   persisted := Array withAll: aClass persistedFields.
   persisted asSet size = persisted size ifFalse: [
     ^ PBUserError signal: aClass name , ': its persistedFields ' , persisted printString

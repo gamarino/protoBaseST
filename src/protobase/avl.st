@@ -32,8 +32,8 @@ registry.st): an Array of the values of its slotFields (for the built-in
 classes, their persistedFields), in that order, built once per record and
 published once by compare-and-swap; each accessor reads a literal slot
 number, which tests/unit/record_slots.st holds to slotFields. An application
-subclass inherits the layout (it may reorder its persistedFields or add
-fields). The state (a PBFrozenDict in the record's order) stays the record:
+subclass of a keyed node class inherits the layout (it may reorder its
+persistedFields or add fields). The state (a PBFrozenDict in the record's order) stays the record:
 the slots are never persisted, compared or hashed.
 
 Writes (plan Task 14) are PBAvl's class methods, the functions of ProtoBase's
@@ -50,6 +50,14 @@ avl.py over a root node, or nil for the empty tree:
   PBAvl keyAt: root key: k                    the node of key k, or nil
   PBAvl keyPut: root key: k value: v nodeClass: aClass     key_put:
                                               { root. replaced. old value }
+
+Node classes: a keyed tree's nodes are of the class nodeClass: names for an
+empty tree (PBKeyNode, PBCountedKeyNode or an application subclass of
+either), and every write keeps the root's class, carrying a subclass's own
+fields into each copy (KeyNode uses type(self) in ProtoBase). Positional trees
+are not subclassable, as ProtoBase's PosNode: their writes build PBPosNode
+nodes only, and a PBPosNode subclass is refused when it is registered, built,
+or given to a pos operation (PBPosNode class >> _refuseSubclass).
   PBAvl keyRemove: root key: k                key_remove:
                                               { root. removed. old value }
   PBAvl nodesDo: aBlock over: root            each node, in order (_inorder)
@@ -424,17 +432,35 @@ PBNode >> _copyWithSlots: anArray
     state: (self class _recordShape stateOfSlots: anArray carrying: self state).
 
 "A new positional node holding aValue (boxed when large) over aLeft and aRight;
- height and count are computed from the children."
+ height and count are computed from the children. A subclass is
+ PBNotSupportedError (positional trees are not subclassable: see
+ _refuseSubclass)."
 PBPosNode class >> value: aValue left: aLeft right: aRight
-  ^ PBNode _new: self values: (self _fieldsValue: aValue left: aLeft right: aRight).
-
-"The values of the built-in slots of a new positional node."
-PBPosNode class >> _fieldsValue: aValue left: aLeft right: aRight
-  ^ { _PBTree boxed: aValue. aLeft. aRight.
+  self == PBPosNode ifFalse: [^ PBNotSupportedError signal: self _refuseSubclass].
+  ^ PBNode _new: self values: {
+    _PBTree boxed: aValue. aLeft. aRight.
     _PBTree heightOf: aLeft and: aRight. _PBTree countOf: aLeft and: aRight }.
 
+"A plain PBPosNode, whatever the receiver's class, as ProtoBase
+ PosNode._with_children builds PosNode (review R3-I1)."
 PBPosNode >> withLeft: aLeft right: aRight
-  ^ self _copyWithSlots: (self class _fieldsValue: self storedValue left: aLeft right: aRight).
+  ^ PBPosNode value: self storedValue left: aLeft right: aRight.
+
+"Positional trees are not subclassable, as in ProtoBase, whose positional
+ writes (_pos_insert, _pos_set, pos_from_iterable, PosNode._with_children) all
+ build PosNode: a subclass would come back as a tree of mixed classes, which
+ the next write reports as corrupt. So a subclass is refused, never degraded
+ (review R3-I1): when it is registered (PBUserError, _checkRecordClass), when
+ it is built, and when a positional operation is given one as its root
+ (PBNotSupportedError). The text of those refusals."
+PBPosNode class >> _refuseSubclass
+  ^ self name , ': positional trees are not subclassable, as ProtoBase''s PosNode'
+    , ' (a positional tree holds PBPosNode nodes only; subclass PBKeyNode for a keyed tree)'.
+
+"A subclass of PBPosNode has no record shape: PBUserError when it is
+ registered (see _refuseSubclass)."
+PBPosNode class >> _checkRecordClass
+  self == PBPosNode ifFalse: [^ PBUserError signal: self _refuseSubclass].
 
 "A new keyed node of key aKey (never boxed) holding aValue (boxed when large)
  over aLeft and aRight; anOrderKey is PBKeys orderKey: aKey, which the caller
@@ -540,12 +566,15 @@ PBAvl class >> valueBoxMin
 
 "--- argument checks (ProtoBase _check_kind, _check_index) ---"
 
-"aRoot is nil or a node of aKind; PBValidationError otherwise."
+"aRoot is nil or a node of aKind; PBValidationError otherwise. A subclass of
+ PBPosNode is PBNotSupportedError (positional trees are not subclassable)."
 PBAvl class >> _root: aRoot kind: aKind
   "Nested ifTrue: (inlined), not or: (a block): every operation checks its root."
   aRoot isNil ifTrue: [^ nil].
   aRoot class == aKind ifTrue: [^ aRoot].
-  (aRoot isKindOf: aKind) ifTrue: [^ aRoot].
+  (aRoot isKindOf: aKind) ifTrue: [
+    aKind == PBPosNode ifTrue: [^ PBNotSupportedError signal: aRoot class _refuseSubclass].
+    ^ aRoot].
   ^ PBValidationError signal: 'PBAvl: a ' , aKind typeName , ' tree (or nil) was expected, not '
     , (PBKeys _preview: aRoot).
 

@@ -1,4 +1,4 @@
-"EXPECT: ok 39"
+"EXPECT: ok 49"
 "Plan Task 16b, fix round 1 (review I1, M2): an application subclass of a node class gets its
  own record shape, derived from its declarations when it is registered. A subclass that
  reorders its persistedFields keeps the slot layout of the accessors it inherits; the AVL
@@ -43,13 +43,21 @@ DuplicateFieldNode class >> typeName
 DuplicateFieldNode class >> persistedFields
   ^ #('key' 'value' 'left' 'right' 'height' 'count' 'key').
 
+PBPosNode subclass: #PositionalNode.
+PositionalNode class >> typeName
+  ^ 'slotstest.PositionalNode'.
+
+PBPosNode subclass: #InMemoryPositionalNode.
+InMemoryPositionalNode class >> typeName
+  ^ 'slotstest.InMemoryPositionalNode'.
+
 PBKeyNode subclass: #BadIntegerNode.
 BadIntegerNode class >> typeName
   ^ 'slotstest.BadIntegerNode'.
 BadIntegerNode class >> integerFields
   ^ #('height' 'count' 'rank').
 
-| c root keys sink stub node older bad tree walked seed prios put |
+| c root keys sink stub node older bad tree walked seed prios put pos classes |
 c := Check new.
 PBTypeRegistry register: ReorderedNode; register: ExtendedNode.
 
@@ -148,4 +156,36 @@ c that: 'an integer field that is not a field' signals: PBUserError containing: 
 c that: 'persistedFields that name a field twice (review R2-M1)' signals: PBUserError containing: 'name a field twice' during: [
   PBTypeRegistry register: DuplicateFieldNode].
 c that: 'and that class is not registered' isTrue: (PBTypeRegistry isRegistered: 'slotstest.DuplicateFieldNode') not.
+
+"Fix round 3 (review R3-I1): positional trees are not subclassable, as ProtoBase's PosNode
+ (whose writes all build PosNode). A subclass is refused when it is registered, and an
+ unregistered one is refused when it is built or given to a positional operation, rather than
+ degraded into a tree of mixed classes. The writes build plain PBPosNodes."
+c that: 'a positional subclass is refused at registration' signals: PBUserError
+  containing: 'positional trees are not subclassable' during: [PBTypeRegistry register: PositionalNode].
+c that: 'and it is not registered' isTrue: (PBTypeRegistry isRegistered: 'slotstest.PositionalNode') not.
+c that: 'an unregistered positional subclass is not built' signals: PBNotSupportedError
+  containing: 'positional trees are not subclassable' during: [InMemoryPositionalNode value: 1 left: nil right: nil].
+stub := InMemoryPositionalNode unloadedAt: (bad pushAtom: (PBAtomEnvelope tag: PBPosNode typeName
+  oid: (ByteArray fromHex: '08080808080808080808080808080808')
+  state: (PBFrozenDict withAssociations: { 'value' -> 1. 'left' -> nil. 'right' -> nil. 'height' -> 1. 'count' -> 1 })))
+  storage: bad.
+c that: 'posAppend: refuses a positional subclass root' signals: PBNotSupportedError
+  containing: 'InMemoryPositionalNode: positional trees are not subclassable' during: [PBAvl posAppend: stub value: 2].
+c that: 'posAt: refuses it too' signals: PBNotSupportedError
+  containing: 'positional trees are not subclassable' during: [PBAvl posAt: stub index: 0].
+c that: 'posSet: refuses it too' signals: PBNotSupportedError
+  containing: 'positional trees are not subclassable' during: [PBAvl posSet: stub at: 0 value: 3].
+c that: 'posConcat: refuses it on either side' signals: PBNotSupportedError
+  containing: 'positional trees are not subclassable' during: [PBAvl posConcat: nil with: stub].
+pos := nil.
+1 to: 12 do: [:i | pos := PBAvl posAppend: pos value: i].
+pos := PBAvl posSet: pos at: 3 value: 40.
+pos := PBAvl posRemove: pos at: 5.
+classes := Set new.
+PBAvl nodesDo: [:x | classes add: x class] over: pos.
+c that: 'positional writes build plain PBPosNodes' is: classes asArray equals: { PBPosNode }.
+c that: 'and keep the values' is: ([:r | | out | out := OrderedCollection new. PBAvl posDo: [:v | out add: v] over: r. out asArray] value: pos)
+  equals: #(1 2 3 40 5 7 8 9 10 11 12).
+c that: 'and the tree checks' is: (PBAvl check: pos) equals: pos.
 c report displayNl.
