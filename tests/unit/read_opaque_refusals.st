@@ -1,4 +1,4 @@
-"EXPECT: ok 16"
+"EXPECT: ok 17"
 "Opaque atoms (D59, plan Task 12): a record of a type with no class here reads as a
  PBOpaqueAtom with its fields; anything that needs the type's behaviour (a change, a
  collection message, any other message, a field it does not hold, its use where a
@@ -24,7 +24,8 @@ loadedHolder := PBTypeRegistry unloadedAtomFor: 19 at: holder pointer storage: s
 opaque := loadedHolder at: 'thing'.
 
 c that: 'an unknown type reads as an opaque atom' is: opaque class equals: PBOpaqueAtom.
-c that: 'its type name is the name it was referenced by' is: opaque tag equals: 'acme.sales.Thing'.
+c that: 'its tag is the name it was referenced by' is: opaque tag equals: 'acme.sales.Thing'.
+c that: 'its typeName is that name (design spec 8.1)' is: opaque typeName equals: 'acme.sales.Thing'.
 c that: 'its fields read' is: (opaque at: 'x') equals: 1.
 c that: 'its attribute names' is: opaque attributeNames equals: #('name' 'x').
 c that: 'a field it does not hold' signals: PBNotSupportedError containing: 'acme.sales.Thing' during: [
@@ -41,7 +42,7 @@ c that: 'hasDefinedAttr:' signals: PBNotSupportedError containing: 'acme.sales.T
   opaque hasDefinedAttr: 'x'].
 c that: 'any other message (doesNotUnderstand:)' signals: PBNotSupportedError containing: 'acme.sales.Thing' during: [
   opaque frobnicate: 3].
-c that: 'the class object still answers doesNotUnderstand:' signals: MessageNotUnderstood during: [
+c that: 'a class never reaches its instance-side doesNotUnderstand: (protoST D52)' signals: MessageNotUnderstood during: [
   PBOpaqueAtom frobnicate: 3].
 loadedList := loadedHolder at: 'list'.
 c that: 'a list reads its count' is: loadedList count equals: 1.

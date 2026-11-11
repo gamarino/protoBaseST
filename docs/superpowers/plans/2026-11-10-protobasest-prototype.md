@@ -779,8 +779,10 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     over `feed(rank, payload)`, read as signed little-endian (FS "Hash keys").
   - `PBKeys class >> bitLength: anInteger` (the bits of the absolute value; never `highBit`
     of a negative).
-  - `PBKeys class >> residue: anExactNumber`: modulo 2^61-1, using square-and-multiply
-    `PBKeys class >> modPow: base exp: e mod: m`.
+  - `PBKeys class >> residue: anExactNumber`: modulo 2^61-1. An Integer is `n \\ P`; a
+    Fraction or a Decimal goes through protoST's native numeric hash (CPython's, protoST R3,
+    which takes powers modulo P with `raisedTo:modulo:`), the -1 → -2 case told apart by the
+    hash of the magnitude. (Until Task 12's fix round it used a `modPow:exp:mod:` of its own.)
   - `PBKeys class >> exactToken: aValue` → a ByteArray: `PBCodec toWire:atomRef:` in token
     mode, then encoded.
   - `PBKeys class >> checkMapKeys: aPBFrozenDict`, the FS "Map keys" conflict rule, which
@@ -899,7 +901,10 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     manifest entry of those two layers, naming the id, and the Task 25 accounting check
     accepts exactly those lines as justified skips;
   - `tests/unit/read_cross_kind_keys.st` (Review Focus 1, on a Python-written space made by
-    `tests/interop/py_make_keys_space.py`, a `.sh` wrapper);
+    `tests/interop/py_make_keys_space.py`, run through the helper
+    `tests/interop/_make_keys_space.sh`: the leading `_` makes the runner treat it as a helper,
+    not a test, so there is no test file named `py_make_keys_space.sh`; without the venv the
+    helper exits 77 and the test prints `SKIP:`);
   - `tests/unit/read_opaque_refusals.st`;
   - `tests/unit/read_history.st`.
 
@@ -921,9 +926,8 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
       `invalid/atom-reserved-name`, run by `invalid_atom.st`). The Task 9 envelope checks only
       the names every type refuses;
     - `PBObjectSpace registerAtomClass: aClass` → `PBTypeRegistry register:`.
-  - `PBOpaqueAtom`: its type name (the instance-side `tag` of Task 9, which is the name it was
-    referenced by; an instance-side `typeName` would collide with `PBAtom class >> typeName`,
-    K14), `at:`, `attributeNames`. Any other message, including
+  - `PBOpaqueAtom`: `typeName` (the name it was referenced by, also its `tag` of Task 9),
+    `at:`, `attributeNames`. Any other message, including
     `doesNotUnderstand:`, and any collection use signal `PBNotSupportedError` naming the
     type.
   - `PBObjectSpace storage: aStorage` and `storage:lockTimeout:` (the default lockTimeout is

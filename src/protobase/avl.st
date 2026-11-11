@@ -64,7 +64,6 @@ PBNode >> storedValue
 
 "The node value, unboxed."
 PBNode >> value
-  self isClassObject ifTrue: [^ self].
   ^ _PBTree unboxed: self storedValue.
 
 PBNode subclass: #PBPosNode.
@@ -120,7 +119,6 @@ PBValueBox class >> persistedFields
 
 "The boxed value."
 PBValueBox >> value
-  self isClassObject ifTrue: [^ self].
   ^ self stateAt: 'value'.
 
 { PBNode. PBPosNode. PBKeyNode. PBCountedKeyNode. PBValueBox } do: [:each | PBTypeRegistry register: each].
@@ -151,6 +149,14 @@ _PBTree class >> node: aNode kind: aKind in: anOwner
       , '), and that type has no class registered in this process: its behaviour is not available here'].
   ^ PBCorruptionError signal: anOwner printString , ' holds ' , (PBKeys _preview: aNode)
     , ' where a ' , aKind typeName , ' (or nil) is expected'.
+
+"aValue, a field aName of anOwner that must hold an atom of aKind: nil is
+ PBCorruptionError naming the field, another value as node:kind:in:."
+_PBTree class >> required: aValue kind: aKind field: aName in: anOwner
+  aValue isNil ifTrue: [
+    ^ PBCorruptionError signal: 'the ' , aName , ' of ' , anOwner printString , ' is nil where a '
+      , aKind typeName , ' is required'].
+  ^ self node: aValue kind: aKind in: anOwner.
 
 "The node count of the tree aRoot (0 when empty)."
 _PBTree class >> count: aRoot kind: aKind in: anOwner

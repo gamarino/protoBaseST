@@ -127,7 +127,6 @@ PBObjectSpace >> close
   (closed value: true ifCurrent: false) ifTrue: [storage close].
 
 PBObjectSpace >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBObjectSpace('; print: storage; nextPut: $).
 
 "=== PBDatabase ==============================================================="
@@ -145,9 +144,8 @@ PBDatabase >> _setSpace: aSpace name: aName
 PBDatabase >> space
   ^ space.
 
-"The database name (the class name when sent to the class object, K14)."
+"The database name."
 PBDatabase >> name
-  self isClassObject ifTrue: [^ super name].
   ^ dbName.
 
 "The current PBDatabaseRoot; PBValidationError when the database is gone."
@@ -187,7 +185,6 @@ PBDatabase >> snapshotAt: aReference
   ^ PBSnapshot basicNew _setRoot: root database: self.
 
 PBDatabase >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBDatabase('; print: dbName; nextPut: $).
 
 "=== the versions ============================================================="
@@ -232,7 +229,6 @@ PBHistoryEntry >> databaseName
   ^ databaseName.
 
 PBHistoryEntry >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBHistoryEntry(version '; print: root version; nextPut: $).
 
 _PBVersionView subclass: #PBSnapshot instanceVariableNames: 'database'.
@@ -256,5 +252,4 @@ PBSnapshot >> getRootObject: aName
   ^ root objects getAt: (_PBNameCheck check: aName what: 'root').
 
 PBSnapshot >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBSnapshot('; print: database name; nextPutAll: ', version '; print: root version; nextPut: $).

@@ -145,7 +145,7 @@ space close.
 - Records (`records.st`): `PBObject` answers `at:` (nil when absent), `hasDefinedAttr:` and
   `attributeNames`. A record holding an attribute named `with_` or `has_defined_attr` (behaviour
   of DBObject) is refused when loaded (`PBCorruptionError`).
-- A record of a type with no class here is a `PBOpaqueAtom` (D59): `tag` is its type name, and
+- A record of a type with no class here is a `PBOpaqueAtom` (D59): `typeName` (and `tag`) is its type name, and
   `at:` and `attributeNames` read its fields. Any other message (a change, a collection message,
   `doesNotUnderstand:`) and its use where a built-in type is expected are `PBNotSupportedError`
   naming the type.

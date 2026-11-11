@@ -15,7 +15,7 @@ only, design spec 5.1).
                     store, invalid, total_count, centroids, trained_size,
                     member_tokens
 
-  name               the index name (the class name when sent to the class, K14)
+  name               the index name
   keySpec            the persisted (kind, arg) tuple
   hasMemberTokens    whether member_tokens is 1: the member keys hold format-4
                      exact tokens. Absent (format 3) or another value: false, and a
@@ -44,7 +44,6 @@ PBIndex class >> persistedFields
 
 "The index name."
 PBIndex >> name
-  self isClassObject ifTrue: [^ super name].
   ^ self stateAt: 'name'.
 
 "The persisted key spec, a (kind, arg) tuple: ('path', 'a.b'), ('element',
@@ -52,11 +51,15 @@ PBIndex >> name
 PBIndex >> keySpec
   ^ self stateAt: 'key_spec'.
 
-"Whether member_tokens is 1 (true is 1 too, as Python's == says)."
+"Whether member_tokens == 1 as ProtoBase compares it (keyed.py, vector.py):
+ true, 1, 1.0 and any Decimal equal to 1 (Decimal 1, 1.00) count; a NaN
+ never does."
 PBIndex >> hasMemberTokens
   | v |
   v := self stateAt: 'member_tokens'.
-  ^ v == true or: [(v isInteger or: [v isFloat]) and: [v = 1]].
+  v == true ifTrue: [^ true].
+  (v isKindOf: Decimal) ifTrue: [^ v isNaN not and: [v = 1]].
+  ^ v isNumber and: [v = 1].
 
 PBIndex >> totalCount
   ^ _PBTree integer: (self stateAt: 'total_count') field: 'total_count' of: self.

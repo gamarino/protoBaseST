@@ -25,9 +25,9 @@ The payload of rank 3 is an Integer or a Fraction (a float's exact value), a
 finite Decimal, or #negInf / #posInf. A decimal stays a Decimal: its exact
 value may be a power of ten too large to build (an untrusted 1E+999999999), so
 it is compared by Decimal's own exact comparison, which never expands a large
-exponent, and hashed through its residue modulo 2^61 - 1, computed digit by
-digit with a modular power (protoST has no raisedTo:modulo:). Decimal>>hash is
-never used. A naive and an aware datetime are ranks 9 and 10, never compared
+exponent, and hashed through its residue modulo 2^61 - 1, derived from
+protoST's numeric hash (CPython's, R3), which takes the power of ten modulo
+2^61 - 1 (residue:). A naive and an aware datetime are ranks 9 and 10, never compared
 with < between them; aware instants come from utcOrdinalMicroseconds.
 
 Map keys. Each key has a map-key id: its order key with every bool read as the
@@ -106,7 +106,6 @@ PBOrderKey >> >= other
   ^ (self compareWith: other) >= 0.
 
 PBOrderKey >> = anObject
-  self isClassObject ifTrue: [^ self == anObject].
   (anObject isClassObject not and: [anObject class == PBOrderKey]) ifFalse: [^ false].
   ^ (self compareWith: anObject) = 0.
 
@@ -114,7 +113,6 @@ PBOrderKey >> = anObject
  so 1, 1.0 and Decimal 1.00 agree, and a huge decimal costs a modular power."
 PBOrderKey >> hash
   | h |
-  self isClassObject ifTrue: [^ self identityHash].
   rank = 3 ifTrue: [
     h := payload isSymbol ifTrue: [payload hash] ifFalse: [PBKeys residue: payload].
     ^ (h bitXor: rank) \\ 1073741824].
@@ -125,7 +123,6 @@ PBOrderKey >> hash
   ^ (payload hash bitXor: rank) \\ 1073741824.
 
 PBOrderKey >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBOrderKey('; print: rank; nextPutAll: ', '; print: payload; nextPut: $).
 
 "=== PBKeys ==================================================================="
@@ -334,45 +331,29 @@ PBKeys class >> signedBytes: anInteger
   u := anInteger < 0 ifTrue: [anInteger + (1 bitShift: 8 * n)] ifFalse: [anInteger].
   ^ ByteArray withAll: ((0 to: n - 1) asArray collect: [:i | (u bitShift: -8 * i) bitAnd: 255]).
 
-"base ^ e mod m by square and multiply (e >= 0, m >= 1)."
-PBKeys class >> modPow: base exp: e mod: m
-  | result b x |
-  (e isInteger and: [e >= 0]) ifFalse: [
-    ^ PBValidationError signal: 'PBKeys modPow: a non-negative integer exponent was expected, not ' , e printString].
-  (m isInteger and: [m >= 1]) ifFalse: [
-    ^ PBValidationError signal: 'PBKeys modPow: a modulus >= 1 was expected, not ' , m printString].
-  result := 1 \\ m.
-  b := base \\ m.
-  x := e.
-  [x > 0] whileTrue: [
-    (x bitAnd: 1) = 1 ifTrue: [result := result * b \\ m].
-    b := b * b \\ m.
-    x := x bitShift: -1].
-  ^ result.
-
 "The residue modulo P = 2^61 - 1 of an exact number, in 0 .. P - 1 (FS 'Hash
- keys'): n mod P for an Integer; n * d^(P-2) mod P for a Fraction n/d; for a
- finite Decimal the coefficient mod P times 10^e mod P (10^e as the inverse of
- 10^-e when e < 0), negated mod P when the sign is 1. Equal numbers have equal
- residues, and no power of ten is ever built."
+ keys'). An Integer is n mod P. A Fraction or a finite Decimal goes through
+ protoST's native numeric hash, which is CPython's (R3): sign * (|x| mod P),
+ the power of ten taken modulo P, so no power of ten is ever built, -1
+ becoming -2. Modulo P that is x mod P, the residue ProtoBase computes
+ (proto_db/values.py _number_residue), except where -1 became -2: a hash of
+ -2 is that of a negative number, told apart by the hash of its magnitude
+ (1 when x = -1 mod P, 2 when x = -2 mod P)."
 PBKeys class >> residue: aNumber
-  | p r |
+  | p h |
   p := self modulus.
   aNumber isInteger ifTrue: [^ aNumber \\ p].
-  (aNumber isKindOf: Fraction) ifTrue: [
-    ^ aNumber numerator * (self modPow: aNumber denominator exp: p - 2 mod: p) \\ p].
-  ((aNumber isKindOf: Decimal) and: [aNumber isFinite]) ifTrue: [
-    r := aNumber coefficient \\ p.
-    r := aNumber exponent >= 0
-      ifTrue: [r * (self modPow: 10 exp: aNumber exponent mod: p) \\ p]
-      ifFalse: [r * (self modPow: self _inverseOfTen exp: aNumber exponent negated mod: p) \\ p].
-    ^ aNumber sign = 1 ifTrue: [(p - r) \\ p] ifFalse: [r]].
+  ((aNumber isKindOf: Fraction) or: [(aNumber isKindOf: Decimal) and: [aNumber isFinite]]) ifTrue: [
+    h := aNumber hash.
+    h = -2 ifTrue: [
+      | magnitude |
+      magnitude := (aNumber isKindOf: Fraction)
+        ifTrue: [aNumber abs]
+        ifFalse: [Decimal sign: 0 coefficient: aNumber coefficient exponent: aNumber exponent].
+      ^ magnitude hash = 1 ifTrue: [p - 1] ifFalse: [p - 2]].
+    ^ h \\ p].
   ^ PBValidationError signal: 'PBKeys residue: an Integer, a Fraction or a finite Decimal was expected, not '
     , (self _preview: aNumber).
-
-"10^(P-2) mod P, the inverse of 10 modulo P."
-PBKeys class >> _inverseOfTen
-  ^ self modPow: 10 exp: self modulus - 2 mod: self modulus.
 
 "=== exact tokens ============================================================="
 
@@ -583,11 +564,9 @@ PBIdentityKey >> _object
   ^ object.
 
 PBIdentityKey >> = anObject
-  self isClassObject ifTrue: [^ self == anObject].
   ^ (anObject isClassObject not and: [anObject class == PBIdentityKey]) and: [object == anObject _object].
 
 PBIdentityKey >> hash
-  self isClassObject ifTrue: [^ super hash].
   ^ object identityHash.
 
 "=== PBMapKeyIndex ============================================================"

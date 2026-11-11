@@ -1,15 +1,16 @@
-"EXPECT: ok 33"
+"EXPECT: ok 40"
 "The read-only space API (plan Task 12) on copies of the database and polyglot vectors
  (never the vendored files): PBObjectSpace, PBDatabase history (newest first, through
  previous), PBHistoryEntry, snapshotAt: and PBSnapshot, the identity check of a
  snapshot of another database (PBReferenceError), a DatabaseRoot without mutables
- (PBCorruptionError) and the lock timeout argument. The values are those ProtoBase
+ and a nil databases, objects or mutables (PBCorruptionError), previous loaded afresh
+ on each read (D53) and the lock timeout argument. The values are those ProtoBase
  v2.0.0rc1 answers on the same spaces."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_spaces'.
 
-| c base copy space db h newest oldest middle snap people other otherDb b dbRoot dict idx spaceRoot old names |
+| c base copy space db h newest oldest middle snap people other otherDb b dbRoot dict idx spaceRoot old names newestRoot |
 c := Check new.
 base := FileSystem temp / ('pbst-read-history-' , Smalltalk pid printString).
 base deleteAll.
@@ -63,6 +64,17 @@ c that: 'snapshotAt: the newest entry' is: ((db snapshotAt: newest) getRootObjec
 c that: 'getRootObject: an empty name' signals: PBValidationError during: [snap getRootObject: ''].
 c that: 'snapshotAt: something else' signals: PBReferenceError during: [db snapshotAt: 42].
 
+"previous is a new unloaded stub per call (ProtoBase D53): walking the history leaves
+ no older version loaded behind a snapshot's root. Checked by the stubs' load state,
+ not by time or memory."
+newestRoot := (db snapshotAt: newest) _root.
+db history do: [:each | each version].
+newestRoot previous objects.
+c that: 'the stub in the root''s state is never loaded' is: (newestRoot state at: 'previous') isLoaded equals: false.
+c that: 'previous answers a new stub on each call' isTrue: newestRoot previous ~~ newestRoot previous.
+c that: 'a new stub is unloaded' is: newestRoot previous isLoaded equals: false.
+c that: 'and reads the previous version' is: newestRoot previous version equals: 1.
+
 "The polyglot space also holds a database 'db', of another origin."
 other := PBObjectSpace storage: (PBFileStorage path: (copy value: 'polyglot')) lockTimeout: 50.
 c that: 'storage:lockTimeout:' is: other lockTimeout equals: 50.
@@ -88,6 +100,32 @@ c that: 'the old database is listed' is: old listDatabases asArray equals: #('ol
 c that: 'a DatabaseRoot without mutables' signals: PBCorruptionError containing: 'mutables' during: [
   (old openDatabase: 'old') history].
 old close.
+
+"A nil databases, objects or mutables field is corruption naming the field."
+b := SpaceBuilder segment: (ByteArray fromHex: '0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d').
+spaceRoot := b add: 17 oid: 1 state: { 'databases' -> nil }.
+old := PBObjectSpace storage: (PBFileStorage path: (b writeTo: base / 'nil-databases' root: spaceRoot)).
+c that: 'a nil databases' signals: PBCorruptionError containing: 'databases' during: [old listDatabases].
+old close.
+{ 'objects'. 'mutables' } do: [:field |
+  | state |
+  b := SpaceBuilder segment: (ByteArray fromHex: '0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e').
+  idx := b add: 3 oid: 1 state: { 'root' -> nil }.
+  dict := b add: 6 oid: 2 state: { 'root' -> nil. 'count' -> 0. 'indexes' -> idx }.
+  state := { 'objects' -> dict. 'mutables' -> dict. 'version' -> 0.
+    'committed_at' -> (DateTime year: 2020 month: 1 day: 1 hour: 0 minute: 0 second: 0 microsecond: 0 fold: 0
+      zone: (ZoneOffset microseconds: 0 name: 'UTC')). 'previous' -> nil } collect: [:a |
+    a key = field ifTrue: [field -> nil] ifFalse: [a]].
+  dbRoot := b add: 18 oid: 3 state: state.
+  dict := b add: 6 oid: 4 state: { 'root' -> (b add: 0 oid: 5 state: { 'key' -> 'nil'. 'value' -> dbRoot.
+    'left' -> nil. 'right' -> nil. 'height' -> 1. 'count' -> 1 }). 'count' -> 1. 'indexes' -> idx }.
+  spaceRoot := b add: 17 oid: 6 state: { 'databases' -> dict }.
+  old := PBObjectSpace storage: (PBFileStorage path: (b writeTo: base / ('nil-' , field) root: spaceRoot)).
+  c that: 'a nil ' , field signals: PBCorruptionError containing: field during: [
+    | e |
+    e := (old openDatabase: 'nil') history first.
+    e rootNames. e mutableNames].
+  old close].
 
 space close.
 c that: 'a closed space' signals: PBClosedError during: [space listDatabases].

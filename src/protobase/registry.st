@@ -355,6 +355,13 @@ PBAtom >> tag
 PBAtom >> isLoaded
   ^ memo value notNil.
 
+"A new, unloaded stub of this stored atom: what a holder answers when it must
+ not keep the record loaded (DatabaseRoot previous, D53). An atom with no
+ stored record answers itself."
+PBAtom >> unloadedCopy
+  pointer isNil ifTrue: [^ self].
+  ^ self class unloadedAt: pointer storage: storage.
+
 "The loaded envelope, loading it once through the storage."
 PBAtom >> _envelope
   | envelope missing |
@@ -391,7 +398,6 @@ PBAtom >> oid
   ^ self _envelope oid.
 
 PBAtom >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: self class name; nextPutAll: '('; print: pointer; nextPut: $).
 
 "=== PBOpaqueAtom ==========================================================="
@@ -425,6 +431,14 @@ PBOpaqueAtom >> _setReferencedName: aString
 PBOpaqueAtom >> tag
   ^ referencedName.
 
+"The atom's type name (design spec 8.1): the name it was referenced by, the
+ only name of its type this process knows."
+PBOpaqueAtom >> typeName
+  ^ referencedName.
+
+PBOpaqueAtom >> unloadedCopy
+  ^ PBOpaqueAtom named: referencedName unloadedAt: pointer storage: storage.
+
 PBOpaqueAtom >> _absentField: aName
   ^ PBNotSupportedError signal: aName printString , ' is not a field of this ' , referencedName
     , ' atom, and that type has no class registered in this process: its behaviour is not available here'.
@@ -441,17 +455,12 @@ PBOpaqueAtom >> attributeNames
 "Any message an opaque atom does not implement needs the type's behaviour:
  PBNotSupportedError naming the type and the message (a collection message,
  a change such as with:value: or setAt:value:, a record message such as
- hasDefinedAttr:). Sent to the class object (K14: class objects reach instance
- methods), it signals MessageNotUnderstood as the inherited one does: a super
- send from here would come back to this method."
+ hasDefinedAttr:)."
 PBOpaqueAtom >> doesNotUnderstand: aMessage
-  self isClassObject ifTrue: [
-    ^ MessageNotUnderstood new signal: 'doesNotUnderstand: ' , aMessage selector , ' (receiver class: ' , self name , ')'].
   ^ PBNotSupportedError signal: 'this ' , referencedName , ' atom does not understand '
     , aMessage selector printString , ': the type has no class registered in this process, so its behaviour is not available here'.
 
 PBOpaqueAtom >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBOpaqueAtom('; nextPutAll: referencedName; nextPutAll: ', '; print: pointer; nextPut: $).
 
 PBTypeRegistry _initializeRegistry.
@@ -469,6 +478,5 @@ _PBNames class >> sorted: aCollection
  not depend on the spelling read. Defined here, not in values.st, because the
  alias table is the registry's; hash is the pointer's (values.st)."
 PBUnresolvedRef >> = anObject
-  self isClassObject ifTrue: [^ self == anObject].
   ^ (anObject isClassObject not and: [anObject class == PBUnresolvedRef])
     and: [self pointer = anObject pointer and: [PBTypeRegistry isTag: self tag sameTypeAs: anObject tag]].

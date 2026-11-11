@@ -26,10 +26,6 @@ protoST's = within one class (_PBItems same:as:). hash is deliberately cheap
 and safe (it never hashes an item, so a Decimal of untrusted input is never
 hashed): the size and the class.
 
-K14: instance-side methods are reachable from the class object, so =, hash,
-printOn: and name answer what a class answers when sent to a class object.
-No selector is defined on both sides of one class.
-
 This module also gives every DateTime isLegacyZone (false), and defines
 PBLegacyZoneDateTime, the format-3 ['zone', key] datetime (Spec 4.3)."
 
@@ -116,18 +112,15 @@ _PBSequence >> asArray
   ^ items copy.
 
 _PBSequence >> = anObject
-  self isClassObject ifTrue: [^ self == anObject].
   (anObject isClassObject not and: [anObject class == self class]) ifFalse: [^ false].
   anObject size = items size ifFalse: [^ false].
   1 to: items size do: [:i | (_PBItems same: (items at: i) as: (anObject at: i)) ifFalse: [^ false]].
   ^ true.
 
 _PBSequence >> hash
-  self isClassObject ifTrue: [^ self identityHash].
   ^ (self class name hash bitXor: items size) \\ 1073741824.
 
 _PBSequence >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: self class name; nextPut: $(.
   items doWithIndex: [:each :i |
     i > 1 ifTrue: [aStream nextPutAll: ', '].
@@ -222,7 +215,6 @@ PBFrozenDict >> associations
   ^ (1 to: keys size) asArray collect: [:i | (keys at: i) -> (values at: i)].
 
 PBFrozenDict >> = anObject
-  self isClassObject ifTrue: [^ self == anObject].
   (anObject isClassObject not and: [anObject class == PBFrozenDict]) ifFalse: [^ false].
   anObject size = keys size ifFalse: [^ false].
   1 to: keys size do: [:i |
@@ -232,11 +224,9 @@ PBFrozenDict >> = anObject
   ^ true.
 
 PBFrozenDict >> hash
-  self isClassObject ifTrue: [^ self identityHash].
   ^ ('PBFrozenDict' hash bitXor: keys size) \\ 1073741824.
 
 PBFrozenDict >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBFrozenDict('.
   1 to: keys size do: [:i |
     i > 1 ifTrue: [aStream nextPutAll: ', '].
@@ -261,7 +251,6 @@ PBMissing class >> new
   ^ Default.
 
 PBMissing >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBMissing default'.
 
 PBMissing _initializeDefault.
@@ -289,22 +278,18 @@ PBMutableObject >> _setCellName: aString
   cellName := aString.
   ^ self.
 
-"The cell name (the class name when sent to the class object, K14)."
+"The cell name."
 PBMutableObject >> name
-  self isClassObject ifTrue: [^ super name].
   ^ cellName.
 
 PBMutableObject >> = anObject
-  self isClassObject ifTrue: [^ self == anObject].
   ^ (anObject isClassObject not and: [anObject class == PBMutableObject])
     and: [cellName = anObject name].
 
 PBMutableObject >> hash
-  self isClassObject ifTrue: [^ self identityHash].
   ^ cellName hash.
 
 PBMutableObject >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBMutableObject('; print: cellName; nextPut: $).
 
 "=== PBAtomPointer ==========================================================="
@@ -346,16 +331,13 @@ PBAtomPointer >> offset
   ^ offset.
 
 PBAtomPointer >> = anObject
-  self isClassObject ifTrue: [^ self == anObject].
   ^ (anObject isClassObject not and: [anObject class == PBAtomPointer])
     and: [offset = anObject offset and: [segmentBytes = anObject segmentBytes]].
 
 PBAtomPointer >> hash
-  self isClassObject ifTrue: [^ self identityHash].
   ^ (segmentBytes hash bitXor: offset hash) \\ 1073741824.
 
 PBAtomPointer >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBAtomPointer('; nextPutAll: self segmentHex;
     nextPutAll: ', '; print: offset; nextPut: $).
 
@@ -396,11 +378,9 @@ PBUnresolvedRef >> isPBReference
  pointer and by the type their tags name, which needs the alias table."
 
 PBUnresolvedRef >> hash
-  self isClassObject ifTrue: [^ self identityHash].
   ^ pointer hash.
 
 PBUnresolvedRef >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBUnresolvedRef('; print: pointer; nextPutAll: ', '; print: tag; nextPut: $).
 
 "=== PBLegacyZoneDateTime ===================================================="
@@ -459,7 +439,6 @@ PBLegacyZoneDateTime >> utcOrdinalMicroseconds
   ^ self _unsupported: 'known UTC instant'.
 
 PBLegacyZoneDateTime >> hash
-  self isClassObject ifTrue: [^ self identityHash].
   ^ self _unsupported: 'hash'.
 
 PBLegacyZoneDateTime >> _orderWith: anObject
@@ -471,7 +450,6 @@ PBLegacyZoneDateTime >> _orderWith: anObject
  (48 h for a format-3 value of another zone) is never equal; any other aware
  value needs the zone's offsets and signals."
 PBLegacyZoneDateTime >> = anObject
-  self isClassObject ifTrue: [^ self == anObject].
   self == anObject ifTrue: [^ true].
   ((anObject isKindOf: DateTime) and: [anObject isClassObject not]) ifFalse: [^ false].
   anObject isNaive ifTrue: [^ false].
@@ -487,6 +465,5 @@ PBLegacyZoneDateTime >> = anObject
 
 "The wall clock, then the zone key in brackets."
 PBLegacyZoneDateTime >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: (DateTime _fieldsText: { self year. self month. self day. self hour. self minute. self second. self microsecond });
     nextPut: $[; nextPutAll: self zone key; nextPut: $].

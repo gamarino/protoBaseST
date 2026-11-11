@@ -168,7 +168,6 @@ PBSegmentReader >> isClosed
   ^ file isClosed.
 
 PBSegmentReader >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBSegmentReader('; nextPutAll: self segmentHex; nextPut: $).
 
 "=== PBFileStorage =========================================================="
@@ -342,5 +341,4 @@ PBFileStorage >> close
   taken do: [:reader | reader close].
 
 PBFileStorage >> printOn: aStream
-  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBFileStorage('; nextPutAll: directory pathString; nextPut: $).

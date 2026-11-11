@@ -15,7 +15,10 @@ proto_db/transactions.py (SpaceRoot, DatabaseRoot) at the tag.
                    optional: absent means nil)
 
 A DatabaseRoot without mutables was written before D35 and cannot be opened:
-its load is PBCorruptionError (a required field), as in ProtoBase."
+its load is PBCorruptionError (a required field), as in ProtoBase. A nil
+databases, objects or mutables is PBCorruptionError naming the field.
+previous answers a new unloaded stub on each call (D53): walking the history
+never leaves older versions loaded behind a root."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/values'.
@@ -36,7 +39,7 @@ PBSpaceRoot class >> persistedFields
 
 "The PBDictionary from database name to PBDatabaseRoot."
 PBSpaceRoot >> databases
-  ^ _PBTree node: (self stateAt: 'databases') kind: PBDictionary in: self.
+  ^ _PBTree required: (self stateAt: 'databases') kind: PBDictionary field: 'databases' in: self.
 
 "The term of the cluster lease the root was committed under, or nil."
 PBSpaceRoot >> clusterTerm
@@ -61,11 +64,11 @@ PBDatabaseRoot class >> persistedFields
 
 "The PBDictionary from root name to the root's value."
 PBDatabaseRoot >> objects
-  ^ _PBTree node: (self stateAt: 'objects') kind: PBDictionary in: self.
+  ^ _PBTree required: (self stateAt: 'objects') kind: PBDictionary field: 'objects' in: self.
 
 "The PBDictionary from mutable cell name to the cell's value (D35)."
 PBDatabaseRoot >> mutables
-  ^ _PBTree node: (self stateAt: 'mutables') kind: PBDictionary in: self.
+  ^ _PBTree required: (self stateAt: 'mutables') kind: PBDictionary field: 'mutables' in: self.
 
 PBDatabaseRoot >> version
   ^ _PBTree integer: (self stateAt: 'version') field: 'version' of: self.
@@ -73,9 +76,14 @@ PBDatabaseRoot >> version
 PBDatabaseRoot >> committedAt
   ^ self stateAt: 'committed_at'.
 
-"The previous version's PBDatabaseRoot, nil for version 0."
+"The previous version's PBDatabaseRoot, nil for version 0: a new unloaded
+ stub on each call, so a root never keeps its predecessors loaded (ProtoBase
+ D53 reloads previous on each read). The stub in this root's state is never
+ loaded."
 PBDatabaseRoot >> previous
-  ^ _PBTree node: (self stateAt: 'previous') kind: PBDatabaseRoot in: self.
+  | stub |
+  stub := _PBTree node: (self stateAt: 'previous') kind: PBDatabaseRoot in: self.
+  ^ stub isNil ifTrue: [nil] ifFalse: [stub unloadedCopy].
 
 "The database's 16-byte identity, or nil for a database created before D56."
 PBDatabaseRoot >> origin

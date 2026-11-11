@@ -19,7 +19,8 @@ a behaviour name of DBObject, with_ or has_defined_attr (format spec,
 for the type, as ProtoBase does; vector invalid/atom-reserved-name). The names
 every type refuses (a leading _, oid, atom_pointer, context) are refused by the
 envelope (framing.st). An application class may reserve more names with
-reservedAttributeNames (class side), which must keep DBObject's.
+reservedAttributeNames (class side); DBObject's (dbObjectBehaviourNames) are
+checked in every subclass whatever it answers there.
 
 PBOpaqueAtom, the record of a type with no class here, is in registry.st;
 with: (ProtoBase's with_) comes with the writer (plan Task 15)."
@@ -41,17 +42,26 @@ PBObject class >> requiredFields
 PBObject class >> persistedFields
   ^ #().
 
-"The behaviour names of DBObject, which no persisted attribute may carry."
-PBObject class >> reservedAttributeNames
+"The behaviour names of DBObject, which no persisted attribute may carry, in
+ any subclass: the check reads them from PBObject, so no override drops them."
+PBObject class >> dbObjectBehaviourNames
   ^ #('with_' 'has_defined_attr').
 
+"The names an application class reserves besides DBObject's: none by default."
+PBObject class >> reservedAttributeNames
+  ^ #().
+
 PBObject class >> _checkPersistedNames: aState at: aPointer
-  | reserved |
+  | behaviour reserved |
+  behaviour := PBObject dbObjectBehaviourNames.
   reserved := self reservedAttributeNames.
   aState keys do: [:name |
+    (behaviour includes: name) ifTrue: [
+      ^ PBCorruptionError signal: 'the record at ' , aPointer printString , ' (' , self typeName
+        , ') holds the attribute ' , name printString , ', a behaviour name of DBObject: no persisted attribute may carry it'].
     (reserved includes: name) ifTrue: [
       ^ PBCorruptionError signal: 'the record at ' , aPointer printString , ' (' , self typeName
-        , ') holds the attribute ' , name printString , ', a behaviour name of DBObject: no persisted attribute may carry it']].
+        , ') holds the attribute ' , name printString , ', a name ' , self name , ' reserves (reservedAttributeNames)']].
   ^ aState.
 
 "The value of the attribute aName; nil when the record does not hold it."

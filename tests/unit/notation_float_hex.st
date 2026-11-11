@@ -1,4 +1,4 @@
-"EXPECT: ok 80"
+"EXPECT: ok 81"
 "PBNotation floatHex: and floatFromHex: against CPython's float.hex (literals pasted from
  CPython 3.12), bit exact in both directions."
 Import from: 'protobase'.
@@ -50,10 +50,9 @@ c that: '-inf back' is: (PBNotation floatFromHex: '-inf') equals: Float infinity
   '0x0.0000000000001p-1021' '0X1.8000000000000p+0' 'NaN') do: [:bad |
   c that: bad printString , ' refused' signals: PBValidationError during: [PBNotation floatFromHex: bad]].
 
-"5e-324, the smallest subnormal. protoST 0.9.0 does not parse the literal 5e-324 (float literal
- out of range), so the value is made from CPython's bits for it (0x0000000000000001)."
-c that: '5e-324 from bits' is: (PBNotation floatHex: ((Check bytes: '0000000000000001') float64At: 1 bigEndian: true))
-  equals: '0x0.0000000000001p-1022'.
+"5e-324, the smallest subnormal, written as a literal (protoST D51)."
+c that: '5e-324' is: (PBNotation floatHex: 5e-324) equals: '0x0.0000000000001p-1022'.
+c that: '5e-324 is CPython''s bits 0x0000000000000001' is: (MessagePack encode: 5e-324) hex equals: 'cb0000000000000001'.
 c that: '5e-324 back' is: (MessagePack encode: (PBNotation floatFromHex: '0x0.0000000000001p-1022')) hex
   equals: 'cb0000000000000001'.
 "NaNs of any payload and sign describe as 'nan' (Python writes repr); reading it gives a NaN."
