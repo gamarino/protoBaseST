@@ -34,24 +34,24 @@ box := root storedValue.
 root := PBAvl posInsert: root at: 0 value: 1.
 root := PBAvl posInsert: root at: 0 value: 2.
 found := nil.
-PBAvl do: [:n | (n storedValue isKindOf: PBValueBox) ifTrue: [found := n storedValue]] over: root.
+PBAvl nodesDo: [:n | (n storedValue isKindOf: PBValueBox) ifTrue: [found := n storedValue]] over: root.
 c that: 'a path copy keeps the same box' isTrue: found == box.
 c that: 'and reads the value' is: (PBAvl posAt: root index: 2) equals: e256.
 root := PBAvl posSet: root at: 2 value: e256 copy.
 found := nil.
-PBAvl do: [:n | (n storedValue isKindOf: PBValueBox) ifTrue: [found := n storedValue]] over: root.
+PBAvl nodesDo: [:n | (n storedValue isKindOf: PBValueBox) ifTrue: [found := n storedValue]] over: root.
 c that: 'a set boxes the new value in a new box' isTrue: (found ~~ box and: [found value = e256]).
 "Keyed trees: the value is boxed, the key never."
 key := String new: 300 withAll: $k.
-root := PBAvl keyPut: nil key: key value: b256 nodeClass: PBKeyNode.
+root := (PBAvl keyPut: nil key: key value: b256 nodeClass: PBKeyNode) first.
 node := PBAvl keyAt: root key: key.
 c that: 'a long key is not boxed' is: (node key isKindOf: PBValueBox) equals: false.
 c that: 'the key is the String' is: node key equals: key.
 c that: 'a keyed value is boxed' is: (node storedValue isKindOf: PBValueBox) equals: true.
 c that: 'and reads unboxed' is: node value equals: b256.
-root := PBAvl keyPut: root key: key value: b255 nodeClass: PBKeyNode.
+root := (PBAvl keyPut: root key: key value: b255 nodeClass: PBKeyNode) first.
 c that: 'a short replacement is inline' is: (PBAvl keyAt: root key: key) storedValue equals: b255.
-k := PBAvl keyPut: nil key: 1 value: (PBTuple withAll: { e256. 3 }) nodeClass: PBCountedKeyNode.
+k := (PBAvl keyPut: nil key: 1 value: (PBTuple withAll: { e256. 3 }) nodeClass: PBCountedKeyNode) first.
 c that: 'a weighted pair is never boxed' is: (k storedValue isKindOf: PBValueBox) equals: false.
 c that: 'and counts' is: k weight equals: 3.
 c that: 'the box type' is: PBValueBox typeName equals: 'proto_db.avl.ValueBox'.

@@ -317,13 +317,14 @@ PBAtom class >> _checkPersistedNames: aState at: aPointer
  CountedSet a RepeatedKeysDictionary answers for an absent key). The public
  constructors of new atoms come with the writer (plan Task 15)."
 PBAtom class >> _unsavedWithState: aPBFrozenDict
-  ^ self _unsavedWithState: aPBFrozenDict tag: (PBTypeRegistry tagFor: self).
-
-"As _unsavedWithState:, with aTag, which the caller computed once with
- PBTypeRegistry tagFor: self (the AVL writes, which build many nodes)."
-PBAtom class >> _unsavedWithState: aPBFrozenDict tag: aTag
   (aPBFrozenDict isKindOf: PBFrozenDict) ifFalse: [
     ^ PBValidationError signal: self name , ': the state of an atom is a PBFrozenDict, not ' , aPBFrozenDict printString].
+  ^ self _unsavedWithState: aPBFrozenDict tag: (PBTypeRegistry tagFor: self).
+
+"As _unsavedWithState:, for a caller that built aPBFrozenDict itself and
+ computed aTag once with PBTypeRegistry tagFor: self (the AVL writes, which
+ build many nodes)."
+PBAtom class >> _unsavedWithState: aPBFrozenDict tag: aTag
   ^ (self basicNew _setOid: nil pointer: nil storage: nil)
     _installState: (PBAtomEnvelope basicNew _setTag: aTag oid: nil state: aPBFrozenDict).
 

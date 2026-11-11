@@ -1110,13 +1110,19 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
   answers a new root and never changes a node):
   - `PBAvl posAt: root index: i`, `posInsert: root at: i value: v`, `posSet: root at: i value: v`,
     `posRemove: root at: i`, `posAppend: root value: v`;
-  - `PBAvl keyAt: root key: k` (a node or nil), `keyPut: root key: k value: v nodeClass: aClass`,
-    `keyRemove: root key: k`;
-  - `PBAvl do: aBlock over: root` (in order);
+  - `PBAvl keyAt: root key: k` (a node or nil), `keyPut: root key: k value: v nodeClass: aClass`
+    (answers ProtoBase key_put's `{ root. replaced. old value }`), `keyRemove: root key: k`
+    (key_remove's `{ root. removed. old value }`; the same root when k is absent);
+  - `PBAvl nodesDo: aBlock over: root` (each node, in order: _inorder),
+    `posDo: aBlock over: root` (each value, unboxed: pos_iter),
+    `keysAndValuesDo: aBlock over: root` (each key and unboxed value: key_iter);
+  - a keyed node caches the order key of its key (ProtoBase `_okey`): a write-once cell,
+    never persisted, filled when a write builds the node or on a stub's first use;
   - `PBAvl check: root` (the FS invariants: height, count, balance, key order, `weight`, and
     one node class per tree), signalling `PBCorruptionError` on a violation;
-  - a new node gets no oid until saved (Spec §8.1); `PBAtom >> oid` of an unsaved node is
-    nil until the publisher assigns it.
+  - a new node is an unsaved atom: no pointer, and no oid until its first need (ruling R13,
+    ProtoBase D21): `knownOid` is nil, `PBAtom >> oid` draws a random version-4 UUID lazily
+    in memory and keeps it, and the writer (Task 15) persists that same oid.
   - Boxing: a node value that is a `String` of 256 code points or more, or a `ByteArray` of
     256 bytes or more, is stored as a `PBValueBox`, and reads unbox it. Keys and bucket
     values are never boxed.

@@ -1,6 +1,6 @@
 """Replay protoBaseST's seeded AVL operation sequence in ProtoBase and compare the trees (plan Task 14).
 
-Usage: python py_avl_replay.py <pos|key|counted> <file>
+Usage: python py_avl_replay.py <pos|key|counted|pos-large|key-large> <file>
 
 <file> is the output of _st_avl_ops.st: 'op <words>' lines, and at each checkpoint a
 'dump <n>' line followed by 'node <line>' lines that describe protoBaseST's tree. This
@@ -76,6 +76,7 @@ def _line(atom, number, numbers):
 
 def apply(kind, root, words):
     op = words[0]
+    kind = kind.split("-")[0]
     if kind == "pos":
         if op == "insert":
             return avl.pos_insert(root, int(words[1]), value_of(words[2]))
@@ -135,7 +136,7 @@ def main(kind, path):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3 or sys.argv[1] not in ("pos", "key", "counted"):
+    if len(sys.argv) != 3 or sys.argv[1] not in ("pos", "key", "counted", "pos-large", "key-large"):
         print(__doc__)
         sys.exit(2)
     sys.exit(main(sys.argv[1], sys.argv[2]))

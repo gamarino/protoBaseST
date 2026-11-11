@@ -2,7 +2,7 @@
 "Plan Task 14: 2000 seeded random inserts, appends, sets and removes on a persistent
  positional tree (PBAvl over PBPosNode), against an OrderedCollection model. After each
  operation PBAvl check: holds and the tree holds the model's elements in order (posAt: and
- do:over: agree). Every 50th tree is kept with a copy of the model, and at the end each
+ nodesDo:over: agree). Every 50th tree is kept with a copy of the model, and at the end each
  must still hold what it held (path copying never changes a node, so the later
  operations, which share its subtrees, left it as it was). Values around the boxing threshold come and go.
  The sequence is AvlOps (Random seed: 20261110); a failure prints the seed and the step.
@@ -19,7 +19,7 @@ kept := OrderedCollection new.
 contents := [:aRoot |
   | out |
   out := OrderedCollection new.
-  PBAvl do: [:node | out add: node value] over: aRoot.
+  PBAvl nodesDo: [:node | out add: node value] over: aRoot.
   out].
 [steps < 2000 and: [failure isNil]] whileTrue: [
   | op value next |

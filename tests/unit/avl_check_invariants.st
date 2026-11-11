@@ -65,7 +65,7 @@ c that: 'a Boolean index' signals: PBValidationError during: [PBAvl posSet: root
 c that: 'a Float index' signals: PBValidationError during: [PBAvl posRemove: root at: 0.0].
 c that: 'remove from the empty tree' signals: PBValidationError during: [PBAvl posRemove: nil at: 0].
 c that: 'a keyed root for a positional function' signals: PBValidationError during: [
-  PBAvl posAppend: (PBAvl keyPut: nil key: 1 value: 1 nodeClass: PBKeyNode) value: 1].
+  PBAvl posAppend: (PBAvl keyPut: nil key: 1 value: 1 nodeClass: PBKeyNode) first value: 1].
 c that: 'a positional root for a keyed function' signals: PBValidationError during: [PBAvl keyPut: root key: 1 value: 1 nodeClass: PBKeyNode].
 c that: 'an unorderable key' signals: PBValidationError during: [PBAvl keyPut: nil key: (PBFrozenList withAll: #(1)) value: 1 nodeClass: PBKeyNode].
 before := PBAvl posAt: root index: 0.

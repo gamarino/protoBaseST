@@ -248,6 +248,11 @@ PBKeys class >> _comparePayload: a with: b rank: aRank
  expands a large exponent."
 PBKeys class >> _compareNumber: a with: b
   a == b ifTrue: [^ 0].
+  "Two Integers, the most common number keys (hash keys among them), compare
+   directly, before the tests for the infinities and Decimals."
+  a isInteger ifTrue: [b isInteger ifTrue: [
+    a = b ifTrue: [^ 0].
+    ^ a < b ifTrue: [-1] ifFalse: [1]]].
   a == PBOrderKey negInf ifTrue: [^ -1].
   b == PBOrderKey negInf ifTrue: [^ 1].
   a == PBOrderKey posInf ifTrue: [^ 1].
@@ -699,8 +704,12 @@ PBMapKeyIndex >> _setIds: aDictionary zoned: aZonedOrNil
 "The position of aKey (1-based), or 0. A lookup that needs a zone's offsets
  to answer signals PBNotSupportedError."
 PBMapKeyIndex >> indexOf: aKey
+  "ifAbsent: nil (nil value is nil) creates no block: this runs on every
+   attribute read."
+  | i |
   zoned isNil ifFalse: [self _checkProbe: aKey].
-  ^ ids at: (PBMapKeyIndex _idOf: aKey) ifAbsent: [0].
+  i := ids at: (PBMapKeyIndex _idOf: aKey) ifAbsent: nil.
+  ^ i isNil ifTrue: [0] ifFalse: [i].
 
 "Signals PBNotSupportedError when aKey and a key of the map could conflict
  and only a zone's offsets can tell (the rule of checkDecidableKeys:)."

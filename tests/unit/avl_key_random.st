@@ -4,7 +4,8 @@
  compare:with:. Keys mix Integers, Floats (n and n.0 are one key: a put keeps the stored
  key object, as ProtoBase's key_put), and Strings; deletes may name an absent key (the
  tree is then answered unchanged, the same object). After each operation PBAvl check:
- holds, the tree holds the model in order, and keyAt: finds the operation's key (or nil).
+ holds, the tree holds the model in order, and keyAt: finds the operation's key (or nil), and the
+ answer's replaced/removed flag and old value are the model's.
  Every 50th tree is kept with a copy of the model, and at the end each must still hold
  what it held (path copying never changes a node). The sequence is AvlOps (Random seed:
  20261110); a failure prints the seed and the step. tests/interop/avl_ops_identical.sh
@@ -25,7 +26,7 @@ holds := [:aRoot :aSequence |
   i := 0.
   ok := (aRoot isNil ifTrue: [0] ifFalse: [aRoot count]) = aSequence size.
   ok ifTrue: [
-    PBAvl do: [:node |
+    PBAvl nodesDo: [:node |
       i := i + 1.
       ok ifTrue: [
         (node key == (aSequence at: i) key) ifFalse: [ok := false].
@@ -47,21 +48,24 @@ slot := [:aKey |
     c > 0 ifTrue: [hi := mid - 1]].
   found isNil ifTrue: [lo negated] ifFalse: [found]].
 [steps < 2000 and: [failure isNil]] whileTrue: [
-  | op key value stored old next at node |
+  | op key value stored previous old next at node result |
   op := ops nextKeyOp.
   steps := steps + 1.
   old := root.
   key := AvlOps valueOf: (op at: 2).
   at := slot value: key.
   stored := at > 0 ifTrue: [(model at: at) key] ifFalse: [nil].
+  previous := at > 0 ifTrue: [(model at: at) value] ifFalse: [nil].
   (op at: 1) = #put ifTrue: [
     value := AvlOps valueOf: (op at: 3).
-    next := PBAvl keyPut: root key: key value: value nodeClass: PBKeyNode.
+    result := PBAvl keyPut: root key: key value: value nodeClass: PBKeyNode.
+    next := result first.
     at > 0
       ifTrue: [model at: at put: (model at: at) key -> value]
       ifFalse: [model add: key -> value beforeIndex: at negated]].
   (op at: 1) = #delete ifTrue: [
-    next := PBAvl keyRemove: root key: key.
+    result := PBAvl keyRemove: root key: key.
+    next := result first.
     at > 0 ifTrue: [model removeAt: at]].
   failure := [
     PBAvl check: next.
@@ -69,11 +73,12 @@ slot := [:aKey |
     (holds value: next value: model)
       ifFalse: ['the tree does not hold the model']
       ifTrue: [
+        ((result at: 2) ~= (at > 0) or: [(result at: 3) ~= previous]) ifTrue: ['the replaced/removed flag or the old value is wrong'] ifFalse: [
           ((op at: 1) = #delete and: [at < 0 and: [next ~~ old]]) ifTrue: ['a delete of an absent key copied the tree'] ifFalse: [
             ((op at: 1) = #put and: [node isNil or: [node value ~= value]]) ifTrue: ['keyAt: misses the key put'] ifFalse: [
               ((op at: 1) = #put and: [at > 0 and: [node key ~~ stored]])
                 ifTrue: ['a put replaced the stored key object'] ifFalse: [
-                  ((op at: 1) = #delete and: [node notNil]) ifTrue: ['keyAt: finds a deleted key'] ifFalse: [nil]]]]]]
+                  ((op at: 1) = #delete and: [node notNil]) ifTrue: ['keyAt: finds a deleted key'] ifFalse: [nil]]]]]]]
     on: Error do: [:e | e return: e class name , ': ' , e messageText].
   failure isNil ifFalse: [
     ('FAIL seed ' , AvlOps seed printString , ' step ' , steps printString , ' ('

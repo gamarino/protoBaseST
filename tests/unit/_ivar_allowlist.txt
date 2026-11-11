@@ -33,3 +33,4 @@ PBOrderKey class>>_initializeInfinities
 _PBLoadResolver>>_setStorage:chain:
 _PBReadMap>>_setEntries:
 PBNode class>>_initializeShapes
+PBKeyNode>>_setOid:pointer:storage:

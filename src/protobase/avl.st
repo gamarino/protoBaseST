@@ -34,12 +34,16 @@ avl.py over a root node, or nil for the empty tree:
   PBAvl posSet: root at: i value: v           pos_set (0 <= i < count)
   PBAvl posRemove: root at: i                 pos_remove (0 <= i < count)
   PBAvl keyAt: root key: k                    the node of key k, or nil
-  PBAvl keyPut: root key: k value: v nodeClass: aClass     key_put
-  PBAvl keyRemove: root key: k                key_remove
-  PBAvl do: aBlock over: root                 each node, in order
+  PBAvl keyPut: root key: k value: v nodeClass: aClass     key_put:
+                                              { root. replaced. old value }
+  PBAvl keyRemove: root key: k                key_remove:
+                                              { root. removed. old value }
+  PBAvl nodesDo: aBlock over: root            each node, in order (_inorder)
+  PBAvl posDo: aBlock over: root              each value, unboxed (pos_iter)
+  PBAvl keysAndValuesDo: aBlock over: root    each key and value (key_iter)
   PBAvl check: root                           check_invariants
 
-Every write answers a new root and never changes a node: it builds new nodes
+Every write builds a new root and never changes a node: it builds new nodes
 along the path it touches (path copying) and shares every other subtree with
 its input. The balancing is ProtoBase's, step for step (_balance with its four
 rotations, _pop_first, successor removal in _remove_node), so one operation
@@ -108,7 +112,13 @@ PBPosNode class >> requiredFields
 PBPosNode class >> persistedFields
   ^ #('value' 'left' 'right' 'height' 'count').
 
-PBNode subclass: #PBKeyNode.
+"A keyed node also holds a cell for the order key of its key (ProtoBase
+ KeyNode._okey), never persisted: a node a write builds fills it when it is
+ built (the put's order key, or the copied node's), a stored node on first
+ use (orderKey). It is filled once, by compare-and-swap, like the oid cell:
+ the value is derived from the immutable key, so two racing first readers
+ compute equal values and both answer the installed one."
+PBNode subclass: #PBKeyNode instanceVariableNames: 'orderKeyCell'.
 
 PBKeyNode class >> typeName
   ^ 'proto_db.avl.KeyNode'.
@@ -121,6 +131,30 @@ PBKeyNode class >> persistedFields
 
 PBKeyNode >> key
   ^ self stateAt: 'key'.
+
+PBKeyNode >> _setOid: anOid pointer: aPointer storage: aStorage
+  "Runs once, on a fresh instance (every constructor of an atom calls it)."
+  super _setOid: anOid pointer: aPointer storage: aStorage.
+  orderKeyCell := Atom on: nil.
+  ^ self.
+
+"The order key of the key (PBKeys orderKey:), computed once per node."
+PBKeyNode >> orderKey
+  | okey |
+  okey := orderKeyCell value.
+  okey isNil ifFalse: [^ okey].
+  self _publishOrderKey: (PBKeys orderKey: self key).
+  ^ orderKeyCell value.
+
+"The cached order key, or nil when it was not needed yet (a stub)."
+PBKeyNode >> knownOrderKey
+  ^ orderKeyCell value.
+
+"Installs anOrderKey, the order key of the key, unless one is installed; answers
+ the node."
+PBKeyNode >> _publishOrderKey: anOrderKey
+  orderKeyCell value: anOrderKey ifCurrent: nil.
+  ^ self.
 
 PBKeyNode subclass: #PBCountedKeyNode.
 
@@ -191,13 +225,16 @@ _PBTree class >> integer: anObject field: aName of: anAtom
 
 "A stored node value without its box."
 _PBTree class >> unboxed: aStoredValue
-  (aStoredValue isKindOf: PBValueBox) ifTrue: [^ aStoredValue value].
+  "Exact class, as ProtoBase's unboxed (type(stored) is ValueBox)."
+  aStoredValue class == PBValueBox ifTrue: [^ aStoredValue value].
   ^ aStoredValue.
 
 "aNode, a node of aKind (a node class) or nil: another value is PBCorruptionError,
  an opaque atom PBNotSupportedError naming its type."
 _PBTree class >> node: aNode kind: aKind in: anOwner
   aNode isNil ifTrue: [^ nil].
+  "A node of exactly aKind first: the common case of every walk and write."
+  aNode class == aKind ifTrue: [^ aNode].
   (aNode isKindOf: aKind) ifTrue: [^ aNode].
   (aNode isKindOf: PBOpaqueAtom) ifTrue: [
     ^ PBNotSupportedError signal: 'the ' , aNode tag , ' atom ' , aNode printString
@@ -256,7 +293,7 @@ _PBTree class >> nodeWithKey: anOrderKey of: aRoot in: anOwner
   | node c |
   node := self node: aRoot kind: PBKeyNode in: anOwner.
   [node notNil] whileTrue: [
-    c := anOrderKey compareWith: (PBKeys orderKey: node key).
+    c := anOrderKey compareWith: node orderKey.
     c = 0 ifTrue: [^ node].
     node := self node: (c < 0 ifTrue: [node left] ifFalse: [node right]) kind: PBKeyNode in: anOwner].
   ^ nil.
@@ -279,30 +316,38 @@ PBPosNode >> withLeft: aLeft right: aRight
   ^ self class value: self storedValue left: aLeft right: aRight.
 
 "A new keyed node of key aKey (never boxed) holding aValue (boxed when large)
- over aLeft and aRight. The key's order is the caller's concern (PBAvl)."
+ over aLeft and aRight; anOrderKey is PBKeys orderKey: aKey, which the caller
+ has (ProtoBase passes _okey the same way). The key's order is the caller's
+ concern (PBAvl)."
+PBKeyNode class >> key: aKey orderKey: anOrderKey value: aValue left: aLeft right: aRight
+  ^ (PBNode _new: self values: (self _fieldsKey: aKey value: aValue left: aLeft right: aRight))
+    _publishOrderKey: anOrderKey.
+
+"As key:orderKey:value:left:right:, computing the order key."
 PBKeyNode class >> key: aKey value: aValue left: aLeft right: aRight
-  ^ PBNode _new: self values: {
-    aKey. _PBTree boxed: aValue. aLeft. aRight.
+  ^ self key: aKey orderKey: (PBKeys orderKey: aKey) value: aValue left: aLeft right: aRight.
+
+"The values of persistedFields for a new node."
+PBKeyNode class >> _fieldsKey: aKey value: aValue left: aLeft right: aRight
+  ^ { aKey. _PBTree boxed: aValue. aLeft. aRight.
     _PBTree heightOf: aLeft and: aRight. _PBTree countOf: aLeft and: aRight }.
 
 PBKeyNode >> withLeft: aLeft right: aRight
-  ^ self class key: self key value: self storedValue left: aLeft right: aRight.
+  ^ self class key: self key orderKey: self orderKey value: self storedValue left: aLeft right: aRight.
 
 "A new node of this class with this node's key and children, holding aValue
  (ProtoBase KeyNode._with_value: the stored key object is kept)."
 PBKeyNode >> withValue: aValue
-  ^ self class key: self key value: aValue left: self left right: self right.
+  ^ self class key: self key orderKey: self orderKey value: aValue left: self left right: self right.
 
 "As PBKeyNode's, for a value that is a (payload, count) pair (PBValidationError
  otherwise, ProtoBase _value_count); weight is the count plus the children's
  weights."
-PBCountedKeyNode class >> key: aKey value: aValue left: aLeft right: aRight
+PBCountedKeyNode class >> _fieldsKey: aKey value: aValue left: aLeft right: aRight
   | own |
   own := _PBTree countOfPair: aValue.
-  ^ PBNode _new: self values: {
-    aKey. _PBTree boxed: aValue. aLeft. aRight.
-    _PBTree heightOf: aLeft and: aRight. _PBTree countOf: aLeft and: aRight.
-    own + (_PBTree weightOf: aLeft) + (_PBTree weightOf: aRight) }.
+  ^ (super _fieldsKey: aKey value: aValue left: aLeft right: aRight)
+    copyWith: own + (_PBTree weightOf: aLeft) + (_PBTree weightOf: aRight).
 
 "=== the helpers of the writes ==============================================="
 
@@ -315,13 +360,21 @@ _PBTree class >> valueBoxMin
  String or ByteArray of at least valueBoxMin, an existing PBValueBox as it is,
  any other value itself."
 _PBTree class >> boxed: aValue
-  | large |
-  (aValue isKindOf: PBValueBox) ifTrue: [^ aValue].
-  large := false.
-  aValue isString ifTrue: [aValue isSymbol ifFalse: [large := aValue size >= self valueBoxMin]].
-  (aValue isKindOf: ByteArray) ifTrue: [large := aValue size >= self valueBoxMin].
-  large ifTrue: [^ PBNode _new: PBValueBox values: { aValue }].
+  aValue _pbIsLargeNodeValue ifTrue: [^ PBNode _new: PBValueBox values: { aValue }].
   ^ aValue.
+
+"Whether a node holds the receiver through a new PBValueBox (_PBTree boxed:):
+ a String (not a Symbol) of at least valueBoxMin code points or a ByteArray of
+ at least valueBoxMin bytes. A PBValueBox is kept as it is."
+Object >> _pbIsLargeNodeValue
+  ^ false.
+
+String >> _pbIsLargeNodeValue
+  self isSymbol ifTrue: [^ false].
+  ^ self size >= _PBTree valueBoxMin.
+
+ByteArray >> _pbIsLargeNodeValue
+  ^ self size >= _PBTree valueBoxMin.
 
 _PBTree class >> heightOfNode: aNode
   ^ aNode isNil ifTrue: [0] ifFalse: [aNode height].
@@ -379,11 +432,13 @@ PBAvl class >> _index: anIndex upTo: anUpper
   ^ anIndex.
 
 "A child of aNode (a node of its own kind, or nil), checked as a walk checks it."
+"A child of aNode: nil or a node of aNode's own class (a tree has one node
+ class), checked as a walk checks it."
 PBAvl class >> _left: aNode
-  ^ _PBTree node: aNode left kind: PBNode in: aNode.
+  ^ _PBTree node: aNode left kind: aNode class in: aNode.
 
 PBAvl class >> _right: aNode
-  ^ _PBTree node: aNode right kind: PBNode in: aNode.
+  ^ _PBTree node: aNode right kind: aNode class in: aNode.
 
 PBAvl class >> _height: aNode
   ^ _PBTree heightOfNode: aNode.
@@ -512,58 +567,82 @@ PBAvl class >> keyAt: aRoot key: aKey
   okey := PBKeys orderKey: aKey.
   ^ _PBTree nodeWithKey: okey of: aRoot in: aRoot.
 
-"A tree with aKey mapped to aValue (ProtoBase key_put). An existing key keeps
- its stored key object and takes the new value; a new key gets a node of the
- tree's class (the root's), or of aClass (PBKeyNode, PBCountedKeyNode) when the
- tree is empty."
+"ProtoBase key_put: { new root. replaced. old value } with aKey mapped to
+ aValue. An existing key keeps its stored key object and takes the new value;
+ replaced is then true and the old value is its previous value, unboxed;
+ otherwise false and nil. A new key gets a node of the tree's class (the
+ root's), or of aClass (PBKeyNode, PBCountedKeyNode) when the tree is empty."
 PBAvl class >> keyPut: aRoot key: aKey value: aValue nodeClass: aClass
-  | okey make |
+  | okey make out root |
   self _root: aRoot kind: PBKeyNode.
   okey := PBKeys orderKey: aKey.
   make := aRoot isNil ifTrue: [aClass] ifFalse: [aRoot class].
   (make isClassObject and: [make == PBKeyNode or: [make inheritsFrom: PBKeyNode]]) ifFalse: [
       ^ PBValidationError signal: 'PBAvl keyPut: nodeClass must be a keyed node class, not ' , make printString].
-  ^ self _keyPut: aRoot okey: okey key: aKey value: aValue make: make.
+  out := Array new: 1.
+  root := self _keyPut: aRoot okey: okey key: aKey value: aValue make: make out: out.
+  ^ { root. (out at: 1) notNil. (out at: 1) isNil ifTrue: [nil] ifFalse: [(out at: 1) value] }.
 
-PBAvl class >> _keyPut: aNode okey: anOrderKey key: aKey value: aValue make: aClass
+"The put along one path; anArray at: 1 receives the node whose value is
+ replaced (a local scratch cell of this call, as ProtoBase's out list)."
+PBAvl class >> _keyPut: aNode okey: anOrderKey key: aKey value: aValue make: aClass out: anArray
   | c |
-  aNode isNil ifTrue: [^ aClass key: aKey value: aValue left: nil right: nil].
-  c := anOrderKey compareWith: (PBKeys orderKey: aNode key).
+  aNode isNil ifTrue: [^ aClass key: aKey orderKey: anOrderKey value: aValue left: nil right: nil].
+  c := anOrderKey compareWith: aNode orderKey.
   c < 0 ifTrue: [
     ^ self _balance: aNode
-      left: (self _keyPut: (self _left: aNode) okey: anOrderKey key: aKey value: aValue make: aClass)
+      left: (self _keyPut: (self _left: aNode) okey: anOrderKey key: aKey value: aValue make: aClass out: anArray)
       right: (self _right: aNode)].
   c > 0 ifTrue: [
     ^ self _balance: aNode
       left: (self _left: aNode)
-      right: (self _keyPut: (self _right: aNode) okey: anOrderKey key: aKey value: aValue make: aClass)].
+      right: (self _keyPut: (self _right: aNode) okey: anOrderKey key: aKey value: aValue make: aClass out: anArray)].
+  anArray at: 1 put: aNode.
   ^ aNode withValue: aValue.
 
-"A tree without aKey (ProtoBase key_remove); aRoot itself when aKey is absent."
+"ProtoBase key_remove: { new root. removed. old value } without aKey; when
+ aKey is absent, { aRoot itself. false. nil }. The old value is unboxed."
 PBAvl class >> keyRemove: aRoot key: aKey
+  | out root |
   self _root: aRoot kind: PBKeyNode.
-  ^ self _keyRemove: aRoot okey: (PBKeys orderKey: aKey).
+  out := Array new: 1.
+  root := self _keyRemove: aRoot okey: (PBKeys orderKey: aKey) out: out.
+  ^ { root. (out at: 1) notNil. (out at: 1) isNil ifTrue: [nil] ifFalse: [(out at: 1) value] }.
 
-PBAvl class >> _keyRemove: aNode okey: anOrderKey
+PBAvl class >> _keyRemove: aNode okey: anOrderKey out: anArray
   | c left right child |
   aNode isNil ifTrue: [^ nil].
-  c := anOrderKey compareWith: (PBKeys orderKey: aNode key).
-  c = 0 ifTrue: [^ self _removeNode: aNode].
+  c := anOrderKey compareWith: aNode orderKey.
+  c = 0 ifTrue: [
+    anArray at: 1 put: aNode.
+    ^ self _removeNode: aNode].
   left := self _left: aNode.
   right := self _right: aNode.
   c < 0 ifTrue: [
-    child := self _keyRemove: left okey: anOrderKey.
+    child := self _keyRemove: left okey: anOrderKey out: anArray.
     ^ child == left ifTrue: [aNode] ifFalse: [self _balance: aNode left: child right: right]].
-  child := self _keyRemove: right okey: anOrderKey.
+  child := self _keyRemove: right okey: anOrderKey out: anArray.
   ^ child == right ifTrue: [aNode] ifFalse: [self _balance: aNode left: left right: child].
 
-"--- walks ---"
+"--- walks (ProtoBase _inorder, pos_iter, key_iter) ---"
 
-"Evaluates aBlock with each node of the tree aRoot, in order (an explicit
- stack; node value answers a node's value unboxed)."
-PBAvl class >> do: aBlock over: aRoot
+"Evaluates aBlock with each node of the tree aRoot, in order (ProtoBase's
+ _inorder; an explicit stack)."
+PBAvl class >> nodesDo: aBlock over: aRoot
   self _root: aRoot kind: PBNode.
   _PBTree nodesOf: aRoot kind: PBNode in: aRoot do: aBlock.
+
+"Evaluates aBlock with each value of the positional tree aRoot, in order,
+ unboxed (ProtoBase pos_iter)."
+PBAvl class >> posDo: aBlock over: aRoot
+  self _root: aRoot kind: PBPosNode.
+  _PBTree nodesOf: aRoot kind: PBPosNode in: aRoot do: [:node | aBlock value: node value].
+
+"Evaluates aBlock with each key and value (unboxed) of the keyed tree aRoot,
+ in key order (ProtoBase key_iter)."
+PBAvl class >> keysAndValuesDo: aBlock over: aRoot
+  self _root: aRoot kind: PBKeyNode.
+  _PBTree nodesOf: aRoot kind: PBKeyNode in: aRoot do: [:node | aBlock value: node key value: node value].
 
 "--- invariants (ProtoBase check_invariants) ---"
 
@@ -580,19 +659,17 @@ PBAvl class >> _corrupt: aString
  PBKeyNode or PBCountedKeyNode, exactly), height and count consistent with the
  children, AVL balance, and in a keyed tree strictly increasing order keys; in
  a PBCountedKeyNode tree, weight is the node's count plus its children's
- weights. A child that is not a node is PBCorruptionError (an opaque atom
- PBNotSupportedError, as every walk). A key that has no order key, or a
- weighted value that is not a pair, is PBCorruptionError too: what a tree holds
- was checked when it was built. Post-order with an explicit stack, as
- ProtoBase: every node of a stored tree is loaded; a path longer than the
- root's height (a height lie) is reported, so the walk always ends.
-
- The walk runs once per operation in the randomized tests, so its loop reads
- each field once, uses ifTrue: (inlined) rather than and:/or: blocks, and
- turns the PBValidationError of a key or a weighted value into corruption with
- one handler around the walk."
+ weights, and a value that is not a (payload, count) pair is corruption (as
+ ProtoBase). A child that is not a node is PBCorruptionError (an opaque atom
+ PBNotSupportedError, as every walk). A key that has no order key is
+ PBCorruptionError too (ProtoBase lets its ProtoValidationError through): only
+ a valid key can be in a tree. The order keys are the nodes' cached ones
+ (orderKey). Post-order with an explicit stack, as ProtoBase: every node of a
+ stored tree is loaded; a path longer than the root's height (a height lie) is
+ reported, so the walk always ends. An error of a load (PBClosedError, say) is
+ signalled as it is."
 PBAvl class >> check: aRoot
-  | kind maxDepth keyed weighted current |
+  | kind maxDepth |
   aRoot isNil ifTrue: [^ nil].
   _PBTree node: aRoot kind: PBNode in: 'the tree checked'.
   kind := aRoot class.
@@ -601,20 +678,19 @@ PBAvl class >> check: aRoot
   maxDepth := aRoot height.
   (maxDepth between: 1 and: self maxHeight) ifFalse: [
     ^ self _corrupt: 'implausible root height ' , maxDepth printString , ' at ' , aRoot printString].
-  keyed := kind ~~ PBPosNode.
-  weighted := kind == PBCountedKeyNode.
-  current := nil.
-  [self _check: aRoot kind: kind maxDepth: maxDepth keyed: keyed weighted: weighted visiting: [:node | current := node]]
-    on: PBValidationError do: [:e |
-      ^ self _corrupt: 'the ' , (weighted ifTrue: ['key or weighted value'] ifFalse: ['key']) , ' of '
-        , current printString , ' is not valid: ' , e messageText].
-  ^ aRoot.
+  ^ self _check: aRoot kind: kind maxDepth: maxDepth keyed: kind ~~ PBPosNode weighted: kind == PBCountedKeyNode.
+
+"aBlock's value, with a PBValidationError it signals reported as corruption of
+ aNode's aWhat; a PBClosedError or PBReferenceError (a load) passes as it is."
+PBAvl class >> _valid: aWhat of: aNode do: aBlock
+  ^ aBlock on: PBValidationError do: [:e |
+    ((e isKindOf: PBClosedError) or: [e isKindOf: PBReferenceError]) ifTrue: [e pass].
+    self _corrupt: 'the ' , aWhat , ' of ' , aNode printString , ' is not valid: ' , e messageText]
 
 "The walk of check:. A stack entry is { node. left. right. depth } before its
  children are checked and { node. left. right. nil } after; a result is
- { height. count. min order key. max order key. weight }. aBlock is told the
- node whose key or value is being read."
-PBAvl class >> _check: aRoot kind: kind maxDepth: maxDepth keyed: keyed weighted: weighted visiting: aBlock
+ { height. count. min order key. max order key. weight }."
+PBAvl class >> _check: aRoot kind: kind maxDepth: maxDepth keyed: keyed weighted: weighted
   | empty results stack |
   empty := { 0. 0. nil. nil. 0 }.
   results := OrderedCollection new.
@@ -654,8 +730,7 @@ PBAvl class >> _check: aRoot kind: kind maxDepth: maxDepth keyed: keyed weighted
         nmax := nil.
         keyed ifTrue: [
           | k |
-          aBlock value: node.
-          k := PBKeys orderKey: node key.
+          k := self _valid: 'key' of: node do: [node orderKey].
           (leftRes at: 4) isNil ifFalse: [
             ((leftRes at: 4) compareWith: k) < 0 ifFalse: [^ self _keyOrderViolatedAt: node]].
           (rightRes at: 3) isNil ifFalse: [
@@ -665,8 +740,7 @@ PBAvl class >> _check: aRoot kind: kind maxDepth: maxDepth keyed: keyed weighted
         weight := 0.
         weighted ifTrue: [
           | own |
-          aBlock value: node.
-          own := _PBTree countOfPair: node value.
+          own := self _valid: 'weighted value' of: node do: [_PBTree countOfPair: node value].
           weight := node weight.
           weight = (own + (leftRes at: 5) + (rightRes at: 5)) ifFalse: [
             ^ self _corrupt: 'wrong weight ' , weight printString , ' at ' , node printString , ': its own count is '

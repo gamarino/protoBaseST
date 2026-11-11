@@ -13,26 +13,26 @@ Import from: '_avl_ops'.
 c := Check new.
 pair := [:p :n | PBTuple withAll: { p. n }].
 root := nil.
-1 to: 50 do: [:i | root := PBAvl keyPut: root key: i value: (pair value: 'p' , i printString value: i \\ 4) nodeClass: PBCountedKeyNode].
+1 to: 50 do: [:i | root := (PBAvl keyPut: root key: i value: (pair value: 'p' , i printString value: i \\ 4) nodeClass: PBCountedKeyNode) first].
 sum := 0.
 1 to: 50 do: [:i | sum := sum + (i \\ 4)].
 c that: 'the root weight is the sum of the counts' is: root weight equals: sum.
 c that: 'every node is a CountedKeyNode' is: (PBAvl check: root) == root equals: true.
 ok := true.
-PBAvl do: [:node |
+PBAvl nodesDo: [:node |
   ok := ok and: [node weight = ((node value at: 2) + (node left isNil ifTrue: [0] ifFalse: [node left weight])
     + (node right isNil ifTrue: [0] ifFalse: [node right weight]))]] over: root.
 c that: 'a node''s weight is its own count plus its children''s' isTrue: ok.
-root := PBAvl keyPut: root key: 7 value: (pair value: 'seven' value: 100) nodeClass: PBCountedKeyNode.
+root := (PBAvl keyPut: root key: 7 value: (pair value: 'seven' value: 100) nodeClass: PBCountedKeyNode) first.
 c that: 'replacing a value changes the weight by the count difference' is: root weight equals: sum - 3 + 100.
-root := PBAvl keyRemove: root key: 7.
-root := PBAvl keyRemove: root key: 10.
+root := (PBAvl keyRemove: root key: 7) first.
+root := (PBAvl keyRemove: root key: 10) first.
 c that: 'removes subtract their counts' is: root weight equals: sum - 3 - 2.
-root := PBAvl keyPut: root key: 1000 value: (pair value: 'x' value: 5) nodeClass: PBKeyNode.
+root := (PBAvl keyPut: root key: 1000 value: (pair value: 'x' value: 5) nodeClass: PBKeyNode) first.
 c that: 'a node added to a weighted tree is a CountedKeyNode' is: (PBAvl keyAt: root key: 1000) class equals: PBCountedKeyNode.
 c that: 'and adds its count' is: root weight equals: sum - 5 + 5.
-plain := PBAvl keyPut: nil key: 1 value: 'one' nodeClass: PBKeyNode.
-plain := PBAvl keyPut: plain key: 2 value: (pair value: 'x' value: 5) nodeClass: PBCountedKeyNode.
+plain := (PBAvl keyPut: nil key: 1 value: 'one' nodeClass: PBKeyNode) first.
+plain := (PBAvl keyPut: plain key: 2 value: (pair value: 'x' value: 5) nodeClass: PBCountedKeyNode) first.
 c that: 'a node added to a plain tree is a KeyNode' is: (PBAvl keyAt: plain key: 2) class equals: PBKeyNode.
 c that: 'a count below 0' signals: PBValidationError during: [PBAvl keyPut: nil key: 1 value: (pair value: 'x' value: -1) nodeClass: PBCountedKeyNode].
 c that: 'a Boolean count' signals: PBValidationError during: [PBAvl keyPut: nil key: 1 value: (pair value: 'x' value: true) nodeClass: PBCountedKeyNode].
@@ -56,10 +56,10 @@ failure := nil.
     ifTrue: [
       | value |
       value := AvlOps valueOf: (op at: 3).
-      root := PBAvl keyPut: root key: key value: value nodeClass: PBCountedKeyNode.
+      root := (PBAvl keyPut: root key: key value: value nodeClass: PBCountedKeyNode) first.
       model at: key put: (value at: 2)]
     ifFalse: [
-      root := PBAvl keyRemove: root key: key.
+      root := (PBAvl keyRemove: root key: key) first.
       model removeKey: key ifAbsent: [nil]].
   failure := [
     PBAvl check: root.
