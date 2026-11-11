@@ -1,4 +1,4 @@
-"EXPECT: ok 92"
+"EXPECT: ok 112"
 "Each tagged form of FS 'Canonical values' (the bytes come from ProtoBase's
  encoder at v2.0.0rc1): the value encodes to the bytes, the bytes decode to an
  equal value of the right class, and re-encode to the same bytes. @uuid is in
@@ -8,7 +8,7 @@ Import from: '_check'.
 Object subclass: #TestResolver.
 TestResolver >> refTo: aByteArray offset: anInteger tag: aTag
   ^ { aByteArray hex. anInteger. aTag }.
-| c roundTrip seg ref legacy legacy0 ny |
+| c roundTrip seg ref legacy legacy0 ny gap |
 c := Check new.
 "value, hex, expected class: encode, decode, re-encode."
 roundTrip := [:label :value :hex :class |
@@ -132,4 +132,46 @@ c that: 'legacy instant' signals: PBNotSupportedError containing: 'America/New_Y
 c that: 'legacy equality with an instant' signals: PBNotSupportedError containing: 'America/New_York' during: [legacy = ny].
 c that: 'legacy is made by the decoder only' signals: PBUserError during: [
   PBLegacyZoneDateTime utcFields: #(2026 1 1 0 0 0 0) zoneName: (ZoneName key: 'UTC')].
+"Format-3 zone keys of a map (FS 'Map keys', format-3 key forms). Within one
+ zone two keys conflict exactly when their wall clocks are equal, fold ignored:
+ the spring-forward 02:30 and 03:30 are two keys, as in ProtoBase, and 01:30
+ fold 0 and fold 1 conflict. Against an aware key or a key of another zone the
+ answer needs the offsets, so the map is refused, never assumed distinct."
+gap := PBCodec decode: (Check bytes: '81a4406d6170929281a340647499cd07ea0308021e00000092a47a6f6e65b0416d65726963612f4e65775f596f726b019281a340647499cd07ea0308031e00000092a47a6f6e65b0416d65726963612f4e65775f596f726b02').
+c that: 'format-3 gap keys are two keys' is: gap size equals: 2.
+c that: 'format-3 gap map re-reads its key' is: (gap at: gap keys first) equals: 1.
+c that: 'format-3 fold keys conflict' signals: PBCorruptionError containing: 'twice' during: [
+  PBCodec decode: (Check bytes: '81a4406d6170929281a340647499cd07ea0b01011e00000092a47a6f6e65b0416d65726963612f4e65775f596f726b019281a340647499cd07ea0b01011e00000192a47a6f6e65b0416d65726963612f4e65775f596f726b02')].
+c that: 'format-3 key next to a fixed-offset key' signals: PBNotSupportedError containing: 'America/New_York' during: [
+  PBCodec decode: (Check bytes: '81a4406d6170929281a340647499cd07ea03080c0000000092a47a6f6e65b0416d65726963612f4e65775f596f726b019281a340647499cd07ea0308100000000093a5666978656400a355544302')].
+c that: 'format-3 key in a tuple next to a fixed-offset one' signals: PBNotSupportedError containing: 'America/New_York' during: [
+  PBCodec decode: (Check bytes: '81a4406d6170929281a4407475709281a340647499cd07ea03080c0000000092a47a6f6e65b0416d65726963612f4e65775f596f726b01a1619281a4407475709281a340647499cd07ea0308100000000093a5666978656400a355544301a162')].
+c that: 'format-3 keys of two zones' signals: PBNotSupportedError containing: 'America/New_York' during: [
+  PBCodec decode: (Check bytes: '81a4406d6170929281a340647499cd07ea03080c0000000092a47a6f6e65b0416d65726963612f4e65775f596f726b019281a340647499cd07ea03080c0000000092a47a6f6e65ac4575726f70652f506172697302')].
+c that: 'a lookup by an aware key in a map of format-3 keys' signals: PBNotSupportedError containing: 'America/New_York' during: [
+  gap at: (DateTime year: 2026 month: 3 day: 8 hour: 7 minute: 30 second: 0 microsecond: 0 fold: 0 zone: ZoneOffset utc)].
+c that: 'a tuple holding a format-3 datetime against an aware one' signals: PBNotSupportedError during: [
+  (PBTuple withAll: { legacy }) = (PBTuple withAll: { ny })].
+
+"Duplicate keys are found through probes, for every kind of key: equal values of one class."
+{ { Decimal fromString: '1.20'. Decimal fromString: '1.2' }.
+  { Decimal fromString: '0'. Decimal fromString: '-0E+5' }.
+  { 0.0. -0.0 }.
+  { 2 raisedTo: 80. 2 raisedTo: 80 }.
+  { ny. DateTime year: 2026 month: 11 day: 1 hour: 1 minute: 30 second: 0 microsecond: 0 fold: 0 zone: (ZoneOffset microseconds: -18000000000) }.
+  { TimeOfDay hour: 1 minute: 2 second: 3 microsecond: 0 fold: 0 zone: (ZoneName key: 'Europe/Paris'). TimeOfDay hour: 1 minute: 2 second: 3 }.
+  { PBTuple withAll: { 'a'. Decimal fromString: '1.0' }. PBTuple withAll: { 'a'. Decimal fromString: '1.00' } }.
+  { 'abcdefghij'. 'abcdefghij' copy }.
+  { #[1 2 3]. #[1 2 3] copy }
+} doWithIndex: [:pair :i |
+  c that: 'duplicate keys ' , i printString signals: PBValidationError containing: 'twice' during: [
+    PBFrozenDict withAssociations: { (pair at: 1) -> 1. (pair at: 2) -> 2 }]].
+"Different classes stay different keys until Task 10's order keys; two NaNs are two keys."
+c that: '1 and 1.0' is: (PBFrozenDict withAssociations: { 1 -> 'a'. 1.0 -> 'b' }) size equals: 2.
+c that: 'two NaN objects' is: (PBFrozenDict withAssociations: {
+  (PBCodec decode: (Check bytes: 'cb7ff8000000000000')) -> 1. (PBCodec decode: (Check bytes: 'cb7ff8000000000000')) -> 2 }) size equals: 2.
+"A large map is checked through the probes (it would be 12.5 million comparisons pairwise)."
+c that: 'a map of 5000 decimal keys' is: (PBFrozenDict withAssociations:
+  ((1 to: 5000) asArray collect: [:i | (Decimal sign: 0 coefficient: i exponent: -2) -> i])) size equals: 5000.
+
 c report displayNl.

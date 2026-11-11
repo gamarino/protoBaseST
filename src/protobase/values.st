@@ -33,22 +33,96 @@ PBLegacyZoneDateTime, the format-3 ['zone', key] datetime (Spec 4.3)."
 Import from: 'protobase/errors'.
 Import from: 'calendar'.
 
-"=== the two sequence kinds ================================================="
-
-"The shared protocol of PBFrozenList and PBTuple: an Array that is never
- exposed, 1-based as Smalltalk's collections."
 "=== item equality (until Task 10's order keys) ============================"
 
 "Item and key equality of the containers: identity, else the same class and
- =. A NaN is never = to itself, but one NaN object is the same item as itself."
+ =. A NaN is never = to itself, but one NaN object is the same item as itself.
+ A format-3 zone datetime against another DateTime is decided by its own =,
+ which signals PBNotSupportedError whenever the answer needs the zone's
+ offsets (never an assumed 'not equal')."
 Object subclass: #_PBItems.
 
 _PBItems class >> same: a as: b
   a == b ifTrue: [^ true].
   (a isClassObject or: [b isClassObject]) ifTrue: [^ false].
+  ((a isKindOf: DateTime) and: [b isKindOf: DateTime]) ifTrue: [
+    a isLegacyZone ifTrue: [^ a = b].
+    b isLegacyZone ifTrue: [^ b = a]].
   a class == b class ifFalse: [^ false].
   ^ a = b.
 
+"A probe of k: two items that are the same item (same:as:) have = probes, so
+ a map checks its keys for duplicates through a Dictionary of probes, in
+ linear time. Building one is cheap and safe on untrusted input: no power of
+ ten and no Decimal hash. A NaN's probe is its identity; an object of
+ another class falls back to its class name (checked pairwise)."
+_PBItems class >> probe: k
+  k isNil ifTrue: [^ #('nil')].
+  k == true ifTrue: [^ #('true')].
+  k == false ifTrue: [^ #('false')].
+  k isClassObject ifTrue: [^ { 'class'. k name }].
+  k isInteger ifTrue: [^ { 'int'. k }].
+  k isFloat ifTrue: [
+    k isNaN ifTrue: [^ { 'nan'. k identityHash }].
+    ^ { 'float'. k = 0.0 ifTrue: [0] ifFalse: [k] }].
+  k isString ifTrue: [^ { 'str'. k }].
+  (k isKindOf: ByteArray) ifTrue: [^ { 'bytes'. k hex }].
+  (k isKindOf: Decimal) ifTrue: [^ self _decimalProbe: k].
+  (k isKindOf: DateTime) ifTrue: [
+    k isLegacyZone ifTrue: [^ { 'dt-format3'. k zone key. k localOrdinalMicroseconds }].
+    k isNaive ifTrue: [^ { 'dt-naive'. k localOrdinalMicroseconds }].
+    ^ { 'dt-aware'. k utcOrdinalMicroseconds }].
+  (k isKindOf: TimeOfDay) ifTrue: [^ { 'time'. k _offset isNil. k _key }].
+  (k isKindOf: CalendarDate) ifTrue: [^ { 'date'. k ordinal }].
+  (k isKindOf: TimeSpan) ifTrue: [^ { 'td'. k totalMicroseconds }].
+  (k isKindOf: _PBSequence) ifTrue: [
+    ^ { k class name. k asArray collect: [:each | self probe: each] }].
+  (k isKindOf: PBMutableObject) ifTrue: [^ { 'mut'. k name }].
+  (k isKindOf: PBUnresolvedRef) ifTrue: [
+    ^ { 'ref'. k pointer segmentHex. k pointer offset. k tag }].
+  k class name = 'UUID' ifTrue: [^ { 'uuid'. k bytes hex }].
+  ^ { 'other'. k class name }.
+
+"Equal decimals have one probe: the sign, the coefficient's digits without
+ trailing zeros and the matching exponent (zero has one probe, -0 included)."
+_PBItems class >> _decimalProbe: d
+  | digits zeros |
+  d isNaN ifTrue: [^ { 'nan'. d identityHash }].
+  d isInfinite ifTrue: [^ { 'dec-inf'. d sign }].
+  d isZero ifTrue: [^ #('dec-zero')].
+  digits := d coefficient printString.
+  zeros := 0.
+  [(digits at: digits size - zeros) = $0] whileTrue: [zeros := zeros + 1].
+  ^ { 'dec'. d sign. digits copyFrom: 1 to: digits size - zeros. d exponent + zeros }.
+
+"Signals PBNotSupportedError when some keys of aKeyArray (or items of tuple
+ keys) are format-3 zone datetimes whose conflicts with other keys need the
+ zone's offsets: format-3 keys of two zones, or a format-3 key with an aware
+ DateTime (format spec, 'Map keys' and 'Known gaps'). Format-3 keys of one
+ zone conflict exactly when their wall clocks are equal, fold ignored."
+_PBItems class >> checkDecidableKeys: aKeyArray
+  | zones aware |
+  zones := OrderedCollection new.
+  aware := OrderedCollection new.
+  aKeyArray do: [:k | self _collectDateTimes: k zones: zones aware: aware].
+  zones isEmpty ifTrue: [^ self].
+  (zones asSet size > 1 or: [aware notEmpty]) ifTrue: [
+    ^ PBNotSupportedError signal: 'A map whose keys hold a format-3 zone datetime in '
+      , zones first , ' and ' , (aware isEmpty ifTrue: [zones asSet size printString , ' zones'] ifFalse: [aware first printString])
+      , ': whether they conflict needs the zone offsets, and protoBaseST has no time-zone database (design 4.3)'].
+
+_PBItems class >> _collectDateTimes: k zones: zones aware: aware
+  (k isKindOf: _PBSequence) ifTrue: [
+    k do: [:each | self _collectDateTimes: each zones: zones aware: aware].
+    ^ self].
+  ((k isKindOf: DateTime) and: [k isClassObject not]) ifFalse: [^ self].
+  k isLegacyZone ifTrue: [^ zones add: k zone key].
+  k isNaive ifFalse: [aware add: k].
+
+"=== the two sequence kinds ================================================="
+
+"The shared protocol of PBFrozenList and PBTuple: an Array that is never
+ exposed, 1-based as Smalltalk's collections."
 Object subclass: #_PBSequence instanceVariableNames: 'items'.
 
 "A copy of aSequence as an Array: an Array, an OrderedCollection, a
@@ -132,9 +206,10 @@ _PBSequence subclass: #PBTuple.
 Object subclass: #PBFrozenDict instanceVariableNames: 'keys values'.
 
 "anArray holds Associations, in insertion order. Two keys that are the same
- item signal PBValidationError (a map is never collapsed)."
+ item signal PBValidationError (a map is never collapsed); keys whose
+ conflicts need a time-zone database signal PBNotSupportedError."
 PBFrozenDict class >> withAssociations: anArray
-  | ks vs |
+  | ks vs buckets |
   ((anArray isKindOf: Array) or: [anArray isKindOf: OrderedCollection]) ifFalse: [
     ^ PBValidationError signal: 'PBFrozenDict withAssociations: an Array of Associations was expected, not a '
       , anArray class name].
@@ -146,11 +221,17 @@ PBFrozenDict class >> withAssociations: anArray
     (each isKindOf: Association) ifFalse: [
       ^ PBValidationError signal: 'PBFrozenDict withAssociations: an Association was expected, not a '
         , each class name].
-    1 to: i - 1 do: [:j |
-      (_PBItems same: (ks at: j) as: each key) ifTrue: [
-        ^ PBValidationError signal: 'PBFrozenDict: the key ' , each key printString , ' appears twice']].
     ks at: i put: each key.
     vs at: i put: each value].
+  _PBItems checkDecidableKeys: ks.
+  buckets := Dictionary new.
+  1 to: ks size do: [:i |
+    | bucket |
+    bucket := buckets at: (_PBItems probe: (ks at: i)) ifAbsentPut: [OrderedCollection new].
+    bucket do: [:j |
+      (_PBItems same: (ks at: j) as: (ks at: i)) ifTrue: [
+        ^ PBValidationError signal: 'PBFrozenDict: the key ' , (ks at: i) printString , ' appears twice']].
+    bucket add: i].
   ^ self basicNew _setKeys: ks values: vs.
 
 PBFrozenDict >> _setKeys: aKeyArray values: aValueArray

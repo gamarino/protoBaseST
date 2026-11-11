@@ -399,6 +399,14 @@ Read ProtoBase's code before guessing a behaviour.
 - [ ] **Step 3:** implement.
 - [ ] **Step 4:** run them. Expected: PASS, with `uuid-v4.st` passing after Task 2's build.
 - [ ] **Step 5:** docs, then commit `lib/uuid.st: UUID values (RFC 4122, version 4 from OS random bytes)`.
+- [ ] **Step 6 (protoBaseST, added by the Task 7 review):**
+  - `src/protobase/codec.st` gets `Import from: 'uuid'`, unconditionally, so a program no
+    longer needs to import it itself. Until this task, PBCodec looks the global `UUID` up at
+    run time and refuses `@uuid` without it.
+  - `PBCodec` reduces a `UUID` subclass to its base value from the base instance variables.
+    Today it signals `PBNotSupportedError`, because the layout is unknown before this task.
+  - Run `tests/unit/codec_tagged_uuid.st`, which must pass, not SKIP.
+  - Remove `values/uuid` from Task 8's expected-differences list.
 
 ---
 
@@ -597,8 +605,33 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     with the wrong class is a FAIL.
 - [ ] **Step 2:** run `tests/run_tests.sh tests/conformance tests/unit`. Expected: FAIL.
 - [ ] **Step 3:** implement `notation.st` and `_vectors.st`.
-- [ ] **Step 4:** run. Expected: PASS. A failing vector is a codec bug (fix it in Task 7's
-  files); never edit a vector.
+- **Expected differences** (added by the Task 7 review; tracked here, never only in the SDD
+  workspace). The runners keep this list as data in `tests/conformance/_expected_differences.st`.
+  - Each listed id prints `EXPECTED <id>: <reason>` and is counted apart from passes.
+  - A listed id that now matches the manifest (it "unexpectedly passes") is a FAIL, so the
+    list cannot go stale.
+  - So is a listed id that is missing from the manifest.
+
+  The EXPECT lines then name the counts, for example
+  `values 72/73 expected 1 decode-only ...`.
+
+  | Vector (section/id) | What protoBaseST does | Why | Removed by |
+  |---|---|---|---|
+  | `values/uuid` | decode: `PBNotSupportedError` | `lib/uuid.st` is not in protoST 0.9.0 | Task 5, Step 6 |
+  | `values_decode_only/ref-format2` | re-encodes with the type name, not the alias | the name→alias table is `PBTypeRegistry`'s | Task 9 |
+  | `values_decode_only/ref-name-of-builtin` | the same | the same | Task 9 |
+  | `values_decode_only/ref-alias` | keeps the alias name `conformance.LegacyInvoice`; it does not map it to the declared name | application aliases are `PBTypeRegistry`'s | Task 9 |
+  | `values_decode_only/datetime-zone-format3` | decodes to a `PBLegacyZoneDateTime` (wall clock), not the instant; re-encoding it is `PBValidationError` | the instant needs a tz database (design §4.3) | permanent, design §4.3 |
+  | `values_read_not_rewritten/map-zone-key-format3` | re-encoding is refused, as listed; the decoded keys are the format-3 wall clocks, not instants | the same | permanent, design §4.3 |
+  | `values_read_not_rewritten/map-nan-keys-format3` | re-encodes instead of `PBValidationError` | the NaN-token conflict of a writer is `PBKeys checkMapKeys:` | Task 10 |
+  | `values_read_not_rewritten/map-decimal-nan-keys-format3` | the same | the same | Task 10 |
+  | `invalid/value-instant-wall-out-of-range` | accepted and presented in UTC | the wall-clock range needs the zone's rules; the format spec (Known gaps) lets a reader without a database present the instant in UTC | permanent, design §4.3 |
+  | `invalid/map-key-bool-and-int` | accepted | the cross-kind conflict rule needs order keys | Task 10 |
+  | `invalid/map-key-equal-numbers` | accepted | the same | Task 10 |
+- [ ] **Step 4:** run. Expected: PASS, with exactly the expected differences above. A
+  failing vector that is not listed is a codec bug (fix it in Task 7's files); never edit a
+  vector, and never add an entry without a reason and a removing task (or "permanent" with
+  a design reference).
 - [ ] **Step 5:** commit `Notation and value-layer vector runner (values, decode-only, read-not-rewritten, invalid values)`.
 
 ### Task 9: Framing: segment header, records, root record, atom envelope and the type registry
@@ -662,6 +695,14 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     `'bad'` → `PBValidationError`.
 - [ ] **Step 2:** run. Expected: FAIL.
 - [ ] **Step 3:** implement.
+- [ ] **Step 3b (added by the Task 7 review):**
+  - Map built-in type names to their aliases, and application aliases to their declared
+    names, wherever `PBCodec` reads a `@ref`. Do it in `PBUnresolvedRef` creation and in the
+    resolver path.
+  - `PBCodec` then uses the registry instead of `_builtinAliasCount`.
+  - An object's atom class answers `isPBReference` true, as `PBUnresolvedRef` does.
+  - Remove `ref-format2`, `ref-name-of-builtin` and `ref-alias` from Task 8's
+    expected-differences list; Task 8's runner must then match them.
 - [ ] **Step 4:** run `tests/run_tests.sh tests/conformance tests/unit`. Expected: PASS.
   **Gate of week 1** (Spec §11): `values`, `values_*`, `invalid` at the value, record,
   segment and root layers, and `framing`.
@@ -698,6 +739,16 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   - `PBKeys class >> checkMapKeys: aPBFrozenDict`, the FS "Map keys" conflict rule, which
     signals `PBValidationError`. `PBCodec` calls it on encode, and on decode for format 4.
   - `PBFrozenDict` lookups now compare by order key.
+  - Added by the Task 7 review:
+    - `checkMapKeys:` replaces the interim rule of `_PBItems` (same class and `=`) and keeps
+      its linear-time duplicate check: keys are bucketed by order key or hash key, never
+      compared pairwise on untrusted input.
+    - It keeps Task 7's refusal of format-3 zone keys whose conflicts need offsets:
+      `PBNotSupportedError` for format-3 keys of two zones, or next to an aware key.
+    - It decodes format-3 NaN keys as distinct, and refuses them on write.
+    - Once this task lands, remove `map-nan-keys-format3`, `map-decimal-nan-keys-format3`,
+      `map-key-bool-and-int` and `map-key-equal-numbers` from Task 8's expected-differences
+      list.
 
 - [ ] **Step 1: failing tests.**
   - `keys_bit_length.st`: `0`→0, `-1`→1, `255`→8, `-128`→8, and `2^61-1`→61.

@@ -1,4 +1,4 @@
-"EXPECT: ok 40"
+"EXPECT: ok 51"
 "Spec 10.5: values outside format 4 are refused when written, with
  PBValidationError naming the class, never stored in another form."
 Import from: 'protobase'.
@@ -12,7 +12,7 @@ Price >> exponent
 CalendarDate subclass: #Holiday.
 Holiday >> year
   ^ 1.
-| c price |
+| c price nest zoned |
 c := Check new.
 {
   { 'a Symbol'. #foobarbaz. 'Symbol' }.
@@ -63,4 +63,31 @@ c that: 'a Decimal subclass reads back a Decimal' is: (PBCodec decode: (PBCodec 
 c that: 'a CalendarDate subclass' is: (PBCodec encode: (Holiday year: 2026 month: 12 day: 25)) hex
   equals: (PBCodec encode: (CalendarDate year: 2026 month: 12 day: 25)) hex.
 c that: 'an Array subclass is a list' is: (PBCodec canonical: (TaggedArray new: 1)) class equals: PBFrozenList.
+"A lone surrogate is not valid UTF-8 (FS Known gaps): PBValidationError, not a msgpack error."
+c that: 'a lone surrogate' signals: PBValidationError containing: 'surrogate' during: [
+  PBCodec encode: 'a' , (String with: (Character value: 16rD800))].
+c that: 'a lone surrogate in a map key' signals: PBValidationError containing: 'surrogate' during: [
+  PBCodec encode: (PBFrozenDict withAssociations: { (String with: (Character value: 16rDFFF)) -> 1 })].
+c that: 'a non-BMP character' is: (PBCodec encode: (String with: (Character value: 16r1F600))) hex equals: 'a4f09f9880'.
+"Nesting is counted in msgpack containers, as msgpack-python's packer counts it
+ (511 at most): a list is 1, a tuple 2, a map entry 3."
+nest := [:n :wrap | | v | v := 1. n timesRepeat: [v := wrap value: v]. v].
+c that: '511 nested lists' is: (PBCodec decode: (PBCodec encode: (nest value: 511 value: [:v | Array with: v]))) class
+  equals: PBFrozenList.
+c that: '512 nested lists' signals: PBValidationError containing: '511' during: [
+  PBCodec encode: (nest value: 512 value: [:v | Array with: v])].
+c that: '255 nested tuples (510 containers)' is: (PBCodec encode: (nest value: 255 value: [:v | PBTuple withAll: { v }])) size
+  equals: 255 * 7 + 1.
+c that: '256 nested tuples (512 containers)' signals: PBValidationError containing: '511' during: [
+  PBCodec encode: (nest value: 256 value: [:v | PBTuple withAll: { v }])].
+c that: '170 nested maps (510 containers)' is: (PBCodec decode: (PBCodec encode:
+    (nest value: 170 value: [:v | PBFrozenDict withAssociations: { 'k' -> v }]))) class equals: PBFrozenDict.
+c that: '171 nested maps (513 containers)' signals: PBValidationError containing: '511' during: [
+  PBCodec encode: (nest value: 171 value: [:v | PBFrozenDict withAssociations: { 'k' -> v }])].
+zoned := [:n | | v | v := TimeOfDay hour: 1 minute: 0 second: 0 microsecond: 0 fold: 0 zone: ZoneOffset utc.
+  n timesRepeat: [v := Array with: v]. v].
+c that: 'a fixed-zone @time in 508 lists (511 containers)' is: (PBCodec decode: (PBCodec encode: (zoned value: 508))) class
+  equals: PBFrozenList.
+c that: 'a fixed-zone @time in 509 lists (512 containers)' signals: PBValidationError containing: '511' during: [
+  PBCodec encode: (zoned value: 509)].
 c report displayNl.

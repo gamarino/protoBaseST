@@ -1,4 +1,4 @@
-"EXPECT: ok 41"
+"EXPECT: ok 53"
 "The decoder checks the tree MessagePack decodeOrdered: answers (FS 'Canonical
  values'): string keys only, no ext value, exactly one key per tagged map, one
  spelling for @int, @dec, @td and the date fields. Each malformed input is
@@ -48,9 +48,19 @@ c := Check new.
   { 'trailing bytes'. '0101' }
 } do: [:each |
   c that: (each at: 1) signals: PBCorruptionError during: [PBCodec decode: (Check bytes: (each at: 2))]].
-"An instant whose wall clock may leave years 1-9999 needs the zone's rules: refused explicitly."
-c that: 'an instant within a day of year 9999' signals: PBNotSupportedError containing: 'Asia/Tokyo' during: [
-  PBCodec decode: (Check bytes: '81a340647499cd270f0c1f140000000092a7696e7374616e74aa417369612f546f6b796f')].
+"Zone keys come from the pinned IANA list (PBZoneKeys), the same on every machine:
+ host-relative names and Factory are not keys; backward links are."
+c that: 'the pinned release' is: PBZoneKeys release equals: '2026e'.
+#('localtime' 'posixrules' 'Factory' 'No/Such_Zone' '../zoneinfo/UTC' 'Europe/Paris/') do: [:key |
+  c that: 'zone key ' , key signals: PBCorruptionError containing: 'unknown time zone key' during: [
+    PBCodec fromWire: (MessagePackMap withAll: { '@time' -> { 1. 0. 0. 0. 0. { 'zone'. key } } }) resolver: nil]].
+#('US/Eastern' 'America/Buenos_Aires' 'UTC' 'Etc/GMT+3' 'America/Argentina/Buenos_Aires') do: [:key |
+  c that: 'zone key ' , key is: (PBCodec fromWire: (MessagePackMap withAll: { '@time' -> { 1. 0. 0. 0. 0. { 'zone'. key } } })
+    resolver: nil) zone key equals: key].
+"An instant whose wall clock may leave years 1-9999 is read and presented in UTC,
+ as the format spec lets a reader without a database do; it re-encodes to its bytes."
+c that: 'an instant within a day of year 9999' is: (PBCodec decode: (Check bytes: '81a340647499cd270f0c1f140000000092a7696e7374616e74aa417369612f546f6b796f')) printString
+  equals: '9999-12-31 20:00:00Z[Asia/Tokyo]'.
 "fromWire: refuses a protoST Dictionary or any other object in the tree."
 c that: 'a Dictionary in a tree' signals: PBCorruptionError during: [PBCodec fromWire: Dictionary new resolver: nil].
 c that: 'a Symbol in a tree' signals: PBCorruptionError during: [PBCodec fromWire: #foobarbaz resolver: nil].
