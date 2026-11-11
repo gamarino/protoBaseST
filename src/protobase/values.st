@@ -208,6 +208,18 @@ PBFrozenDict >> at: aKey ifAbsent: aBlock
 PBFrozenDict >> _valueAt: anIndex
   ^ values at: anIndex.
 
+"The values Array itself when the keys are anArray's elements, in order (the
+ identical Array or an equal one), else nil. For the record shapes
+ (_PBRecordShape), which keep it as a record's slots: never to be changed."
+PBFrozenDict >> _valuesIfKeys: anArray
+  keys == anArray ifTrue: [^ values].
+  keys = anArray ifTrue: [^ values].
+  ^ nil.
+
+"Whether the keys are anArray itself (a state built on a shared key Array)."
+PBFrozenDict >> _hasKeys: anArray
+  ^ keys == anArray.
+
 PBFrozenDict >> includesKey: aKey
   ^ (self _indexOfKey: aKey) > 0.
 

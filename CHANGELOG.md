@@ -112,3 +112,13 @@
 - The invalid `log` vectors (framed log files, read by ProtoBase only in its cluster and
   tiered storage) are justified skips of `tests/conformance/cluster.st` (ruling R14); the
   runner prints the `SKIP:` lines of a passing test under its `PASS` line.
+- Record field access in a few dispatches (plan Task 16b, ruling R15): a class with fixed
+  fields has a record shape (`_PBRecordShape`: its `persistedFields`, their shared
+  `PBMapKeyIndex`, its tag, its integer fields), and each record of it carries a slots Array,
+  the values of its fields in `persistedFields` order, built once when the record is built or
+  loaded and published once by compare-and-swap. The accessors of `PBPosNode`, `PBKeyNode`,
+  `PBCountedKeyNode` and `PBValueBox` read a literal slot number, held to `persistedFields` by
+  `tests/unit/record_slots.st`. `height`, `count` and `weight` are checked once per record. A
+  loaded record in `persistedFields` order shares the class's keys and index. The bytes, `=`,
+  `hash` and the save are unchanged. `bench/run_avl.sh` measures the AVL workload against
+  ProtoBase.

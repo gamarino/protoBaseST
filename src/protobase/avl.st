@@ -23,7 +23,15 @@ the collection expects; every node a walk reaches is checked: a node of
 another built-in kind, or a value that is not a node, is PBCorruptionError,
 and an opaque atom (a type with no class here) is PBNotSupportedError naming
 the type (format spec, 'Atoms of unknown types': its use where a built-in
-type is expected). The integer fields a walk reads (count) must be Integers.
+type is expected). The integer fields of a node (height, count, weight) must
+be Integers: each record's are checked once, when it is built or loaded.
+
+A node reads its fields from its slots (plan Task 16b, _PBRecordShape in
+registry.st): an Array of the values of its persistedFields, in that order,
+built once per record and published once by compare-and-swap; each accessor
+reads a literal slot number, which tests/unit/record_slots.st holds to
+persistedFields. The state (a PBFrozenDict in the record's order) stays the
+record: the slots are never persisted, compared or hashed.
 
 Writes (plan Task 14) are PBAvl's class methods, the functions of ProtoBase's
 avl.py over a root node, or nil for the empty tree:
@@ -83,6 +91,18 @@ PBNode class >> requiredFields
 PBNode class >> persistedFields
   ^ #('left' 'right' 'height' 'count').
 
+PBNode class >> integerFields
+  ^ #('height' 'count').
+
+"The record shape of this class (_PBRecordShape): the concrete node classes
+ have one; PBNode, the abstract type, reads its fields by name."
+PBNode class >> _recordShape
+  ^ Shapes at: self ifAbsent: nil.
+
+"The fields of a node read by name (stateAt:); each concrete class reads its
+ slots instead, at the literal slot number of the field in its persistedFields
+ (tests/unit/record_slots.st holds each literal to persistedFields)."
+
 PBNode >> left
   ^ self stateAt: 'left'.
 
@@ -115,6 +135,27 @@ PBPosNode class >> requiredFields
 PBPosNode class >> persistedFields
   ^ #('value' 'left' 'right' 'height' 'count').
 
+"The accessors read the slots: value 1, left 2, right 3, height 4, count 5."
+PBPosNode >> storedValue
+  slots == nil ifTrue: [^ self _slots at: 1].
+  ^ slots at: 1.
+
+PBPosNode >> left
+  slots == nil ifTrue: [^ self _slots at: 2].
+  ^ slots at: 2.
+
+PBPosNode >> right
+  slots == nil ifTrue: [^ self _slots at: 3].
+  ^ slots at: 3.
+
+PBPosNode >> height
+  slots == nil ifTrue: [^ self _slots at: 4].
+  ^ slots at: 4.
+
+PBPosNode >> count
+  slots == nil ifTrue: [^ self _slots at: 5].
+  ^ slots at: 5.
+
 "A keyed node also holds a cell for the order key of its key (ProtoBase
  KeyNode._okey), never persisted: a node a write builds fills it when it is
  built (the put's order key, or the copied node's), a stored node on first
@@ -132,8 +173,31 @@ PBKeyNode class >> requiredFields
 PBKeyNode class >> persistedFields
   ^ #('key' 'value' 'left' 'right' 'height' 'count').
 
+"The accessors read the slots: key 1, value 2, left 3, right 4, height 5,
+ count 6 (PBCountedKeyNode keeps them and adds weight 7)."
 PBKeyNode >> key
-  ^ self stateAt: 'key'.
+  slots == nil ifTrue: [^ self _slots at: 1].
+  ^ slots at: 1.
+
+PBKeyNode >> storedValue
+  slots == nil ifTrue: [^ self _slots at: 2].
+  ^ slots at: 2.
+
+PBKeyNode >> left
+  slots == nil ifTrue: [^ self _slots at: 3].
+  ^ slots at: 3.
+
+PBKeyNode >> right
+  slots == nil ifTrue: [^ self _slots at: 4].
+  ^ slots at: 4.
+
+PBKeyNode >> height
+  slots == nil ifTrue: [^ self _slots at: 5].
+  ^ slots at: 5.
+
+PBKeyNode >> count
+  slots == nil ifTrue: [^ self _slots at: 6].
+  ^ slots at: 6.
 
 PBKeyNode >> _setOid: anOid pointer: aPointer storage: aStorage
   "Runs once, on a fresh instance (every constructor of an atom calls it)."
@@ -170,9 +234,13 @@ PBCountedKeyNode class >> requiredFields
 PBCountedKeyNode class >> persistedFields
   ^ #('key' 'value' 'left' 'right' 'height' 'count' 'weight').
 
-"The sum of the counts (value at: 2) of this subtree."
+PBCountedKeyNode class >> integerFields
+  ^ #('height' 'count' 'weight').
+
+"The sum of the counts (value at: 2) of this subtree: slot 7."
 PBCountedKeyNode >> weight
-  ^ _PBTree integer: (self stateAt: 'weight') field: 'weight' of: self.
+  slots == nil ifTrue: [^ self _slots at: 7].
+  ^ slots at: 7.
 
 PBAtom subclass: #PBValueBox.
 
@@ -185,31 +253,39 @@ PBValueBox class >> requiredFields
 PBValueBox class >> persistedFields
   ^ #('value').
 
-"The boxed value."
+PBValueBox class >> _recordShape
+  ^ PBNode _shapeOf: self.
+
+"The boxed value: slot 1."
 PBValueBox >> value
-  ^ self stateAt: 'value'.
+  slots == nil ifTrue: [^ self _slots at: 1].
+  ^ slots at: 1.
 
 { PBNode. PBPosNode. PBKeyNode. PBCountedKeyNode. PBValueBox } do: [:each | PBTypeRegistry register: each].
 
-"The shape of the new atoms of each concrete class (plan Task 14): { its
- persistedFields. the PBMapKeyIndex over them. its tag }, computed once, when
- the module loads, and shared by every state the writes build (a key array and
- its index are never changed)."
+"The record shape of each concrete class (plan Tasks 14 and 16b,
+ _PBRecordShape), computed once, when the module loads: its fields and their
+ index are shared by every state the writes build (never changed), and its
+ records read their fields from slots."
 PBNode class >> _initializeShapes
   | shapes |
   shapes := Dictionary new.
   { PBPosNode. PBKeyNode. PBCountedKeyNode. PBValueBox } do: [:each |
-    shapes at: each put: { each persistedFields. PBMapKeyIndex on: each persistedFields. PBTypeRegistry tagFor: each }].
+    shapes at: each put: (_PBRecordShape of: each)].
   Shapes := shapes.
 
+"The record shape of aClass, a concrete node class or PBValueBox."
+PBNode class >> _shapeOf: aClass
+  ^ Shapes at: aClass.
+
 "A new, unsaved atom of aClass whose state holds anArray, the values of
- aClass persistedFields in order."
+ aClass persistedFields in order (anArray is also its slots: never changed)."
 PBNode class >> _new: aClass values: anArray
   | shape |
   shape := Shapes at: aClass.
   ^ aClass
-    _unsavedWithState: (PBFrozenDict _keys: (shape at: 1) index: (shape at: 2) values: anArray)
-    tag: (shape at: 3).
+    _unsavedWithState: (PBFrozenDict _keys: shape fields index: shape index values: anArray)
+    tag: shape tag.
 
 PBNode _initializeShapes.
 
@@ -217,14 +293,10 @@ PBNode _initializeShapes.
 
 Object subclass: #_PBTree.
 
-"anObject's value as an Integer field (not a Boolean); PBCorruptionError otherwise."
+"anObject's value as an Integer field (not a Boolean); PBCorruptionError
+ otherwise. The node classes check theirs once per record (_PBRecordShape)."
 _PBTree class >> integer: anObject field: aName of: anAtom
-  "Nested ifTrue: (inlined by the compiler), not and: (a block): every walk reads
-   height and count through here."
-  anObject isInteger ifTrue: [
-    anObject == true ifFalse: [anObject == false ifFalse: [^ anObject]]].
-  ^ PBCorruptionError signal: 'the ' , aName , ' of ' , anAtom printString , ' is not an integer: '
-    , (PBKeys _preview: anObject).
+  ^ _PBRecordShape integer: anObject field: aName of: anAtom.
 
 "A stored node value without its box."
 _PBTree class >> unboxed: aStoredValue

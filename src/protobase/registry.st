@@ -274,7 +274,13 @@ PBTypeRegistry class >> unloadedAtomFor: aTag at: aPointer storage: aStorage
  cells are the runtime-only fields a load, a first need or the save fills
  (plan, immutability by convention), as ProtoBase sets oid and atom_pointer
  with object.__setattr__; each is filled once, by compare-and-swap, so two
- threads that race install one value and both answer it.
+ threads that race install one value and both answer it. An atom of a class
+ with a record shape (_PBRecordShape) also holds slots: nil, or the slots
+ Array of its installed envelope (the values of its persistedFields, in that
+ order), which its accessors read at literal positions. It is published once
+ by compare-and-swap on the field itself (_slots), always from the installed
+ envelope, so every reader sees nil or that one immutable Array. Like the
+ cells, it is runtime-only: never persisted, compared or hashed.
 
  Identity (ProtoBase D21, core/atom.py _assign_oid): an atom's oid is not a
  storage id. A stored atom's oid is its record's (a stub loads the record to
@@ -291,7 +297,7 @@ PBTypeRegistry class >> unloadedAtomFor: aTag at: aPointer storage: aStorage
  reader's PBCorruptionError for a record that needs itself stays as a defence
  against damaged data). Atoms are immutable and built from atoms that exist
  already, so the references of unsaved atoms form no cycle."
-Object subclass: #PBAtom instanceVariableNames: 'oid pointer storage saved memo'.
+Object subclass: #PBAtom instanceVariableNames: 'oid pointer storage saved memo slots'.
 
 "The declared type name, two or more dotted ASCII identifiers; nil for an
  abstract class (never registered)."
@@ -315,6 +321,43 @@ PBAtom class >> requiredFields
  order the database vector's records show), which a writer reproduces."
 PBAtom class >> persistedFields
   ^ #().
+
+"The persisted fields whose value must be an Integer (not a Boolean), checked
+ once per record of a class with a record shape, when it is built or loaded:
+ PBCorruptionError otherwise."
+PBAtom class >> integerFields
+  ^ #().
+
+"The shape of this class's records (_PBRecordShape), or nil: an atom of a
+ class with no shape reads its fields by name (stateAt:)."
+PBAtom class >> _recordShape
+  ^ nil.
+
+"The envelope an atom of this class holds for aState (an unsaved atom's tag
+ aTag and oid anOid): with the slots when the class has a record shape."
+PBAtom class >> _envelopeTag: aTag oid: anOid state: aState for: anAtom
+  | shape |
+  shape := self _recordShape.
+  shape isNil ifTrue: [^ PBAtomEnvelope basicNew _setTag: aTag oid: anOid state: aState].
+  ^ shape envelopeTag: aTag oid: anOid state: aState for: anAtom.
+
+"The envelope anAtom of this class keeps once its record at aPointer is
+ loaded: anEnvelope as the storage decoded it, checked against the class
+ (its required fields, the reserved names), with the slots when the class
+ has a record shape. A state whose keys are the shape's fields, in order,
+ holds every required field (a shape's fields include them)."
+PBAtom class >> _loadedEnvelope: anEnvelope at: aPointer for: anAtom
+  | shape state missing |
+  shape := self _recordShape.
+  state := anEnvelope state.
+  (shape notNil and: [shape isShapeOf: state]) ifFalse: [
+    missing := self requiredFields reject: [:field | state includesKey: field].
+    missing isEmpty ifFalse: [
+      ^ PBCorruptionError signal: 'the atom at ' , aPointer printString , ' (' , (PBTypeRegistry nameOfTag: anAtom tag)
+        , ') lacks the required fields ' , missing printString]].
+  self _checkPersistedNames: state at: aPointer.
+  shape isNil ifTrue: [^ anEnvelope].
+  ^ shape envelopeTag: anEnvelope tag oid: anEnvelope oid state: state for: anAtom.
 
 "The check of a loaded record's attribute names against the behaviour names
  of this class (format spec, 'Attribute names'): PBCorruptionError for a
@@ -344,12 +387,14 @@ PBAtom class >> _unsavedWithState: aPBFrozenDict tag: aTag
  given its own runtime-only fields first) made an unsaved atom holding
  aPBFrozenDict."
 PBAtom class >> _unsaved: aBlank withState: aPBFrozenDict tag: aTag
-  ^ (aBlank _setOid: nil pointer: nil storage: nil)
-    _installState: (PBAtomEnvelope basicNew _setTag: aTag oid: nil state: aPBFrozenDict).
+  | atom |
+  atom := aBlank _setOid: nil pointer: nil storage: nil.
+  ^ atom _installState: (self _envelopeTag: aTag oid: nil state: aPBFrozenDict for: atom).
 
 PBAtom >> _installState: anEnvelope
-  "Runs once, on a fresh unsaved instance."
+  "Runs once, on a fresh instance: an unsaved atom, or a decoded twin."
   (memo value: anEnvelope ifCurrent: nil) ifFalse: [^ PBUserError signal: 'PBAtom: the state is installed once'].
+  self _slots.
   ^ self.
 
 "An unloaded atom (a stub) of this class: its record is at aPointer in
@@ -440,7 +485,7 @@ PBAtom >> _envelope
  kept in a stub and never shared, so loads on other threads are independent and
  an application's exception handlers see nothing."
 PBAtom >> _envelopeWithin: aChain
-  | envelope missing |
+  | envelope |
   envelope := memo value.
   envelope isNil ifFalse: [^ envelope].
   (storage isNil or: [pointer isNil]) ifTrue: [
@@ -448,14 +493,22 @@ PBAtom >> _envelopeWithin: aChain
   (aChain includes: pointer) ifTrue: [
     ^ PBCorruptionError signal: 'the record at ' , pointer printString , ' (' , (PBTypeRegistry nameOfTag: self tag)
       , ') cannot be loaded: decoding its state needs the record itself (a map key refers back to it: damaged data, or a writer that broke the save-dependents-first invariant)'].
-  envelope := storage loadAt: pointer expecting: self tag within: (aChain copyWith: pointer).
-  missing := self class requiredFields reject: [:field | envelope state includesKey: field].
-  missing isEmpty ifFalse: [
-    ^ PBCorruptionError signal: 'the atom at ' , pointer printString , ' (' , (PBTypeRegistry nameOfTag: self tag)
-      , ') lacks the required fields ' , missing printString].
-  self class _checkPersistedNames: envelope state at: pointer.
+  envelope := self class _loadedEnvelope: (storage loadAt: pointer expecting: self tag within: (aChain copyWith: pointer))
+    at: pointer for: self.
   (memo value: envelope ifCurrent: nil) ifTrue: [^ envelope].
   ^ memo value.
+
+"The slots Array of an atom whose class has a record shape (nil for another):
+ the installed envelope's, loading the record on first use. It is published
+ into the slots field once, by compare-and-swap from nil, and always from the
+ envelope the memo cell holds, so a reader of the field sees nil or this one
+ Array. The accessors of a shaped class read the field and come here only
+ while it is nil."
+PBAtom >> _slots
+  | envelope |
+  envelope := self _envelope.
+  envelope slots isNil ifFalse: [self setInstVar: #slots from: nil to: envelope slots].
+  ^ envelope slots.
 
 "The persisted state, a PBFrozenDict of attribute name to value, in the
  record's order (loaded on first use)."
@@ -639,7 +692,7 @@ PBFrozenDict >> _pbAddUnsavedAtomsTo: anOrderedCollection in: aStorage
  (one oid) and leaves it untouched. An atom that is not saved has no twin
  (PBUserError)."
 PBAtom >> _decodedTwin
-  | ptr st envelope |
+  | ptr st envelope twin |
   ptr := self pointer.
   ptr isNil ifTrue: [^ PBUserError signal: self printString , ' is not saved: only a saved atom has a decoded twin'].
   st := self _storage.
@@ -647,7 +700,97 @@ PBAtom >> _decodedTwin
     decode: (PBAtomEnvelope tag: self tag oid: self oid state: self state) encode
     expecting: self tag
     resolver: (_PBLoadResolver storage: st chain: { ptr }).
-  ^ (self class basicNew _setOid: envelope oid pointer: ptr storage: st) _installState: envelope.
+  twin := self class basicNew _setOid: envelope oid pointer: ptr storage: st.
+  ^ twin _installState: (self class _loadedEnvelope: envelope at: ptr for: twin).
+
+"=== record shapes (plan Task 16b) ==========================================="
+
+"The shape of the records of a class with fixed fields: its persistedFields
+ (one Array, the keys of every state the class's writes build), the
+ PBMapKeyIndex over them (shared by those states), the class's tag, and the
+ slot numbers of its integerFields. A record of such a class carries a slots
+ Array, the values of its fields in persistedFields order (nil for a field
+ the state does not hold), which the class's accessors read at literal slot
+ numbers (tests/unit/record_slots.st holds each literal to persistedFields).
+ The slots are derived from the immutable state once per record, when it is
+ built or loaded, and are never persisted, compared or hashed: the state
+ stays the record, in its own order. A shape is immutable once built."
+Object subclass: #_PBRecordShape instanceVariableNames: 'fields index tag integerSlots'.
+
+"The shape of aClass, a registered class whose requiredFields and
+ integerFields are persisted fields (PBUserError otherwise: a class
+ declaration error)."
+_PBRecordShape class >> of: aClass
+  | fields integerSlots |
+  fields := Array withAll: aClass persistedFields.
+  aClass requiredFields do: [:f |
+    (fields includes: f) ifFalse: [
+      ^ PBUserError signal: aClass name , ': the required field ' , f printString , ' is not a persisted field']].
+  integerSlots := aClass integerFields collect: [:f |
+    (fields includes: f) ifFalse: [
+      ^ PBUserError signal: aClass name , ': the integer field ' , f printString , ' is not a persisted field'].
+    fields indexOf: f].
+  ^ self basicNew _setFields: fields index: (PBMapKeyIndex on: fields) tag: (PBTypeRegistry tagFor: aClass)
+    integerSlots: (Array withAll: integerSlots).
+
+_PBRecordShape >> _setFields: anArray index: aPBMapKeyIndex tag: aTag integerSlots: anIntegerArray
+  "Runs once, on a fresh instance."
+  fields isNil ifFalse: [^ PBUserError signal: '_PBRecordShape is immutable'].
+  fields := anArray.
+  index := aPBMapKeyIndex.
+  tag := aTag.
+  integerSlots := anIntegerArray.
+  ^ self.
+
+"The persistedFields, the keys of the states a write builds (never to be changed)."
+_PBRecordShape >> fields
+  ^ fields.
+
+"The PBMapKeyIndex over fields (never to be changed)."
+_PBRecordShape >> index
+  ^ index.
+
+"The class's tag (PBTypeRegistry tagFor:)."
+_PBRecordShape >> tag
+  ^ tag.
+
+"Whether aState's keys are the fields, in order."
+_PBRecordShape >> isShapeOf: aState
+  ^ (aState _valuesIfKeys: fields) notNil.
+
+"The envelope of tag aTag, oid anOid and state aState for anAtom, a record of
+ this shape, with its slots. A state whose keys are the fields, in order,
+ gives its values Array as the slots, and when its keys are an equal Array
+ (a loaded record) it is rebuilt on the shared fields and index: the same
+ keys, values and order, without an index of its own. A state in another
+ order is kept as it is (the record's order is part of its bytes), and the
+ slots are its values in field order. Each integer field is checked here,
+ once per record (PBCorruptionError naming the field and anAtom)."
+_PBRecordShape >> envelopeTag: aTag oid: anOid state: aState for: anAtom
+  | state slots |
+  state := aState.
+  slots := aState _valuesIfKeys: fields.
+  slots isNil
+    ifTrue: [
+      slots := fields collect: [:f |
+        | i |
+        i := aState _indexOfKey: f.
+        i = 0 ifTrue: [nil] ifFalse: [aState _valueAt: i]]]
+    ifFalse: [
+      (aState _hasKeys: fields) ifFalse: [state := PBFrozenDict _keys: fields index: index values: slots]].
+  1 to: integerSlots size do: [:k |
+    | i |
+    i := integerSlots at: k.
+    _PBRecordShape integer: (slots at: i) field: (fields at: i) of: anAtom].
+  ^ PBAtomEnvelope basicNew _setTag: aTag oid: anOid state: state slots: slots.
+
+"anObject's value as an Integer field (not a Boolean); PBCorruptionError otherwise."
+_PBRecordShape class >> integer: anObject field: aName of: anAtom
+  "Nested ifTrue: (inlined by the compiler), not and: (a block)."
+  anObject isInteger ifTrue: [
+    anObject == true ifFalse: [anObject == false ifFalse: [^ anObject]]].
+  ^ PBCorruptionError signal: 'the ' , aName , ' of ' , anAtom printString , ' is not an integer: '
+    , (PBKeys _preview: anObject).
 
 "=== PBOpaqueAtom ==========================================================="
 

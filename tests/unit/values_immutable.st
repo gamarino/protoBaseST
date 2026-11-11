@@ -2,17 +2,20 @@
 "Spec 12.6 (decision 3, immutability by convention): in src/protobase/*.st an
  instance or class variable is assigned only by the initialisers listed in
  _ivar_allowlist.txt (Class>>selector, or Class class>>selector), which the
- class-side constructors call once. The candidates are grep -n ':= ' over the
- sources; a scan of each file keeps the assignments in code (not in comments or
- strings) and checks that grep missed none. An assignment is to a field when
- its target is an instance variable of the method's class, or a capitalized
- name (a class variable). A stale allowlist entry fails too. The values
+ class-side constructors call once, or which publish a runtime-only field once
+ by compare-and-swap (setInstVar:from:to:, plan Task 16b). The candidates are
+ grep -n over the sources for ':= ' and 'setInstVar:'; a scan of each file
+ keeps those in code (not in comments or strings) and checks that grep missed
+ none. An assignment is to a field when its target is an instance variable of
+ the method's class, or a capitalized name (a class variable); every
+ setInstVar: in code writes a field. A stale allowlist entry fails too. The values
  themselves answer no mutator and keep no reference to their arguments."
 Import from: 'protobase'.
 | failures grep allow used scans methodOf list dict frozen map handle |
 failures := OrderedCollection new.
 
-"The (line -> target) assignments in the code of aText, skipping comments, strings and character literals."
+"The (line -> target) assignments in the code of aText, skipping comments, strings and
+ character literals; a setInstVar: send is (line -> 'setInstVar:')."
 scans := [:aText |
   | out line state i n |
   out := OrderedCollection new. line := 1. state := #code. i := 1. n := aText size.
@@ -25,6 +28,8 @@ scans := [:aText |
         ch = $" ifTrue: [state := #comment].
         ch = $' ifTrue: [state := #string].
         ch = $$ ifTrue: [i := i + 1. (i <= n and: [(aText at: i) = Character lf]) ifTrue: [line := line + 1]].
+        (ch = $s and: [(i + 10) <= n and: [(aText copyFrom: i to: i + 10) = 'setInstVar:']]) ifTrue: [
+          out add: line -> 'setInstVar:'].
         (ch = $: and: [i < n and: [(aText at: i + 1) = $=]]) ifTrue: [
           | j k |
           j := i - 1.
@@ -72,7 +77,7 @@ methodOf := [:lines :n |
 allow := ((FileReference path: '_ivar_allowlist.txt') lines
   reject: [:l | l isEmpty or: [l first = $#]]) asArray.
 used := Set new.
-grep := OSProcess shell: 'grep -n '':= '' ../../src/protobase/*.st'.
+grep := OSProcess shell: 'grep -n -e '':= '' -e ''setInstVar:'' ../../src/protobase/*.st'.
 grep exitCode = 0 ifFalse: [failures add: 'grep failed: ' , grep errorOutput].
 "file -> the grep line numbers"
 dict := Dictionary new.
@@ -87,12 +92,12 @@ dict keysAndValuesDo: [:file :grepLines |
   (scans value: text) do: [:assoc |
     | where cls ivars target isField |
     (grepLines includes: assoc key) ifFalse: [
-      failures add: file , ':' , assoc key printString , ' an assignment grep does not see (write '':= '')'].
+      failures add: file , ':' , assoc key printString , ' an assignment grep does not see (write '':= '' or ''setInstVar:'')'].
     where := methodOf value: lines value: assoc key.
     target := assoc value.
     cls := where = '<module>' ifTrue: [nil] ifFalse: [Smalltalk at: ((where subStrings: '>') first subStrings: ' ') first asSymbol ifAbsent: [nil]].
     ivars := (cls isNil or: [where includesSubstring: ' class>>']) ifTrue: [#()] ifFalse: [cls allInstVarNames].
-    isField := (ivars includes: target) or: [target notEmpty and: [target first isUppercase]].
+    isField := (target = 'setInstVar:' or: [ivars includes: target]) or: [target notEmpty and: [target first isUppercase]].
     isField ifTrue: [
       (allow includes: where)
         ifTrue: [used add: where]

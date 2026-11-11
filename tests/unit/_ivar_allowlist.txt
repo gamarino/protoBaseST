@@ -2,6 +2,9 @@
 # variable. Each is a private initialiser called once by a class-side constructor
 # (or, for PBMissing and PBZoneKeys, once when the module loads). One entry per line:
 # Class>>selector or Class class>>selector.
+# PBAtom>>_slots is not an initialiser: it publishes the runtime-only slots field once, by
+# compare-and-swap from nil (setInstVar:from:to:), always from the installed envelope (Task 16b).
+PBAtom>>_slots
 _PBSequence>>_setItems:
 PBFrozenDict>>_setKeys:values:index:
 PBOrderKey>>_setRank:payload:
@@ -14,11 +17,12 @@ PBUnresolvedRef>>_setPointer:tag:
 PBZoneKeys class>>_initializeKeys
 PBTypeRegistry class>>_initializeRegistry
 PBAtom>>_setOid:pointer:storage:
+_PBRecordShape>>_setFields:index:tag:integerSlots:
 PBOpaqueAtom>>_setReferencedName:
 PBSegmentHeader>>_setVersion:segment:
 PBRecordHeader>>_setKind:length:payloadCrc:
 PBRootRecord>>_setVersion:segment:offset:epoch:
-PBAtomEnvelope>>_setTag:oid:state:
+PBAtomEnvelope>>_setTag:oid:state:slots:
 PBSegmentReader>>_setSegment:file:header:
 PBFileStorage>>_setDirectory:
 PBHistoryEntry>>_setRoot:database:

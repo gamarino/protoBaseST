@@ -297,7 +297,7 @@ PBRootRecord >> encode
 "The payload of an ATOM record: the type tag t, the 16-byte oid and the state
  s (attribute name to canonical value), with the checks of format spec 'Atom
  records'."
-Object subclass: #PBAtomEnvelope instanceVariableNames: 'tag oid state'.
+Object subclass: #PBAtomEnvelope instanceVariableNames: 'tag oid state slots'.
 
 "An envelope to write: aTag is an alias Integer or a type name (written in
  its canonical form; a name every reader refuses is PBValidationError), anOid 16 bytes (or a UUID), aState a PBFrozenDict of
@@ -388,11 +388,19 @@ PBAtomEnvelope class >> _isKnown: aName
   ^ (PBTypeRegistry aliasOf: aName) notNil or: [PBTypeRegistry isRegistered: aName].
 
 PBAtomEnvelope >> _setTag: aTag oid: aByteArray state: aState
-  "Runs once, on a fresh instance."
-  oid isNil ifFalse: [^ PBUserError signal: 'PBAtomEnvelope is immutable'].
+  ^ self _setTag: aTag oid: aByteArray state: aState slots: nil.
+
+"anArray: the slots of an atom of a class with a record shape (_PBRecordShape),
+ derived from aState; nil for an envelope that is not an atom's state (one a
+ storage decoded or one to write) or an atom of another class."
+PBAtomEnvelope >> _setTag: aTag oid: aByteArray state: aState slots: anArray
+  "Runs once, on a fresh instance. The guard tests state, which every envelope
+   holds (an envelope an atom builds in memory has no oid, and may have no tag)."
+  state isNil ifFalse: [^ PBUserError signal: 'PBAtomEnvelope is immutable'].
   tag := aTag.
   oid := aByteArray.
   state := aState.
+  slots := anArray.
   ^ self.
 
 "The type tag as read (an alias Integer or a name)."
@@ -406,6 +414,11 @@ PBAtomEnvelope >> oid
 "The state, a PBFrozenDict in the record's order."
 PBAtomEnvelope >> state
   ^ state.
+
+"The slots of the atom holding this envelope (see _setTag:oid:state:slots:),
+ or nil. Runtime-only: never encoded."
+PBAtomEnvelope >> slots
+  ^ slots.
 
 "The ATOM payload: the msgpack map t, oid, s, in that order; t is written in
  canonical form, references as their pointers, every value two containers
