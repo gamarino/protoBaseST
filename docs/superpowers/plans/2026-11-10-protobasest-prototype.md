@@ -7,8 +7,8 @@ ProtoBase `v2.0.0rc1`, with ProtoBase's transaction semantics, proven by a two-w
 with Python and an ERP demo for the FAST workshop on 2026-12-03.
 
 **Architecture:** three repositories, bottom up.
-- protoIO 0.4.1 adds OS random bytes and a UTC microsecond clock.
-- protoST 0.9.1 binds them and adds `Decimal`, the calendar values and `UUID` to `lib/`.
+- protoIO 0.5.0 adds OS random bytes and a UTC microsecond clock (rulings R1, R10).
+- protoST 0.10.0 binds them and adds `Decimal`, the calendar values and `UUID` to `lib/`.
 - The new `protoBaseST` repository holds the codec, framing, file store, AVL structures,
   collections with operation logs, and the transactions with one publisher actor per process.
 
@@ -37,8 +37,8 @@ Read ProtoBase's code before guessing a behaviour.
 ## Global Constraints
 
 - **Repositories and branches**, all siblings under `/home/gamarino/Documentos/proyectos/`:
-  - `protoIO` on branch `feat/random-clock-0.4.1`;
-  - `protoST` on branch `feat/protobasest-groundwork-0.9.1`;
+  - `protoIO` on branch `feat/random-clock`;
+  - `protoST` on branch `feat/protobase-support`;
   - `protoBaseST` on branch `feat/prototype`;
   - `ProtoBase` is read only.
 - **Do not push, merge, tag or publish anything before Task 26.** The maintainer's rule is
@@ -56,7 +56,7 @@ Read ProtoBase's code before guessing a behaviour.
 - **Tests never depend on timing.** No test sleeps, races a clock, or asserts a duration.
   Interleavings are driven step by step by the test. A timeout is tested by an outcome that
   holds for any duration, such as a lock that is never released.
-- **Visible skips only.** A test that cannot run (no Python, no venv, a missing protoST 0.9.1
+- **Visible skips only.** A test that cannot run (no Python, no venv, a missing protoST 0.10.0
   primitive) prints `SKIP: <reason>` as its last line and exits 77. The final gate (Task 25)
   tolerates no SKIP.
 - **Refuse, never diverge.** Any value, type, version or operation the prototype cannot handle
@@ -83,8 +83,8 @@ Read ProtoBase's code before guessing a behaviour.
 
 | # | Call | Why |
 |---|---|---|
-| C1 | protoIO keeps the approved number **0.4.1**, although protoIO bumped the minor for new API in 0.4.0 | The maintainer approved 0.4.1 by number. protoST sets `PROTOIO_MIN_VERSION 0.4.1`. If the maintainer prefers 0.5.0, it is a one-line change in Task 26 |
-| C2 | protoST's `lib/` additions (Tasks 3-5) ship in the same **0.9.1** release as the bindings | Publication happens once, at the end. The additions are additive and break nothing |
+| C1 | *Superseded by ruling R1: protoIO is **0.5.0**, protoST's floor `PROTOIO_MIN_VERSION 0.5.0`.* Original call: protoIO keeps the approved number **0.4.1**, although protoIO bumped the minor for new API in 0.4.0 | The maintainer approved 0.4.1 by number. protoST sets `PROTOIO_MIN_VERSION 0.4.1`. If the maintainer prefers 0.5.0, it is a one-line change in Task 26 |
+| C2 | *Renumbered by ruling R10: the release is **0.10.0** (the branch carries breaking changes: D52, K20, numeric hash values, the protoIO floor).* protoST's `lib/` additions (Tasks 3-5) ship in the same release as the bindings | Publication happens once, at the end. The additions are additive and break nothing |
 | C3 | The protoST API names are `ByteArray randomBytes: n` and `Time utcMicroseconds` (microseconds since 1970-01-01T00:00Z, wall clock). `Time microsecondClockValue` stays monotonic | Clarity over familiar names: Pharo's `microsecondClockValue` is a wall clock, protoST's is monotonic, and reusing the name would mislead |
 | C4 | `randomBytes:` accepts 0 ≤ n ≤ 1,048,576 and signals `InvalidArgument` outside that range | A bound keeps one call from allocating without limit. Identities need 16 bytes |
 | C5 | Week-0 checks and every reader task run on the existing `../protoST/build_release/protost` (0.9.0), with protoST's branch `lib/`. The installed `/usr/bin/protost` is 0.8.1 and is not used | The spec assumed an installed 0.9.0. The local release build is 0.9.0 and runs, so no build is needed until Task 2 |
@@ -126,20 +126,20 @@ Read ProtoBase's code before guessing a behaviour.
 
 ## Phase A: ground releases (week 0, from 11-11)
 
-### Task 1: protoIO 0.4.1, OS random bytes and a UTC microsecond clock
+### Task 1: protoIO 0.5.0, OS random bytes and a UTC microsecond clock
 
 **Files:**
 - Create: `protoIO/include/protoio/random.h`, `protoIO/src/random.cpp`,
   `protoIO/include/protoio/clock.h`, `protoIO/src/clock.cpp`.
 - Create: `protoIO/tests/test_random.cpp`, `protoIO/tests/test_clock.cpp`.
 - Modify: `protoIO/CMakeLists.txt`. Add the sources to `add_library(protoio ...)`, set
-  `project(protoIO VERSION 0.4.1 ...)`, and add `bcrypt` to the Windows
+  `project(protoIO VERSION 0.5.0 ...)`, and add `bcrypt` to the Windows
   `target_link_libraries`.
 - Modify: `protoIO/tests/CMakeLists.txt` with `protoio_test(test_random random)` and
   `protoio_test(test_clock clock)`.
 - Modify: `protoIO/README.md`. Add rows to the "API overview" table, add `random|clock` to the
   TSan `-L` list, and change the version in the deb name and in `find_package`.
-- Modify: `protoIO/CHANGELOG.md`, adding a section `## 0.4.1 - (unreleased)` under
+- Modify: `protoIO/CHANGELOG.md`, adding a section `## 0.5.0 - (unreleased)` under
   `## Unreleased`.
 
 **Interfaces:**
@@ -176,12 +176,12 @@ Read ProtoBase's code before guessing a behaviour.
 - [ ] **Step 6:** update the README and the CHANGELOG. The CHANGELOG paragraph reads "A patch
   release adding two OS services for protoBaseST: `random::bytes` and
   `clock::utcMicroseconds`."
-- [ ] **Step 7:** commit `protoIO 0.4.1: OS random bytes and a UTC microsecond clock`.
+- [ ] **Step 7:** commit `protoIO 0.5.0: OS random bytes and a UTC microsecond clock`.
 
-### Task 2: protoST 0.9.1 bindings, `ByteArray randomBytes:` and `Time utcMicroseconds`
+### Task 2: protoST 0.10.0 bindings, `ByteArray randomBytes:` and `Time utcMicroseconds`
 
 **Files:**
-- Modify: `protoST/CMakeLists.txt`. Set `VERSION 0.9.1` and `set(PROTOIO_MIN_VERSION "0.4.1")`.
+- Modify: `protoST/CMakeLists.txt`. Set `VERSION 0.10.0` and `set(PROTOIO_MIN_VERSION "0.5.0")`.
 - Modify: `protoST/src/primitives/bytes_prims.cpp`. Add `__randomBytes:` on the ByteArray
   class side, registered in `installBytesPrimitives`, with the `unmanaged()` wrapper. Build
   the result through `makeBytes`, and map errors through `ProtoioErrors.h`.
@@ -191,15 +191,15 @@ Read ProtoBase's code before guessing a behaviour.
   `protoST/lib/kernel/time.st` with `Time class >> utcMicroseconds`.
 - Test: `protoST/tests/conformance/15-binary/random_bytes.st`,
   `random_bytes_bounds.st`, and `protoST/tests/conformance/12-builtins/time_utc_microseconds.st`.
-- Modify: `protoST/tests/conformance/14-io/http_request_shape.st` (`protoST/0.9.1`).
+- Modify: `protoST/tests/conformance/14-io/http_request_shape.st` (`protoST/0.10.0`).
 - Docs:
   - `docs/LANGUAGE.md`: §12.12.1 for `randomBytes:`, and the time section for
     `utcMicroseconds`, with a sentence that `microsecondClockValue` is monotonic;
   - `docs/tutorial/` (the bytes and time chapters);
   - the version text in `README.md`, `docs/INSTALLATION.md`, `docs/STATUS.md`,
     `docs/ROADMAP.md` and `docs/INTEROP.md`;
-  - `CHANGELOG.md`, adding `## 0.9.1 — protoBaseST groundwork (unreleased)` with
-    "**Requires protoIO 0.4.1**".
+  - `CHANGELOG.md`, adding `## 0.10.0 — protoBaseST groundwork (unreleased)` with
+    "**Requires protoIO 0.5.0**".
 
 **Interfaces:**
 - Consumes: Task 1's `protoio::random::bytes` and `protoio::clock::utcMicroseconds`.
@@ -229,7 +229,7 @@ Read ProtoBase's code before guessing a behaviour.
   `ctest --test-dir build_release -j1 --output-on-failure`. Expected: all PASS, with SKIP
   lines listed. Then build `build_tsan` and run `ctest -L tsan`. Expected: PASS.
 - [ ] **Step 5:** write the docs and the CHANGELOG entry.
-- [ ] **Step 6:** commit `protoST 0.9.1: ByteArray randomBytes: and Time utcMicroseconds (protoIO 0.4.1)`.
+- [ ] **Step 6:** commit `protoST 0.10.0: ByteArray randomBytes: and Time utcMicroseconds (protoIO 0.5.0)`.
 
 ### Task 3: protoST `lib/decimal.st`, an exact `Decimal` value
 
@@ -247,7 +247,7 @@ Read ProtoBase's code before guessing a behaviour.
   - `docs/STATUS.md`: deviation **D49**, "`Decimal` is a value without arithmetic: parse,
     print, compare, `asExactFraction`; no context, no rounding";
   - `docs/tutorial/` (the standard-library chapter);
-  - `CHANGELOG.md` (the 0.9.1 entry).
+  - `CHANGELOG.md` (the 0.10.0 entry).
 
 **Interfaces:**
 - Produces (import with `Import from: 'decimal'`; the class is bound as a global):
@@ -363,7 +363,7 @@ Read ProtoBase's code before guessing a behaviour.
   - `calendar-invalid.st`: month 13, day 30 of February, year 0 and year 10000, and offset
     86400·10^6, each signal `Error`. Print `5 refused`.
   - `calendar-now-utc.st`: `DateTime nowUTC` lies between 2026 and 2100. Without
-    `Time respondsTo: #utcMicroseconds`, print `SKIP: needs protoST 0.9.1`.
+    `Time respondsTo: #utcMicroseconds`, print `SKIP: needs protoST 0.10.0`.
 - [ ] **Step 2:** run them with `../protoST/build_release/protost`. Expected: FAIL.
 - [ ] **Step 3:** implement in Smalltalk.
 - [ ] **Step 4:** run them. Expected: PASS, with `calendar-now-utc.st` SKIPPING until
@@ -1046,7 +1046,7 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
 
 Phase C needs Task 2's build: oids and segment names come from `ByteArray randomBytes:`, and
 `committedAt` from `DateTime nowUTC`. From here on, `PROTOST` is the protoST branch build
-(0.9.1). Tests that need it SKIP visibly on 0.9.0.
+(0.10.0). Tests that need it SKIP visibly on 0.9.0.
 
 ### Task 14: Persistent AVL writes and value boxing
 
@@ -1544,15 +1544,21 @@ If this task is cut, `docs/not-done.md` says so, and any `PBCountedSet` mutator 
 Run this task only after Task 25 passes. The maintainer's rule is "mergear y publicar al
 final".
 
-- [ ] **Step 1: protoIO.**
-  - Date the CHANGELOG section `0.4.1 - <date>`, or apply C1's alternative if the maintainer
-    asked for it.
-  - Merge `feat/random-clock-0.4.1` into `main`, tag `v0.4.1`, push, and create the GitHub
+- [ ] **Step 1: protoIO (first: protoST's CI needs its tag).**
+  - Date the CHANGELOG section `0.5.0 - <date>` (rulings R1, R10).
+  - Merge `feat/random-clock` into `main`, tag `v0.5.0`, push, and create the GitHub
     release.
-- [ ] **Step 2: protoST.**
-  - Pin protoIO `v0.4.1` in `.github/workflows/cross-platform.yml` and date the CHANGELOG.
+  - Put the main protoIO checkout on that commit. Only then re-configure the main protoST
+    `build_release`: from 0.10.0 protoST refuses a 0.4.x sibling at configure time.
+- [ ] **Step 2: protoST.** Do not push the protoST branch before protoIO's `v0.5.0` tag
+  exists: both CI workflows build protoIO at a pinned tag, and the 0.5.0 floor refuses the
+  current pin `v0.4.0`, so every job would fail at configure time.
+  - Move **both** protoIO pins to `v0.5.0`, with the comments above them:
+    `PROTOIO_REF` in `.github/workflows/ci.yml` (line 88, comment lines 82-87) and in
+    `.github/workflows/cross-platform.yml` (line 29, comment lines 27-28). Date the
+    CHANGELOG section `0.10.0 - <date>`.
   - Push the branch and open a PR. Wait for CI to pass on Linux, macOS and Windows.
-  - Merge, tag `v0.9.1`, and build the deb with the recipe in
+  - Merge, tag `v0.10.0`, and build the deb with the recipe in
     `project_protoio030_protost090_binary_storage` (docker `pc-deb-build:24.04 --dns 8.8.8.8`,
     protoIO at the tag as a sibling, `-DPROTOCORE_REQUIRE_PACKAGE=ON`, `cpack -G DEB`).
   - Create the GitHub release with the deb.
