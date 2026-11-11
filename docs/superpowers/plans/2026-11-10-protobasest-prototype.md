@@ -399,7 +399,7 @@ Read ProtoBase's code before guessing a behaviour.
 - [ ] **Step 3:** implement.
 - [ ] **Step 4:** run them. Expected: PASS, with `uuid-v4.st` passing after Task 2's build.
 - [ ] **Step 5:** docs, then commit `lib/uuid.st: UUID values (RFC 4122, version 4 from OS random bytes)`.
-- [ ] **Step 6 (protoBaseST, added by the Task 7 review):**
+- [x] **Step 6 (protoBaseST, added by the Task 7 review):** done in protoBaseST 1ee0e98 (protoST `lib/uuid.st`: 25fa7e2).
   - `src/protobase/codec.st` gets `Import from: 'uuid'`, unconditionally, so a program no
     longer needs to import it itself. Until this task, PBCodec looks the global `UUID` up at
     run time and refuses `@uuid` without it.
@@ -628,13 +628,13 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
 
   | Vector (section/id) | What protoBaseST does | Why | Removed by |
   |---|---|---|---|
-  | `values/uuid` | decode: `PBNotSupportedError` | `lib/uuid.st` is not in protoST 0.9.0 | Task 5, Step 6 |
+  | `values/uuid` | decode: `PBNotSupportedError` | `lib/uuid.st` is not in protoST 0.9.0 | Task 5, Step 6: removed in 1ee0e98 |
   | `values_decode_only/datetime-zone-format3` | decodes to a `PBLegacyZoneDateTime` (wall clock), not the instant; re-encoding it is `PBValidationError` | the instant needs a tz database (design §4.3) | permanent, design §4.3 |
   | `values_read_not_rewritten/map-zone-key-format3` | re-encoding is refused, as listed; the decoded keys are the format-3 wall clocks, not instants | the same | permanent, design §4.3 |
   | `invalid/value-instant-wall-out-of-range` | accepted and presented in UTC | the wall-clock range needs the zone's rules; the format spec (Known gaps) lets a reader without a database present the instant in UTC | permanent, design §4.3 |
-  | `order/uuid 00000000000000000000000000000001`, `order/uuid ff000000000000000000000000000000` | stage `order`: `PBNotSupportedError` | the value cannot be built: `lib/uuid.st` is not in protoST 0.9.0 | Task 5, Step 6 |
-  | `hashes/uuid ffffffffffffffffffffffffffffffff`, `hashes/uuid 12345678123456781234567812345678` | stage `hash`: `PBNotSupportedError` | the same | Task 5, Step 6 |
-  | `exact_tokens/uuid 12345678123456781234567812345678` | stage `token`: `PBNotSupportedError` | the same | Task 5, Step 6 |
+  | `order/uuid 00000000000000000000000000000001`, `order/uuid ff000000000000000000000000000000` | stage `order`: `PBNotSupportedError` | the value cannot be built: `lib/uuid.st` is not in protoST 0.9.0 | Task 5, Step 6: removed in 1ee0e98 |
+  | `hashes/uuid ffffffffffffffffffffffffffffffff`, `hashes/uuid 12345678123456781234567812345678` | stage `hash`: `PBNotSupportedError` | the same | Task 5, Step 6: removed in 1ee0e98 |
+  | `exact_tokens/uuid 12345678123456781234567812345678` | stage `token`: `PBNotSupportedError` | the same | Task 5, Step 6: removed in 1ee0e98 |
 
   Removed by Task 9: `values_decode_only/ref-format2`, `ref-name-of-builtin` and `ref-alias`
   (the reader maps a built-in name to its alias and an application alias to its declared name

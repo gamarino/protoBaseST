@@ -173,7 +173,7 @@ PBCodec class >> _canonicalShallow: v depth: d
     ^ TimeSpan microseconds: (self _field: 'total' of: v base: TimeSpan)].
   (v isKindOf: UUID) ifTrue: [
     v class == UUID ifTrue: [^ v].
-    ^ UUID fromBytes: (self _field: 'bytes' of: v base: UUID)].
+    ^ UUID fromBytes: (self _uuidBytes: v)].
   v == PBMissing default ifTrue: [^ v].
   (v isKindOf: PBMutableObject) ifTrue: [
     self _checkUTF8: (self _field: 'cellName' of: v base: PBMutableObject).
@@ -210,6 +210,11 @@ PBCodec class >> _isReference: v
  accessors are never used to read the base value."
 PBCodec class >> _field: aName of: v base: aBaseClass
   ^ v instVarAt: (aBaseClass allInstVarNames indexOf: aName).
+
+"The 16 bytes of a UUID, read from UUID's own instance variable, never through
+ a subclass's methods (codec, keys and notation all read them here)."
+PBCodec class >> _uuidBytes: aUUID
+  ^ self _field: 'bytes' of: aUUID base: UUID.
 
 PBCodec class >> _plainBytes: aByteArray
   ^ ByteArray withAll: ((1 to: aByteArray size) asArray collect: [:i | aByteArray at: i]).
@@ -383,7 +388,7 @@ PBCodec class >> _wire: v ref: aBlock
       v hour. v minute. v second. v microsecond. v fold. self _wireZone: v zone }].
   (v isKindOf: TimeSpan) ifTrue: [
     ^ self _tagged: '@td' body: { v days. v seconds. v microseconds }].
-  (v isKindOf: UUID) ifTrue: [^ self _tagged: '@uuid' body: v bytes].
+  (v isKindOf: UUID) ifTrue: [^ self _tagged: '@uuid' body: (self _uuidBytes: v)].
   v == PBMissing default ifTrue: [^ self _tagged: '@missing' body: 0].
   (v isKindOf: PBMutableObject) ifTrue: [^ self _tagged: '@mut' body: v name].
   (v isKindOf: PBTuple) ifTrue: [

@@ -154,7 +154,7 @@ PBNotation class >> describe: v
   (v isKindOf: TimeOfDay) ifTrue: [
     ^ self _one: 'time' value: { v hour. v minute. v second. v microsecond. v fold. self _tz: v zone }].
   (v isKindOf: TimeSpan) ifTrue: [^ self _one: 'timedelta' value: { v days. v seconds. v microseconds }].
-  (v isKindOf: UUID) ifTrue: [^ self _one: 'uuid' value: (self _hex: v bytes)].
+  (v isKindOf: UUID) ifTrue: [^ self _one: 'uuid' value: (self _hex: (PBCodec _uuidBytes: v))].
   v == PBMissing default ifTrue: [^ self _one: 'missing' value: true].
   (v isKindOf: PBMutableObject) ifTrue: [^ self _one: 'mutable' value: v name].
   (v isKindOf: PBTuple) ifTrue: [^ self _one: 'tuple' value: (v asArray collect: [:each | self describe: each])].

@@ -192,7 +192,7 @@ PBKeys class >> _orderKey: v
     ^ self _key: 8 payload: v microsecondsSinceMidnight - v _offset].
   (v isKindOf: TimeSpan) ifTrue: [^ self _key: 11 payload: v totalMicroseconds].
   v == PBMissing default ifTrue: [^ self _key: 0 payload: 0].
-  (v isKindOf: UUID) ifTrue: [^ self _key: 12 payload: (self _unsignedBigEndian: v bytes)].
+  (v isKindOf: UUID) ifTrue: [^ self _key: 12 payload: (self _unsignedBigEndian: (PBCodec _uuidBytes: v))].
   (v isKindOf: PBTuple) ifTrue: [^ self _key: 13 payload: (v asArray collect: [:each | self _orderKey: each])].
   (v isKindOf: PBMutableObject) ifTrue: [^ self _key: 15 payload: v name].
   (v isKindOf: PBAtom) ifTrue: [^ self _key: 14 payload: (self _unsignedBigEndian: (self _oidBytes: (self _oidOf: v)))].
