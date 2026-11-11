@@ -1,4 +1,4 @@
-"EXPECT: ok 29"
+"EXPECT: ok 31"
 "Plan Task 14: PBAvl check: verifies the invariants of format spec 'AVL nodes' (ProtoBase
  avl.check_invariants) and signals PBCorruptionError on the first violation: height,
  count, balance, strictly increasing key order, weight, and one node class per tree. The
@@ -9,7 +9,7 @@
  was."
 Import from: 'protobase'.
 Import from: '_check'.
-| c mk pos key cnt leaf good root before |
+| c mk pos key cnt leaf good root before cached |
 c := Check new.
 mk := [:cls :assocs | cls _unsavedWithState: (PBFrozenDict withAssociations: assocs)].
 pos := [:v :l :r :h :n | mk value: PBPosNode value: { 'value' -> v. 'left' -> l. 'right' -> r. 'height' -> h. 'count' -> n }].
@@ -45,6 +45,16 @@ c that: 'two equal keys (1 and 1.0)' signals: PBCorruptionError containing: 'ord
 c that: 'an unorderable key' signals: PBCorruptionError during: [
   PBAvl check: (key value: (PBFrozenList withAll: #(1)) value: nil value: nil value: 1 value: 1)].
 c that: 'keys in order pass' is: (PBAvl check: (key value: 2 value: (key value: 1 value: nil value: nil value: 1 value: 1) value: nil value: 2 value: 2)) notNil equals: true.
+"Review R2-I1: check: recomputes each order key from the key, as check_invariants does: a
+ root of key 5 whose cached order key is 2's, over keys 1 and 3, is in order only by the
+ cache (keyAt: 5 would miss it)."
+c that: 'a cached order key that is not the key''s' signals: PBCorruptionError containing: 'cached order key' during: [
+  PBAvl check: ((key value: 5 value: (key value: 1 value: nil value: nil value: 1 value: 1)
+    value: (key value: 3 value: nil value: nil value: 1 value: 1) value: 2 value: 3)
+    _publishOrderKey: (PBKeys orderKey: 2))].
+cached := (key value: 2 value: (key value: 1 value: nil value: nil value: 1 value: 1)
+  value: (key value: 3 value: nil value: nil value: 1 value: 1) value: 2 value: 3) _publishOrderKey: (PBKeys orderKey: 2.0).
+c that: 'a cached order key equal to the key''s passes' isTrue: (PBAvl check: cached) == cached.
 c that: 'a CountedKeyNode under a KeyNode root' signals: PBCorruptionError containing: 'kind' during: [
   PBAvl check: (key value: 2 value: (cnt value: 1 value: (PBTuple withAll: #(0 1)) value: nil value: nil value: 1 value: 1 value: 1) value: nil value: 2 value: 2)].
 c that: 'wrong weight' signals: PBCorruptionError containing: 'weight' during: [

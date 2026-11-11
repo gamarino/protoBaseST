@@ -8,8 +8,11 @@
                       1000 / 1000 / 600 operations, a checkpoint every 10
   pos-large           2000 appends, 1000 random operations, 500 removes of the first
                       element, 500 removes of the last; a checkpoint every 500
-  key-large           2000 puts of ascending Integer keys, 1000 random mixed-rank
-                      operations, 1000 deletes of descending keys; a checkpoint every 500
+  key-large           2000 puts of ascending Integer keys, 1000 random operations (four in
+                      five on keys inside the tree's range, Integers and halves, so
+                      deletes remove interior nodes with two children; one in five
+                      mixed-rank, at the ends), 1000 deletes of descending keys; a
+                      checkpoint every 500
 
 The large sequences are the sequential patterns of a database (list appends, monotonic
 keys, queues): long right-spine rotation cascades and repeated first-node pops, at heights
@@ -54,7 +57,10 @@ kind = 'pos-large' ifTrue: [
   500 timesRepeat: [apply value: { #remove. size - 1 }]].
 kind = 'key-large' ifTrue: [
   1000 to: 2999 do: [:i | apply value: { #put. 'i:' , i printString. 'i:' , (i * 7) printString }].
-  1000 timesRepeat: [apply value: ops nextKeyOp].
+  1000 timesRepeat: [
+    (ops between: 1 and: 5) = 1
+      ifTrue: [apply value: ops nextKeyOp]
+      ifFalse: [apply value: (ops nextKeyOpFrom: 1000 to: 2998)]].
   2999 to: 2000 by: -1 do: [:i | apply value: { #delete. 'i:' , i printString }]].
 steps = 0 ifTrue: [('unknown kind ' , kind) displayNl. Smalltalk exit: 2].
 steps \\ every = 0 ifFalse: [emit value].

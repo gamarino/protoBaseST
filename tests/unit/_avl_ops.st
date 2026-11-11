@@ -59,6 +59,15 @@ AvlOps >> nextKeyOp
   (self between: 1 and: 10) <= 5 ifTrue: [^ { #put. self keyToken. self valueToken }].
   ^ { #delete. self keyToken }.
 
+"A keyed operation on Number keys within lo..hi: put 50 %, delete 50 %, of an Integer
+ (i:n) or of n + 0.5 (h:n)."
+AvlOps >> nextKeyOpFrom: lo to: hi
+  | n key |
+  n := self between: lo and: hi.
+  key := ((self between: 1 and: 2) = 1 ifTrue: ['i:'] ifFalse: ['h:']) , n printString.
+  (self between: 1 and: 10) <= 5 ifTrue: [^ { #put. key. self valueToken }].
+  ^ { #delete. key }.
+
 "A weighted keyed operation: put 60 % of a (payload, count) pair, delete 40 %."
 AvlOps >> nextCountedOp
   | key |

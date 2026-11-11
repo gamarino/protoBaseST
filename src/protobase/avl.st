@@ -663,8 +663,9 @@ PBAvl class >> _corrupt: aString
  ProtoBase). A child that is not a node is PBCorruptionError (an opaque atom
  PBNotSupportedError, as every walk). A key that has no order key is
  PBCorruptionError too (ProtoBase lets its ProtoValidationError through): only
- a valid key can be in a tree. The order keys are the nodes' cached ones
- (orderKey). Post-order with an explicit stack, as ProtoBase: every node of a
+ a valid key can be in a tree. Each order key is recomputed from the key, as
+ check_invariants does, and a node's cached order key (knownOrderKey), when
+ present, must equal it. Post-order with an explicit stack, as ProtoBase: every node of a
  stored tree is loaded; a path longer than the root's height (a height lie) is
  reported, so the walk always ends. An error of a load (PBClosedError, say) is
  signalled as it is."
@@ -681,10 +682,11 @@ PBAvl class >> check: aRoot
   ^ self _check: aRoot kind: kind maxDepth: maxDepth keyed: kind ~~ PBPosNode weighted: kind == PBCountedKeyNode.
 
 "aBlock's value, with a PBValidationError it signals reported as corruption of
- aNode's aWhat; a PBClosedError or PBReferenceError (a load) passes as it is."
+ aNode's aWhat. Only that exact class is the refusal of an invalid value: any
+ subclass (PBClosedError, PBReferenceError: a load) passes as it is."
 PBAvl class >> _valid: aWhat of: aNode do: aBlock
   ^ aBlock on: PBValidationError do: [:e |
-    ((e isKindOf: PBClosedError) or: [e isKindOf: PBReferenceError]) ifTrue: [e pass].
+    e class == PBValidationError ifFalse: [^ e pass].
     self _corrupt: 'the ' , aWhat , ' of ' , aNode printString , ' is not valid: ' , e messageText]
 
 "The walk of check:. A stack entry is { node. left. right. depth } before its
@@ -730,7 +732,13 @@ PBAvl class >> _check: aRoot kind: kind maxDepth: maxDepth keyed: keyed weighted
         nmax := nil.
         keyed ifTrue: [
           | k |
-          k := self _valid: 'key' of: node do: [node orderKey].
+          "Recomputed from the key, as check_invariants does, and compared with
+           the cached one: the verifier never trusts what the writer cached."
+          k := self _valid: 'key' of: node do: [PBKeys orderKey: node key].
+          node knownOrderKey isNil ifFalse: [
+            (k compareWith: node knownOrderKey) = 0 ifFalse: [
+              ^ self _corrupt: 'the cached order key of ' , node printString , ' differs from the key''s ('
+                , (PBKeys _preview: node key) , ')']].
           (leftRes at: 4) isNil ifFalse: [
             ((leftRes at: 4) compareWith: k) < 0 ifFalse: [^ self _keyOrderViolatedAt: node]].
           (rightRes at: 3) isNil ifFalse: [
