@@ -11,7 +11,6 @@
  field, is refused when it is registered."
 Import from: 'protobase'.
 Import from: '_check'.
-Import from: '_sink'.
 
 PBKeyNode subclass: #ReorderedNode.
 ReorderedNode class >> typeName
@@ -57,7 +56,7 @@ BadIntegerNode class >> typeName
 BadIntegerNode class >> integerFields
   ^ #('height' 'count' 'rank').
 
-| c root keys sink stub node older bad tree walked seed prios put pos classes |
+| c root keys sink stub node older bad tree walked seed prios put pos classes base |
 c := Check new.
 PBTypeRegistry register: ReorderedNode; register: ExtendedNode.
 
@@ -70,7 +69,9 @@ c that: 'reordered: check: accepts the built-in kinds only, as ProtoBase''s chec
 c that: 'reordered: keyAt: reads through the inherited accessors' is: (PBAvl keyAt: root key: 7) value equals: 70.
 c that: 'reordered: the record order is its own' is: root state keys equals: ReorderedNode persistedFields.
 c that: 'reordered: count' is: root count equals: 10.
-sink := SegmentSink segment: (ByteArray fromHex: '16c016c016c016c016c016c016c016c0').
+base := FileSystem temp / ('pbst-slots-subclasses-' , Smalltalk pid printString).
+base deleteAll.
+sink := PBFileStorage path: (base / 'sink') pathString.
 root _saveInto: sink.
 stub := root unloadedCopy.
 walked := OrderedCollection new.
@@ -137,7 +138,7 @@ c that: 'a present optional integer field reads back' is: node unloadedCopy prio
 c that: 'an optional integer field that is not an Integer' signals: PBCorruptionError containing: 'the priority of' during: [
   ExtendedNode _unsavedWithState: (PBFrozenDict withAssociations: {
     'key' -> 1. 'value' -> 2. 'left' -> nil. 'right' -> nil. 'height' -> 1. 'count' -> 1. 'priority' -> 'high' })].
-bad := SegmentSink segment: (ByteArray fromHex: '16c116c116c116c116c116c116c116c1').
+bad := PBFileStorage path: (base / 'bad') pathString.
 stub := ExtendedNode unloadedAt: (bad pushAtom: (PBAtomEnvelope tag: 'slotstest.ExtendedNode'
   oid: (ByteArray fromHex: '07070707070707070707070707070707')
   state: (PBFrozenDict withAssociations: { 'key' -> 1. 'value' -> 2. 'left' -> nil. 'right' -> nil.
@@ -188,4 +189,7 @@ c that: 'positional writes build plain PBPosNodes' is: classes asArray equals: {
 c that: 'and keep the values' is: ([:r | | out | out := OrderedCollection new. PBAvl posDo: [:v | out add: v] over: r. out asArray] value: pos)
   equals: #(1 2 3 40 5 7 8 9 10 11 12).
 c that: 'and the tree checks' is: (PBAvl check: pos) equals: pos.
+sink close.
+bad close.
+base deleteAll.
 c report displayNl.

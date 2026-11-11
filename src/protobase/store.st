@@ -1,10 +1,11 @@
-"-- store.st: PBFileStorage and PBSegmentReader, the file storage, read side --
+"-- store.st: PBFileStorage, PBSegmentReader and PBSegmentWriter, the file storage --
 
 The space directory of ProtoBase's FileStorage (proto_db/storage/file.py at
 v2.0.0rc1; format spec v2.0.0rc1, 'Segments and records' and 'Root records'):
 
   space.root        the published root (PBRootRecord), replaced atomically
   space.root.tmp    the scratch file of a publish in progress; never read
+  space.lock        the file whose OS lock (flock) excludes root publishers
   <uuid-hex>.seg    append-only segments: a 26-byte header, then records
 
   PBFileStorage path: aString           opens (creating the directory if needed)
@@ -16,7 +17,8 @@ v2.0.0rc1; format spec v2.0.0rc1, 'Segments and records' and 'Root records'):
   aStorage refTo: bytes offset: n tag: t
                                         the resolver of PBCodec: an unloaded atom
   aStorage recordsOfSegment: aUUID      the diagnostic walk of a complete segment
-  aStorage close                        later reads signal PBClosedError
+  aStorage close                        later reads and writes signal
+                                        PBClosedError; releases the root lock
 
 Opening checks what ProtoBase checks: a path that exists and is not a
 directory is PBValidationError; a directory holding cluster/ (a cluster
@@ -48,14 +50,94 @@ nothing published points there. recordsOfSegment: is not a read path: it is
 the walk of a complete segment for the conformance runner and diagnostics, and
 it reports a torn tail or an append in progress as PBCorruptionError by design.
 
-This module writes nothing: the write side (segments, publishing the root
-under the owner lock) is Task 17."
+Write side (format spec v2.0.0rc1, 'A minimal external writer (file
+storage)'; ProtoBase FileStorage push_atom, flush and publish_root):
+
+  aStorage save: anAtom                 saves anAtom and every unsaved atom it
+                                        refers to, dependents first (PBAtom >>
+                                        _saveInto:), and answers its pointer
+  aStorage pushAtom: aPBAtomEnvelope    appends one ATOM record to the owned
+                                        segment and answers its PBAtomPointer
+  aStorage flushSegment                 makes the owned segment durable (sync)
+  aStorage currentSegment               the owned segment's 16 bytes, or nil
+  aStorage tryLockRoot                  true when it took the root lock (flock
+                                        on space.lock), false when another
+                                        holder has it
+  aStorage unlockRoot                   releases it, best effort: a failure is
+                                        logged to stderr, never signalled
+  aStorage replaceRoot: aPBRootRecord   publishes aPBRootRecord as space.root
+  aStorage isCluster                    whether the space belongs to a cluster
+  aStorage newSegmentId                 the UUID the owned segment is named by
+
+The owned segment. A storage writes only into the one segment it created: the
+first record pushed creates <uuid hex>.seg, named by a fresh UUID4
+(newSegmentId), with #create #exclusive (a file of that name already there is
+a loud failure, never an append to another writer's segment), writes the
+format-4 header, syncs the file, and syncs the directory once, so the new
+name is durable before any root can reference it. Every later record is
+appended to it. Nothing appended is ever truncated or rewritten: a pointer
+pushAtom: answers stays valid for the life of the storage (the atom keeps it
+in its saved cell), and a record no published root reaches is an orphan,
+harmless, as in ProtoBase. An orphan may repeat the oid of a reachable record
+(the loser of a lost race on an atom's saved cell writes one), so any tool
+that scans segments by oid (checker, compaction, replication) considers only
+the records reachable from a root.
+
+Publishing (replaceRoot:), in the order the format spec makes normative: the
+caller holds the root lock (tryLockRoot; PBUserError otherwise); the owned
+segment is synced first (data reaches the disk strictly before the root that
+references it); the record at the new root's pointer must be a SpaceRoot
+that passes its checks; the current space.root is read and checked (a version
+the reader does not know is an error, never a reason to overwrite); the new
+epoch must be the current one plus one (1 for a space without a root),
+PBConflictError otherwise; a space that belongs to a cluster (a cluster/
+directory, or a current SpaceRoot with a cluster_term) is PBNotSupportedError,
+since such a space is written only through the cluster and clusters are
+outside the prototype (design spec 10.5). Then space.root.tmp is written and
+synced, renamed over space.root (FileSystem replace:with:), and the directory
+is synced. The publish is durable once replaceRoot: returns.
+
+Failure policy (ProtoBase's): a failure of the file system while creating,
+appending to or syncing the segment, or while writing, renaming or syncing
+the root, is PBUnexpectedError and leaves the storage failed: every later
+pushAtom:, flushSegment and replaceRoot: is PBUnexpectedError, so no later
+root can reference a record whose write was lost (reads keep working; open a
+new storage to write again). After a failure in the rename or in the
+directory sync that follows it, the outcome of that publish is unknown until
+space.root is read again (the publisher's step 8, plan Task 18).
+
+One writer at a time. The write operations (pushAtom:, flushSegment,
+replaceRoot:) are made by one actor, the space's publisher (plan Task 18),
+one at a time; the storage takes no lock to serialise them. A write operation
+that starts while another is in progress on the same storage is refused at
+once with PBUserError and writes nothing (an Atom over a Boolean, set by
+compare-and-swap: a refusal, never a wait). close does not wait for a write
+in progress either: it marks the storage closed, which the write checks
+before each step and before the rename that commits a publish; a write that
+loses that race signals PBClosedError, and the steps it already made stay as
+they are (records are orphans; a renamed root is published). The space closes
+its storage through its publisher, between commits (plan Task 18).
+
+The root lock is the format's inter-process protocol, the OS advisory lock
+ProtoBase's root_lock takes on space.lock, so protoST and Python publishers
+exclude each other. It belongs to the open file: tryLockRoot opens space.lock
+per acquisition and unlockRoot closes it, as ProtoBase does; it is not
+re-entrant (a second tryLockRoot while this storage holds it is
+PBLockingError, ProtoBase's refusal).
+
+The seams a test overrides to fail at a chosen step (crash-consistency tests
+never kill a process): newSegmentId, _newSegmentWriter:, _syncDirectory,
+_writeRootTemp:, _replaceRootFile, and PBSegmentWriter's append: and sync.
+
+Durability is ProtoBase's default mode, fsync; segment rollover (a size cap,
+implementation-specific) is not implemented: one storage writes one segment."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/values'.
 Import from: 'protobase/registry'.
 Import from: 'protobase/codec'.
 Import from: 'protobase/framing'.
+Import from: 'uuid'.
 
 "=== PBSegmentReader ========================================================"
 
@@ -171,18 +253,98 @@ PBSegmentReader >> isClosed
 PBSegmentReader >> printOn: aStream
   aStream nextPutAll: 'PBSegmentReader('; nextPutAll: self segmentHex; nextPut: $).
 
+"=== PBSegmentWriter ========================================================"
+
+"The write side of the segment a storage owns: its UUID (16 bytes), its
+ BinaryFile (opened for writing only: reads go through a PBSegmentReader, as
+ for any segment) and dirty, an Atom over a Boolean, true while records were
+ appended since the last sync. Made only by PBFileStorage, whose publisher is
+ its one writer."
+Object subclass: #PBSegmentWriter instanceVariableNames: 'segment file dirty'.
+
+"Creates the segment file aFileReference for the segment aByteArray (16
+ bytes): #create #exclusive, so an existing file of that name is
+ FileAlreadyExists and is left untouched; writes the format-4 header and syncs
+ the file. A failure of the file system passes to the caller (PBFileStorage
+ turns it into PBUnexpectedError); the file is closed on any failure."
+PBSegmentWriter class >> create: aByteArray file: aFileReference
+  | file ok |
+  file := self _openFile: aFileReference.
+  ok := false.
+  [file append: (PBSegmentHeader encodeSegment: aByteArray).
+   file sync.
+   ok := true] ensure: [ok ifFalse: [file close]].
+  ^ self basicNew _setSegment: aByteArray file: file.
+
+"The seam that creates a segment file (tests override it)."
+PBSegmentWriter class >> _openFile: aFileReference
+  ^ BinaryFile open: aFileReference options: #(#write #create #exclusive).
+
+PBSegmentWriter >> _setSegment: aByteArray file: aBinaryFile
+  "Runs once, on a fresh instance."
+  segment isNil ifFalse: [^ PBUserError signal: 'PBSegmentWriter is initialised once'].
+  segment := aByteArray.
+  file := aBinaryFile.
+  dirty := Atom on: false.
+  ^ self.
+
+"The segment's UUID, 16 bytes."
+PBSegmentWriter >> segment
+  ^ segment.
+
+PBSegmentWriter >> segmentHex
+  ^ segment hex asLowercase.
+
+"Appends aByteArray (one framed record) and answers the offset where it
+ starts. A seam: tests override it to fail at a chosen record."
+PBSegmentWriter >> append: aByteArray
+  | offset |
+  dirty value: true ifCurrent: false.
+  offset := file append: aByteArray.
+  ^ offset.
+
+"Makes every record appended so far durable (sync: data and metadata); does
+ nothing when none was appended since the last sync. The flag is cleared
+ before the sync, so a record appended meanwhile marks the segment dirty
+ again. A seam: tests override it to fail."
+PBSegmentWriter >> sync
+  (dirty value: false ifCurrent: true) ifTrue: [file sync].
+
+"Closes the file (idempotent)."
+PBSegmentWriter >> close
+  file close.
+
+PBSegmentWriter >> isClosed
+  ^ file isClosed.
+
+PBSegmentWriter >> printOn: aStream
+  aStream nextPutAll: 'PBSegmentWriter('; nextPutAll: self segmentHex; nextPut: $).
+
 "=== PBFileStorage =========================================================="
 
-"A space directory, read side. directory is its FileReference, readers an Atom
- over a PBFrozenDict (segment hex -> PBSegmentReader), closed an Atom over a
- Boolean."
-Object subclass: #PBFileStorage instanceVariableNames: 'directory readers closed'.
+"A space directory. directory is its FileReference; the others are Atom cells:
+ readers over a PBFrozenDict (segment hex -> PBSegmentReader), closed over a
+ Boolean, writer over nil or the PBSegmentWriter of the owned segment, writing
+ over a Boolean (a write operation in progress), failed over nil or the text
+ of the write failure that ended writing, and rootLock over nil or the open
+ BinaryFile of space.lock whose OS lock this storage holds."
+Object subclass: #PBFileStorage instanceVariableNames: 'directory readers closed writer writing failed rootLock'.
 
 PBFileStorage class >> rootFileName
   ^ 'space.root'.
 
 PBFileStorage class >> segmentSuffix
   ^ '.seg'.
+
+PBFileStorage class >> rootTempFileName
+  ^ 'space.root.tmp'.
+
+PBFileStorage class >> lockFileName
+  ^ 'space.lock'.
+
+"The subdirectory that marks the space of a cluster node."
+PBFileStorage class >> clusterDirectoryName
+  ^ 'cluster'.
 
 "The storage of the space directory aPath (a String or a FileReference), created
  when missing. The published root is validated (its record is read and
@@ -194,7 +356,7 @@ PBFileStorage class >> path: aPath
   dir := aPath isString ifTrue: [aPath asFileReference] ifFalse: [aPath].
   (dir exists and: [dir isDirectory not]) ifTrue: [
     ^ PBValidationError signal: 'PBFileStorage: ' , dir pathString , ' exists and is not a directory'].
-  (dir / 'cluster') exists ifTrue: [
+  (dir / self clusterDirectoryName) exists ifTrue: [
     ^ PBNotSupportedError signal: 'PBFileStorage: ' , dir pathString
       , ' holds cluster/, the space of a cluster node: clusters are not supported by protoBaseST'].
   [dir ensureCreateDirectory] on: FileSystemError do: [:e |
@@ -210,6 +372,10 @@ PBFileStorage >> _setDirectory: aFileReference
   directory := aFileReference.
   readers := Atom on: (PBFrozenDict withAssociations: #()).
   closed := Atom on: false.
+  writer := Atom on: nil.
+  writing := Atom on: false.
+  failed := Atom on: nil.
+  rootLock := Atom on: nil.
   ^ self.
 
 "The space directory, a FileReference."
@@ -272,6 +438,233 @@ PBFileStorage >> refTo: aSegmentBytes offset: anOffset tag: aTag
   ^ PBTypeRegistry unloadedAtomFor: aTag
     at: (PBAtomPointer segment: aSegmentBytes offset: anOffset)
     storage: self.
+
+"=== PBFileStorage, write side =============================================="
+
+"Saves anAtom into this storage, with every atom it refers to that is not
+ saved yet, dependents first (PBAtom >> _saveInto:), and answers its
+ PBAtomPointer. An atom saved here already answers its pointer and writes
+ nothing; one stored in another storage is PBValidationError."
+PBFileStorage >> save: anAtom
+  (anAtom isClassObject not and: [anAtom isKindOf: PBAtom]) ifFalse: [
+    ^ PBValidationError signal: 'PBFileStorage save: a PBAtom was expected, not ' , anAtom printString].
+  ^ anAtom _saveInto: self.
+
+"Appends the ATOM record of anEnvelope to the owned segment (created by the
+ first push) and answers its PBAtomPointer, valid for the life of the storage.
+ The record is not durable until flushSegment (or replaceRoot:) syncs it."
+PBFileStorage >> pushAtom: anEnvelope
+  | record |
+  (anEnvelope isKindOf: PBAtomEnvelope) ifFalse: [
+    ^ PBValidationError signal: 'PBFileStorage pushAtom: a PBAtomEnvelope was expected, not ' , anEnvelope printString].
+  record := PBRecordHeader encodeKind: PBRecordHeader atomKind payload: anEnvelope encode.
+  ^ self _writeOperation: [
+    | w offset |
+    w := self _ownedSegment.
+    offset := self _write: [w append: record] what: 'appending a record to the segment ' , w segmentHex.
+    PBAtomPointer segment: w segment offset: offset].
+
+"Makes every record pushed so far durable: syncs the owned segment (nothing
+ to do before the first push)."
+PBFileStorage >> flushSegment
+  self _writeOperation: [self _syncOwnedSegment].
+
+"The UUID (16 bytes) of the segment this storage writes, or nil before its
+ first push (ProtoBase current_segment)."
+PBFileStorage >> currentSegment
+  | w |
+  w := writer value.
+  ^ w isNil ifTrue: [nil] ifFalse: [w segment].
+
+"The UUID a new owned segment is named by: a fresh version-4 UUID. A seam,
+ overridden only by tests that inject a name."
+PBFileStorage >> newSegmentId
+  ^ UUID new.
+
+"Takes the root lock without waiting: true when this storage now holds it,
+ false when another holder (a process, or another storage of this process)
+ has it. The lock is the OS lock on space.lock, opened #(#read #write
+ #create) for this acquisition and closed when it is released. Not
+ re-entrant: PBLockingError when this storage holds it already."
+PBFileStorage >> tryLockRoot
+  | lockFile file took |
+  self _checkOpen.
+  rootLock value isNil ifFalse: [
+    ^ PBLockingError signal: 'PBFileStorage tryLockRoot: this storage holds the root lock already (it is not re-entrant)'].
+  lockFile := directory / self class lockFileName.
+  file := [BinaryFile open: lockFile options: #(#read #write #create)] on: FileSystemError do: [:e |
+    ^ PBUnexpectedError signal: 'PBFileStorage: cannot open ' , lockFile pathString , ': ' , e messageText].
+  took := [file tryLock] on: Error do: [:e |
+    file close.
+    ^ PBUnexpectedError signal: 'PBFileStorage: cannot lock ' , lockFile pathString , ': ' , e messageText].
+  took ifFalse: [file close. ^ false].
+  (rootLock value: file ifCurrent: nil) ifFalse: [
+    "Another actor of this storage installed a lock file meanwhile: the OS lock
+     excludes a second holder, so that one is not held; release ours."
+    file close.
+    ^ PBLockingError signal: 'PBFileStorage tryLockRoot: another tryLockRoot of this storage ran at the same time'].
+  closed value ifTrue: [
+    self _releaseRootLock.
+    ^ PBClosedError signal: 'PBFileStorage: the storage is closed'].
+  ^ true.
+
+"Releases the root lock, best effort: it never signals. A failure to unlock or
+ to close space.lock, or a call while the lock is not held, is written to
+ stderr (closing the file releases the OS lock in any case)."
+PBFileStorage >> unlockRoot
+  rootLock value isNil ifTrue: [
+    ^ self _log: 'unlockRoot: the root lock is not held by this storage'].
+  self _releaseRootLock.
+
+PBFileStorage >> _releaseRootLock
+  | file |
+  [file := rootLock value.
+   file isNil ifTrue: [^ self].
+   rootLock value: nil ifCurrent: file] whileFalse.
+  [file unlock] on: Error do: [:e | self _log: 'unlocking ' , self class lockFileName , ' failed: ' , e messageText].
+  [file close] on: Error do: [:e | self _log: 'closing ' , self class lockFileName , ' failed: ' , e messageText].
+
+"Whether this storage holds the root lock now."
+PBFileStorage >> holdsRootLock
+  ^ rootLock value notNil.
+
+"aString on stderr, prefixed with the storage; never signals."
+PBFileStorage >> _log: aString
+  [Stdio stderr nextPutAll: self printString , ': ' , aString; lf; flush] on: Error do: [:e | nil].
+
+"Whether the space belongs to a cluster: its directory holds cluster/, or the
+ SpaceRoot of its current root carries a cluster_term (not nil)."
+PBFileStorage >> isCluster
+  self _checkOpen.
+  ^ (self _clusterReasonAt: self readRoot) notNil.
+
+"Why the space is a cluster node's, with the root record aRootRecord current
+ (nil: none), or nil when it is not."
+PBFileStorage >> _clusterReasonAt: aRootRecord
+  | term |
+  (directory / self class clusterDirectoryName) exists ifTrue: [
+    ^ 'its directory holds ' , self class clusterDirectoryName , '/'].
+  aRootRecord isNil ifTrue: [^ nil].
+  term := (self loadAt: aRootRecord pointer expecting: self class spaceRootTag) state
+    at: 'cluster_term' ifAbsent: [nil].
+  term isNil ifTrue: [^ nil].
+  ^ 'its SpaceRoot at ' , aRootRecord pointer printString , ' carries the cluster_term ' , term printString.
+
+"The tag of the SpaceRoot records a root record points to."
+PBFileStorage class >> spaceRootTag
+  ^ PBTypeRegistry aliasOf: 'proto_db.transactions.SpaceRoot'.
+
+"Publishes aPBRootRecord as the space's root and answers it (see the module
+ comment for the order of the steps). Needs the root lock (PBUserError).
+ Refused, with nothing written: a pointer that is not a valid SpaceRoot record
+ (PBCorruptionError), an epoch other than the current one plus one
+ (PBConflictError), a cluster node's space (PBNotSupportedError)."
+PBFileStorage >> replaceRoot: aPBRootRecord
+  (aPBRootRecord isKindOf: PBRootRecord) ifFalse: [
+    ^ PBValidationError signal: 'PBFileStorage replaceRoot: a PBRootRecord was expected, not ' , aPBRootRecord printString].
+  ^ self _writeOperation: [
+    | current expected reason |
+    rootLock value isNil ifTrue: [
+      ^ PBUserError signal: 'PBFileStorage replaceRoot: needs the root lock (tryLockRoot)'].
+    self _syncOwnedSegment.
+    self loadAt: aPBRootRecord pointer expecting: self class spaceRootTag.
+    current := self readRoot.
+    expected := current isNil ifTrue: [1] ifFalse: [current epoch + 1].
+    aPBRootRecord epoch = expected ifFalse: [
+      ^ PBConflictError signal: 'PBFileStorage replaceRoot: the root epoch is '
+        , (current isNil ifTrue: ['none'] ifFalse: [current epoch printString])
+        , ', so the publish writes epoch ' , expected printString , ', not ' , aPBRootRecord epoch printString].
+    reason := self _clusterReasonAt: current.
+    reason isNil ifFalse: [
+      ^ PBNotSupportedError signal: 'PBFileStorage: ' , directory pathString , ' is the space of a cluster node ('
+        , reason , '): it is written only through the cluster, and clusters are not supported by protoBaseST'].
+    self _write: [self _writeRootTemp: aPBRootRecord encode]
+      what: 'writing ' , self class rootTempFileName.
+    self _checkOpen.
+    self _write: [self _replaceRootFile]
+      what: 'replacing ' , self class rootFileName.
+    self _write: [self _syncDirectory]
+      what: 'syncing the space directory after replacing ' , self class rootFileName.
+    aPBRootRecord].
+
+"The writer of the owned segment, created on first use: the file (named by
+ newSegmentId), its header and sync, then one sync of the directory. Runs
+ inside a write operation."
+PBFileStorage >> _ownedSegment
+  | w id hex |
+  w := writer value.
+  w isNil ifFalse: [^ w].
+  id := _PBFrame uuidBytes: self newSegmentId.
+  id isNil ifTrue: [^ PBUserError signal: 'PBFileStorage newSegmentId must answer a UUID'].
+  hex := id hex asLowercase.
+  w := self _write: [self _newSegmentWriter: id] what: 'creating the segment ' , hex.
+  (writer value: w ifCurrent: nil) ifFalse: [
+    w close.
+    ^ PBUnexpectedError signal: 'PBFileStorage: the owned segment was created twice'].
+  closed value ifTrue: [
+    self close.
+    ^ PBClosedError signal: 'PBFileStorage: the storage is closed'].
+  self _write: [self _syncDirectory] what: 'syncing the space directory after creating the segment ' , hex.
+  ^ w.
+
+"The seam that creates the writer of the owned segment aByteArray."
+PBFileStorage >> _newSegmentWriter: aByteArray
+  ^ PBSegmentWriter create: aByteArray file: (self _segmentFile: aByteArray).
+
+PBFileStorage >> _syncOwnedSegment
+  | w |
+  w := writer value.
+  w isNil ifTrue: [^ self].
+  self _write: [w sync] what: 'syncing the segment ' , w segmentHex.
+
+"The seam that makes the space directory's entries durable."
+PBFileStorage >> _syncDirectory
+  FileSystem syncDirectory: directory.
+
+"The seam that writes aByteArray to space.root.tmp (created or emptied) and
+ syncs it."
+PBFileStorage >> _writeRootTemp: aByteArray
+  | file |
+  file := BinaryFile open: directory / self class rootTempFileName options: #(#write #create #truncate).
+  [file writeAt: 0 bytes: aByteArray.
+   file sync] ensure: [file close].
+
+"The seam that renames space.root.tmp over space.root, atomically."
+PBFileStorage >> _replaceRootFile
+  FileSystem replace: directory / self class rootTempFileName with: directory / self class rootFileName.
+
+PBFileStorage >> _checkWritable
+  | reason |
+  self _checkOpen.
+  reason := failed value.
+  reason isNil ifFalse: [
+    ^ PBUnexpectedError signal: 'PBFileStorage: an earlier write to ' , directory pathString , ' failed (' , reason
+      , '): this storage accepts no more writes; open a new storage'].
+
+"aBlock's value, as the one write operation in progress on this storage: a
+ write operation that starts while another is in progress is PBUserError
+ (one writer at a time, see the module comment), and so is any write on a
+ failed storage (PBUnexpectedError) or a closed one (PBClosedError)."
+PBFileStorage >> _writeOperation: aBlock
+  self _checkWritable.
+  (writing value: true ifCurrent: false) ifFalse: [
+    ^ PBUserError signal: 'PBFileStorage: a write is in progress on this storage: its writes are made by one actor at a time (the space''s publisher)'].
+  ^ [self _checkWritable. aBlock value] ensure: [writing value: false ifCurrent: true].
+
+"aBlock's value, one step of a write described by aString. A failure that is
+ not a PBDBError leaves the storage failed (the first failure is kept) and is
+ PBUnexpectedError; on a storage closed meanwhile it is PBClosedError."
+PBFileStorage >> _write: aBlock what: aString
+  ^ aBlock on: Error do: [:e |
+    (e isKindOf: PBDBError) ifTrue: [e pass].
+    closed value ifTrue: [^ PBClosedError signal: 'PBFileStorage: the storage was closed during ' , aString].
+    failed value: aString , ': ' , e messageText ifCurrent: nil.
+    ^ PBUnexpectedError signal: 'PBFileStorage: ' , aString , ' failed: ' , e messageText
+      , '; this storage accepts no more writes'].
+
+"Whether a write failed, which ended writing through this storage."
+PBFileStorage >> isFailed
+  ^ failed value notNil.
 
 "=== _PBLoadResolver ========================================================="
 
@@ -363,16 +756,23 @@ PBFileStorage >> _whileOpen: aBlock
     (e isKindOf: FileSystemError) ifTrue: [^ PBUnexpectedError signal: 'PBFileStorage: a read failed: ' , e messageText].
     e pass].
 
-"Closes every segment reader and empties the cache; later loads, walks and root
- reads signal PBClosedError. Idempotent. The flag is set first, so a load that
- installs a reader after the cache is emptied sees it (_unlessClosed:)."
+"Closes every segment reader and empties the cache, closes the owned segment
+ and releases the root lock; later loads, walks, root reads and writes signal
+ PBClosedError. Idempotent. The flag is set first, so a load that installs a
+ reader after the cache is emptied sees it (_unlessClosed:), and so does a
+ write that creates the owned segment (_ownedSegment). close does not wait
+ for a write in progress (see the module comment)."
 PBFileStorage >> close
-  | empty taken |
+  | empty taken w |
   closed value: true ifCurrent: false.
   empty := PBFrozenDict withAssociations: #().
   [taken := readers value.
    readers value: empty ifCurrent: taken] whileFalse.
   taken do: [:reader | reader close].
+  [w := writer value.
+   writer value: nil ifCurrent: w] whileFalse.
+  w isNil ifFalse: [w close].
+  self _releaseRootLock.
 
 PBFileStorage >> printOn: aStream
   aStream nextPutAll: 'PBFileStorage('; nextPutAll: directory pathString; nextPut: $).

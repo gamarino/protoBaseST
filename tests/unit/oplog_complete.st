@@ -13,9 +13,8 @@
  that box (ProtoBase D51: the value is not written twice)."
 Import from: 'protobase'.
 Import from: '_check'.
-Import from: '_sink'.
 
-| c d d1 d2 blind sink twin stub big withBig box rebased node s h tup |
+| c d d1 d2 blind sink twin stub big withBig box rebased node s h tup base |
 c := Check new.
 tup := [:anArray | PBTuple withAll: anArray].
 d := PBDictionary new.
@@ -42,7 +41,9 @@ c that: 'the log of a hash dictionary, values canonical'
 c that: 'a hash dictionary built by new is complete' isTrue: h logComplete.
 
 "Loaded versions."
-sink := SegmentSink segment: (ByteArray fromHex: '0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e').
+base := FileSystem temp / ('pbst-oplog-complete-' , Smalltalk pid printString).
+base deleteAll.
+sink := PBFileStorage path: base pathString.
 d1 _saveInto: sink.
 twin := d1 _decodedTwin.
 c that: 'a loaded version has an incomplete log' is: twin logComplete equals: false.
@@ -72,4 +73,6 @@ rebased := withBig rebaseOnto: (PBDictionary new setAt: 'other' value: 1).
 node := PBAvl keyAt: (rebased stateAt: 'root') key: 'big'.
 c that: 'the rebase reuses the box' isTrue: node storedValue == box.
 c that: 'and reads the value' is: (rebased getAt: 'big') equals: big.
+sink close.
+base deleteAll.
 c report displayNl.

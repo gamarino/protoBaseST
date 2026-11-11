@@ -27,6 +27,7 @@ PBRecordHeader>>_setKind:length:payloadCrc:
 PBRootRecord>>_setVersion:segment:offset:epoch:
 PBAtomEnvelope>>_setTag:oid:state:slots:
 PBSegmentReader>>_setSegment:file:header:
+PBSegmentWriter>>_setSegment:file:
 PBFileStorage>>_setDirectory:
 PBHistoryEntry>>_setRoot:database:
 PBSnapshot>>_setRoot:database:

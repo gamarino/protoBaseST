@@ -8,15 +8,16 @@
  a stub of its record ({atomV1 -> a. atomV2 -> b}) and a saved atom and its decoded twin
  (PBAtom >> _decodedTwin, ProtoBase Atom._decoded_twin: the atom a load of its record
  would produce, built from the state it was saved with). A PBDictionary takes the second
- as the same key (setAt:value: replaces), as ProtoBase's. The records go to the SegmentSink
- double (_sink.st) until the file storage's write side (plan Task 17)."
+ as the same key (setAt:value: replaces), as ProtoBase's. The records are saved into a
+ PBFileStorage (plan Task 17) and read back through a fresh storage."
 Import from: 'protobase'.
 Import from: '_check'.
-Import from: '_sink'.
 
 | c sink k map dict rec h okey hkey oid twin stub base st loaded |
 c := Check new.
-sink := SegmentSink segment: (ByteArray fromHex: '0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f').
+base := FileSystem temp / ('pbst-atom-keys-oid-' , Smalltalk pid printString).
+base deleteAll.
+sink := PBFileStorage path: base pathString.
 k := PBObject withAll: { 'name' -> 'key' }.
 map := PBFrozenDict withAssociations: { k -> 'v'. 'plain' -> 1 }.
 dict := PBDictionary new setAt: k value: 'in a dictionary'.
@@ -36,9 +37,7 @@ c that: 'the map still finds it' is: (map at: k) equals: 'v'.
 c that: 'the dictionary still finds it' is: (dict getAt: k) equals: 'in a dictionary'.
 
 "Read back from the segment file."
-base := FileSystem temp / ('pbst-atom-keys-oid-' , Smalltalk pid printString).
-base deleteAll.
-st := PBFileStorage path: (sink writeTo: base).
+st := PBFileStorage path: base pathString.
 loaded := PBTypeRegistry unloadedAtomFor: 19 at: rec pointer storage: st.
 c that: 'the record''s oid' is: loaded oid equals: rec oid.
 c that: 'the stored map finds the key by the atom in memory' is: ((loaded at: 'map') at: k) equals: 'v'.
@@ -60,5 +59,6 @@ c that: '{saved A -> a. twin of A -> b} is refused' signals: PBValidationError c
 c that: 'a PBDictionary takes the twin as the same key' is: ((dict setAt: twin value: 'b') count) equals: 1.
 c that: 'an unsaved atom has no twin' signals: PBUserError during: [(PBObject withAll: #()) _decodedTwin].
 st close.
+sink close.
 base deleteAll.
 c report displayNl.

@@ -1,12 +1,14 @@
 """Compare ProtoBase's verifier dump with protoBaseST's (plan call C11).
 
-Usage: python compare_dumps.py <py.json> <st.json>
+Usage: python compare_dumps.py <py.json> <st.json> [--exact]
 
 The dumps are compared on the keys 'databases' and 'opaque_types' (atom counts depend on
 the walk). demo.erp.AuditNote is deliberately unknown to protoST: an {"opaque": T} on the
 protoST side equals {"object": T} on the Python side for that type only, and protoST lists
 it in opaque_types where Python does not. Every other difference fails, and so does a pair
 of dumps in which the AuditNote rule is never used (the opaque path must be exercised).
+With --exact (a space that holds no Python-only type, such as one protoST wrote), no
+normalisation is made: 'databases' and 'opaque_types' must be equal as they are.
 Exit 0 when equal, 1 otherwise (the first differing path is printed).
 """
 import json
@@ -50,11 +52,19 @@ def first_difference(a, b, path="$"):
     return None if a == b else f"{path}: {a!r} != {b!r}"
 
 
-def main(py_path: str, st_path: str) -> int:
+def main(py_path: str, st_path: str, exact: bool = False) -> int:
     with open(py_path, encoding="utf-8") as f:
         py = json.load(f)
     with open(st_path, encoding="utf-8") as f:
         st = json.load(f)
+    if exact:
+        for label in ("opaque_types", "databases"):
+            d = first_difference(py[label], st[label], label)
+            if d:
+                print(f"compare_dumps: differ at {d}")
+                return 1
+        print(f"compare_dumps: equal ({len(py['databases'])} databases, exact)")
+        return 0
     counter = [0]
     st_databases = normalise(st["databases"], counter)
     if counter[0] == 0:
@@ -74,4 +84,8 @@ def main(py_path: str, st_path: str) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1], sys.argv[2]))
+    args = [a for a in sys.argv[1:] if a != "--exact"]
+    if len(args) != 2:
+        print("usage: compare_dumps.py <py.json> <st.json> [--exact]")
+        sys.exit(2)
+    sys.exit(main(args[0], args[1], exact="--exact" in sys.argv[1:]))

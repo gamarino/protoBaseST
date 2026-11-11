@@ -15,12 +15,11 @@
  envelope, forced through a seam, never by timing."
 Import from: 'protobase'.
 Import from: '_check'.
-Import from: '_sink'.
 
-"A sink whose first load of a record first loads the same record through the atom in its
- cell, so that inner load installs its envelope first and the outer load loses the
+"A storage whose first load of a record first loads the same record through the atom in
+ its cell, so that inner load installs its envelope first and the outer load loses the
  compare-and-swap."
-SegmentSink subclass: #RacingLoadSink instanceVariableNames: 'racer loads'.
+PBFileStorage subclass: #RacingLoadSink instanceVariableNames: 'racer loads'.
 RacingLoadSink >> racer: anAtom
   racer := anAtom.
   loads := 0.
@@ -56,7 +55,7 @@ ExtendedNode class >> integerFields
 ExtendedNode >> priority
   ^ self _slotAt: 7.
 
-| c accessors markers sink build saveLoad stub node reversed racing inner bad ptr seg classes keyTable |
+| c accessors markers sink build saveLoad stub node reversed racing inner bad ptr classes keyTable base |
 c := Check new.
 PBTypeRegistry register: ReorderedNode; register: ExtendedNode.
 "The accessor of each slot field, per class that declares slotFields."
@@ -77,7 +76,9 @@ classes do: [:cls | cls persistedFields do: [:f | markers at: f ifAbsent: [marke
 "An in-memory atom of aClass holding the marker of each field, in the order of aFieldArray."
 build := [:aClass :aFieldArray |
   aClass _unsavedWithState: (PBFrozenDict withAssociations: (aFieldArray collect: [:f | f -> (markers at: f)]))].
-sink := SegmentSink segment: (ByteArray fromHex: '16b016b016b016b016b016b016b016b0').
+base := FileSystem temp / ('pbst-record-slots-' , Smalltalk pid printString).
+base deleteAll.
+sink := PBFileStorage path: (base / 'sink') pathString.
 "A fresh stub of anAtom, saved first."
 saveLoad := [:anAtom | anAtom _saveInto: sink. anAtom unloadedCopy].
 
@@ -137,8 +138,7 @@ c that: 'a built node: weight not an integer' signals: PBCorruptionError contain
   PBCountedKeyNode _unsavedWithState: (PBFrozenDict withAssociations: {
     'key' -> 1. 'value' -> 1. 'left' -> nil. 'right' -> nil. 'height' -> 1. 'count' -> 1. 'weight' -> 1.5 })].
 "A damaged record, written by hand (no class would build it)."
-seg := ByteArray fromHex: '16b116b116b116b116b116b116b116b1'.
-bad := SegmentSink segment: seg.
+bad := PBFileStorage path: (base / 'bad') pathString.
 ptr := bad pushAtom: (PBAtomEnvelope tag: (PBTypeRegistry tagFor: PBPosNode) oid: (ByteArray fromHex: '07070707070707070707070707070707')
   state: (PBFrozenDict withAssociations: { 'value' -> 1. 'left' -> nil. 'right' -> nil. 'height' -> 'two'. 'count' -> 1 })).
 stub := PBPosNode unloadedAt: ptr storage: bad.
@@ -147,7 +147,7 @@ c that: 'a loaded node: the first field read checks height' signals: PBCorruptio
 c that: 'and the record is not installed' isTrue: stub isLoaded not.
 
 "The load race: the inner load installs its envelope, the outer load reads its slots."
-racing := RacingLoadSink segment: (ByteArray fromHex: '16b216b216b216b216b216b216b216b2').
+racing := RacingLoadSink path: (base / 'racing') pathString.
 node := PBPosNode value: 'x' left: nil right: nil.
 node _saveInto: racing.
 stub := node unloadedCopy.
@@ -155,4 +155,8 @@ racing racer: stub.
 c that: 'the loser reads the field' is: stub storedValue equals: 'x'.
 c that: 'the record was decoded twice' is: racing loads equals: 2.
 c that: 'the loser holds the installed envelope''s slots' isTrue: stub _slots == stub _envelope slots.
+sink close.
+bad close.
+racing close.
+base deleteAll.
 c report displayNl.

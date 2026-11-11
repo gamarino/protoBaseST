@@ -11,12 +11,11 @@
  writes nothing. The records read back as written. A class that is not registered is
  refused when saved, before any of its dependents is written or bound to the storage, as
  ProtoBase's _save checks the declared type name before it saves a child; once registered
- (PBObjectSpace registerAtomClass:), the same record saves and reads back as its class. The file
- storage's write side is plan Task 17: the records go to the SegmentSink double
- (_sink.st), whose segment file is then opened with PBFileStorage."
+ (PBObjectSpace registerAtomClass:), the same record saves and reads back as its class. The
+ records are saved into a PBFileStorage (its owned segment, plan Task 17), and read back
+ through a fresh storage on the same directory."
 Import from: 'protobase'.
 Import from: '_check'.
-Import from: '_sink'.
 
 PBObject subclass: #Unregistered.
 Unregistered class >> typeName
@@ -26,10 +25,13 @@ Registered class >> typeName
   ^ 'tests.dependents.Registered'.
 
 | c seg sink k r k2 k3 d cc bb aa r1 r2 r3 l late drawn base st records refs forward oids walk
-  loaded count before orphan reg |
+  loaded count before orphan reg pushed |
 c := Check new.
-seg := ByteArray fromHex: '0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e'.
-sink := SegmentSink segment: seg.
+base := FileSystem temp / ('pbst-dependents-' , Smalltalk pid printString).
+base deleteAll.
+sink := PBFileStorage path: base pathString.
+"The number of records the save pushed so far."
+pushed := [(sink recordsOfSegment: sink currentSegment) size].
 
 "A record keyed by another record."
 k := PBObject withAll: { 'k' -> 1 }.
@@ -60,18 +62,18 @@ l := (PBList new extend: { r1. r2. r3 }) appendLast: (String new: 300 withAll: $
 l _saveInto: sink.
 "A record saved later, referring to records saved before."
 late := PBObject withAll: { 'refs' -> { aa. k. r2 } }.
-before := sink offsets size.
+before := pushed value.
 late _saveInto: sink.
-c that: 'only the new record is written' is: sink offsets size equals: before + 1.
+c that: 'only the new record is written' is: pushed value equals: before + 1.
 c that: 'a second save writes nothing' is: (aa _saveInto: sink; yourself) pointer equals: aa pointer.
-c that: 'and pushes no record' is: sink offsets size equals: before + 1.
+c that: 'and pushes no record' is: pushed value equals: before + 1.
 c that: 'an unregistered class is refused' signals: PBValidationError containing: 'Unregistered'
   during: [(Unregistered withAll: { 'x' -> 1 }) _saveInto: sink].
-c that: 'and nothing was written' is: sink offsets size equals: before + 1.
+c that: 'and nothing was written' is: pushed value equals: before + 1.
 orphan := PBObject withAll: { 'y' -> 1 }.
 c that: 'an unregistered class with a dependent is refused' signals: PBValidationError containing: 'Unregistered'
   during: [(Unregistered withAll: { 'x' -> orphan }) _saveInto: sink].
-c that: 'before its dependent is written' is: sink offsets size equals: before + 1.
+c that: 'before its dependent is written' is: pushed value equals: before + 1.
 c that: 'and the dependent is not bound to the storage' is: orphan isSaved equals: false.
 "Registering the class makes its save succeed (plan Task 15: registering application classes)."
 reg := Registered withAll: { 'x' -> orphan }.
@@ -81,11 +83,12 @@ reg _saveInto: sink.
 c that: 'once registered, it is saved' is: reg isSaved equals: true.
 
 "Walk the segment: every @ref points to a lower offset."
-base := FileSystem temp / ('pbst-dependents-' , Smalltalk pid printString).
-base deleteAll.
-st := PBFileStorage path: (sink writeTo: base).
+seg := sink currentSegment.
+count := pushed value.
+sink close.
+st := PBFileStorage path: base pathString.
 records := st recordsOfSegment: seg.
-c that: 'one record per atom pushed' is: records size equals: sink offsets size.
+c that: 'one record per atom pushed' is: records size equals: count.
 refs := 0.
 forward := OrderedCollection new.
 oids := Set new.

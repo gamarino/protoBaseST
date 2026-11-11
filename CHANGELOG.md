@@ -132,3 +132,14 @@
   handler per tree, and the index and root checks of `PBAvl` use no blocks. The bytes, `=`,
   `hash` and the save are unchanged. `bench/run_avl.sh` measures the AVL workload against
   ProtoBase, interleaved, for any binary and source tree.
+- The file storage's write side (plan Task 17, `store.st`): `PBFileStorage >> save:`,
+  `pushAtom:` (into `PBSegmentWriter`, the segment the storage owns: a fresh UUID4 name,
+  `#create #exclusive`, header and directory synced), `flushSegment`, `currentSegment`,
+  `tryLockRoot` and `unlockRoot` (the OS lock on `space.lock`, ProtoBase's `root_lock`),
+  `replaceRoot:` (lock held, segment synced, SpaceRoot pointer checked, epoch + 1, cluster
+  refusal, `space.root.tmp` synced, renamed, directory synced), `isCluster`, `isFailed` and
+  `newSegmentId`. A file-system failure leaves the storage failed for writes, as ProtoBase's.
+  The unit tests that saved into the `SegmentSink` double now save into `PBFileStorage`, and
+  `tests/unit/_sink.st` is gone. `tests/interop/st_write_to_py.sh` runs ProtoBase's verifier on
+  spaces protoST wrote, commits from each side on top of the other, and checks the root lock
+  both ways; `compare_dumps.py --exact` compares dumps without the AuditNote normalisation.
