@@ -13,7 +13,8 @@ MAX_VALUE_DEPTH = 1022 MessagePack containers per attribute value):
 - over/: the root 'over' holds a value of 1023 lists (raw bytes): reading it raises
   ProtoCorruptionError;
 - ProtoBase's writer refuses a value one container deeper than each limit with
-  ProtoValidationError naming MAX_VALUE_DEPTH, as protoST's does.
+  ProtoValidationError naming MAX_VALUE_DEPTH, as protoST's does, and with the very text
+  protoST's unit tests expect (SAME_TEXT).
 
 Exit 0 when every check holds, 1 otherwise (each failed check is printed).
 """
@@ -108,12 +109,37 @@ def check_refusals():
             FAILURES.append(f"{label}: ProtoBase's writer accepted it")
 
 
+#: The refusal texts tests/unit/tx_atom_depth.st and collection_depth.st expect from protoST's
+#: writer, word for word (protoST names its own class, PBSet, where ProtoBase says Set).
+SAME_TEXT = {
+    "a DBObject field of 1023": (
+        lambda: DBObject(v=lists(1023)),
+        "Field 'v' of proto_db.core.dbobject.DBObject: The value nests deeper than MAX_VALUE_DEPTH = 1022 "
+        "MessagePack containers, the most the storage format allows (format spec, \"Value nesting depth\")"),
+    "a Set element of 511 tuples": (
+        lambda: Set().add(tuples(511)),
+        "Set element nests 1022 MessagePack containers deep, and its bucket tuple adds 2 around it, so it "
+        "may nest at most 1020 (MAX_VALUE_DEPTH = 1022, format spec \"Value nesting depth\")"),
+}
+
+
+def check_texts():
+    for label, (build, text) in SAME_TEXT.items():
+        try:
+            build()
+        except ProtoValidationError as e:
+            check(f"{label}: the refusal text", str(e), text)
+        else:
+            FAILURES.append(f"{label}: ProtoBase's writer accepted it")
+
+
 def main(directory: str) -> int:
     check("MAX_VALUE_DEPTH", MAX_VALUE_DEPTH, 1022)
     check("Python's recursion limit is the default", sys.getrecursionlimit(), 1000)
     read_space(f"{directory}/space")
     read_over(f"{directory}/over")
     check_refusals()
+    check_texts()
     for failure in FAILURES:
         print(f"py_read_deep: {failure}")
     if FAILURES:

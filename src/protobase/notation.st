@@ -4,7 +4,8 @@ Every description is a Dictionary with one key (the JSON object of
 tests/conformance/README.md, 'The notation'), read from the manifest by
 protoST's JSON library or made by describe:. It follows ProtoBase's
 proto_db/tools/notation.py (describe) and tests/conformance/typed.py (build)
-at v2.0.0rc1:
+at v2.0.0rc2; every walk of a value keeps an explicit stack, as ProtoBase's
+(R128), so a value MAX_VALUE_DEPTH deep is described and built on any thread:
 
   PBNotation describe: aValue         the description of a decoded canonical value
   PBNotation build: aDescription      the value a description names
@@ -20,6 +21,7 @@ at v2.0.0rc1:
                                       ProtoBase's notation.describe_database
   PBNotation dumpSpace: aSpace to: aPath
                                       the JSON dump of ProtoBase's verifier --out
+  PBNotation jsonText: aValue         the JSON text of a dump or description
 
 Kinds: nil, bool, int (decimal text), float (C99 hexadecimal), str, bytes
 (hexadecimal), decimal, date, time, datetime, timedelta, uuid, list, tuple,
@@ -140,8 +142,46 @@ PBNotation class >> _typeName: aTag
   ^ PBTypeRegistry nameOfTag: aTag.
 
 "The description of a decoded canonical value: its kind decides, never its
- truthiness or equality; anything else signals PBValidationError."
+ truthiness or equality; anything else signals PBValidationError. A walk with
+ an explicit stack (ProtoBase notation.describe, 'any depth'): a value nested
+ MAX_VALUE_DEPTH deep, or deeper, is described on any thread."
 PBNotation class >> describe: v
+  ^ _PBValueFrame fold: v
+    children: [:x | self _itemsOf: x]
+    leaf: [:x | self _describeScalar: x]
+    node: [:x :results | self _node: x results: results].
+
+"The items a tuple, list or map is described or walked from (a map's keys and
+ values interleaved, in order), or nil for anything else."
+PBNotation class >> _itemsOf: v
+  ((v isKindOf: PBTuple) or: [v isKindOf: PBFrozenList]) ifTrue: [^ v asArray].
+  (v isKindOf: PBFrozenDict) ifTrue: [^ self _interleaved: v associations].
+  ^ nil.
+
+"k1, v1, k2, v2, ... of an Array of associations."
+PBNotation class >> _interleaved: anArray
+  | out |
+  out := Array new: 2 * anArray size.
+  1 to: anArray size do: [:i |
+    out at: 2 * i - 1 put: (anArray at: i) key.
+    out at: 2 * i put: (anArray at: i) value].
+  ^ out.
+
+"[[r1, r2], [r3, r4], ...] of the results of interleaved keys and values."
+PBNotation class >> _pairs: anArray
+  | out |
+  out := Array new: anArray size // 2.
+  1 to: out size do: [:i | out at: i put: { anArray at: 2 * i - 1. anArray at: 2 * i }].
+  ^ out.
+
+"The description of a tuple, list or map v from the descriptions of its items."
+PBNotation class >> _node: v results: anArray
+  (v isKindOf: PBTuple) ifTrue: [^ self _one: 'tuple' value: anArray].
+  (v isKindOf: PBFrozenList) ifTrue: [^ self _one: 'list' value: anArray].
+  ^ self _one: 'map' value: (self _pairs: anArray).
+
+"The description of a value that is not a tuple, list or map."
+PBNotation class >> _describeScalar: v
   v isNil ifTrue: [^ self _one: 'nil' value: nil].
   (v == true or: [v == false]) ifTrue: [^ self _one: 'bool' value: v].
   v isInteger ifTrue: [^ self _one: 'int' value: v printString].
@@ -157,11 +197,6 @@ PBNotation class >> describe: v
   (v isKindOf: UUID) ifTrue: [^ self _one: 'uuid' value: (self _hex: (PBCodec _uuidBytes: v))].
   v == PBMissing default ifTrue: [^ self _one: 'missing' value: true].
   (v isKindOf: PBMutableObject) ifTrue: [^ self _one: 'mutable' value: v name].
-  (v isKindOf: PBTuple) ifTrue: [^ self _one: 'tuple' value: (v asArray collect: [:each | self describe: each])].
-  (v isKindOf: PBFrozenList) ifTrue: [^ self _one: 'list' value: (v asArray collect: [:each | self describe: each])].
-  (v isKindOf: PBFrozenDict) ifTrue: [
-    ^ self _one: 'map' value: (v associations collect: [:each |
-      { self describe: each key. self describe: each value }])].
   ((v isKindOf: PBUnresolvedRef) or: [v isKindOf: PBAtom]) ifTrue: [
     | ref |
     v pointer isNil ifTrue: [^ PBValidationError signal: 'PBNotation: ' , v printString , ' is not stored: it has no ref'].
@@ -189,36 +224,59 @@ PBNotation class >> _describeDateTime: v
  item the same way, and any other value by describe: (an atom of another type is
  its ref). A format-3 zone datetime (PBLegacyZoneDateTime) is refused with
  PBNotSupportedError naming its zone: ProtoBase describes the UTC instant, which
- needs the zone's rules (design spec 4.3)."
+ needs the zone's rules (design spec 4.3). A walk with an explicit stack, as
+ ProtoBase's: neither the depth of a value nor the length of a chain of records
+ is bounded by the protoST stack."
 PBNotation class >> describeObject: o
-  | d |
+  ^ _PBValueFrame fold: o
+    children: [:x | self _contentItemsOf: x]
+    leaf: [:x | self _describeContentLeaf: x]
+    node: [:x :results | self _contentNode: x results: results].
+
+"The items the content description of o is made from, in order, or nil for a
+ leaf: a record's attribute values (by name), a PBList's or PBSet's elements,
+ the keys and values (or elements and counts) of the other collections
+ interleaved, and the items of a tuple, list or map."
+PBNotation class >> _contentItemsOf: o
+  | state |
+  ((o isKindOf: PBObject) or: [o isKindOf: PBOpaqueAtom]) ifTrue: [
+    state := o state.
+    ^ o attributeNames asArray collect: [:name | state at: name]].
+  ((o isKindOf: PBList) or: [o isKindOf: PBSet]) ifTrue: [^ o elements asArray].
+  (self _isItemCollection: o) ifTrue: [^ self _interleaved: o items asArray].
+  ^ self _itemsOf: o.
+
+PBNotation class >> _isItemCollection: o
+  ^ (o isKindOf: PBCountedSet) or: [(o isKindOf: PBDictionary) or: [
+    (o isKindOf: PBHashDictionary) or: [o isKindOf: PBRepeatedKeysDictionary]]].
+
+"The description of a leaf of describeObject: (a count of a PBCountedSet is an
+ Integer, so its description is describe:'s)."
+PBNotation class >> _describeContentLeaf: o
   ((o isKindOf: DateTime) and: [o isLegacyZone]) ifTrue: [
     ^ o _unsupported: 'description in ProtoBase''s database notation (its UTC instant)'].
-  (o isKindOf: PBObject) ifTrue: [^ self _content: 'object' of: o].
-  (o isKindOf: PBOpaqueAtom) ifTrue: [^ self _content: 'opaque' of: o].
+  ^ self _describeScalar: o.
+
+"The content description of o from the descriptions of its items."
+PBNotation class >> _contentNode: o results: anArray
+  | d |
+  (o isKindOf: PBObject) ifTrue: [^ self _content: 'object' of: o attrs: anArray].
+  (o isKindOf: PBOpaqueAtom) ifTrue: [^ self _content: 'opaque' of: o attrs: anArray].
   ((o isKindOf: PBList) or: [o isKindOf: PBSet]) ifTrue: [
     d := self _one: 'collection' value: (self _typeName: o tag).
-    d at: 'elements' put: (o elements collect: [:each | self describeObject: each]).
+    d at: 'elements' put: anArray.
     ^ d].
-  ((o isKindOf: PBCountedSet) or: [(o isKindOf: PBDictionary) or: [
-      (o isKindOf: PBHashDictionary) or: [o isKindOf: PBRepeatedKeysDictionary]]]) ifTrue: [
+  (self _isItemCollection: o) ifTrue: [
     d := self _one: 'collection' value: (self _typeName: o tag).
-    d at: 'items' put: (o items collect: [:each |
-      { self describeObject: each key.
-        (o isKindOf: PBCountedSet) ifTrue: [self describe: each value] ifFalse: [self describeObject: each value] }]).
+    d at: 'items' put: (self _pairs: anArray).
     ^ d].
-  (o isKindOf: PBTuple) ifTrue: [^ self _one: 'tuple' value: (o asArray collect: [:each | self describeObject: each])].
-  (o isKindOf: PBFrozenList) ifTrue: [^ self _one: 'list' value: (o asArray collect: [:each | self describeObject: each])].
-  (o isKindOf: PBFrozenDict) ifTrue: [
-    ^ self _one: 'map' value: (o associations collect: [:each |
-      { self describeObject: each key. self describeObject: each value }])].
-  ^ self describe: o.
+  ^ self _node: o results: anArray.
 
-PBNotation class >> _content: aKind of: anAtom
-  | d state |
-  state := anAtom state.
+PBNotation class >> _content: aKind of: anAtom attrs: anArray
+  | d names |
+  names := anAtom attributeNames asArray.
   d := self _one: aKind value: (self _typeName: anAtom tag).
-  d at: 'attrs' put: (anAtom attributeNames collect: [:name | { name. self describeObject: (state at: name) }]).
+  d at: 'attrs' put: ((1 to: names size) asArray collect: [:i | { names at: i. anArray at: i }]).
   ^ d.
 
 "The description of the database aSnapshotOrTransaction reads (ProtoBase
@@ -295,8 +353,54 @@ PBNotation class >> dumpSpace: aSpace to: aPath
     databases at: name put: (self describeDatabase: (db snapshotAt: db history first))].
   report at: 'databases' put: databases.
   file := aPath isString ifTrue: [aPath asFileReference] ifFalse: [aPath].
-  file contents: (JSONModule JSON stringify: report) , (String with: Character lf).
+  file contents: (self jsonText: report) , (String with: Character lf).
   ^ report.
+
+"The JSON text of aValue (Dictionaries, Arrays and OrderedCollections of
+ scalars), the text protoST's JSON stringify: writes, but written with an
+ explicit stack: stringify: recurses through do: blocks, which protoST bounds
+ at about 1,000 levels, and a description nests two JSON levels per
+ container level (ProtoBase verify.dump_text, R128, for the same reason).
+ Scalars and keys are written by stringify: itself."
+PBNotation class >> jsonText: aValue
+  | out stack |
+  out := WriteStream on: String new.
+  stack := OrderedCollection new.
+  self _jsonOpen: aValue on: out stack: stack.
+  [stack isEmpty] whileFalse: [
+    | frame items position |
+    frame := stack last.
+    items := frame at: 1.
+    position := (frame at: 2) + 1.
+    position > items size
+      ifTrue: [
+        stack removeLast.
+        out nextPutAll: (frame at: 3)]
+      ifFalse: [
+        | item |
+        frame at: 2 put: position.
+        position > 1 ifTrue: [out nextPutAll: ','].
+        item := items at: position.
+        (frame at: 4)
+          ifTrue: [
+            out nextPutAll: (JSONModule JSON stringifyString: item key jsonKeyString); nextPutAll: ':'.
+            self _jsonOpen: item value on: out stack: stack]
+          ifFalse: [self _jsonOpen: item on: out stack: stack]]].
+  ^ out contents.
+
+"Writes a scalar, or the opening bracket of a container and pushes its frame:
+ { items. items written. closing bracket. whether the items are associations }."
+PBNotation class >> _jsonOpen: v on: aStream stack: aStack
+  (v isKindOf: Dictionary) ifTrue: [
+    | items |
+    items := OrderedCollection new.
+    v keysAndValuesDo: [:k :x | items add: k -> x].
+    aStream nextPutAll: '{'.
+    ^ aStack addLast: { items asArray. 0. '}'. true }].
+  ((v isKindOf: Array) or: [v isKindOf: OrderedCollection]) ifTrue: [
+    aStream nextPutAll: '['.
+    ^ aStack addLast: { v asArray. 0. ']'. false }].
+  aStream nextPutAll: (JSONModule JSON stringify: v).
 
 "{ atoms. collections. opaque type names (a Set) } of the atoms reachable from
  aRoot (nil: none), depth first, each decoded once by pointer."
@@ -334,15 +438,22 @@ PBNotation class >> _atomsIn: v into: anOrderedCollection
 
 "The description of the tree MessagePack decodeOrdered: answers (raw msgpack
  data: atom envelopes, root records, cluster messages): the scalars as
- describe:, an Array as array, a MessagePackMap as mpmap (pairs, in order)."
+ describe:, an Array as array, a MessagePackMap as mpmap (pairs, in order).
+ A walk with an explicit stack: a record nests up to 1024 containers."
 PBNotation class >> describeRaw: aTree
-  (aTree isKindOf: MessagePackMap) ifTrue: [
-    ^ self _one: 'mpmap' value: (aTree associations collect: [:each |
-      { self describeRaw: each key. self describeRaw: each value }])].
-  (aTree isKindOf: Array) ifTrue: [^ self _one: 'array' value: (aTree collect: [:each | self describeRaw: each])].
-  (aTree isKindOf: MessagePackExt) ifTrue: [
-    ^ PBValidationError signal: 'PBNotation: a msgpack ext value has no description'].
-  ^ self describe: aTree.
+  ^ _PBValueFrame fold: aTree
+    children: [:x |
+      (x isKindOf: MessagePackMap)
+        ifTrue: [self _interleaved: x associations asArray]
+        ifFalse: [(x isKindOf: Array) ifTrue: [x] ifFalse: [nil]]]
+    leaf: [:x |
+      (x isKindOf: MessagePackExt) ifTrue: [
+        PBValidationError signal: 'PBNotation: a msgpack ext value has no description'].
+      self _describeScalar: x]
+    node: [:x :results |
+      (x isKindOf: MessagePackMap)
+        ifTrue: [self _one: 'mpmap' value: (self _pairs: results)]
+        ifFalse: [self _one: 'array' value: results]].
 
 "=== building =================================================================="
 
@@ -356,12 +467,48 @@ PBNotation class >> _intFrom: aText of: aDescription
   ^ n.
 
 "The value a description names (the inverse of describe:, with a reference's
- type name turned back into its alias when it names a built-in type)."
+ type name turned back into its alias when it names a built-in type). A walk
+ with an explicit stack, as describe:."
 PBNotation class >> build: aDescription
-  | kind body |
+  ^ _PBValueFrame fold: aDescription
+    children: [:d | self _buildItemsOf: d]
+    leaf: [:d | self _buildScalar: d]
+    node: [:d :results | self _buildNode: d results: results].
+
+"The kind of a description, which has exactly one key."
+PBNotation class >> _kindOf: aDescription
   ((aDescription isKindOf: Dictionary) and: [aDescription size = 1]) ifFalse: [
     ^ self _bad: aDescription because: 'a description has exactly one key'].
-  kind := aDescription associations first key.
+  ^ aDescription associations first key.
+
+"The item descriptions of a list, tuple or map description (a map's keys and
+ values interleaved), or nil for any other description."
+PBNotation class >> _buildItemsOf: aDescription
+  | kind body |
+  kind := self _kindOf: aDescription.
+  body := aDescription at: kind.
+  (kind = 'list' or: [kind = 'tuple']) ifTrue: [^ body asArray].
+  kind = 'map' ifTrue: [
+    | out |
+    out := Array new: 2 * body size.
+    1 to: body size do: [:i |
+      out at: 2 * i - 1 put: ((body at: i) at: 1).
+      out at: 2 * i put: ((body at: i) at: 2)].
+    ^ out].
+  ^ nil.
+
+PBNotation class >> _buildNode: aDescription results: anArray
+  | kind |
+  kind := self _kindOf: aDescription.
+  kind = 'list' ifTrue: [^ PBFrozenList withAll: anArray].
+  kind = 'tuple' ifTrue: [^ PBTuple withAll: anArray].
+  ^ PBFrozenDict withAssociations: ((1 to: anArray size // 2) asArray collect: [:i |
+    (anArray at: 2 * i - 1) -> (anArray at: 2 * i)]).
+
+"The value of a description that is not a list, tuple or map."
+PBNotation class >> _buildScalar: aDescription
+  | kind body |
+  kind := self _kindOf: aDescription.
   body := aDescription at: kind.
   kind = 'nil' ifTrue: [^ nil].
   kind = 'bool' ifTrue: [^ body].
@@ -377,10 +524,6 @@ PBNotation class >> build: aDescription
   kind = 'datetime' ifTrue: [^ self _buildDateTime: body].
   kind = 'timedelta' ifTrue: [^ TimeSpan days: (body at: 1) seconds: (body at: 2) microseconds: (body at: 3)].
   kind = 'uuid' ifTrue: [^ self _buildUUID: body].
-  kind = 'list' ifTrue: [^ PBFrozenList withAll: (body collect: [:each | self build: each])].
-  kind = 'tuple' ifTrue: [^ PBTuple withAll: (body collect: [:each | self build: each])].
-  kind = 'map' ifTrue: [
-    ^ PBFrozenDict withAssociations: (body collect: [:pair | (self build: (pair at: 1)) -> (self build: (pair at: 2))])].
   kind = 'missing' ifTrue: [^ PBMissing default].
   kind = 'mutable' ifTrue: [^ PBMutableObject name: body].
   kind = 'ref' ifTrue: [^ self _buildRef: body].

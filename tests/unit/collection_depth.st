@@ -15,7 +15,7 @@ c := Check new.
 nest := [:n :seed :wrap | | v | v := seed. n timesRepeat: [v := wrap value: v]. v].
 lists := [:n | nest value: n value: 1 value: [:v | Array with: v]].
 tuples := [:n | nest value: n value: 1 value: [:v | PBTuple withAll: { v }]].
-limitMsg := 'PBCodec: the value nests deeper than MAX_VALUE_DEPTH = 1022'.
+limitMsg := 'The value nests deeper than MAX_VALUE_DEPTH = 1022'.
 
 "PBList: an element is a node's value, unwrapped."
 list := PBList new appendLast: (lists value: 1022).
@@ -43,7 +43,7 @@ set := PBSet new add: (tuples value: 510).
 c that: 'a Set of an element of 510 tuples' is: set count equals: 1.
 c that: 'its bucket node value is 1022 deep' is: (PBCodec valueDepth: (set stateAt: 'root') value) equals: 1022.
 c that: 'an element of 511 tuples (1022, its bucket would make 1024)' signals: PBValidationError
-  containing: 'PBSet element nests 1022 MessagePack containers deep, and its bucket tuple adds 2 around it, so it may nest at most 1020'
+  containing: 'PBSet element nests 1022 MessagePack containers deep, and its bucket tuple adds 2 around it, so it may nest at most 1020 (MAX_VALUE_DEPTH = 1022, format spec "Value nesting depth")'
   during: [PBSet new add: (tuples value: 511)].
 c that: 'an element past the limit itself' signals: PBValidationError containing: 'PBSet element: ' , limitMsg during: [
   PBSet new add: (tuples value: 512)].

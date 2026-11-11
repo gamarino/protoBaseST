@@ -24,7 +24,7 @@ nest := [:n :seed :wrap | | v | v := seed. n timesRepeat: [v := wrap value: v]. 
 lists := [:n :seed | nest value: n value: seed value: [:v | Array with: v]].
 roundTrips := [:v | | b | b := PBCodec encode: v. (PBCodec encode: (PBCodec decode: b)) = b].
 writeRefused := 'MAX_VALUE_DEPTH = 1022'.
-readRefused := 'encoded value nests deeper than MAX_VALUE_DEPTH = 1022'.
+readRefused := 'The encoded value nests deeper than MAX_VALUE_DEPTH = 1022 MessagePack containers, the most the storage format allows (format spec, "Value nesting depth")'.
 "raw: the bytes of wire data written by protoST's MessagePack, which knows nothing of the limit."
 raw := [:wire | MessagePack encode: wire].
 

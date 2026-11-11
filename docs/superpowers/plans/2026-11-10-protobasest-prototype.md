@@ -1378,14 +1378,22 @@ decision D60). No format version change. It supersedes ruling R12 (509).
 - No walk of a value depends on the protoST stack: protoST bounds a recursion through `do:`
   or `collect:` at about 1,000 levels (STATUS D38), so every walk that can meet a value 1022
   deep, or a key of 511 tuples, keeps an explicit stack, and the boundary tests run on an
-  actor's worker thread too.
+  actor's worker thread too. That includes `PBNotation` (`describe:`, `build:`,
+  `describeObject:`, `describeRaw:`, and `jsonText:`, which `dumpSpace:to:` writes with
+  instead of protoST's recursive JSON `stringify:`), as ProtoBase's `tools/notation.py` and
+  `verify.dump_text` (fix round 1, I1). Walks left recursive are bounded: through method
+  frames only (`_PBSequence =`, `_pbAddUnsavedAtomsTo:in:`; about 19,000 frames, D38), or by
+  an AVL tree's height (`avl.st`, under 100 levels for any count).
 - Effective per-structure limits (spec table, informative): a writer never writes a record a
   reader must refuse. Here: a `PBSet` element 1020 (its bucket tuple adds 2), a
   `PBHashDictionary` key or value 1018 (its `(key, value)` entry in its bucket tuple adds 4),
   refused when the mutator is called (`add:`, `union:`, `intersection:`, `setAt:value:`),
   never at commit. Left to the owning tasks: the `Root 'r': ...` and `Mutable 'm': ...`
   holders (Task 18, `setRootObject:` and the mutable-cell writes), the `PBCountedSet` element
-  limit 1018 (Task 22, its `(element, count)` bucket entry adds 4), and the index member-key
+  limit 1018 (Task 22, its `(element, count)` bucket entry adds 4), the
+  `PBRepeatedKeysDictionary` limits (a key 1022, a record 1018: `check:wrapping:` with 4, as
+  its `(record, count)` entry in its bucket tuple; its writes are a non-goal today, so this
+  binds a future writer), and the index member-key
   limits (orderable 1018, a vector index's store 1016, unorderable 254 nested lists or 169
   nested maps), which bind only if index maintenance is ever written (design spec 7.4 refuses
   changes to an indexed collection).

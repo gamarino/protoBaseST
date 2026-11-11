@@ -60,7 +60,16 @@ map keys are on the paths. A deeper value is refused when it is made
 canonical (PBValidationError) and deeper data when it is read
 (PBCorruptionError), at the same count; inside an atom record a value sits two
 containers deep, so a record holds at most 1024, what protoST's MessagePack
-(and msgpack-python from 1.2.0) packs and unpacks.
+(and msgpack-python from 1.2.0) packs and unpacks. The three depth refusals
+are ProtoBase's text word for word (values.too_deep_error, check_wrapped and
+codec._too_deep_data), without the 'PBCodec: ' prefix of the codec's other
+messages, so one database refuses one value with one sentence in both
+languages; only a holder naming a collection class differs ('PBList element',
+where ProtoBase says 'List element'). A record deeper than 1024 is refused by
+protoST's MessagePack before the codec sees it (PBCorruptionError, 'malformed
+msgpack'): its depth refusal carries no kind of its own to tell it from other
+malformed data, so it cannot yet name MAX_VALUE_DEPTH as ProtoBase's
+storage.format.undecodable_atom does (Task 17b fix round 1, M1).
 
   PBCodec canonical: aValue for: aHolder      canonical:, a PBValidationError
                                               of its own naming aHolder
@@ -193,18 +202,18 @@ PBCodec class >> check: aValue wrapping: anInteger holder: aHolder wrapper: aWra
   depth > limit ifTrue: [
     ^ PBValidationError signal: aHolder , ' nests ' , depth printString , ' MessagePack containers deep, and '
       , aWrapper , ' adds ' , anInteger printString , ' around it, so it may nest at most ' , limit printString
-      , ' (MAX_VALUE_DEPTH = ' , self maxValueDepth printString , ', format spec ''Value nesting depth'')'].
+      , ' (MAX_VALUE_DEPTH = ' , self maxValueDepth printString , ', format spec "Value nesting depth")'].
   ^ aValue.
 
 PBCodec class >> _tooDeep
-  ^ PBValidationError signal: 'PBCodec: the value nests deeper than MAX_VALUE_DEPTH = '
+  ^ PBValidationError signal: 'The value nests deeper than MAX_VALUE_DEPTH = '
     , self maxValueDepth printString
-    , ' MessagePack containers, the most the storage format allows (format spec, ''Value nesting depth'')'.
+    , ' MessagePack containers, the most the storage format allows (format spec, "Value nesting depth")'.
 
 PBCodec class >> _tooDeepData
-  ^ PBCorruptionError signal: 'PBCodec: the encoded value nests deeper than MAX_VALUE_DEPTH = '
+  ^ PBCorruptionError signal: 'The encoded value nests deeper than MAX_VALUE_DEPTH = '
     , self maxValueDepth printString
-    , ' MessagePack containers, the most the storage format allows (format spec, ''Value nesting depth'')'.
+    , ' MessagePack containers, the most the storage format allows (format spec, "Value nesting depth")'.
 
 "The msgpack containers the wire form of the canonical scalar v nests: 0 for a
  value written natively, 1 for a tag whose body is a scalar (@int, @dec,

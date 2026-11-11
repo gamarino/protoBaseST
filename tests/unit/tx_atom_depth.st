@@ -23,13 +23,13 @@ envelope := PBAtomEnvelope tag: 19 oid: (ByteArray new: 16) state: (PBFrozenDict
 c that: '1022 lists: the envelope is made' is: (depthOf value: (envelope state at: 'v')) equals: 1022.
 c that: 'and decodes back' is: (depthOf value: ((PBAtomEnvelope decode: envelope encode expecting: 19) state at: 'v')) equals: 1022.
 c that: '1023 lists: refused when the envelope is made, naming the attribute' signals: PBValidationError
-  containing: 'Attribute ''v'': PBCodec: the value nests deeper than MAX_VALUE_DEPTH = 1022' during: [
+  containing: 'Attribute ''v'': The value nests deeper than MAX_VALUE_DEPTH = 1022 MessagePack containers, the most the storage format allows (format spec, "Value nesting depth")' during: [
     PBAtomEnvelope tag: 19 oid: (ByteArray new: 16) state: (PBFrozenDict withAssociations: { 'v' -> (around value: 1023 value: 1) })].
 c that: 'a map 1023 deep too' signals: PBValidationError containing: 'MAX_VALUE_DEPTH = 1022' during: [
   PBAtomEnvelope tag: 19 oid: (ByteArray new: 16) state: (PBFrozenDict withAssociations: {
     'v' -> (around value: 1020 value: (PBFrozenDict withAssociations: { 1 -> 2 })) })].
 c that: 'a DBObject field names itself' signals: PBValidationError
-  containing: 'Field ''v'' of proto_db.core.dbobject.DBObject: PBCodec: the value nests deeper' during: [
+  containing: 'Field ''v'' of proto_db.core.dbobject.DBObject: The value nests deeper than MAX_VALUE_DEPTH = 1022 MessagePack containers, the most the storage format allows (format spec, "Value nesting depth")' during: [
     PBObject withAll: { 'v' -> (around value: 1023 value: 1) }].
 c that: 'a DBObject field of 1022 lists' is: (depthOf value: ((PBObject withAll: { 'v' -> deep }) at: 'v')) equals: 1022.
 
