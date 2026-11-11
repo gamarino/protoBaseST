@@ -19,7 +19,7 @@ values"). `src/protobase/values.st` and `src/protobase/codec.st` hold them:
 |---|---|---|
 | nil, bool, int, float, str, bytes | `nil`, `true`/`false`, `Integer`, `Float`, `String`, `ByteArray` | an integer outside -2^63..2^64-1 is `{"@int": hex}`; floats keep their 64 bits |
 | decimal, date, time, datetime, timedelta | `Decimal`, `CalendarDate`, `TimeOfDay`, `DateTime`, `TimeSpan` (protoST `lib/`) | `@dec` is the to-scientific-string |
-| uuid | `UUID` (protoST `lib/uuid.st`, imported by the program) | until that library exists, `@uuid` is refused with `PBNotSupportedError` |
+| uuid | `UUID` (protoST `lib/uuid.st`, 0.10.0; `protobase` imports it) | `@uuid` is the 16 bytes in RFC 4122 order; `UUID new` is a version-4 UUID |
 | list, tuple, map | `PBFrozenList`, `PBTuple`, `PBFrozenDict` | immutable; `at:` is 1-based; a map keeps its insertion order |
 | missing, mutable | `PBMissing default`, `PBMutableObject name: 'cell'` | |
 | ref | `PBUnresolvedRef` (decoded without a resolver), later the atom | |
@@ -162,8 +162,8 @@ space close.
 
 ## Running the tests
 
-The tests need a protoST binary 0.9.0 or newer (run from a protoST checkout on the branch that
-provides `lib/decimal.st` and `lib/calendar.st`). Point `PROTOST` at it:
+The tests need a protoST binary 0.10.0 or newer (run from a protoST checkout on the branch that
+provides `lib/decimal.st`, `lib/calendar.st` and `lib/uuid.st`). Point `PROTOST` at it:
 
 ```sh
 export PROTOST=../protoST/build_release/protost      # default: protost from PATH

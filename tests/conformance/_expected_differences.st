@@ -37,9 +37,6 @@ Object subclass: #ExpectedDifferences.
 
 ExpectedDifferences class >> all
   ^ {
-    { 'values'. 'uuid'. #(#('decode' 'PBNotSupportedError') #('encode' 'PBNotSupportedError')).
-      'decode: PBNotSupportedError; the value cannot even be built: lib/uuid.st is not in protoST 0.9.0'.
-      'Task 5, Step 6' }.
     { 'values_decode_only'. 'datetime-zone-format3'. #(#('decode' nil) #('reencode' 'PBValidationError')).
       'decodes to a PBLegacyZoneDateTime (wall clock), not the instant; re-encoding it is PBValidationError: the instant needs a tz database'.
       'permanent, design 4.3' }.
@@ -48,31 +45,7 @@ ExpectedDifferences class >> all
       'permanent, design 4.3' }.
     { 'invalid'. 'value-instant-wall-out-of-range'. #(#('accepted' nil)).
       'accepted and presented in UTC: the wall-clock range needs the zone''s rules; the format spec (Known gaps) lets a reader without a database present the instant in UTC'.
-      'permanent, design 4.3' }.
-    { 'order'. 'uuid 00000000000000000000000000000001'. #(#('order' 'PBNotSupportedError')).
-      'the value cannot be built: lib/uuid.st is not in protoST 0.9.0 (PBNotation build: signals PBNotSupportedError)'.
-      'Task 5, Step 6' }.
-    { 'order'. 'uuid ff000000000000000000000000000000'. #(#('order' 'PBNotSupportedError')).
-      'the value cannot be built: lib/uuid.st is not in protoST 0.9.0 (PBNotation build: signals PBNotSupportedError)'.
-      'Task 5, Step 6' }.
-    { 'hashes'. 'uuid ffffffffffffffffffffffffffffffff'. #(#('hash' 'PBNotSupportedError')).
-      'the value cannot be built: lib/uuid.st is not in protoST 0.9.0 (PBNotation build: signals PBNotSupportedError)'.
-      'Task 5, Step 6' }.
-    { 'hashes'. 'uuid 12345678123456781234567812345678'. #(#('hash' 'PBNotSupportedError')).
-      'the value cannot be built: lib/uuid.st is not in protoST 0.9.0 (PBNotation build: signals PBNotSupportedError)'.
-      'Task 5, Step 6' }.
-    { 'exact_tokens'. 'uuid 12345678123456781234567812345678'. #(#('token' 'PBNotSupportedError')).
-      'the value cannot be built: lib/uuid.st is not in protoST 0.9.0 (PBNotation build: signals PBNotSupportedError)'.
-      'Task 5, Step 6' }.
-    { 'database'. '13966'. #(#('decode' 'PBNotSupportedError')).
-      'the record holds a @uuid value, which needs lib/uuid.st (not in protoST 0.9.0): its envelope is refused with PBNotSupportedError'.
-      'Task 5, Step 6' }.
-    { 'database_contents'. 'database'. #(#('describe' 'PBNotSupportedError')).
-      'the root invoice holds a @uuid value, which needs lib/uuid.st (not in protoST 0.9.0): describing the whole database is refused with PBNotSupportedError'.
-      'Task 5, Step 6' }.
-    { 'database_contents'. 'root invoice'. #(#('describe' 'PBNotSupportedError')).
-      'the record holds a @uuid value, which needs lib/uuid.st (not in protoST 0.9.0): its envelope is refused with PBNotSupportedError'.
-      'Task 5, Step 6' } }.
+      'permanent, design 4.3' } }.
 
 "The entries of one section, as an OrderedCollection."
 ExpectedDifferences class >> forSection: aSection

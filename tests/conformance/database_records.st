@@ -1,4 +1,4 @@
-"EXPECT: database records 126/127 expected 1"
+"EXPECT: database records 127/127"
 "The record walk of the database section (README, 'Using the vectors', 7, first
  part): the space opens with PBFileStorage (its space.root is the manifest's
  root), and the segment, walked from offset 26 (recordsOfSegment:), holds

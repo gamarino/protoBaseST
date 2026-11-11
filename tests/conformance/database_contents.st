@@ -1,4 +1,4 @@
-"EXPECT: database contents ok (database contents 15/17 expected 2)"
+"EXPECT: database contents ok (database contents 17/17)"
 "The database section read as a database (README, 'Using the vectors', 7, second
  part), on a copy of vectors/database: following space.root -> SpaceRoot ->
  databases['db'] -> DatabaseRoot, PBNotation describeDatabase: of a snapshot of the

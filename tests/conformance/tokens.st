@@ -1,4 +1,4 @@
-"EXPECT: exact_tokens 33/34 expected 1 atom_tokens 3/3"
+"EXPECT: exact_tokens 34/34 atom_tokens 3/3"
 "The manifest's exact_tokens and atom_tokens sections (FS 'Exact tokens'): PBKeys
  exactToken: of each value is the listed bytes. The atom_tokens entries describe their
  value in words; this runner builds the three values they name, with an atom of the

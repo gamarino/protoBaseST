@@ -15,7 +15,7 @@ Kinds (format kind: protoST class):
   float: Float                       str: String         bytes: ByteArray
   decimal: Decimal (@dec)            date: CalendarDate (@date)
   time: TimeOfDay (@time)            datetime: DateTime (@dt)
-  timedelta: TimeSpan (@td)          uuid: UUID (@uuid, when lib/uuid.st exists)
+  timedelta: TimeSpan (@td)          uuid: UUID (@uuid)
   list: PBFrozenList (an Array or an OrderedCollection is copied)
   tuple: PBTuple (@tup)              map: PBFrozenDict (@map)
   missing: PBMissing default         mutable: PBMutableObject (@mut)
@@ -69,10 +69,7 @@ Import from: 'decimal'.
 Import from: 'calendar'.
 Import from: 'protobase/zonekeys'.
 Import from: 'protobase/registry'.
-
-"UUID values use the global UUID of protoST's lib/uuid.st (plan Task 5) when a
- program has imported it; this module does not import it, since that library
- is not in protoST 0.9.0. Without it @uuid is refused with PBNotSupportedError."
+Import from: 'uuid'.
 
 Object subclass: #PBCodec.
 
@@ -103,9 +100,6 @@ PBCodec class >> _instantLow
 
 PBCodec class >> _instantHigh
   ^ 315537897599999999 - 86399999999.
-
-PBCodec class >> _uuidClass
-  ^ Smalltalk at: #UUID ifAbsent: [nil].
 
 "=== canonical values ========================================================="
 
@@ -151,7 +145,6 @@ PBCodec class >> _ownWireDepth: v
   ^ 1.
 
 PBCodec class >> _canonicalShallow: v depth: d
-  | uuid |
   d > self _maxWireDepth ifTrue: [^ self _tooDeep].
   v isNil ifTrue: [^ v].
   (v == true or: [v == false]) ifTrue: [^ v].
@@ -178,11 +171,9 @@ PBCodec class >> _canonicalShallow: v depth: d
   (v isKindOf: TimeSpan) ifTrue: [
     v class == TimeSpan ifTrue: [^ v].
     ^ TimeSpan microseconds: (self _field: 'total' of: v base: TimeSpan)].
-  uuid := self _uuidClass.
-  (uuid notNil and: [v isKindOf: uuid]) ifTrue: [
-    v class == uuid ifTrue: [^ v].
-    ^ PBNotSupportedError signal: 'PBCodec: a subclass of UUID (' , v class name
-      , ') cannot be reduced to its base value yet'].
+  (v isKindOf: UUID) ifTrue: [
+    v class == UUID ifTrue: [^ v].
+    ^ UUID fromBytes: (self _field: 'bytes' of: v base: UUID)].
   v == PBMissing default ifTrue: [^ v].
   (v isKindOf: PBMutableObject) ifTrue: [
     self _checkUTF8: (self _field: 'cellName' of: v base: PBMutableObject).
@@ -373,7 +364,6 @@ PBCodec class >> _tagged: aTag body: aBody
   ^ MessagePackMap withAll: { aTag -> aBody }.
 
 PBCodec class >> _wire: v ref: aBlock
-  | uuid |
   v isNil ifTrue: [^ v].
   (v == true or: [v == false]) ifTrue: [^ v].
   v isInteger ifTrue: [
@@ -393,8 +383,7 @@ PBCodec class >> _wire: v ref: aBlock
       v hour. v minute. v second. v microsecond. v fold. self _wireZone: v zone }].
   (v isKindOf: TimeSpan) ifTrue: [
     ^ self _tagged: '@td' body: { v days. v seconds. v microseconds }].
-  uuid := self _uuidClass.
-  (uuid notNil and: [v isKindOf: uuid]) ifTrue: [^ self _tagged: '@uuid' body: v bytes].
+  (v isKindOf: UUID) ifTrue: [^ self _tagged: '@uuid' body: v bytes].
   v == PBMissing default ifTrue: [^ self _tagged: '@missing' body: 0].
   (v isKindOf: PBMutableObject) ifTrue: [^ self _tagged: '@mut' body: v name].
   (v isKindOf: PBTuple) ifTrue: [
@@ -604,14 +593,9 @@ PBCodec class >> _decodeTimeSpan: aBody
     tag: '@td' body: aBody.
 
 PBCodec class >> _decodeUUID: aBody
-  | uuid |
   ((aBody isKindOf: ByteArray) and: [aBody size = 16]) ifFalse: [
     ^ self _corrupt: '@uuid' body: aBody because: '16 bytes were expected'].
-  uuid := self _uuidClass.
-  uuid isNil ifTrue: [
-    ^ PBNotSupportedError signal: 'PBCodec: the @uuid value ' , (self _preview: aBody)
-      , ' needs protoST''s UUID (lib/uuid.st, protoST 0.10.0), imported by the program'].
-  ^ uuid fromBytes: aBody.
+  ^ UUID fromBytes: aBody.
 
 PBCodec class >> _decodeMap: aBody resolver: aResolver
   | pairs |

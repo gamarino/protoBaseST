@@ -1,4 +1,4 @@
-"EXPECT: hashes 34/36 expected 2 atom_hashes 3/3"
+"EXPECT: hashes 36/36 atom_hashes 3/3"
 "The manifest's hashes and atom_hashes sections (FS 'Hash keys'): PBKeys hashKey: of each
  value, and of an atom with each oid, is the listed signed 64-bit integer. Ids are
  'kind body' and 'oid <hex>' (_keyvectors.st); a listed expected difference prints

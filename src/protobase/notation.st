@@ -44,6 +44,7 @@ Import from: 'protobase/registry'.
 Import from: 'protobase/codec'.
 Import from: 'decimal'.
 Import from: 'calendar'.
+Import from: 'uuid'.
 
 Object subclass: #PBNotation classVariableNames: 'JSONModule'.
 
@@ -141,7 +142,6 @@ PBNotation class >> _typeName: aTag
 "The description of a decoded canonical value: its kind decides, never its
  truthiness or equality; anything else signals PBValidationError."
 PBNotation class >> describe: v
-  | uuid |
   v isNil ifTrue: [^ self _one: 'nil' value: nil].
   (v == true or: [v == false]) ifTrue: [^ self _one: 'bool' value: v].
   v isInteger ifTrue: [^ self _one: 'int' value: v printString].
@@ -154,8 +154,7 @@ PBNotation class >> describe: v
   (v isKindOf: TimeOfDay) ifTrue: [
     ^ self _one: 'time' value: { v hour. v minute. v second. v microsecond. v fold. self _tz: v zone }].
   (v isKindOf: TimeSpan) ifTrue: [^ self _one: 'timedelta' value: { v days. v seconds. v microseconds }].
-  uuid := PBCodec _uuidClass.
-  (uuid notNil and: [v isKindOf: uuid]) ifTrue: [^ self _one: 'uuid' value: (self _hex: v bytes)].
+  (v isKindOf: UUID) ifTrue: [^ self _one: 'uuid' value: (self _hex: v bytes)].
   v == PBMissing default ifTrue: [^ self _one: 'missing' value: true].
   (v isKindOf: PBMutableObject) ifTrue: [^ self _one: 'mutable' value: v name].
   (v isKindOf: PBTuple) ifTrue: [^ self _one: 'tuple' value: (v asArray collect: [:each | self describe: each])].
@@ -419,11 +418,7 @@ PBNotation class >> _buildDateTime: body
     zone: (self _zoneOf: tz).
 
 PBNotation class >> _buildUUID: aHexText
-  | uuid |
-  uuid := PBCodec _uuidClass.
-  uuid isNil ifTrue: [
-    ^ PBNotSupportedError signal: 'PBNotation: a uuid needs protoST''s UUID (lib/uuid.st, protoST 0.10.0), imported by the program'].
-  ^ uuid fromBytes: (self _bytesFromHex: aHexText).
+  ^ UUID fromBytes: (self _bytesFromHex: aHexText).
 
 PBNotation class >> _buildRef: body
   ^ PBUnresolvedRef

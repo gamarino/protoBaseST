@@ -1,4 +1,4 @@
-"EXPECT: order ascending 41/43 expected 2 equal 4/4 unorderable 5/5"
+"EXPECT: order ascending 43/43 equal 4/4 unorderable 5/5"
 "The manifest's order section (FS 'Order keys'):
    ascending    every value orders after every earlier one (all pairs, both ways, through
                 PBKeys compare:with: and PBOrderKey <), and compares 0 with itself

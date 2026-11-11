@@ -2,7 +2,7 @@
 "Each tagged form of FS 'Canonical values' (the bytes come from ProtoBase's
  encoder at v2.0.0rc1): the value encodes to the bytes, the bytes decode to an
  equal value of the right class, and re-encode to the same bytes. @uuid is in
- codec_tagged_uuid.st (it needs protoST's lib/uuid.st)."
+ codec_tagged_uuid.st."
 Import from: 'protobase'.
 Import from: '_check'.
 Object subclass: #TestResolver.

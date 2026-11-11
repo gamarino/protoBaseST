@@ -58,6 +58,7 @@ This module needs no other protoBaseST module when it loads: the value classes
 Import from: 'protobase/errors'.
 Import from: 'decimal'.
 Import from: 'calendar'.
+Import from: 'uuid'.
 
 "=== PBOrderKey ==============================================================="
 
@@ -165,7 +166,6 @@ PBKeys class >> _preview: anObject
   ^ text size <= 80 ifTrue: [text] ifFalse: [(text copyFrom: 1 to: 77) , '...'].
 
 PBKeys class >> _orderKey: v
-  | uuid |
   v isNil ifTrue: [^ self _key: 1 payload: 0].
   v == false ifTrue: [^ self _key: 2 payload: 0].
   v == true ifTrue: [^ self _key: 2 payload: 1].
@@ -192,8 +192,7 @@ PBKeys class >> _orderKey: v
     ^ self _key: 8 payload: v microsecondsSinceMidnight - v _offset].
   (v isKindOf: TimeSpan) ifTrue: [^ self _key: 11 payload: v totalMicroseconds].
   v == PBMissing default ifTrue: [^ self _key: 0 payload: 0].
-  uuid := PBCodec _uuidClass.
-  (uuid notNil and: [v isKindOf: uuid]) ifTrue: [^ self _key: 12 payload: (self _unsignedBigEndian: v bytes)].
+  (v isKindOf: UUID) ifTrue: [^ self _key: 12 payload: (self _unsignedBigEndian: v bytes)].
   (v isKindOf: PBTuple) ifTrue: [^ self _key: 13 payload: (v asArray collect: [:each | self _orderKey: each])].
   (v isKindOf: PBMutableObject) ifTrue: [^ self _key: 15 payload: v name].
   (v isKindOf: PBAtom) ifTrue: [^ self _key: 14 payload: (self _unsignedBigEndian: (self _oidBytes: (self _oidOf: v)))].
