@@ -1,6 +1,6 @@
 "-- collections.st: the collections of format 4, read side --
 
-ProtoBase's collections (format spec v2.0.0rc1, 'Collections'; ProtoBase
+ProtoBase's collections (format spec v2.0.0rc2, 'Collections'; ProtoBase
 proto_db/collections/*.py at the tag), with the read API of the design spec
 5.2. Every collection persists count and indexes (a reference to a
 PBIndexSet) plus its own fields:
@@ -294,6 +294,20 @@ PBIndexedCollection >> elements
 PBIndexedCollection >> _probe: aKey
   ^ PBCodec canonical: aKey.
 
+"aValue canonical, a PBValidationError of the codec naming aRole of this
+ collection ('PBList element', 'PBDictionary key'), as ProtoBase's
+ canonical_for names the List's element."
+PBIndexedCollection >> _canonical: aValue as: aRole
+  ^ PBCodec canonical: aValue for: self class name , ' ' , aRole.
+
+"As _canonical:as:, refused (PBValidationError) also when the anInteger
+ containers aWrapper adds around the value in a stored node would make it nest
+ deeper than PBCodec maxValueDepth: at the call, not at commit (ProtoBase
+ check_wrapped)."
+PBIndexedCollection >> _canonical: aValue as: aRole wrapping: anInteger by: aWrapper
+  ^ PBCodec check: (self _canonical: aValue as: aRole) wrapping: anInteger
+    holder: self class name , ' ' , aRole wrapper: aWrapper.
+
 "--- new versions ---"
 
 "An empty collection of this class (ProtoBase's constructor): no elements, an
@@ -517,7 +531,7 @@ PBList >> setAt: anIndex value: aValue
   | position value |
   self _checkWritable: 'setAt:value:'.
   position := self _position: anIndex upper: self count - 1.
-  value := PBCodec canonical: aValue.
+  value := self _canonical: aValue as: 'element'.
   ^ self _withRoot: (PBAvl posSet: (self stateAt: 'root') at: position value: value) count: self count.
 
 "A list with aValue inserted before position anIndex (insertAt: count appends)."
@@ -525,7 +539,7 @@ PBList >> insertAt: anIndex value: aValue
   | position value |
   self _checkWritable: 'insertAt:value:'.
   position := self _position: anIndex upper: self count.
-  value := PBCodec canonical: aValue.
+  value := self _canonical: aValue as: 'element'.
   ^ self _withRoot: (PBAvl posInsert: (self stateAt: 'root') at: position value: value) count: self count + 1.
 
 "A list without the element at anIndex (a new list, unlike Pharo's
@@ -552,7 +566,7 @@ PBList >> extend: aCollection
   | values |
   "A String is refused (_elementsOf:for:)."
   values := self _elementsOf: aCollection for: 'extend:'.
-  1 to: values size do: [:i | values at: i put: (PBCodec canonical: (values at: i))].
+  1 to: values size do: [:i | values at: i put: (self _canonical: (values at: i) as: 'element')].
   "As ProtoBase: nothing to add answers the receiver before the indexes are
    looked at, so an indexed list answers itself too."
   values isEmpty ifTrue: [^ self].
@@ -658,9 +672,9 @@ PBDictionary >> items
 PBDictionary >> setAt: aKey value: aValue
   | key stored put |
   self _checkWritable: 'setAt:value:'.
-  key := PBCodec canonical: aKey.
+  key := self _canonical: aKey as: 'key'.
   "The log keeps the stored form: a replay reuses the box (ProtoBase D51)."
-  stored := _PBTree boxed: (PBCodec canonical: aValue).
+  stored := _PBTree boxed: (self _canonical: aValue as: 'value').
   put := PBAvl keyPut: (self stateAt: 'root') key: key value: stored nodeClass: PBKeyNode.
   ^ self
     _withRoot: (put at: 1)
@@ -672,7 +686,7 @@ PBDictionary >> setAt: aKey value: aValue
 PBDictionary >> removeAt: aKey
   | key removed |
   self _checkWritable: 'removeAt:'.
-  key := PBCodec canonical: aKey.
+  key := self _canonical: aKey as: 'key'.
   removed := PBAvl keyRemove: (self stateAt: 'root') key: key.
   ^ self
     _withRoot: (removed at: 1)
@@ -752,14 +766,23 @@ PBHashDictionary >> items
 
 "--- writes (ProtoBase HashDictionary set_at, remove_at) ---"
 
+"The MessagePack containers a bucket node value adds around a key and its
+ value (format spec, 'Value nesting depth'): the bucket tuple and the entry
+ (key, value), two @tup (ProtoBase HashDictionary.ENTRY_WRAPPING)."
+PBHashDictionary class >> entryWrapping
+  ^ 4.
+
+PBHashDictionary class >> wrapper
+  ^ 'its bucket entry (key, value) in its bucket tuple'.
+
 "A hash dictionary with aKey mapped to aValue. The key must be hashable and
  orderable (a list, a map or a NaN is PBValidationError); an existing key
  keeps its stored key object and its place in the bucket."
 PBHashDictionary >> setAt: aKey value: aValue
   | key value found entries position |
   self _checkWritable: 'setAt:value:'.
-  key := PBCodec canonical: aKey.
-  value := PBCodec canonical: aValue.
+  key := self _canonical: aKey as: 'key' wrapping: self class entryWrapping by: self class wrapper.
+  value := self _canonical: aValue as: 'value' wrapping: self class entryWrapping by: self class wrapper.
   found := _PBBuckets find: key in: (self stateAt: 'root') pairs: true owner: self.
   entries := found at: 2.
   position := found at: 3.
@@ -778,7 +801,7 @@ PBHashDictionary >> setAt: aKey value: aValue
 PBHashDictionary >> removeAt: aKey
   | key found op |
   self _checkWritable: 'removeAt:'.
-  key := PBCodec canonical: aKey.
+  key := self _canonical: aKey as: 'key'.
   found := _PBBuckets find: key in: (self stateAt: 'root') pairs: true owner: self.
   op := PBTuple withAll: { 'remove'. key }.
   (found at: 3) = 0 ifTrue: [^ self _withRoot: (self stateAt: 'root') count: self count op: op].
@@ -899,12 +922,20 @@ PBSet >> _pairs
 PBSet class >> _logsOperations
   ^ true.
 
+"The MessagePack containers a bucket node value adds around an element: the
+ bucket tuple, a @tup (ProtoBase Set.ELEMENT_WRAPPING)."
+PBSet class >> elementWrapping
+  ^ 2.
+
+PBSet class >> wrapper
+  ^ 'its bucket tuple'.
+
 "A set holding anElement; when it is present already, a new version with the
  same content. The element must be orderable (PBValidationError otherwise)."
 PBSet >> add: anElement
   | element found op |
   self _checkWritable: 'add:'.
-  element := PBCodec canonical: anElement.
+  element := self _canonical: anElement as: 'element' wrapping: self class elementWrapping by: self class wrapper.
   found := _PBBuckets find: element in: (self stateAt: 'root') pairs: false owner: self.
   op := PBTuple withAll: { 'add'. element }.
   (found at: 3) > 0 ifTrue: [^ self _withRoot: (self stateAt: 'root') count: self count op: op].
@@ -919,7 +950,7 @@ PBSet >> add: anElement
 PBSet >> remove: anElement
   | element found op |
   self _checkWritable: 'remove:'.
-  element := PBCodec canonical: anElement.
+  element := self _canonical: anElement as: 'element'.
   found := _PBBuckets find: element in: (self stateAt: 'root') pairs: false owner: self.
   op := PBTuple withAll: { 'remove'. element }.
   (found at: 3) = 0 ifTrue: [^ self _withRoot: (self stateAt: 'root') count: self count op: op].
@@ -945,7 +976,8 @@ PBSet >> intersection: aCollection
       "ProtoBase builds Set.from_iterable(other): membership by order key."
       elements := self _elementsOf: aCollection for: 'intersection:'.
       orderKeys := Dictionary new.
-      1 to: elements size do: [:i | orderKeys at: (PBKeys orderKey: (PBCodec canonical: (elements at: i))) put: true]].
+      1 to: elements size do: [:i | orderKeys at: (PBKeys orderKey: (self _canonical: (elements at: i) as: 'element'
+        wrapping: self class elementWrapping by: self class wrapper)) put: true]].
   members := self elements.
   result := self _newVersion.
   1 to: members size do: [:i |

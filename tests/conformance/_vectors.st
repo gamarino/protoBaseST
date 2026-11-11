@@ -40,7 +40,7 @@ Vectors class >> json
   ^ JSONModule JSON.
 
 Vectors class >> pinnedDigest
-  ^ '5f86eb09ed1683aa9f048051c64cca68d23b9fb753e87416cb1ecf11ed406df0'.
+  ^ '6e913bcb960dee1c71d955754a3519f573cdb435e66476561d8e873f602dfbf4'.
 
 Vectors class >> bytesOf: aPath
   ^ ('vectors/' , aPath) asFileReference binaryContents.

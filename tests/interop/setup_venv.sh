@@ -2,15 +2,18 @@
 # Creates the Python side of the interop tests (plan call C9). Idempotent.
 #
 #   tests/interop/.venv/            venv made with --system-site-packages
-#   tests/interop/.venv/protobase/  proto_db extracted with `git archive v2.0.0rc1`
+#   tests/interop/.venv/protobase/  proto_db extracted with `git archive v2.0.0rc2`
 #
-# msgpack==1.1.2 is installed only when the import is missing or another version. That is the
-# only use of the network. Environment: PYTHON (default python3), PROTOBASE_REPO (default ../ProtoBase).
+# msgpack==1.2.4 is installed only when the import is missing or another version: ProtoBase
+# v2.0.0rc2 needs msgpack >= 1.2.0 (its packer writes the 1024 containers of a record holding a
+# value of MAX_VALUE_DEPTH; format spec, 'Value nesting depth') and runs with msgpack's C
+# extension (its pure-Python fallback recurses per container). That is the only use of the
+# network. Environment: PYTHON (default python3), PROTOBASE_REPO (default ../ProtoBase).
 set -euo pipefail
 
-TAG="v2.0.0rc1"
-TAG_COMMIT="c48f73e"
-MSGPACK_VERSION="1.1.2"
+TAG="v2.0.0rc2"
+TAG_COMMIT="343b762"
+MSGPACK_VERSION="1.2.4"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="${PROTOBASE_REPO:-$HERE/../../../ProtoBase}"
 VENV="$HERE/.venv"
@@ -42,4 +45,5 @@ if [[ "$(cat "$VENV/protobase/.commit" 2>/dev/null || true)" != "$full" ]]; then
     echo "$full" > "$VENV/protobase/.commit"
 fi
 
+"$PY" -c "import msgpack._cmsgpack" 2>/dev/null || die "msgpack's C extension does not import (ProtoBase needs it)"
 PYTHONPATH="$VENV/protobase" "$PY" -c "import proto_db, msgpack; print('venv ok: msgpack', msgpack.version, 'proto_db from', proto_db.__file__)"

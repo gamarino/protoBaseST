@@ -1,6 +1,6 @@
 "-- records.st: PBObject, the records of format 4, read side --
 
-ProtoBase's DBObject (format spec v2.0.0rc1, 'Records' and 'Atom records',
+ProtoBase's DBObject (format spec v2.0.0rc2, 'Records' and 'Atom records',
 'Attribute names'; ProtoBase proto_db/core/dbobject.py at the tag): an
 immutable record of named canonical values.
 
@@ -126,9 +126,14 @@ PBObject class >> _state: anArrayOfAssociations with: aChanges
     given add: name.
     i := names indexOf: name.
     i = 0
-      ifTrue: [names addLast: name. values addLast: (PBCodec canonical: each value)]
-      ifFalse: [values at: i put: (PBCodec canonical: each value)]].
+      ifTrue: [names addLast: name. values addLast: (self _canonical: each value field: name)]
+      ifFalse: [values at: i put: (self _canonical: each value field: name)]].
   ^ PBFrozenDict withAssociations: ((1 to: names size) asArray collect: [:i | (names at: i) -> (values at: i)]).
+
+"aValue canonical, a PBValidationError of the codec naming the field aName
+ (ProtoBase: Field 'name' of <type name>: ...)."
+PBObject class >> _canonical: aValue field: aName
+  ^ PBCodec canonical: aValue for: 'Field ' , aName printString , ' of ' , self typeName.
 
 "aName, when it may be a persisted attribute of this class; PBValidationError
  naming the rule it breaks otherwise (format spec 'Atom records')."

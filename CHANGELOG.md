@@ -152,3 +152,23 @@
   `store_close_race.st`, `store_crash_states.st`, `store_segment_rollover.st`, the seams of
   `tests/unit/_seams.st`, `tests/interop/crash_states_to_py.sh`, and the reverse lock
   exclusion (protoST holds, ProtoBase times out) in `st_write_to_py.sh`.
+- ProtoBase `v2.0.0rc2` (plan Task 17b, ruling R18; ask B12 resolved): a value nests at most
+  `MAX_VALUE_DEPTH` = 1022 msgpack containers (`PBCodec maxValueDepth`), counted from the value
+  as the format spec counts it (an empty container counts like any other; map keys are on the
+  paths), and a record therefore at most 1024. Depth 1022 round-trips; 1023 is
+  `PBValidationError` when written, naming the field, attribute or collection element, key or
+  value, and `PBCorruptionError` when read. This replaces the 511-container cut (509 inside a
+  record, ruling R12), which a conforming reader may no longer apply;
+  `canonical:enclosingDepth:` and `toWire:atomRef:enclosingDepth:` are removed, and
+  `canonical:for:`, `toWire:atomRef:for:`, `valueDepth:` and
+  `check:wrapping:holder:wrapper:` are added. `PBSet` refuses an element past 1020 and
+  `PBHashDictionary` a key or value past 1018, when the mutator is called. The codec's walks,
+  and the order keys, hash keys, tuple comparison and map-key checks, use explicit stacks: a
+  recursion through `do:` or `collect:` stops at about 1,000 levels in protoST. Needs protoST's
+  MessagePack at 1024 levels (protoIO `e952077`, protoST `b412b38`).
+- The conformance vectors are those of `v2.0.0rc2` (digest `6e913bcb…dfbf4`): the
+  `values_depth` section (`tests/conformance/values_depth.st`), seven `value-depth-over-*`
+  invalid vectors, and the regenerated database vector. The interop venv holds ProtoBase
+  `v2.0.0rc2` with msgpack 1.2.4; `env.sh` fails when the venv holds another commit. The
+  recursion-limit workaround of `st_deep_to_py.sh` and its `NOTE:` line are gone; the deep
+  cross tests run at 1022 both ways and check the refusals of 1023 both ways.

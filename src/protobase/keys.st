@@ -1,7 +1,7 @@
 "-- keys.st: order keys, hash keys, exact tokens and the map-key rule --
 
 The functions of the value model that keyed structures place their keys by
-(ProtoBase format spec v2.0.0rc1, 'Order, equality and hashing' and 'Map
+(ProtoBase format spec v2.0.0rc2, 'Order, equality and hashing' and 'Map
 keys'; ProtoBase proto_db/values.py):
 
   PBKeys orderKey: aValue          a PBOrderKey (rank, payload); a NaN, a list,
@@ -59,6 +59,87 @@ Import from: 'protobase/errors'.
 Import from: 'decimal'.
 Import from: 'calendar'.
 Import from: 'uuid'.
+
+"=== walks ===================================================================="
+
+"One open container of a walk over a value (the explicit stacks of PBCodec and
+ PBKeys): its kind, the container (or the wire data) it came from, its items,
+ the results of the items walked so far, and the depth its items sit at.
+ Private to one walk, which is its only user; never a value. The walk hands
+ out the items in order and adds one result per item before it asks for the
+ next, so the count of results is the cursor: no field changes after the
+ initialiser (only the results collection grows)."
+Object subclass: #_PBValueFrame instanceVariableNames: 'kind source items results depth'.
+
+_PBValueFrame class >> kind: aSymbol source: anObject items: anArray depth: anInteger
+  ^ self basicNew _setKind: aSymbol source: anObject items: anArray depth: anInteger.
+
+_PBValueFrame >> _setKind: aSymbol source: anObject items: anArray depth: anInteger
+  "Runs once, on a fresh instance."
+  kind isNil ifFalse: [^ PBUserError signal: '_PBValueFrame is initialised once'].
+  kind := aSymbol.
+  source := anObject.
+  items := anArray.
+  results := OrderedCollection new.
+  depth := anInteger.
+
+_PBValueFrame >> kind
+  ^ kind.
+
+_PBValueFrame >> source
+  ^ source.
+
+_PBValueFrame >> items
+  ^ items.
+
+_PBValueFrame >> depth
+  ^ depth.
+
+"Whether every item has been handed out."
+_PBValueFrame >> atEnd
+  ^ results size >= items size.
+
+"The next item to walk: the one after those that have a result."
+_PBValueFrame >> next
+  ^ items at: results size + 1.
+
+"The 1-based position of the item whose result was added last."
+_PBValueFrame >> position
+  ^ results size.
+
+_PBValueFrame >> add: aResult
+  results addLast: aResult.
+
+"The results of the items walked, in order, as an Array."
+_PBValueFrame >> results
+  ^ results asArray.
+
+"The bottom-up fold of aValue with an explicit stack, never by recursion
+ (ProtoBase values.fold): aChildrenBlock value: v answers the Array of v's
+ children, or nil for a leaf; aLeafBlock value: v the result of a leaf;
+ aNodeBlock value: v value: anArray the result of a node from its children's
+ results, in order. Children are expanded in order, depth first."
+_PBValueFrame class >> fold: aValue children: aChildrenBlock leaf: aLeafBlock node: aNodeBlock
+  | kids stack result |
+  kids := aChildrenBlock value: aValue.
+  kids isNil ifTrue: [^ aLeafBlock value: aValue].
+  stack := OrderedCollection with: (self kind: #node source: aValue items: kids depth: 0).
+  [stack isEmpty] whileFalse: [
+    | frame r |
+    frame := stack last.
+    frame atEnd
+      ifTrue: [
+        stack removeLast.
+        r := aNodeBlock value: frame source value: frame results.
+        stack isEmpty ifTrue: [result := r] ifFalse: [stack last add: r]]
+      ifFalse: [
+        | child |
+        child := frame next.
+        kids := aChildrenBlock value: child.
+        kids isNil
+          ifTrue: [frame add: (aLeafBlock value: child)]
+          ifFalse: [stack addLast: (self kind: #node source: child items: kids depth: 0)]]].
+  ^ result.
 
 "=== PBOrderKey ==============================================================="
 
@@ -132,9 +213,14 @@ PBOrderKey >> hash
       payload == NegInf ifTrue: [314158] ifFalse: [PBKeys residue: payload]].
     ^ (h bitXor: rank) \\ 1073741824].
   rank = 13 ifTrue: [
-    h := payload size.
-    payload do: [:each | h := (h * 31 + each hash) \\ 1073741824].
-    ^ (h bitXor: rank) \\ 1073741824].
+    "A tuple's key hashes its items' hashes, folded with an explicit stack."
+    ^ _PBValueFrame fold: self
+      children: [:k | k rank = 13 ifTrue: [k _payload] ifFalse: [nil]]
+      leaf: [:k | k hash]
+      node: [:k :hashes |
+        h := hashes size.
+        1 to: hashes size do: [:i | h := (h * 31 + (hashes at: i)) \\ 1073741824].
+        (h bitXor: 13) \\ 1073741824]].
   ^ (payload hash bitXor: rank) \\ 1073741824.
 
 PBOrderKey >> printOn: aStream
@@ -179,7 +265,15 @@ PBKeys class >> _preview: anObject
   text := [anObject printString] on: Error do: [:e | e return: 'a ' , anObject class name].
   ^ text size <= 80 ifTrue: [text] ifFalse: [(text copyFrom: 1 to: 77) , '...'].
 
-PBKeys class >> _orderKey: v
+PBKeys class >> _orderKey: aValue
+  "A tuple's key is the tuple of its items' keys, folded with an explicit stack."
+  ^ _PBValueFrame fold: aValue
+    children: [:v | (v isClassObject not and: [v isKindOf: PBTuple]) ifTrue: [v asArray] ifFalse: [nil]]
+    leaf: [:v | self _orderKeyLeaf: v]
+    node: [:v :keys | self _key: 13 payload: keys].
+
+"The order key of v, which is not a tuple."
+PBKeys class >> _orderKeyLeaf: v
   v isNil ifTrue: [^ self _key: 1 payload: 0].
   v == false ifTrue: [^ self _key: 2 payload: 0].
   v == true ifTrue: [^ self _key: 2 payload: 1].
@@ -207,7 +301,6 @@ PBKeys class >> _orderKey: v
   (v isKindOf: TimeSpan) ifTrue: [^ self _key: 11 payload: v totalMicroseconds].
   v == PBMissing default ifTrue: [^ self _key: 0 payload: 0].
   (v isKindOf: UUID) ifTrue: [^ self _key: 12 payload: (self _unsignedBigEndian: (PBCodec _uuidBytes: v))].
-  (v isKindOf: PBTuple) ifTrue: [^ self _key: 13 payload: (v asArray collect: [:each | self _orderKey: each])].
   (v isKindOf: PBMutableObject) ifTrue: [^ self _key: 15 payload: v name].
   (v isKindOf: PBAtom) ifTrue: [^ self _key: 14 payload: (self _unsignedBigEndian: (self _oidBytes: (self _oidOf: v)))].
   (v isKindOf: PBUnresolvedRef) ifTrue: [
@@ -284,15 +377,33 @@ PBKeys class >> _compareBytes: a with: b
     x = y ifFalse: [^ x < y ifTrue: [-1] ifFalse: [1]]].
   ^ (a size - b size) sign.
 
-"Lexicographic over the items' order keys; a shorter prefix orders first."
+"Lexicographic over the items' order keys; a shorter prefix orders first.
+ Tuples inside tuples are compared with an explicit stack of { a. b. i }."
 PBKeys class >> _compareTuple: a with: b
-  | n |
-  n := a size min: b size.
-  1 to: n do: [:i |
-    | c |
-    c := (a at: i) compareWith: (b at: i).
-    c = 0 ifFalse: [^ c]].
-  ^ (a size - b size) sign.
+  | stack |
+  stack := OrderedCollection with: (Array with: a with: b with: 0).
+  [stack isEmpty] whileFalse: [
+    | f x y i |
+    f := stack last.
+    x := f at: 1.
+    y := f at: 2.
+    i := (f at: 3) + 1.
+    i > (x size min: y size)
+      ifTrue: [
+        stack removeLast.
+        x size = y size ifFalse: [^ (x size - y size) sign]]
+      ifFalse: [
+        | p q |
+        f at: 3 put: i.
+        p := x at: i.
+        q := y at: i.
+        (p rank = 13 and: [q rank = 13])
+          ifTrue: [stack addLast: (Array with: p _payload with: q _payload with: 0)]
+          ifFalse: [
+            | c |
+            c := p compareWith: q.
+            c = 0 ifFalse: [^ c]]]].
+  ^ 0.
 
 "=== hash keys ================================================================"
 
@@ -314,7 +425,23 @@ PBKeys class >> feed: anOrderKey
   self _feed: anOrderKey on: w.
   ^ w bytesContents.
 
+"The feed of aKey written on w, depth first in the items' order, with an
+ explicit stack (a tuple's items follow its rank and size)."
 PBKeys class >> _feed: aKey on: w
+  | stack |
+  stack := OrderedCollection with: aKey.
+  [stack isEmpty] whileFalse: [
+    | key payload |
+    key := stack removeLast.
+    payload := key _payload.
+    key rank = 13
+      ifTrue: [
+        w putByte: 13.
+        w nextPutUnsigned: payload size width: 8 bigEndian: false.
+        payload size to: 1 by: -1 do: [:i | stack addLast: (payload at: i)]]
+      ifFalse: [self _feedScalar: key on: w]].
+
+PBKeys class >> _feedScalar: aKey on: w
   | rank payload |
   rank := aKey rank.
   payload := aKey _payload.
@@ -323,10 +450,6 @@ PBKeys class >> _feed: aKey on: w
     payload == PBOrderKey posInf ifTrue: [^ w putBytes: '+inf' utf8Encoded].
     payload == PBOrderKey negInf ifTrue: [^ w putBytes: '-inf' utf8Encoded].
     ^ w nextPutUnsigned: (self residue: payload) width: 8 bigEndian: false].
-  rank = 13 ifTrue: [
-    w nextPutUnsigned: payload size width: 8 bigEndian: false.
-    payload do: [:each | self _feed: each on: w].
-    ^ self].
   (rank = 4 or: [rank = 15]) ifTrue: [^ self _feedData: payload utf8Encoded on: w].
   rank = 5 ifTrue: [^ self _feedData: payload on: w].
   ^ self _feedData: (self signedBytes: payload) on: w.
@@ -423,12 +546,20 @@ PBKeys class >> checkMapKeys: anArray reading: aBoolean
    #coarse as #read, but every aware or format-3 datetime is one id: keys
            equal everywhere except at datetime positions share an id
            (checkDecidableKeys:)."
-PBKeys class >> _keyId: k mode: aMode
+PBKeys class >> _keyId: aKey mode: aMode
   | reason |
-  k isClassObject ifTrue: [^ { 'other'. k }].
   aMode == #write ifTrue: [
-    reason := self _unkeyableReason: k legacyAllowed: false.
+    reason := self _unkeyableReason: aKey legacyAllowed: false.
     reason isNil ifFalse: [^ PBValidationError signal: 'PBCodec: ' , reason]].
+  "A tuple is { 'tuple' } and its items' ids, folded with an explicit stack."
+  ^ _PBValueFrame fold: aKey
+    children: [:k | (k isClassObject not and: [k isKindOf: PBTuple]) ifTrue: [k asArray] ifFalse: [nil]]
+    leaf: [:k | self _scalarKeyId: k mode: aMode]
+    node: [:k :ids | { 'tuple' } , ids].
+
+"The map-key id of k, which is not a tuple (_keyId:mode:)."
+PBKeys class >> _scalarKeyId: k mode: aMode
+  k isClassObject ifTrue: [^ { 'other'. k }].
   k == true ifTrue: [^ self _key: 3 payload: 1].
   k == false ifTrue: [^ self _key: 3 payload: 0].
   ((k isFloat or: [k isKindOf: Decimal]) and: [k isNaN]) ifTrue: [
@@ -436,10 +567,6 @@ PBKeys class >> _keyId: k mode: aMode
   (k isKindOf: DateTime) ifTrue: [
     (aMode == #coarse and: [k isNaive not]) ifTrue: [^ #('zoned')].
     k isLegacyZone ifTrue: [^ { 'format-3'. k zone key. k localOrdinalMicroseconds }]].
-  (k isKindOf: PBTuple) ifTrue: [
-    | ids |
-    ids := k asArray collect: [:each | self _keyId: each mode: aMode].
-    ^ { 'tuple' } , ids].
   "An atom is its oid (its order key, through the next lines); a reference
    decoded without a resolver, whose oid is unknown, its pointer."
   (k isKindOf: PBUnresolvedRef) ifTrue: [^ { 'pointer'. k pointer }].
@@ -450,7 +577,31 @@ PBKeys class >> _keyId: k mode: aMode
  reader), a format-3 zone datetime is accepted: format 3 wrote such keys. An
  Array or OrderedCollection is a list (PBCodec canonical: makes it one), a
  Dictionary a map."
-PBKeys class >> _unkeyableReason: k legacyAllowed: aBoolean
+PBKeys class >> _unkeyableReason: aKey legacyAllowed: aBoolean
+  | stack |
+  "Depth first, in the key's order, with an explicit stack of { value. tuples
+   around it }; the first reason found, followed by ' (inside a tuple)' once
+   for each tuple around the value."
+  stack := OrderedCollection with: (Array with: aKey with: 0).
+  [stack isEmpty] whileFalse: [
+    | entry k n reason |
+    entry := stack removeLast.
+    k := entry at: 1.
+    n := entry at: 2.
+    (k isClassObject not and: [k isKindOf: PBTuple])
+      ifTrue: [
+        | items |
+        items := k asArray.
+        items size to: 1 by: -1 do: [:i | stack addLast: (Array with: (items at: i) with: n + 1)]]
+      ifFalse: [
+        reason := self _scalarUnkeyableReason: k legacyAllowed: aBoolean.
+        reason isNil ifFalse: [
+          n timesRepeat: [reason := reason , ' (inside a tuple)'].
+          ^ reason]]].
+  ^ nil.
+
+"Why k, which is not a tuple, can never be a map key, or nil."
+PBKeys class >> _scalarUnkeyableReason: k legacyAllowed: aBoolean
   k isClassObject ifTrue: [^ nil].
   ((k isKindOf: PBFrozenList) or: [(k isKindOf: Array) or: [k isKindOf: OrderedCollection]]) ifTrue: [
     ^ 'a list cannot be a map key'].
@@ -460,11 +611,6 @@ PBKeys class >> _unkeyableReason: k legacyAllowed: aBoolean
     ^ aBoolean ifTrue: [nil] ifFalse: ['a datetime in an IANA time zone cannot be a map key']].
   ((k isKindOf: DateTime) and: [k isInstantForm]) ifTrue: [
     ^ 'a datetime in an IANA time zone cannot be a map key: use its UTC or fixed-offset form'].
-  (k isKindOf: PBTuple) ifTrue: [
-    k do: [:each |
-      | r |
-      r := self _unkeyableReason: each legacyAllowed: aBoolean.
-      r isNil ifFalse: [^ r , ' (inside a tuple)']]].
   ^ nil.
 
 "=== format-3 zone keys (design 4.3) ========================================="
@@ -499,28 +645,52 @@ PBKeys class >> checkDecidableKeys: aKeyArray
 
 "True when k is, or a tuple k holds, a format-3 zone datetime."
 PBKeys class >> _holdsLegacy: k
-  k isClassObject ifTrue: [^ false].
-  (k isKindOf: PBTuple) ifTrue: [^ k asArray anySatisfy: [:each | self _holdsLegacy: each]].
-  ^ (k isKindOf: DateTime) and: [k isLegacyZone].
+  ^ self _holds: k satisfying: [:each | (each isKindOf: DateTime) and: [each isLegacyZone]].
+
+"True when k, or a value in the tuples of k, satisfies aBlock (never sent a
+ class or a tuple): an explicit stack, no recursion."
+PBKeys class >> _holds: k satisfying: aBlock
+  | stack |
+  stack := OrderedCollection with: k.
+  [stack isEmpty] whileFalse: [
+    | each |
+    each := stack removeLast.
+    each isClassObject ifFalse: [
+      (each isKindOf: PBTuple)
+        ifTrue: [
+          | items |
+          items := each asArray.
+          1 to: items size do: [:i | stack addLast: (items at: i)]]
+        ifFalse: [(aBlock value: each) ifTrue: [^ true]]]].
+  ^ false.
 
 "True when k is, or a tuple k holds, an aware or format-3 datetime (no
  allocation: most keys hold none)."
 PBKeys class >> _holdsZoned: k
   (self _isZoned: k) ifTrue: [^ true].
-  (k isClassObject not and: [k isKindOf: PBTuple]) ifTrue: [
-    k do: [:each | (self _holdsZoned: each) ifTrue: [^ true]]].
-  ^ false.
+  (k isClassObject not and: [k isKindOf: PBTuple]) ifFalse: [^ false].
+  ^ self _holds: k satisfying: [:each | self _isZoned: each].
 
 PBKeys class >> _isZoned: k
   ^ k isClassObject not and: [(k isKindOf: DateTime) and: [k isNaive not]].
 
 "The index paths, within k, of its aware and format-3 datetimes."
 PBKeys class >> _zonedPathsOf: k prefix: anArray
-  | out |
-  (self _isZoned: k) ifTrue: [^ OrderedCollection with: anArray].
+  | out stack |
+  "Depth first, in the key's order, with an explicit stack of { value. path }."
   out := OrderedCollection new.
-  (k isClassObject not and: [k isKindOf: PBTuple]) ifTrue: [
-    k keysAndValuesDo: [:i :each | out addAll: (self _zonedPathsOf: each prefix: anArray , { i })]].
+  stack := OrderedCollection with: (Array with: k with: anArray).
+  [stack isEmpty] whileFalse: [
+    | entry each path |
+    entry := stack removeLast.
+    each := entry at: 1.
+    path := entry at: 2.
+    (self _isZoned: each)
+      ifTrue: [out add: path]
+      ifFalse: [(each isClassObject not and: [each isKindOf: PBTuple]) ifTrue: [
+        | items |
+        items := each asArray.
+        items size to: 1 by: -1 do: [:i | stack addLast: (Array with: (items at: i) with: path , { i })]]]].
   ^ out.
 
 PBKeys class >> _at: aPath in: k

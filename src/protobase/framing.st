@@ -1,6 +1,6 @@
 "-- framing.st: segment headers, records, root records and atom envelopes --
 
-The byte frames of format 4 (format spec v2.0.0rc1, 'Segments and records',
+The byte frames of format 4 (format spec v2.0.0rc2, 'Segments and records',
 'Root records' and 'Atom records'; ProtoBase proto_db/storage/format.py and
 the envelope checks of proto_db/core/atom.py Atom._load):
 
@@ -301,9 +301,10 @@ Object subclass: #PBAtomEnvelope instanceVariableNames: 'tag oid state slots'.
 
 "An envelope to write: aTag is an alias Integer or a type name (written in
  its canonical form; a name every reader refuses is PBValidationError), anOid 16 bytes (or a UUID), aState a PBFrozenDict of
- attribute names to values. Each value is made canonical (PBCodec canonical:,
- two msgpack containers deep, as it sits in the record), so a value that
- cannot be stored is refused here, with PBValidationError."
+ attribute names to values. Each value is made canonical (PBCodec canonical:for:,
+ at most maxValueDepth containers deep, so a record holds at most 1024), and a
+ value that cannot be stored is refused here, with PBValidationError naming
+ its attribute."
 PBAtomEnvelope class >> tag: aTag oid: anOid state: aState
   | bytes canonicalState |
   bytes := _PBFrame uuidBytes: anOid.
@@ -315,7 +316,7 @@ PBAtomEnvelope class >> tag: aTag oid: anOid state: aState
     why := self _nameProblem: name.
     why isNil ifFalse: [^ PBValidationError signal: 'PBAtomEnvelope: ' , why]].
   canonicalState := PBFrozenDict withAssociations: (aState associations collect: [:each |
-    each key -> (PBCodec canonical: each value enclosingDepth: 2)]).
+    each key -> (PBCodec canonical: each value for: 'Attribute ' , each key printString)]).
   ^ self basicNew _setTag: (PBTypeRegistry writerTag: aTag) oid: bytes state: canonicalState.
 
 "Why aName cannot be a persisted attribute name, or nil."
@@ -433,10 +434,10 @@ PBAtomEnvelope >> slots
 
 "The ATOM payload: the msgpack map t, oid, s, in that order; t is written in
  canonical form, references as their pointers, every value two containers
- deep."
+ deep (so at most 1024 in all)."
 PBAtomEnvelope >> encode
   | wireState |
   wireState := MessagePackMap withAll: (state associations collect: [:each |
-    each key -> (PBCodec toWire: each value atomRef: PBCodec pointerRef enclosingDepth: 2)]).
+    each key -> (PBCodec toWire: each value atomRef: PBCodec pointerRef for: 'Attribute ' , each key printString)]).
   ^ MessagePack encode: (MessagePackMap withAll: {
     't' -> (PBTypeRegistry writerTag: tag). 'oid' -> oid. 's' -> wireState }).

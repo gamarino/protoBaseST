@@ -1,4 +1,4 @@
-"EXPECT: invalid value-layer 28/29 expected 1"
+"EXPECT: invalid value-layer 35/36 expected 1"
 "Every invalid vector of layer 'value' (value and map-key vectors): PBCodec decode: refuses
  the file with the listed class (corruption: PBCorruptionError, not_supported:
  PBNotSupportedError). A refusal with another class is a FAIL, and so is a file that is

@@ -19,7 +19,7 @@ The roots that pin the lookup rules (review I2 of plan Task 12):
                            of plan Task 13: the infinities' order and hash keys)
 
 Run with the interop venv
-(tests/interop/env.sh): ProtoBase v2.0.0rc1 on PYTHONPATH.
+(tests/interop/env.sh): ProtoBase at the tag setup_venv.sh pins on PYTHONPATH.
 """
 import sys
 from decimal import Decimal

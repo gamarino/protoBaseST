@@ -13,7 +13,7 @@ One database 'erp', written in three commits (versions 1 to 3 after the creation
 3. invoice 1001 paid (a new version made with with_), the customer renamed through its
    mutable cell, and a second cell 'sequence'.
 
-Run with the interop venv (tests/interop/env.sh): ProtoBase v2.0.0rc1 on PYTHONPATH.
+Run with the interop venv (tests/interop/env.sh): ProtoBase at the tag setup_venv.sh pins on PYTHONPATH.
 """
 import datetime
 import sys

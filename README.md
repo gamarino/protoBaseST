@@ -3,7 +3,8 @@
 A perennial object database for protoST, in the tradition GemStone opened.
 
 protoBaseST is a Smalltalk implementation, on protoST, of ProtoBase (the Python package `proto_db`).
-It reads and writes the same on-disk format (format 4, frozen at ProtoBase `v2.0.0rc1`), so one
+It reads and writes the same on-disk format (format 4, frozen at ProtoBase `v2.0.0rc1`, with the
+value nesting limit of `v2.0.0rc2`), so one
 database directory can be shared by Python and Smalltalk programs.
 
 Status: proposal prototype for discussion at the FAST Smalltalk workshop (2026-12-03). Not a product.
@@ -55,14 +56,20 @@ links on a host without `tzdata-legacy`); protoBaseST accepts and keeps such key
 holding an instant within a day of year 1 or 9999 can be read but not re-written.
 
 A string holding a lone surrogate is refused (`PBValidationError`). So is a value nested deeper
-than 511 msgpack containers, the most ProtoBase's msgpack writes (an empty container counts one
-level less). Inside an atom record a value sits 2 levels deep, so the limit there is 509
-(`PBCodec canonical:enclosingDepth:`). ProtoBase's reader, which recurses two Python frames per
-level, raises `RecursionError` from about 333 nested lists under Python's default recursion limit,
-so a value that deep is readable from Python only with a raised limit. ProtoBase accepted to make
-its codec non-recursive and to state a normative `MAX_VALUE_DEPTH` (candidate 509) in
-v2.0.0rc2 (ask B12); until then `tests/interop/st_deep_to_py.sh` raises the limit and says so in
-a `NOTE:` line on every run.
+than `PBCodec maxValueDepth` = 1022 msgpack containers (`MAX_VALUE_DEPTH`, format spec
+v2.0.0rc2, "Value nesting depth"), counted from the value: a list adds 1, a tuple 2, a map 3 (2
+when empty), a tagged scalar 1 to 3 (an aware `@time` or `@dt` 3); an empty container counts like
+any other, and map keys are on the paths. The refusal names where the value was going
+(`Field 'v' of <type name>: ...`, `Attribute 'v': ...`, `PBList element: ...`). Reading data
+deeper than the limit is `PBCorruptionError`, at the same count, so a record holds at most 1024
+containers, what protoST's MessagePack reads and writes. A structure that stores a value inside
+more containers takes a shallower one, refused when the mutator is called: a `PBSet` element
+1020 (its bucket tuple adds 2), a `PBHashDictionary` key or value 1018 (`PBCodec valueDepth:`,
+`check:wrapping:holder:wrapper:`). Every walk of a value (the codec's, and the order keys, hash
+keys and map-key checks) keeps an explicit stack, so the depth does not depend on the protoST
+stack, on the main thread or an actor's worker thread. ProtoBase `v2.0.0rc2` reads and writes the
+same values at Python's default recursion limit (`tests/interop/st_deep_to_py.sh`,
+`py_deep_to_st.sh`).
 
 ## Transactions (read side)
 

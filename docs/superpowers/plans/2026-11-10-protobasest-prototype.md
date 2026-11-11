@@ -3,7 +3,8 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** a Smalltalk implementation of ProtoBase on protoST, reading and writing format 4 at
-ProtoBase `v2.0.0rc1`, with ProtoBase's transaction semantics, proven by a two-way round trip
+ProtoBase `v2.0.0rc2` (format 4 was frozen at `v2.0.0rc1`; `v2.0.0rc2` adds the normative value
+nesting limit, ruling R18), with ProtoBase's transaction semantics, proven by a two-way round trip
 with Python and an ERP demo for the FAST workshop on 2026-12-03.
 
 **Architecture:** three repositories, bottom up.
@@ -19,17 +20,19 @@ them in order.
 - C++20, protoIO (GoogleTest), protoST 0.9.x (conformance `.st` programs with `EXPECT:`
   directives);
 - protoST Smalltalk;
-- CPython ≥ 3.11 with `msgpack` 1.1.2, and ProtoBase extracted from `git archive v2.0.0rc1`,
-  for the interop tests only.
+- CPython ≥ 3.11 with `msgpack` 1.2.4 (ProtoBase `v2.0.0rc2` needs ≥ 1.2.0, with its C
+  extension), and ProtoBase extracted from `git archive v2.0.0rc2`, for the interop tests only.
 
 **Spec:** `docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md` (protoBaseST
-commit `e5f6db9`). The normative format is ProtoBase `v2.0.0rc1` (commit `c48f73e`):
+commit `e5f6db9`). The normative format is ProtoBase `v2.0.0rc2` (commit `343b762`; until Task 17b,
+`v2.0.0rc1`, commit `c48f73e`, which `v2.0.0rc2` keeps byte for byte apart from the value
+nesting limit and the regenerated database vector):
 - `docs/source/format-spec.rst`;
 - `docs/source/concurrency-model.rst`;
 - `proto_db/transactions.py`;
 - `tests/conformance/`.
 
-Read every ProtoBase file with `git -C ../ProtoBase show v2.0.0rc1:<path>`, and never modify
+Read every ProtoBase file with `git -C ../ProtoBase show v2.0.0rc2:<path>`, and never modify
 that repository. Citations: "FS §X" is a section of `format-spec.rst`, "Spec §N" a section of
 the design spec. **When in doubt, ProtoBase at the tag is the reference** (maintainer rule).
 Read ProtoBase's code before guessing a behaviour.
@@ -91,7 +94,7 @@ Read ProtoBase's code before guessing a behaviour.
 | C6 | The §9 lock check targets ProtoBase's **FileStorage root lock** (`fcntl.flock(LOCK_EX\|LOCK_NB)` on `space.lock`), not `OwnerLock` | At the tag, `OwnerLock` guards logs and tiered storage, not `space.lock` |
 | C7 | The calendar classes signal protoST's own `TimeZoneUnavailable` (an `Error` subclass in `lib/calendar.st`) for a wall clock of an instant-zone `DateTime` and for building a named-zone `DateTime` from a wall clock. protoBaseST's own refusals (format-3 `["zone", key]` datetimes) signal `PBNotSupportedError` | The values live in protoST `lib/` (decision 1), which cannot depend on protoBaseST. Spec §4.3 named `PBNotSupportedError`; the refusal stays explicit and is documented |
 | C8 | Conformance vectors are **vendored** into `protoBaseST/tests/conformance/vectors/` by a script that extracts them from the tag and checks every file against `vectors.sha256` | A clean checkout must run the tests (Spec §10.8) |
-| C9 | The Python side is a venv at `tests/interop/.venv` (git-ignored), made with `--system-site-packages`. `msgpack==1.1.2` is installed only when the import is missing or another version. ProtoBase is extracted with `git archive v2.0.0rc1` into `tests/interop/.venv/protobase/` and used through `PYTHONPATH` | Pure Python, so no install step is needed. Network use is kept to a missing `msgpack` |
+| C9 | The Python side is a venv at `tests/interop/.venv` (git-ignored), made with `--system-site-packages`. `msgpack==1.2.4` is installed only when the import is missing or another version (*amended by Task 17b, ruling R18*: ProtoBase `v2.0.0rc2` needs msgpack ≥ 1.2.0 and its C extension; until then `msgpack==1.1.2` and `v2.0.0rc1`). ProtoBase is extracted with `git archive v2.0.0rc2` into `tests/interop/.venv/protobase/` and used through `PYTHONPATH`; `env.sh` fails a run whose venv holds another commit than `setup_venv.sh` pins | Pure Python, so no install step is needed. Network use is kept to a missing `msgpack` |
 | C10 | Spec §10.2 and §10.3 run the verifier through `tests/interop/py_verify.py`. It imports `examples/erp/erp_model.py`, which registers `demo.erp.*`, then calls `proto_db.tools.verify.main([dir, "--out", file])` | A bare `python -m proto_db.tools.verify` would read `demo.erp.Invoice` as opaque. It is still ProtoBase's verifier, with the application's classes registered |
 | C11 | The dumps are compared on the `databases` and `opaque_types` keys by `tests/interop/compare_dumps.py`. A `{"opaque": T}` on the protoST side equals `{"object": T}` on the Python side only for the Python-only type `demo.erp.AuditNote` | Atom counts depend on the walk. AuditNote is deliberately unknown to protoST |
 | C12 | protoST cannot drive an interactive pipe (`OSProcess run:arguments:input:` is one batch). Interleavings use nested runs. For "start A, start B, commit B, commit A", the side owning A starts A, runs the other language's one-shot script (start B, commit B) as a subprocess, and then commits A. Both assignments run: protoST as A and Python as B, and Python as A and protoST as B | Deterministic with no pipes. Each language validates against the other's commit |
@@ -443,14 +446,17 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     0 pass, 77 skip, anything else fail) under the given paths, or under `tests/` and
     `examples/` by default, and prints a summary `passed N, failed N, skipped N`;
   - `tests/conformance/fetch_vectors.sh` (C8), which extracts `tests/conformance/` of
-    `$PROTOBASE_REPO` (default `../ProtoBase`) at `v2.0.0rc1` into `tests/conformance/`.
+    `$PROTOBASE_REPO` (default `../ProtoBase`) at `v2.0.0rc1` into `tests/conformance/`
+    (*amended by Task 17b:* `v2.0.0rc2`, digest
+    `6e913bcb960dee1c71d955754a3519f573cdb435e66476561d8e873f602dfbf4`).
     It refuses unless `sha256sum vectors.sha256` equals the pinned digest and every listed
     file matches;
   - the vendored `tests/conformance/manifest.json`, `vectors.sha256`, `vectors/**` and
     `README.md`, copied verbatim; the Python files (`generate.py`, `test_conformance.py`)
     are not vendored;
   - `tests/interop/setup_venv.sh` (C9). It checks that `v2.0.0rc1` resolves to `c48f73e`
-    and that Python is 3.11 or newer, and is idempotent;
+    (*amended by Task 17b:* `v2.0.0rc2` to `343b762`) and that Python is 3.11 or newer, and
+    is idempotent;
   - `tests/interop/env.sh`, sourced by interop tests, which sets `PY`, `PYTHONPATH` and
     `PROTOST`, or prints `SKIP: venv missing (run tests/interop/setup_venv.sh)` and exits 77;
   - `tests/week0/msgpack_uint64_float64.st`, `tests/week0/json_manifest.st`,
@@ -1027,23 +1033,20 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     It SKIPs without the venv.
   - `tx_states.st`: after `abort`, `getRootObject:`, `rootNames` and `abort` each signal
     `PBUserError`.
-  - Atom depth (added by the Task 7 re-review): ProtoBase packs an attribute value inside the
-    atom payload `{"t", "oid", "s": {name: value}}` at depth 2, so the effective limit for a
-    stored attribute value is 509 msgpack containers. The atom writer passes the enclosing
-    depth 2 to the codec (`PBCodec canonical:enclosingDepth:` or
-    `toWire:atomRef:enclosingDepth:`). `tx_atom_depth.st` writes an attribute of 509 nested
-    lists (accepted, and read back by ProtoBase in the interop run) and one of 510 (refused
-    with `PBValidationError` before any byte is written, never protoST's raw msgpack
-    `Error`). Found in Task 13: ProtoBase's reader decodes nested lists recursively (two
-    Python frames per level), so under Python's default recursion limit it raises
-    `RecursionError` from about 333 nested lists, and its writer from about 497.
-    `st_deep_to_py.sh` therefore reads the 509-deep record with a raised recursion limit
-    (`py_read_deep.py`); the limit is ProtoBase's, reported to the maintainer as ask B12,
-    and protoBaseST keeps the format's 509. ProtoBase accepted B12 (a non-recursive codec
-    and a normative `MAX_VALUE_DEPTH`, candidate 509, for v2.0.0rc2). Until then the
-    workaround is stated loudly (fix round 1, review M2): every run prints a `NOTE:` line
-    naming B12, which the runner shows under the PASS line, and the script fails once the
-    default limit reads the record, asking for the workaround to be dropped.
+  - Atom depth (added by the Task 7 re-review; *superseded by Task 17b, ruling R18*, which
+    replaces ruling R12's 509): an attribute value nests at most `MAX_VALUE_DEPTH` = 1022
+    msgpack containers, counted from the value (format spec v2.0.0rc2, "Value nesting
+    depth", ProtoBase D60), and the atom payload `{"t", "oid", "s": {name: value}}` adds two,
+    so a record holds at most 1024. The atom writer names the attribute in the refusal
+    (`PBCodec canonical:for:` and `toWire:atomRef:for:`, `Attribute 'v': ...`).
+    `tx_atom_depth.st` writes an attribute of 1022 nested lists (accepted, read back through
+    a transaction, and by ProtoBase in the interop run) and one of 1023 (refused with
+    `PBValidationError` before any byte is written, never protoST's raw msgpack `Error`), and
+    a raw record holding 1023 is refused when read (`PBCorruptionError`). The rc1 history:
+    ProtoBase's recursive codec read about 333 nested lists under Python's default recursion
+    limit, so `st_deep_to_py.sh` raised the limit and printed a `NOTE:` naming ask B12; B12 is
+    resolved in `v2.0.0rc2` (a non-recursive codec and the normative limit), and the
+    workaround and its note are gone.
   - `tx_read_set.st`, on a copy of the database vector: reading two roots and an absent name
     records three entries; reading again does not change them; `rootNames` records nothing.
   - Atom map keys through the real resolver (from Task 10 fix round 1, which must be kept):
@@ -1339,6 +1342,57 @@ cut in `docs/not-done.md`. A blind write never ships without its merge.
 - [ ] **Step 4:** run. Expected: PASS.
 - [ ] **Step 5:** commit `File storage write side: owned segment, atom saving, root publication`.
 
+### Task 17b (controller-inserted, ruling R18): adopt ProtoBase `v2.0.0rc2`, the value nesting limit (B12)
+
+ProtoBase resolved ask B12 in `v2.0.0rc2` (commit `343b762`; format spec "Value nesting depth",
+decision D60). No format version change. It supersedes ruling R12 (509).
+
+**Files:**
+- Modify: `src/protobase/codec.st` (`PBCodec maxValueDepth` = 1022; `canonical:`,
+  `canonical:for:`, `valueDepth:`, `check:wrapping:holder:wrapper:`; the walks of
+  `canonical:`, the wire form and `fromWire:resolver:` with explicit stacks; the
+  `enclosingDepth:` variants removed), `src/protobase/keys.st` (`_PBValueFrame` and its
+  `fold:children:leaf:node:`; the order key, its hash, the hash feed, the tuple comparison,
+  the map-key ids and the key checks with explicit stacks), `src/protobase/framing.st`
+  (attribute names in refusals), `src/protobase/records.st` (field names in refusals),
+  `src/protobase/collections.st` (holders, `PBSet elementWrapping` 2,
+  `PBHashDictionary entryWrapping` 4).
+- Vendor: the `v2.0.0rc2` vectors (`fetch_vectors.sh`, digest
+  `6e913bcb960dee1c71d955754a3519f573cdb435e66476561d8e873f602dfbf4`).
+- Re-pin: `tests/interop/setup_venv.sh` (`v2.0.0rc2`/`343b762`, msgpack 1.2.4), `env.sh`.
+- Test: `tests/unit/codec_depth_boundaries.st`, `tests/unit/tx_atom_depth.st`,
+  `tests/unit/collection_depth.st`, `tests/conformance/values_depth.st`,
+  `tests/conformance/invalid_value.st` (the seven `value-depth-over-*` vectors),
+  `tests/interop/st_deep_to_py.sh` (with `_st_deep_space.st`, `py_read_deep.py`),
+  `tests/interop/py_deep_to_st.sh` (with `py_write_deep.py`, `_st_read_deep.st`).
+
+**Requirements:**
+- The depth is counted as the spec counts it, from each attribute value: a list 1, a tuple 2,
+  a map 3 (2 when empty), `@int`/`@dec`/`@uuid`/`@missing`/`@mut` 1, `@date`/`@td`/`@ref`
+  and a naive `@time`/`@dt` 2, an aware one 3; an empty container counts like any other, and
+  map keys are on the paths. 1022 round-trips; 1023 is refused when written
+  (`PBValidationError` naming the field, `Field 'v' of <type name>: ...`, the attribute,
+  `Attribute 'v': ...`, or the collection's element, key or value) and when read
+  (`PBCorruptionError`). A record payload deeper than 1024 is refused by protoST's
+  MessagePack (protoIO `e952077`, protoST `b412b38`: 1024 read and written, 1025 refused).
+- No walk of a value depends on the protoST stack: protoST bounds a recursion through `do:`
+  or `collect:` at about 1,000 levels (STATUS D38), so every walk that can meet a value 1022
+  deep, or a key of 511 tuples, keeps an explicit stack, and the boundary tests run on an
+  actor's worker thread too.
+- Effective per-structure limits (spec table, informative): a writer never writes a record a
+  reader must refuse. Here: a `PBSet` element 1020 (its bucket tuple adds 2), a
+  `PBHashDictionary` key or value 1018 (its `(key, value)` entry in its bucket tuple adds 4),
+  refused when the mutator is called (`add:`, `union:`, `intersection:`, `setAt:value:`),
+  never at commit. Left to the owning tasks: the `Root 'r': ...` and `Mutable 'm': ...`
+  holders (Task 18, `setRootObject:` and the mutable-cell writes), the `PBCountedSet` element
+  limit 1018 (Task 22, its `(element, count)` bucket entry adds 4), and the index member-key
+  limits (orderable 1018, a vector index's store 1016, unorderable 254 nested lists or 169
+  nested maps), which bind only if index maintenance is ever written (design spec 7.4 refuses
+  changes to an indexed collection).
+
+- [x] Step 1: failing tests (on `481be92`). Step 2: run, FAIL. Step 3: implement. Step 4:
+  run, PASS. Step 5: commit `Adopt ProtoBase v2.0.0rc2: MAX_VALUE_DEPTH 1022, explicit-stack walks (B12)`.
+
 ### Task 18: The publisher actor and the write side of transactions
 
 **Files:**
@@ -1383,6 +1437,10 @@ cut in `docs/not-done.md`. A blind write never ships without its merge.
   - `PBDatabase >> newTransactionDo: aBlock`. It commits when the block ends, aborts if the
     block raises, re-signals the exception, and does not retry.
   - `PBMutableObject >> set: aTransaction value: v`.
+  - (Task 17b) A root's value and a mutable cell's value pass through
+    `PBCodec canonical:for:` with the holder `Root 'name'` or `Mutable 'name'`, as
+    ProtoBase's `canonical_for` names them, so a value deeper than `MAX_VALUE_DEPTH` is
+    refused naming where it was going.
   - `PBPublisher >> commit: aTransaction`, one actor per `PBObjectSpace`, which answers a
     Future. It runs the steps of Spec §7.3 in order:
     1. lock, retried with `(Future after: d) wait` from 1 ms, doubling, capped at 50 ms,
@@ -1536,6 +1594,9 @@ cut in `docs/not-done.md`. A blind write never ships without its merge.
     `countOf:`, with `total_count` kept;
   - log entries `('transform' e removes adds)`;
   - net effect per element `c → max(c - removes, 0) + adds`.
+  - (Task 17b) An element is refused past 1018 containers (`PBCodec check:wrapping:...` with
+    4: its `(element, count)` entry in its bucket tuple adds 4), as ProtoBase's
+    `CountedSet.ELEMENT_WRAPPING`.
   - (Task 16 review I1) `PBCountedSet` already logs (`_logsOperations` true, an empty log
     rebases to `current`); this task supplies its `('transform' ...)` ops in
     `_replay:onto:` and its own `_netOps`. `PBRepeatedKeysDictionary` writes stay a non-goal.

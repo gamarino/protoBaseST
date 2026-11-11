@@ -2,11 +2,12 @@
 
 Usage: python py_list_positions.py
 
-Builds List [10, 20, 30, 40, 50] with ProtoBase v2.0.0rc1 and prints one line per case:
+Builds List [10, 20, 30, 40, 50] with the interop venv's ProtoBase and prints one line per case:
 '<case> => <result>', where <result> is the list's elements after the operation
 (space-separated, '[]' when empty), the element read, or 'error <class name>'. The lines
 were pasted as literals into tests/unit/list_positions.st, which requires protoBaseST's
-PBList to give the same results; rerun this script to check them. A slice bound written
+PBList to give the same results; rerun this script to check them (recorded with v2.0.0rc1,
+and unchanged at v2.0.0rc2). A slice bound written
 'nil' is Python's None.
 """
 from proto_db.collections.lists import List

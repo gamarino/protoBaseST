@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# The deepest attribute value protoBaseST writes inside an atom record (509 nested lists,
-# plan Task 13) is read back by ProtoBase. Exit 77 without the interop venv. ProtoBase needs a
-# raised Python recursion limit for it until ask B12 lands (v2.0.0rc2); py_read_deep.py says so
-# in a NOTE line on every run and fails once B12 makes the workaround unnecessary.
+# Values at the nesting limit, protoST to Python (format spec v2.0.0rc2, "Value nesting depth";
+# plan Tasks 13 and 17b). protoST writes a space whose records hold attribute values exactly
+# MAX_VALUE_DEPTH = 1022 containers deep (DBObject fields, a map key path, and the nodes of a
+# List, a Dictionary, a Set and a HashDictionary at their effective limits), checking first that
+# its writer refuses one container more; ProtoBase's verifier accepts the space (exit 0), and
+# ProtoBase reads every value back with Python's default recursion limit, refuses a record
+# holding 1023 (ProtoCorruptionError) and refuses to write 1023 (ProtoValidationError)
+# (py_read_deep.py). Exit 77 without the interop venv.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -13,6 +17,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 
-(cd "$HERE" && "$PROTOST" _st_deep_space.st "$TMP/space") || fail "_st_deep_space.st exited $?"
-"$PY" "$HERE/py_read_deep.py" "$TMP/space" || fail "py_read_deep.py"
-echo "deep attribute read back by ProtoBase"
+(cd "$HERE" && "$PROTOST" _st_deep_space.st "$TMP") || fail "_st_deep_space.st exited $?"
+"$PY" -m proto_db.tools.verify "$TMP/space" --out "$TMP/py.json" || fail "ProtoBase's verifier exited $? on protoST's space"
+"$PY" "$HERE/py_read_deep.py" "$TMP" || fail "py_read_deep.py"
+echo "values at the nesting limit read back by ProtoBase"

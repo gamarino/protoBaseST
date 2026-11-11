@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Vendors ProtoBase's conformance vectors (plan call C8).
 #
-# Extracts tests/conformance/ of $PROTOBASE_REPO (default ../ProtoBase) at the tag v2.0.0rc1
+# Extracts tests/conformance/ of $PROTOBASE_REPO (default ../ProtoBase) at the tag v2.0.0rc2
 # into this directory, keeping manifest.json, vectors.sha256, vectors/**, README.md and
 # .gitattributes. The Python files (generate.py, test_conformance.py, model.py, typed.py,
 # __init__.py) are not vendored. Refuses unless sha256sum of vectors.sha256 equals the pinned
 # digest and every listed file matches, and no vector file is unlisted.
 set -euo pipefail
 
-TAG="v2.0.0rc1"
-PINNED="5f86eb09ed1683aa9f048051c64cca68d23b9fb753e87416cb1ecf11ed406df0"
+TAG="v2.0.0rc2"
+PINNED="6e913bcb960dee1c71d955754a3519f573cdb435e66476561d8e873f602dfbf4"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="${PROTOBASE_REPO:-$HERE/../../../ProtoBase}"
 

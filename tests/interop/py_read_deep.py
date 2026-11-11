@@ -1,68 +1,124 @@
-"""Read the 509-deep attribute that _st_deep_space.st writes, with ProtoBase (plan Task 13).
+"""ProtoBase's side of st_deep_to_py.sh: read the values at the nesting limit protoST wrote.
 
 Usage: python py_read_deep.py <directory>
 
-WORKAROUND (ask B12 to the ProtoBase maintainer): ProtoBase v2.0.0rc1 decodes nested lists
-recursively, two Python frames per level, so with Python's default recursion limit (1000)
-its reader raises RecursionError on this record (it does from about 333 nested lists; a
-ProtoBase limit, reported, not a defect of the record). ProtoBase accepted B12: a
-non-recursive codec and a normative MAX_VALUE_DEPTH (candidate 509), to be tagged
-v2.0.0rc2. Until then this script raises the recursion limit to read the record, and says
-so on every run: a NOTE line, which tests/run_tests.sh shows under the PASS line.
+<directory> is what _st_deep_space.st writes (format spec v2.0.0rc2, "Value nesting depth":
+MAX_VALUE_DEPTH = 1022 MessagePack containers per attribute value):
 
-The script first reads with the default limit and requires RecursionError: a ProtoBase
-that reads the record without it has resolved B12, and the script then fails, asking for
-the raised limit to be dropped. Then it raises the limit and reads the record: the value
-must be 509 lists around 1, and its canonical encoding must be the bytes stored.
-Exit 0 when it reads back, 1 otherwise.
+- space/: every root reads back with Python's default recursion limit: 'deep' and 'keyed'
+  hold values exactly 1022 containers deep, and each re-encodes to the bytes stored in its
+  record; the collections hold their elements, and every record of the space is at most
+  1022 deep in each attribute (the stored node values of the Set and the HashDictionary
+  are exactly 1022);
+- over/: the root 'over' holds a value of 1023 lists (raw bytes): reading it raises
+  ProtoCorruptionError;
+- ProtoBase's writer refuses a value one container deeper than each limit with
+  ProtoValidationError naming MAX_VALUE_DEPTH, as protoST's does.
+
+Exit 0 when every check holds, 1 otherwise (each failed check is printed).
 """
 import sys
 
-from proto_db import FileStorage, ObjectSpace
+from proto_db import DBObject, Dictionary, FileStorage, HashDictionary, List, ObjectSpace, Set
 from proto_db.core import codec
+from proto_db.errors import ProtoCorruptionError, ProtoValidationError
+from proto_db.values import MAX_VALUE_DEPTH, value_depth
 
-DEPTH = 509
+FAILURES = []
 
 
-def read(directory):
+def check(label, actual, expected):
+    if actual != expected:
+        FAILURES.append(f"{label}: expected {expected!r}, got {actual!r}")
+
+
+def lists(n):
+    v = 1
+    for _ in range(n):
+        v = [v]
+    return v
+
+
+def tuples(n):
+    v = 1
+    for _ in range(n):
+        v = (v,)
+    return v
+
+
+def read_space(directory):
     space = ObjectSpace(FileStorage(directory))
     try:
         tx = space.open_database("db").new_transaction()
-        record = tx.get_root_object("deep")
-        value = record.v
-        payload = space.storage.get_atom(record.atom_pointer)
+        for name in ("deep", "keyed"):
+            record = tx.get_root_object(name)
+            check(f"{name}: the depth of v", value_depth(record.v), MAX_VALUE_DEPTH)
+            stored = space.storage.get_atom(record.atom_pointer)["s"]["v"]
+            check(f"{name}: v re-encodes to the stored bytes",
+                  codec.encode_value(codec.decode_value(stored, None), None) == stored, True)
+        check("deep: the value", record_value(tx, "deep"), lists(1022))
+        check("the List element", [value_depth(e) for e in tx.get_root_object("list")], [1022])
+        d = tx.get_root_object("dict")
+        check("the Dictionary", [(value_depth(k), value_depth(v)) for k, v in d.items()], [(1022, 1022)])
+        check("the Set", [value_depth(e) for e in tx.get_root_object("set")], [1020])
+        h = tx.get_root_object("hash")
+        check("the HashDictionary", [(value_depth(k), value_depth(v)) for k, v in h.items()], [(1018, 1018)])
+        for name, label in (("set", "the Set's bucket"), ("hash", "the HashDictionary's bucket")):
+            root = tx.get_root_object(name).root
+            check(f"{label} node value", value_depth(root.value), MAX_VALUE_DEPTH)
         tx.abort()
-        return value, payload
     finally:
         space.close()
 
 
-def main(directory: str) -> int:
+def record_value(tx, name):
+    return tx.get_root_object(name).v
+
+
+def read_over(directory):
+    space = ObjectSpace(FileStorage(directory))
     try:
-        read(directory)
-    except RecursionError:
-        pass
-    else:
-        print("py_read_deep: B12 resolved: ProtoBase reads the record with the default "
-              "recursion limit; drop the raised limit from this script")
+        tx = space.open_database("db").new_transaction()
+        try:
+            value = tx.get_root_object("over").v
+        except ProtoCorruptionError:
+            pass
+        else:
+            FAILURES.append(f"over: a value 1023 deep was read ({value_depth(value)} containers)")
+        tx.abort()
+    finally:
+        space.close()
+
+
+def check_refusals():
+    refusals = {
+        "a DBObject field of 1023": lambda: DBObject(v=lists(1023)),
+        "a List element of 1023": lambda: List().append_last(lists(1023)),
+        "a Dictionary value of 1023": lambda: Dictionary().set_at(1, lists(1023)),
+        "a Set element of 511 tuples": lambda: Set().add(tuples(511)),
+        "a HashDictionary key of 510 tuples": lambda: HashDictionary().set_at(tuples(510), 1),
+    }
+    for label, build in refusals.items():
+        try:
+            build()
+        except ProtoValidationError as e:
+            if "MAX_VALUE_DEPTH" not in str(e):
+                FAILURES.append(f"{label}: refused without naming MAX_VALUE_DEPTH: {e}")
+        else:
+            FAILURES.append(f"{label}: ProtoBase's writer accepted it")
+
+
+def main(directory: str) -> int:
+    check("MAX_VALUE_DEPTH", MAX_VALUE_DEPTH, 1022)
+    check("Python's recursion limit is the default", sys.getrecursionlimit(), 1000)
+    read_space(f"{directory}/space")
+    read_over(f"{directory}/over")
+    check_refusals()
+    for failure in FAILURES:
+        print(f"py_read_deep: {failure}")
+    if FAILURES:
         return 1
-    print(f"NOTE: ask B12 open: ProtoBase v2.0.0rc1 raises RecursionError on {DEPTH} nested "
-          "lists at Python's default recursion limit; this test raises the limit to 20000 "
-          "to read them (until ProtoBase v2.0.0rc2: non-recursive codec, MAX_VALUE_DEPTH)")
-    sys.setrecursionlimit(20000)
-    value, payload = read(directory)
-    depth = 0
-    while isinstance(value, (list, tuple)) and len(value) == 1:
-        value = value[0]
-        depth += 1
-    if depth != DEPTH or value != 1:
-        print(f"py_read_deep: expected {DEPTH} lists around 1, read {depth} around {value!r}")
-        return 1
-    stored = payload["s"]["v"]
-    if codec.encode_value(codec.decode_value(stored, None), None) != stored:
-        print("py_read_deep: the value does not re-encode to the stored form")
-        return 1
-    print(f"py_read_deep: {DEPTH} lists read back with the raised recursion limit")
+    print("py_read_deep: values at the limit read back, 1023 refused when read and when written")
     return 0
 
 

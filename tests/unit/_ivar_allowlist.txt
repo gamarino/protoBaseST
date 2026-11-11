@@ -12,6 +12,7 @@ PBFrozenDict>>_setKeys:values:index:
 PBOrderKey>>_setRank:payload:
 PBMapKeyIndex>>_setIds:zoned:
 PBIdentityKey>>_setObject:
+_PBValueFrame>>_setKind:source:items:depth:
 PBMissing class>>_initializeDefault
 PBMutableObject>>_setCellName:
 PBAtomPointer>>_setSegmentBytes:offset:

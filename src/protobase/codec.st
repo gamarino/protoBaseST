@@ -1,7 +1,7 @@
 "-- codec.st: PBCodec, the canonical values of format 4 --
 
 The wire form of a value is the msgpack data of the ProtoBase format spec
-(v2.0.0rc1, 'Canonical values'). PBCodec turns a protoST value into that data
+(v2.0.0rc2, 'Canonical values'). PBCodec turns a protoST value into that data
 and back, with every refusal of the spec:
 
   PBCodec canonical: aValue              the canonical value, or PBValidationError
@@ -50,12 +50,30 @@ surrogate (16rD800..16rDFFF) is not valid UTF-8 and is refused with
 PBValidationError (format spec, Known gaps). Zone keys are ASCII by the
 pinned list.
 
-Nesting: a value whose wire form nests more than 511 msgpack containers is
-refused with PBValidationError. That is the most msgpack-python's packer (and
-so ProtoBase) writes; a list is 1 container, a tuple 2, a map entry 3, a
-tagged scalar 1 to 3, an empty container 1 less. Inside an atom record a
-value sits 2 levels deep, so the atom writer (plan Task 13) passes that
-enclosing depth.
+Nesting (format spec v2.0.0rc2, 'Value nesting depth'; ProtoBase D60): the
+wire form of a value nests at most PBCodec maxValueDepth = 1022 msgpack
+containers (MAX_VALUE_DEPTH), counted from the value itself: a list adds 1, a
+tuple 2 ({'@tup': [...]}), a map 3 ({'@map': [[k, v], ...]}, 2 when empty),
+@int, @dec, @uuid, @missing and @mut 1, @date, @td, @ref and a naive @time or
+@dt 2, an aware @time or @dt 3; an empty container counts like any other, and
+map keys are on the paths. A deeper value is refused when it is made
+canonical (PBValidationError) and deeper data when it is read
+(PBCorruptionError), at the same count; inside an atom record a value sits two
+containers deep, so a record holds at most 1024, what protoST's MessagePack
+(and msgpack-python from 1.2.0) packs and unpacks.
+
+  PBCodec canonical: aValue for: aHolder      canonical:, a PBValidationError
+                                              of its own naming aHolder
+  PBCodec check: v wrapping: n holder: h wrapper: w
+                                              PBValidationError when n
+                                              containers a structure stores
+                                              around v pass the limit
+  PBCodec valueDepth: aValue                  the containers v's wire form nests
+
+Every walk of a value (canonical:, the wire form, fromWire:resolver:,
+valueDepth:) uses an explicit stack, never recursion: protoST bounds a
+recursion through do: or collect: at about 1,000 levels, and a worker thread
+must read what the main thread writes.
 
 Decoding checks the tree that MessagePack decodeOrdered: answers: map keys are
 strings, no ext value, exactly one key per tagged map, one spelling for @int,
@@ -89,9 +107,10 @@ PBCodec class >> _decimalMinExponent
 PBCodec class >> _decimalMaxAdjusted
   ^ 999999999999999999.
 
-"The most nested msgpack containers msgpack-python's packer writes."
-PBCodec class >> _maxWireDepth
-  ^ 511.
+"MAX_VALUE_DEPTH: the most msgpack containers the wire form of a stored value
+ nests, counted from the value (format spec, 'Value nesting depth')."
+PBCodec class >> maxValueDepth
+  ^ 1022.
 
 "The ordinal microseconds within which every wall clock of an instant lies in
  years 1 to 9999, whatever its zone's offset (|offset| < 24 h)."
@@ -106,46 +125,167 @@ PBCodec class >> _instantHigh
 "aValue in canonical form: containers frozen (an Array or OrderedCollection
  becomes a PBFrozenList), host subclasses reduced to their base values. An
  already canonical value is answered as is. A value that cannot be stored
- signals PBValidationError naming its class."
+ signals PBValidationError naming its class, and so does one nested deeper
+ than maxValueDepth containers."
 PBCodec class >> canonical: aValue
-  ^ self _canonical: aValue depth: 0.
-
-"As canonical:, for a value whose wire form sits inside anInteger msgpack
- containers (2 for an attribute value inside an atom record)."
-PBCodec class >> canonical: aValue enclosingDepth: anInteger
-  ^ self _canonical: aValue depth: anInteger.
-
-"d is the number of msgpack containers around v's wire form."
-PBCodec class >> _canonical: v depth: d
-  | result |
-  result := self _canonicalShallow: v depth: d.
-  d + (self _ownWireDepth: result) > self _maxWireDepth ifTrue: [^ self _tooDeep].
+  | stack result |
+  result := self _canonicalOpen: aValue depth: 0 on: nil.
+  (result isKindOf: _PBValueFrame) ifFalse: [^ result].
+  stack := OrderedCollection with: result.
+  [stack isEmpty] whileFalse: [
+    | frame r |
+    frame := stack last.
+    frame atEnd
+      ifTrue: [
+        stack removeLast.
+        r := self _canonicalClose: frame]
+      ifFalse: [r := self _canonicalOpen: frame next depth: frame depth on: stack].
+    (r isKindOf: _PBValueFrame) ifFalse: [
+      stack isEmpty ifTrue: [result := r] ifFalse: [stack last add: r]]].
   ^ result.
 
-PBCodec class >> _tooDeep
-  ^ PBValidationError signal: 'PBCodec: a value nested deeper than ' , self _maxWireDepth printString
-    , ' msgpack levels cannot be stored (the most msgpack-python writes)'.
+"As canonical:, with a PBValidationError of the codec's own (not of a subclass)
+ signalled again with aHolder in front: the field, root, mutable cell or
+ collection element the value was going to (ProtoBase canonical_for)."
+PBCodec class >> canonical: aValue for: aHolder
+  ^ [self canonical: aValue] on: PBValidationError do: [:e |
+    e class == PBValidationError ifFalse: [e pass].
+    PBValidationError signal: aHolder , ': ' , e messageText].
 
-"The msgpack levels a canonical v's own wire form adds below its position,
- its items not counted, as msgpack-python counts them (an empty container
- opens no level for items): a list 1 (empty 0), a tuple 2 (empty 1), a map 3
- (empty 1: the map and its empty array), and for a tagged scalar its map and
- arrays (a @dt or @time with a zone: 3)."
-PBCodec class >> _ownWireDepth: v
+"The msgpack containers the wire form of the canonical value aValue nests
+ (format spec, 'Value nesting depth'), counted with an explicit stack."
+PBCodec class >> valueDepth: aValue
+  | stack best |
+  best := 0.
+  stack := OrderedCollection with: aValue -> 0.
+  [stack isEmpty] whileFalse: [
+    | entry v d items |
+    entry := stack removeLast.
+    v := entry key.
+    d := entry value.
+    items := nil.
+    (v isClassObject not and: [v isKindOf: _PBSequence])
+      ifTrue: [
+        d := d + ((v isKindOf: PBTuple) ifTrue: [2] ifFalse: [1]).
+        items := self _field: 'items' of: v base: _PBSequence]
+      ifFalse: [(v isClassObject not and: [v isKindOf: PBFrozenDict])
+        ifTrue: [
+          (self _field: 'keys' of: v base: PBFrozenDict) isEmpty
+            ifTrue: [d := d + 2]
+            ifFalse: [
+              d := d + 3.
+              items := (self _field: 'keys' of: v base: PBFrozenDict) , (self _field: 'values' of: v base: PBFrozenDict)]]
+        ifFalse: [d := d + (self _leafContainers: v)]].
+    d > best ifTrue: [best := d].
+    items isNil ifFalse: [1 to: items size do: [:i | stack addLast: (items at: i) -> d]]].
+  ^ best.
+
+"Signals PBValidationError when anInteger containers that a structure stores
+ around the canonical value aValue (aWrapper: 'its bucket tuple') would make
+ the stored attribute value nest deeper than maxValueDepth; aHolder names the
+ value ('PBSet element'). A scalar nests at most 3 containers, so only a
+ container is walked (ProtoBase check_wrapped)."
+PBCodec class >> check: aValue wrapping: anInteger holder: aHolder wrapper: aWrapper
+  | limit depth |
+  limit := self maxValueDepth - anInteger.
+  (aValue isClassObject not and: [(aValue isKindOf: _PBSequence) or: [aValue isKindOf: PBFrozenDict]]) ifFalse: [^ aValue].
+  depth := self valueDepth: aValue.
+  depth > limit ifTrue: [
+    ^ PBValidationError signal: aHolder , ' nests ' , depth printString , ' MessagePack containers deep, and '
+      , aWrapper , ' adds ' , anInteger printString , ' around it, so it may nest at most ' , limit printString
+      , ' (MAX_VALUE_DEPTH = ' , self maxValueDepth printString , ', format spec ''Value nesting depth'')'].
+  ^ aValue.
+
+PBCodec class >> _tooDeep
+  ^ PBValidationError signal: 'PBCodec: the value nests deeper than MAX_VALUE_DEPTH = '
+    , self maxValueDepth printString
+    , ' MessagePack containers, the most the storage format allows (format spec, ''Value nesting depth'')'.
+
+PBCodec class >> _tooDeepData
+  ^ PBCorruptionError signal: 'PBCodec: the encoded value nests deeper than MAX_VALUE_DEPTH = '
+    , self maxValueDepth printString
+    , ' MessagePack containers, the most the storage format allows (format spec, ''Value nesting depth'')'.
+
+"The msgpack containers the wire form of the canonical scalar v nests: 0 for a
+ value written natively, 1 for a tag whose body is a scalar (@int, @dec,
+ @uuid, @missing, @mut), 2 for a tag whose body is an array of scalars
+ (@date, @td, @ref, a naive @time or @dt), 3 for an aware @time or @dt (its
+ time zone, or its instant form, is an array inside the body)."
+PBCodec class >> _leafContainers: v
   v isNil ifTrue: [^ 0].
   (v == true or: [v == false]) ifTrue: [^ 0].
   v isInteger ifTrue: [^ (v between: self _intMin and: self _intMax) ifTrue: [0] ifFalse: [1]].
   (v isFloat or: [v isString or: [v isKindOf: ByteArray]]) ifTrue: [^ 0].
-  (v isKindOf: PBFrozenList) ifTrue: [^ v isEmpty ifTrue: [0] ifFalse: [1]].
-  (v isKindOf: PBTuple) ifTrue: [^ v isEmpty ifTrue: [1] ifFalse: [2]].
-  (v isKindOf: PBFrozenDict) ifTrue: [^ v isEmpty ifTrue: [1] ifFalse: [3]].
   ((v isKindOf: DateTime) or: [v isKindOf: TimeOfDay]) ifTrue: [^ v zone isNil ifTrue: [2] ifFalse: [3]].
   ((v isKindOf: CalendarDate) or: [v isKindOf: TimeSpan]) ifTrue: [^ 2].
   (self _isReference: v) ifTrue: [^ 2].
   ^ 1.
 
-PBCodec class >> _canonicalShallow: v depth: d
-  d > self _maxWireDepth ifTrue: [^ self _tooDeep].
+"The canonical form of v, d containers deep: a scalar's, or, for a container,
+ a frame pushed on aStack (an OrderedCollection, or nil for the first value)
+ whose items the walk of canonical: makes canonical in turn."
+PBCodec class >> _canonicalOpen: v depth: d on: aStack
+  | frame kind items inner result |
+  v isClassObject ifFalse: [
+    (v isKindOf: PBTuple) ifTrue: [kind := #tuple. inner := d + 2. items := self _field: 'items' of: v base: _PBSequence].
+    (kind isNil and: [v isKindOf: PBFrozenList]) ifTrue: [
+      kind := #list. inner := d + 1. items := self _field: 'items' of: v base: _PBSequence].
+    (kind isNil and: [(v isKindOf: Array) or: [v isKindOf: OrderedCollection]]) ifTrue: [
+      kind := #array. inner := d + 1. items := v asArray].
+    (kind isNil and: [v isKindOf: PBFrozenDict]) ifTrue: [
+      kind := #map.
+      inner := (self _field: 'keys' of: v base: PBFrozenDict) isEmpty ifTrue: [d + 2] ifFalse: [d + 3].
+      items := self _interleave: (self _field: 'keys' of: v base: PBFrozenDict)
+        with: (self _field: 'values' of: v base: PBFrozenDict)]].
+  kind isNil ifTrue: [
+    result := self _canonicalLeaf: v.
+    d + (self _leafContainers: result) > self maxValueDepth ifTrue: [^ self _tooDeep].
+    ^ result].
+  inner > self maxValueDepth ifTrue: [^ self _tooDeep].
+  frame := _PBValueFrame kind: kind source: v items: items depth: inner.
+  aStack isNil ifFalse: [aStack addLast: frame].
+  ^ frame.
+
+"k1 v1 k2 v2 ...: the keys and values of a map, in its order."
+PBCodec class >> _interleave: keys with: values
+  | out |
+  out := Array new: keys size * 2.
+  1 to: keys size do: [:i |
+    out at: 2 * i - 1 put: (keys at: i).
+    out at: 2 * i put: (values at: i)].
+  ^ out.
+
+"The canonical container of a frame whose items are all canonical: the source
+ itself when it was canonical already (same class, the same item objects)."
+PBCodec class >> _canonicalClose: aFrame
+  | kind v items results same |
+  kind := aFrame kind.
+  v := aFrame source.
+  results := aFrame results.
+  kind == #array ifTrue: [^ PBFrozenList withAll: results].
+  items := aFrame items.
+  same := true.
+  1 to: results size do: [:i | (results at: i) == (items at: i) ifFalse: [same := false]].
+  kind == #map ifTrue: [
+    | pairs |
+    same := same and: [v class == PBFrozenDict].
+    pairs := (1 to: results size // 2) asArray collect: [:i | (results at: 2 * i - 1) -> (results at: 2 * i)].
+    "The writer's map-key rule (format spec 'Map keys', PBKeys): a key that can
+     never be a map key, and two keys that conflict (1 and 1.0, two NaNs of one
+     encoding), signal PBValidationError. A PBFrozenDict was built under the
+     reader's rule, which keeps NaN keys of one encoding apart."
+    PBKeys checkMapKeys: (pairs collect: [:each | each key]) reading: false.
+    same ifTrue: [^ v].
+    ^ PBFrozenDict withAssociations: pairs].
+  kind == #tuple ifTrue: [
+    (same and: [v class == PBTuple]) ifTrue: [^ v].
+    ^ PBTuple withAll: results].
+  (same and: [v class == PBFrozenList]) ifTrue: [^ v].
+  ^ PBFrozenList withAll: results.
+
+"The canonical form of the scalar v (anything canonical:'s walk does not
+ open as a container)."
+PBCodec class >> _canonicalLeaf: v
   v isNil ifTrue: [^ v].
   (v == true or: [v == false]) ifTrue: [^ v].
   v isClassObject ifTrue: [^ self _refuse: v because: 'a class is not a value'].
@@ -179,11 +319,6 @@ PBCodec class >> _canonicalShallow: v depth: d
     self _checkUTF8: (self _field: 'cellName' of: v base: PBMutableObject).
     v class == PBMutableObject ifTrue: [^ v].
     ^ PBMutableObject name: (self _field: 'cellName' of: v base: PBMutableObject)].
-  (v isKindOf: PBTuple) ifTrue: [^ self _canonicalItems: v class: PBTuple depth: d + 2].
-  (v isKindOf: PBFrozenList) ifTrue: [^ self _canonicalItems: v class: PBFrozenList depth: d + 1].
-  ((v isKindOf: Array) or: [v isKindOf: OrderedCollection]) ifTrue: [
-    ^ PBFrozenList withAll: (v asArray collect: [:each | self _canonical: each depth: d + 1])].
-  (v isKindOf: PBFrozenDict) ifTrue: [^ self _canonicalMap: v depth: d + 3].
   (v isKindOf: Dictionary) ifTrue: [
     ^ self _refuse: v because: 'its order is unspecified, and the order is part of the bytes; use PBFrozenDict'].
   (self _isReference: v) ifTrue: [
@@ -303,36 +438,6 @@ PBCodec class >> _checkInstantBand: aDateTime
       , aDateTime zone key , ' may fall outside years 1 to 9999; protoBaseST has no time-zone database to decide (Spec 4.3)'].
   ^ aDateTime.
 
-PBCodec class >> _canonicalItems: v class: aClass depth: d
-  | items same |
-  items := (self _field: 'items' of: v base: _PBSequence) collect: [:each | self _canonical: each depth: d].
-  same := v class == aClass.
-  same ifTrue: [
-    | old |
-    old := self _field: 'items' of: v base: _PBSequence.
-    1 to: items size do: [:i | (items at: i) == (old at: i) ifFalse: [same := false]]].
-  same ifTrue: [^ v].
-  ^ aClass withAll: items.
-
-PBCodec class >> _canonicalMap: v depth: d
-  | ks vs pairs same |
-  ks := self _field: 'keys' of: v base: PBFrozenDict.
-  vs := self _field: 'values' of: v base: PBFrozenDict.
-  same := v class == PBFrozenDict.
-  pairs := (1 to: ks size) asArray collect: [:i |
-    | k val |
-    k := self _canonical: (ks at: i) depth: d.
-    val := self _canonical: (vs at: i) depth: d.
-    (k == (ks at: i) and: [val == (vs at: i)]) ifFalse: [same := false].
-    k -> val].
-  "The writer's map-key rule (format spec 'Map keys', PBKeys): a key that can
-   never be a map key, and two keys that conflict (1 and 1.0, two NaNs of one
-   encoding), signal PBValidationError. A PBFrozenDict was built under the
-   reader's rule, which keeps NaN keys of one encoding apart."
-  PBKeys checkMapKeys: (pairs collect: [:each | each key]) reading: false.
-  same ifTrue: [^ v].
-  ^ PBFrozenDict withAssociations: pairs.
-
 "=== encoding ================================================================="
 
 "The wire form of aValue (canonicalized first): msgpack-ready data where
@@ -342,9 +447,10 @@ PBCodec class >> _canonicalMap: v depth: d
 PBCodec class >> toWire: aValue atomRef: aBlock
   ^ self _wire: (self canonical: aValue) ref: aBlock.
 
-"As toWire:atomRef:, inside anInteger enclosing msgpack containers."
-PBCodec class >> toWire: aValue atomRef: aBlock enclosingDepth: anInteger
-  ^ self _wire: (self canonical: aValue enclosingDepth: anInteger) ref: aBlock.
+"As toWire:atomRef:, with a PBValidationError of the codec's own naming
+ aHolder (canonical:for:)."
+PBCodec class >> toWire: aValue atomRef: aBlock for: aHolder
+  ^ self _wire: (self canonical: aValue for: aHolder) ref: aBlock.
 
 "The block that writes a reference as its pointer: {'@ref': [segment, offset,
  tag]}, from the reference's pointer and tag."
@@ -368,7 +474,49 @@ PBCodec class >> _pointerRefOf: anAtom
 PBCodec class >> _tagged: aTag body: aBody
   ^ MessagePackMap withAll: { aTag -> aBody }.
 
-PBCodec class >> _wire: v ref: aBlock
+"The wire form of the canonical value aValue, built with an explicit stack."
+PBCodec class >> _wire: aValue ref: aBlock
+  | stack result |
+  result := self _wireOpen: aValue ref: aBlock on: nil.
+  (result isKindOf: _PBValueFrame) ifFalse: [^ result].
+  stack := OrderedCollection with: result.
+  [stack isEmpty] whileFalse: [
+    | frame r |
+    frame := stack last.
+    frame atEnd
+      ifTrue: [
+        stack removeLast.
+        r := self _wireClose: frame]
+      ifFalse: [r := self _wireOpen: frame next ref: aBlock on: stack].
+    (r isKindOf: _PBValueFrame) ifFalse: [
+      stack isEmpty ifTrue: [result := r] ifFalse: [stack last add: r]]].
+  ^ result.
+
+"The wire form of the canonical scalar v, or, for a container, a frame pushed
+ on aStack (nil for the first value)."
+PBCodec class >> _wireOpen: v ref: aBlock on: aStack
+  | frame |
+  (v isKindOf: _PBSequence) ifTrue: [
+    frame := _PBValueFrame kind: ((v isKindOf: PBTuple) ifTrue: [#tuple] ifFalse: [#list])
+      source: v items: (self _field: 'items' of: v base: _PBSequence) depth: 0].
+  (v isKindOf: PBFrozenDict) ifTrue: [
+    frame := _PBValueFrame kind: #map source: v
+      items: (self _interleave: (self _field: 'keys' of: v base: PBFrozenDict)
+        with: (self _field: 'values' of: v base: PBFrozenDict))
+      depth: 0].
+  frame isNil ifTrue: [^ self _wireLeaf: v ref: aBlock].
+  aStack isNil ifFalse: [aStack addLast: frame].
+  ^ frame.
+
+PBCodec class >> _wireClose: aFrame
+  | results |
+  results := aFrame results.
+  aFrame kind == #list ifTrue: [^ results].
+  aFrame kind == #tuple ifTrue: [^ self _tagged: '@tup' body: results].
+  ^ self _tagged: '@map' body: ((1 to: results size // 2) asArray collect: [:i |
+    { results at: 2 * i - 1. results at: 2 * i }]).
+
+PBCodec class >> _wireLeaf: v ref: aBlock
   v isNil ifTrue: [^ v].
   (v == true or: [v == false]) ifTrue: [^ v].
   v isInteger ifTrue: [
@@ -391,12 +539,6 @@ PBCodec class >> _wire: v ref: aBlock
   (v isKindOf: UUID) ifTrue: [^ self _tagged: '@uuid' body: (self _uuidBytes: v)].
   v == PBMissing default ifTrue: [^ self _tagged: '@missing' body: 0].
   (v isKindOf: PBMutableObject) ifTrue: [^ self _tagged: '@mut' body: v name].
-  (v isKindOf: PBTuple) ifTrue: [
-    ^ self _tagged: '@tup' body: (v asArray collect: [:each | self _wire: each ref: aBlock])].
-  (v isKindOf: PBFrozenList) ifTrue: [^ v asArray collect: [:each | self _wire: each ref: aBlock]].
-  (v isKindOf: PBFrozenDict) ifTrue: [
-    ^ self _tagged: '@map' body: (v associations collect: [:each |
-      { self _wire: each key ref: aBlock. self _wire: each value ref: aBlock }])].
   (self _isReference: v) ifTrue: [^ aBlock value: v].
   ^ PBUnexpectedError signal: 'PBCodec: no wire form for a canonical ' , v class name.
 
@@ -426,8 +568,33 @@ PBCodec class >> decode: aByteArray
 
 "The value of aTree, as MessagePack decodeOrdered:strictKeys: answers it. A
  reference is aResolver refTo: segmentBytes offset: anInteger tag: aTag, or a
- PBUnresolvedRef when aResolver is nil."
+ PBUnresolvedRef when aResolver is nil. Data nested deeper than maxValueDepth
+ containers is PBCorruptionError. The walk keeps an explicit stack, and meets
+ references and map keys in the order of the data: a key is checked, and its
+ atoms loaded, before its value is read."
 PBCodec class >> fromWire: aTree resolver: aResolver
+  | stack result |
+  result := self _fromWireOpen: aTree depth: 0 resolver: aResolver on: nil.
+  (result isKindOf: _PBValueFrame) ifFalse: [^ result].
+  stack := OrderedCollection with: result.
+  [stack isEmpty] whileFalse: [
+    | frame r |
+    frame := stack last.
+    frame atEnd
+      ifTrue: [
+        stack removeLast.
+        r := self _fromWireClose: frame]
+      ifFalse: [r := self _fromWireOpen: frame next depth: frame depth resolver: aResolver on: stack].
+    (r isKindOf: _PBValueFrame) ifFalse: [
+      stack isEmpty
+        ifTrue: [result := r]
+        ifFalse: [self _fromWireAdd: r to: stack last resolver: aResolver]]].
+  ^ result.
+
+"The value of the wire data aTree, d containers deep: a scalar's, or, for a
+ list, a @tup or a @map, a frame pushed on aStack (nil for the first value)."
+PBCodec class >> _fromWireOpen: aTree depth: d resolver: aResolver on: aStack
+  | frame |
   aTree isNil ifTrue: [^ aTree].
   (aTree == true or: [aTree == false]) ifTrue: [^ aTree].
   aTree isInteger ifTrue: [^ aTree].
@@ -435,14 +602,45 @@ PBCodec class >> fromWire: aTree resolver: aResolver
   (aTree isString and: [aTree isSymbol not]) ifTrue: [^ aTree].
   (aTree isKindOf: ByteArray) ifTrue: [^ aTree].
   (aTree isKindOf: Array) ifTrue: [
-    ^ PBFrozenList withAll: (aTree collect: [:each | self fromWire: each resolver: aResolver])].
-  (aTree isKindOf: MessagePackMap) ifTrue: [^ self _fromTagged: aTree resolver: aResolver].
+    d + 1 > self maxValueDepth ifTrue: [^ self _tooDeepData].
+    frame := _PBValueFrame kind: #list source: aTree items: aTree depth: d + 1].
+  (aTree isKindOf: MessagePackMap) ifTrue: [
+    frame := self _fromTagged: aTree depth: d resolver: aResolver.
+    (frame isKindOf: _PBValueFrame) ifFalse: [^ frame]].
   (aTree isKindOf: MessagePackExt) ifTrue: [
     ^ PBCorruptionError signal: 'PBCodec: a msgpack ext value (type ' , aTree type printString
       , ') is never a canonical value'].
-  ^ PBCorruptionError signal: 'PBCodec: malformed encoded value: ' , (self _preview: aTree).
+  frame isNil ifTrue: [^ PBCorruptionError signal: 'PBCodec: malformed encoded value: ' , (self _preview: aTree)].
+  aStack isNil ifFalse: [aStack addLast: frame].
+  ^ frame.
 
-PBCodec class >> _fromTagged: aMap resolver: aResolver
+"aResult, the value of an item of aFrame, added to it. A map key is checked
+ against the reader's map-key rule and its atoms loaded before the value that
+ follows it is read."
+PBCodec class >> _fromWireAdd: aResult to: aFrame resolver: aResolver
+  | reason |
+  aFrame add: aResult.
+  (aFrame kind == #map and: [aFrame position odd]) ifFalse: [^ self].
+  reason := PBKeys _unkeyableReason: aResult legacyAllowed: true.
+  reason isNil ifFalse: [^ self _corrupt: '@map' body: aFrame source because: reason].
+  self _loadKeyAtoms: aResult resolver: aResolver.
+
+PBCodec class >> _fromWireClose: aFrame
+  | results pairs |
+  results := aFrame results.
+  aFrame kind == #list ifTrue: [^ PBFrozenList withAll: results].
+  aFrame kind == #tuple ifTrue: [^ PBTuple withAll: results].
+  pairs := (1 to: results size // 2) asArray collect: [:i | (results at: 2 * i - 1) -> (results at: 2 * i)].
+  "The reader's map-key rule (PBKeys checkMapKeys:reading: true) is the rule
+   PBFrozenDict withAssociations: builds under: conflicting keys are
+   PBValidationError, read as corruption; NaN keys of one encoding (format 3)
+   stay two keys."
+  ^ [PBFrozenDict withAssociations: pairs] on: PBValidationError do: [:e |
+    self _corrupt: '@map' body: aFrame source because: e messageText].
+
+"The value of a tagged map d containers deep, or, for @tup and @map, the frame
+ of its items (not yet pushed)."
+PBCodec class >> _fromTagged: aMap depth: d resolver: aResolver
   | assoc tag body |
   aMap size = 1 ifFalse: [
     ^ PBCorruptionError signal: 'PBCodec: a tagged value is a map with exactly one key, not '
@@ -452,6 +650,13 @@ PBCodec class >> _fromTagged: aMap resolver: aResolver
   body := assoc value.
   (tag isString and: [tag isSymbol not]) ifFalse: [
     ^ PBCorruptionError signal: 'PBCodec: a map key must be a string, not ' , (self _preview: tag)].
+  tag = '@tup' ifTrue: [
+    (body isKindOf: Array) ifFalse: [^ self _corrupt: tag body: body because: 'an array was expected'].
+    d + 2 > self maxValueDepth ifTrue: [^ self _tooDeepData].
+    ^ _PBValueFrame kind: #tuple source: body items: body depth: d + 2].
+  tag = '@map' ifTrue: [^ self _mapFrame: body depth: d].
+  (d + 3 > self maxValueDepth and: [d + (self _wireTreeDepth: aMap) > self maxValueDepth]) ifTrue: [
+    ^ self _tooDeepData].
   tag = '@int' ifTrue: [^ self _decodeInt: body].
   tag = '@dec' ifTrue: [^ self _decodeDecimal: body].
   tag = '@date' ifTrue: [^ self _decodeDate: body].
@@ -459,10 +664,6 @@ PBCodec class >> _fromTagged: aMap resolver: aResolver
   tag = '@dt' ifTrue: [^ self _decodeDateTime: body].
   tag = '@td' ifTrue: [^ self _decodeTimeSpan: body].
   tag = '@uuid' ifTrue: [^ self _decodeUUID: body].
-  tag = '@tup' ifTrue: [
-    (body isKindOf: Array) ifFalse: [^ self _corrupt: tag body: body because: 'an array was expected'].
-    ^ PBTuple withAll: (body collect: [:each | self fromWire: each resolver: aResolver])].
-  tag = '@map' ifTrue: [^ self _decodeMap: body resolver: aResolver].
   tag = '@missing' ifTrue: [
     (body isInteger and: [body = 0]) ifFalse: [^ self _corrupt: tag body: body because: 'the body must be the integer 0'].
     ^ PBMissing default].
@@ -472,6 +673,44 @@ PBCodec class >> _fromTagged: aMap resolver: aResolver
       ^ self _corrupt: tag body: body because: 'a non-empty name was expected'].
     ^ PBMutableObject name: body].
   ^ PBCorruptionError signal: 'PBCodec: unknown codec tag ' , (self _preview: tag).
+
+"The frame of a @map body d containers deep: its keys and values interleaved,
+ after every entry is checked to be a [key, value] array."
+PBCodec class >> _mapFrame: aBody depth: d
+  | items inner |
+  (aBody isKindOf: Array) ifFalse: [^ self _corrupt: '@map' body: aBody because: 'an array was expected'].
+  items := Array new: aBody size * 2.
+  1 to: aBody size do: [:i |
+    | pair |
+    pair := aBody at: i.
+    ((pair isKindOf: Array) and: [pair size = 2]) ifFalse: [
+      ^ self _corrupt: '@map' body: aBody because: 'each entry is a [key, value] array'].
+    items at: 2 * i - 1 put: (pair at: 1).
+    items at: 2 * i put: (pair at: 2)].
+  inner := aBody isEmpty ifTrue: [d + 2] ifFalse: [d + 3].
+  inner > self maxValueDepth ifTrue: [^ self _tooDeepData].
+  ^ _PBValueFrame kind: #map source: aBody items: items depth: inner.
+
+"The msgpack containers (arrays and maps, an empty one included) the wire data
+ aTree nests, counted with an explicit stack."
+PBCodec class >> _wireTreeDepth: aTree
+  | stack best |
+  best := 0.
+  stack := OrderedCollection with: aTree -> 0.
+  [stack isEmpty] whileFalse: [
+    | entry t d |
+    entry := stack removeLast.
+    t := entry key.
+    d := entry value.
+    (t isKindOf: Array)
+      ifTrue: [
+        d := d + 1.
+        1 to: t size do: [:i | stack addLast: (t at: i) -> d]]
+      ifFalse: [(t isKindOf: MessagePackMap) ifTrue: [
+        d := d + 1.
+        t associations do: [:each | stack addLast: each key -> d; addLast: each value -> d]]].
+    d > best ifTrue: [best := d]].
+  ^ best.
 
 PBCodec class >> _corrupt: aTag body: aBody because: aString
   ^ PBCorruptionError signal: 'PBCodec: malformed ' , aTag , ' value ' , (self _preview: aBody)
@@ -602,25 +841,6 @@ PBCodec class >> _decodeUUID: aBody
     ^ self _corrupt: '@uuid' body: aBody because: '16 bytes were expected'].
   ^ UUID fromBytes: aBody.
 
-PBCodec class >> _decodeMap: aBody resolver: aResolver
-  | pairs |
-  (aBody isKindOf: Array) ifFalse: [^ self _corrupt: '@map' body: aBody because: 'an array was expected'].
-  pairs := aBody collect: [:pair |
-    | k reason |
-    ((pair isKindOf: Array) and: [pair size = 2]) ifFalse: [
-      ^ self _corrupt: '@map' body: aBody because: 'each entry is a [key, value] array'].
-    k := self fromWire: (pair at: 1) resolver: aResolver.
-    reason := PBKeys _unkeyableReason: k legacyAllowed: true.
-    reason isNil ifFalse: [^ self _corrupt: '@map' body: aBody because: reason].
-    self _loadKeyAtoms: k resolver: aResolver.
-    k -> (self fromWire: (pair at: 2) resolver: aResolver)].
-  "The reader's map-key rule (PBKeys checkMapKeys:reading: true) is the rule
-   PBFrozenDict withAssociations: builds under: conflicting keys are
-   PBValidationError, read as corruption; NaN keys of one encoding (format 3)
-   stay two keys."
-  ^ [PBFrozenDict withAssociations: pairs] on: PBValidationError do: [:e |
-    self _corrupt: '@map' body: aBody because: e messageText].
-
 "A key is identified by its oid: the atoms of the key k (an atom, or atoms in
  a tuple) are loaded now through a resolver that loads keys
  (_PBLoadResolver >> loadKey:, which refuses a record already being decoded).
@@ -629,9 +849,15 @@ PBCodec class >> _decodeMap: aBody resolver: aResolver
  to itself is still refused with PBCorruptionError, one level later, when the
  stub is loaded, so the recursion always ends."
 PBCodec class >> _loadKeyAtoms: k resolver: aResolver
+  | stack |
   (aResolver isNil or: [(aResolver respondsTo: #loadKey:) not]) ifTrue: [^ self].
-  (k isKindOf: PBAtom) ifTrue: [^ aResolver loadKey: k].
-  (k isKindOf: PBTuple) ifTrue: [k do: [:each | self _loadKeyAtoms: each resolver: aResolver]].
+  "Depth first, in the key's order, with an explicit stack."
+  stack := OrderedCollection with: k.
+  [stack isEmpty] whileFalse: [
+    | each |
+    each := stack removeLast.
+    (each isKindOf: PBAtom) ifTrue: [aResolver loadKey: each].
+    (each isKindOf: PBTuple) ifTrue: [each asArray reverseDo: [:item | stack addLast: item]]].
 
 PBCodec class >> _decodeRef: aBody resolver: aResolver
   | f segment offset tag bytes |

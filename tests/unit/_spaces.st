@@ -9,6 +9,10 @@
   b writeTo: aDirectory root: ref
                                  writes the segment and a space.root pointing at
                                  ref, and answers aDirectory
+  ref := b addPayload: bytes tag: aTag
+                                 writes an ATOM record whose payload is the raw
+                                 msgpack bytes given (for records no writer may
+                                 write), and answers a PBUnresolvedRef to it
   b nextRef: aTag, b refAt: anOffset tag: aTag, b nextOffset, b sizeOf:oid:state:
                                  references and offsets ahead of the records
 
@@ -37,6 +41,13 @@ SpaceBuilder >> add: aTag oidBytes: aByteArray state: anArray
     tag: aTag
     oid: aByteArray
     state: (PBFrozenDict withAssociations: anArray)) encode).
+  ^ PBUnresolvedRef pointer: (PBAtomPointer segment: segment offset: offset) tag: aTag.
+
+"As add:oid:state:, with the payload given as raw msgpack bytes."
+SpaceBuilder >> addPayload: aByteArray tag: aTag
+  | offset |
+  offset := stream contents size.
+  stream nextPutAll: (PBRecordHeader encodeKind: 1 payload: aByteArray).
   ^ PBUnresolvedRef pointer: (PBAtomPointer segment: segment offset: offset) tag: aTag.
 
 "A reference, tagged aTag, to the record the next add: writes (a record that
