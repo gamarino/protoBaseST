@@ -3,7 +3,8 @@
 Mirrors proto_db/errors.py at ProtoBase v2.0.0rc1 (plan call C14), with PB in place of Proto,
 so that on: PBLockingError do: means the same in Smalltalk and in Python. ProtoBase classes
 that are outside this prototype (references, pager tokens, misfiled entries, authorization,
-backlog and refused writes) have no counterpart here."
+backlog and refused writes) have no counterpart here, and the errors carry no code or message API yet:
+they are added, additively, when a task needs them."
 
 Error subclass: #PBDBError.
 PBDBError comment: 'Root of every error protoBaseST signals. Counterpart of ProtoBase ProtoDBError.'.

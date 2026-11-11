@@ -14,8 +14,12 @@
 #   "EXPECT-ERROR: <text>"  non-zero exit, and the error output contains <text> (text optional)
 # A successful run whose last line starts with "SKIP: " counts as skipped.
 # Each *.sh file passes with exit 0, is skipped with exit 77, and fails otherwise.
-# Files whose name starts with "_" are helpers. Tooling scripts (env.sh, setup_venv.sh,
-# fetch_vectors.sh, run_tests.sh) and the directories .venv and out are never run as tests.
+# "EXPECT-ERROR" needs a text (an error class or message): the bare form is a test failure, and so
+# is a module parse error that the text does not name, so a broken import cannot pass.
+# A path argument that does not exist, or a run that finds no test, fails.
+# Files whose name starts with "_" are helpers. The tooling scripts tests/run_tests.sh,
+# tests/interop/env.sh, tests/interop/setup_venv.sh and tests/conformance/fetch_vectors.sh (exact
+# paths) and the directories .venv, out and fixtures are never run as tests.
 set -u
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,23 +38,32 @@ export STPATH="$REPO/src${STPATH:+:$STPATH}"
 TIMEOUT="${RUN_TIMEOUT:-120}"
 
 if [[ $# -eq 0 ]]; then
-    set -- "$REPO/tests" "$REPO/examples"
+    set -- "$REPO/tests"
+    [[ -d "$REPO/examples" ]] && set -- "$@" "$REPO/examples"
 fi
 
 files=()
+missing=0
 for p in "$@"; do
-    [[ -e "$p" ]] || continue
+    if [[ ! -e "$p" ]]; then
+        echo "FAIL: no such path: $p"; missing=$((missing + 1)); continue
+    fi
     p="$(cd "$(dirname "$p")" && pwd)/$(basename "$p")"
     if [[ -d "$p" ]]; then
         while IFS= read -r f; do files+=("$f"); done < <(
-            find "$p" \( -name .venv -o -name out \) -prune -o -type f \
+            find "$p" \( -name .venv -o -name out -o -name fixtures \) -prune -o -type f \
                 \( -name '*.st' -o -name '*.sh' \) ! -name '_*' \
-                ! -name env.sh ! -name setup_venv.sh ! -name fetch_vectors.sh ! -name run_tests.sh \
                 -print | sort)
     else
         files+=("$p")
     fi
 done
+TOOLING=" tests/run_tests.sh tests/interop/env.sh tests/interop/setup_venv.sh tests/conformance/fetch_vectors.sh "
+kept=()
+for f in "${files[@]}"; do
+    [[ "$TOOLING" == *" ${f#"$REPO"/} "* ]] || kept+=("$f")
+done
+files=("${kept[@]}")
 
 passed=0; failed=0; skipped=0
 rel() { printf '%s' "${1#"$REPO"/}"; }
@@ -64,8 +77,11 @@ run_st() {
     directive="${directive#"${directive%%[![:space:]]*}"}"
     directive="${directive%"${directive##*[![:space:]]}"}"
     case "$directive" in
-        EXPECT-ERROR:*) mode=error; expected="${directive#EXPECT-ERROR:}"; expected="${expected# }" ;;
-        EXPECT-ERROR)   mode=error; expected="" ;;
+        EXPECT-ERROR:*) mode=error; expected="${directive#EXPECT-ERROR:}"; expected="${expected# }"
+            if [[ -z "$expected" ]]; then
+                echo "FAIL: $(rel "$file"): EXPECT-ERROR needs the expected error text"; return 1
+            fi ;;
+        EXPECT-ERROR)   echo "FAIL: $(rel "$file"): EXPECT-ERROR needs the expected error text"; return 1 ;;
         EXPECT:*)       mode=value; expected="${directive#EXPECT:}"; expected="${expected# }" ;;
         *) echo "FAIL: $(rel "$file"): no directive on the first line"; return 1 ;;
     esac
@@ -85,7 +101,10 @@ run_st() {
     if [[ $rc -ge 124 ]]; then
         echo "FAIL: $(rel "$file"): crashed or timed out (exit=$rc)"; return 1
     fi
-    if [[ $rc -ne 0 && ( -z "$expected" || "$errtext" == *"$expected"* ) ]]; then
+    if [[ "$errtext" == *"module parse errors"* && "$expected" != *"parse error"* ]]; then
+        echo "FAIL: $(rel "$file"): a module parse error, not the expected error [$expected]: $errtext"; return 1
+    fi
+    if [[ $rc -ne 0 && "$errtext" == *"$expected"* ]]; then
         echo "PASS: $(rel "$file")"; return 0
     fi
     echo "FAIL: $(rel "$file"): expected an error containing [$expected], got exit=$rc stderr=[$errtext]"
@@ -115,5 +134,9 @@ for f in "${files[@]}"; do
     esac
 done
 
+failed=$((failed + missing))
+if [[ $((passed + failed + skipped)) -eq 0 ]]; then
+    echo "FAIL: no tests found"; failed=1
+fi
 echo "passed $passed, failed $failed, skipped $skipped"
 [[ $failed -eq 0 ]]
