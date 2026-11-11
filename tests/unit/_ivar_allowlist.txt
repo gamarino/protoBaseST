@@ -32,3 +32,4 @@ PBTxState class>>_initializeMarks
 PBOrderKey class>>_initializeInfinities
 _PBLoadResolver>>_setStorage:chain:
 _PBReadMap>>_setEntries:
+PBNode class>>_initializeShapes

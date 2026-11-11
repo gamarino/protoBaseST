@@ -163,6 +163,15 @@ PBFrozenDict class >> withAssociations: anArray
     vs at: i put: each value].
   ^ self basicNew _setKeys: ks values: vs index: (PBMapKeyIndex on: ks).
 
+"A map of the keys aKeyArray, filed by aPBMapKeyIndex (PBMapKeyIndex on:
+ aKeyArray, which the caller built once and shares between maps of the same
+ keys: both are never changed), and the values aValueArray, in order."
+PBFrozenDict class >> _keys: aKeyArray index: aPBMapKeyIndex values: aValueArray
+  aKeyArray size = aValueArray size ifFalse: [
+    ^ PBValidationError signal: 'PBFrozenDict: ' , aKeyArray size printString , ' keys and '
+      , aValueArray size printString , ' values'].
+  ^ self basicNew _setKeys: aKeyArray values: aValueArray index: aPBMapKeyIndex.
+
 PBFrozenDict >> _setKeys: aKeyArray values: aValueArray index: aPBMapKeyIndex
   "Runs once, on a fresh instance."
   keys isNil ifFalse: [^ PBUserError signal: 'PBFrozenDict is immutable'].
@@ -194,6 +203,10 @@ PBFrozenDict >> at: aKey ifAbsent: aBlock
   i := self _indexOfKey: aKey.
   i = 0 ifTrue: [^ aBlock value].
   ^ values at: i.
+
+"The value at position anIndex (1-based, from _indexOfKey:)."
+PBFrozenDict >> _valueAt: anIndex
+  ^ values at: anIndex.
 
 PBFrozenDict >> includesKey: aKey
   ^ (self _indexOfKey: aKey) > 0.

@@ -608,20 +608,41 @@ PBIdentityKey >> hash
 Object subclass: #PBMapKeyIndex instanceVariableNames: 'ids zoned'.
 
 PBMapKeyIndex class >> on: aKeyArray
-  | ids |
-  aKeyArray do: [:k |
-    | reason |
-    reason := PBKeys _unkeyableReason: k legacyAllowed: true.
-    reason isNil ifFalse: [^ PBValidationError signal: 'PBFrozenDict: ' , reason]].
-  PBKeys checkDecidableKeys: aKeyArray.
+  | ids plain |
+  plain := aKeyArray allSatisfy: [:k | self _isPlainString: k].
+  plain ifFalse: [
+    aKeyArray do: [:k |
+      | reason |
+      reason := PBKeys _unkeyableReason: k legacyAllowed: true.
+      reason isNil ifFalse: [^ PBValidationError signal: 'PBFrozenDict: ' , reason]].
+    PBKeys checkDecidableKeys: aKeyArray].
   ids := Dictionary new.
   1 to: aKeyArray size do: [:i |
     | k id |
     k := aKeyArray at: i.
-    id := PBKeys _keyId: k mode: #read.
+    id := self _idOf: k.
     (ids includesKey: id) ifTrue: [^ self _twice: k as: (aKeyArray at: (ids at: id))].
     ids at: id put: i].
-  ^ self basicNew _setIds: ids zoned: (self _zonedColumnsOf: aKeyArray).
+  ^ self basicNew _setIds: ids zoned: (plain ifTrue: [nil] ifFalse: [self _zonedColumnsOf: aKeyArray]).
+
+"Whether k is a String that is not a Symbol: the attribute names of every
+ record state, the most common map."
+PBMapKeyIndex class >> _isPlainString: k
+  "Written with ifTrue:, which the compiler inlines (and: evaluates a block): this
+   runs on every attribute read."
+  k isString ifFalse: [^ false].
+  ^ k isSymbol not.
+
+"The id the index files k under: PBKeys _keyId: k mode: #read, except that a
+ plain String is its own id. That is the same rule: the #read id of a plain
+ String is the order key (rank 4, the String), equal exactly to the id of an
+ equal String, and no other id is a String (they are PBOrderKeys, Arrays and
+ PBIdentityKeys), so no other key can be confused with it; it only skips the
+ type tests. A plain String key is never unkeyable and holds no datetime, so a
+ map of plain String keys also skips those checks and has no zoned columns."
+PBMapKeyIndex class >> _idOf: k
+  (self _isPlainString: k) ifTrue: [^ k].
+  ^ PBKeys _keyId: k mode: #read.
 
 PBMapKeyIndex class >> _twice: aKey as: anEarlierKey
   | text earlier |
@@ -679,7 +700,7 @@ PBMapKeyIndex >> _setIds: aDictionary zoned: aZonedOrNil
  to answer signals PBNotSupportedError."
 PBMapKeyIndex >> indexOf: aKey
   zoned isNil ifFalse: [self _checkProbe: aKey].
-  ^ ids at: (PBKeys _keyId: aKey mode: #read) ifAbsent: [0].
+  ^ ids at: (PBMapKeyIndex _idOf: aKey) ifAbsent: [0].
 
 "Signals PBNotSupportedError when aKey and a key of the map could conflict
  and only a zone's offsets can tell (the rule of checkDecidableKeys:)."

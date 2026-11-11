@@ -317,10 +317,15 @@ PBAtom class >> _checkPersistedNames: aState at: aPointer
  CountedSet a RepeatedKeysDictionary answers for an absent key). The public
  constructors of new atoms come with the writer (plan Task 15)."
 PBAtom class >> _unsavedWithState: aPBFrozenDict
+  ^ self _unsavedWithState: aPBFrozenDict tag: (PBTypeRegistry tagFor: self).
+
+"As _unsavedWithState:, with aTag, which the caller computed once with
+ PBTypeRegistry tagFor: self (the AVL writes, which build many nodes)."
+PBAtom class >> _unsavedWithState: aPBFrozenDict tag: aTag
   (aPBFrozenDict isKindOf: PBFrozenDict) ifFalse: [
     ^ PBValidationError signal: self name , ': the state of an atom is a PBFrozenDict, not ' , aPBFrozenDict printString].
   ^ (self basicNew _setOid: nil pointer: nil storage: nil)
-    _installState: (PBAtomEnvelope basicNew _setTag: (PBTypeRegistry tagFor: self) oid: nil state: aPBFrozenDict).
+    _installState: (PBAtomEnvelope basicNew _setTag: aTag oid: nil state: aPBFrozenDict).
 
 PBAtom >> _installState: anEnvelope
   "Runs once, on a fresh unsaved instance."
@@ -419,7 +424,15 @@ PBAtom >> state
  hold reads as nil (an application type's later field, format spec 'Required
  fields')."
 PBAtom >> stateAt: aName
-  ^ self state at: aName ifAbsent: [self _absentField: aName].
+  "Every field read of every atom runs here: the loaded envelope is read from
+   its cell directly, and the lookup creates no block."
+  | envelope state i |
+  envelope := memo value.
+  envelope isNil ifTrue: [envelope := self _envelope].
+  state := envelope state.
+  i := state _indexOfKey: aName.
+  i = 0 ifTrue: [^ self _absentField: aName].
+  ^ state _valueAt: i.
 
 PBAtom >> _absentField: aName
   ^ nil.
