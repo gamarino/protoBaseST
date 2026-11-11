@@ -62,6 +62,55 @@ level less). Inside an atom record a value sits 2 levels deep, so the limit ther
 Until the order keys exist (plan Task 10), the keys of a `PBFrozenDict` and the items of a list
 compare with `=` within one class: `1` and `1.0` are different keys there.
 
+## Framing and type names
+
+`src/protobase/framing.st` holds the byte frames of the format (format spec, "Segments and
+records", "Root records", "Atom records"). Integers are little-endian and every checksum is
+zlib's CRC-32. Readers accept format versions 2, 3 and 4; writers write 4. An integrity failure
+is `PBCorruptionError`, another version `PBNotSupportedError`.
+
+| Class | Reads | Writes |
+|---|---|---|
+| `PBSegmentHeader` | `decode: bytes` → `version`, `segment` (16 bytes) | `encodeSegment: aUUID` → 26 bytes |
+| `PBRecordHeader` | `decode: bytes` → `kind`, `length`, `payloadCrc`; `payloadIn:at:` / `payloadOfRecord:` check the payload | `encodeKind: k payload: bytes` → header and payload |
+| `PBRootRecord` | `decode: bytes` → `version`, `segment`, `offset`, `epoch`, `pointer`; extra keys ignored | `(PBRootRecord segment: s offset: o epoch: e) encode` |
+| `PBAtomEnvelope` | `decode: payload expecting: aTag` → `tag`, `oid`, `state` (a `PBFrozenDict` in record order) | `(PBAtomEnvelope tag: t oid: o state: aDict) encode` |
+
+`src/protobase/registry.st` holds `PBTypeRegistry`, which maps type tags to classes, and
+`PBAtom`, the base class of persistent objects. A type name is two or more dotted ASCII
+identifiers (`acme.sales.Order`). A class declares it, and the names it was stored under before,
+on its class side:
+
+```smalltalk
+PBAtom subclass: #Invoice.
+
+Invoice class >> typeName
+  ^ 'acme.sales.Invoice'.
+
+Invoice class >> typeAliases
+  ^ #('acme.sales.LegacyInvoice').
+
+PBTypeRegistry register: Invoice.
+
+PBTypeRegistry classForTag: 'acme.sales.LegacyInvoice'.   "Invoice"
+PBTypeRegistry tagFor: Invoice.                           "'acme.sales.Invoice'"
+PBTypeRegistry classForTag: 'polyglot.st.Order'.          "PBOpaqueAtom: a type another language owns"
+PBTypeRegistry classForTag: 'proto_db.nonexistent.X'.     "PBCorruptionError"
+```
+
+A built-in type is written as its alias, its index in `PBTypeRegistry builtinNames` (the table
+of the format spec). Its name, as format 2 wrote it, is read too. A name or alias already taken by
+another class, a name outside the grammar, and a `proto_db.` name outside the table are refused
+by `register:` with `PBValidationError`. A built-in type whose class is not registered yet is
+`PBNotSupportedError`. `PBCodec` reads every `@ref` with the tag a writer puts: a built-in name
+becomes its alias, an application alias the declared name.
+
+An atom read through a reference is a stub (`unloadedAt:storage:`, or
+`PBTypeRegistry unloadedAtomFor:at:storage:`, which also builds a `PBOpaqueAtom`). Its first
+`state`, `stateAt:` or `oid` loads the record through `storage loadAt:expecting:` and memoises the
+envelope in an `Atom` cell, checking the class's `requiredFields`. A field that an application
+record does not hold reads as nil; an opaque atom signals `PBNotSupportedError` naming its type.
+
 ## Running the tests
 
 The tests need a protoST binary 0.9.0 or newer (run from a protoST checkout on the branch that

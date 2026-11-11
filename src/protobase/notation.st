@@ -23,33 +23,18 @@ fields; a format-3 wall-clock datetime (PBLegacyZoneDateTime) describes as
 (ProtoBase turns it into an instant with its time-zone database; design 4.3).
 
 A reference's type is its name. The type tag of a reference to a built-in type
-is an alias (an Integer): describe: shows its name and build: writes the alias,
-through the table of the 22 built-in aliases below. That table is a copy of the
-format spec's, checked against manifest.json's builtin_type_aliases by the
-conformance runner; PBTypeRegistry (plan Task 9) owns it and replaces it."
+is an alias (an Integer): describe: shows its name and build: writes the tag a
+writer puts (the alias of a built-in type, the declared name of an application
+alias), both through PBTypeRegistry, which owns the built-in alias table."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/values'.
+Import from: 'protobase/registry'.
 Import from: 'protobase/codec'.
 Import from: 'decimal'.
 Import from: 'calendar'.
 
 Object subclass: #PBNotation.
-
-"=== the built-in alias table ================================================="
-
-PBNotation class >> builtinAliasNames
-  ^ #('proto_db.avl.KeyNode' 'proto_db.avl.PosNode' 'proto_db.avl.ValueBox'
-      'proto_db.collections.IndexSet' 'proto_db.collections.IndexedCollection'
-      'proto_db.collections.List' 'proto_db.collections.Dictionary'
-      'proto_db.collections.RepeatedKeysDictionary' 'proto_db.collections.HashDictionary'
-      'proto_db.collections.sets._HashBuckets' 'proto_db.collections.Set'
-      'proto_db.collections.CountedSet' 'proto_db.indexing.Index'
-      'proto_db.indexing.keyed.KeyGroupIndex' 'proto_db.indexing.EqualityIndex'
-      'proto_db.indexing.RangeIndex' 'proto_db.indexing.VectorIndex'
-      'proto_db.transactions.SpaceRoot' 'proto_db.transactions.DatabaseRoot'
-      'proto_db.core.dbobject.DBObject' 'proto_db.avl._Node'
-      'proto_db.avl.CountedKeyNode').
 
 "=== floats ==================================================================="
 
@@ -135,7 +120,7 @@ PBNotation class >> _tz: z
   ^ { 'zone'. z key }.
 
 PBNotation class >> _typeName: aTag
-  ^ aTag isInteger ifTrue: [self builtinAliasNames at: aTag + 1] ifFalse: [aTag].
+  ^ PBTypeRegistry nameOfTag: aTag.
 
 "The description of a decoded canonical value: its kind decides, never its
  truthiness or equality; anything else signals PBValidationError."
@@ -270,9 +255,7 @@ PBNotation class >> _buildUUID: aHexText
   ^ uuid fromBytes: (self _bytesFromHex: aHexText).
 
 PBNotation class >> _buildRef: body
-  | type alias |
-  type := body at: 'type'.
-  alias := self builtinAliasNames indexOf: type.
   ^ PBUnresolvedRef
     pointer: (PBAtomPointer segment: (self _bytesFromHex: (body at: 'segment')) offset: (body at: 'offset'))
-    tag: (alias > 0 ifTrue: [alias - 1] ifFalse: [type]).
+    tag: ([PBTypeRegistry canonicalTag: (body at: 'type')] on: PBCorruptionError do: [:e |
+      PBValidationError signal: 'PBNotation: ' , e messageText]).

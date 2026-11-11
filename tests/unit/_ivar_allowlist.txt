@@ -9,3 +9,10 @@ PBMutableObject>>_setCellName:
 PBAtomPointer>>_setSegmentBytes:offset:
 PBUnresolvedRef>>_setPointer:tag:
 PBZoneKeys class>>_initializeKeys
+PBTypeRegistry class>>_initializeRegistry
+PBAtom>>_setOid:pointer:storage:
+PBOpaqueAtom>>_setReferencedName:
+PBSegmentHeader>>_setVersion:segment:
+PBRecordHeader>>_setKind:length:payloadCrc:
+PBRootRecord>>_setVersion:segment:offset:epoch:
+PBAtomEnvelope>>_setTag:oid:state:

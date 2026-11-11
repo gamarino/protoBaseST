@@ -31,15 +31,6 @@ ExpectedDifferences class >> all
     { 'values'. 'uuid'. #(#('decode' 'PBNotSupportedError') #('encode' 'PBNotSupportedError')).
       'decode: PBNotSupportedError; the value cannot even be built: lib/uuid.st is not in protoST 0.9.0'.
       'Task 5, Step 6' }.
-    { 'values_decode_only'. 'ref-format2'. #(#('reencode' nil)).
-      're-encodes with the type name, not the alias: the name to alias table is PBTypeRegistry''s'.
-      'Task 9' }.
-    { 'values_decode_only'. 'ref-name-of-builtin'. #(#('reencode' nil)).
-      're-encodes with the type name, not the alias: the name to alias table is PBTypeRegistry''s'.
-      'Task 9' }.
-    { 'values_decode_only'. 'ref-alias'. #(#('decode' nil) #('reencode' nil)).
-      'keeps the alias name conformance.LegacyInvoice, it does not map it to the declared name: application aliases are PBTypeRegistry''s'.
-      'Task 9' }.
     { 'values_decode_only'. 'datetime-zone-format3'. #(#('decode' nil) #('reencode' 'PBValidationError')).
       'decodes to a PBLegacyZoneDateTime (wall clock), not the instant; re-encoding it is PBValidationError: the instant needs a tz database'.
       'permanent, design 4.3' }.

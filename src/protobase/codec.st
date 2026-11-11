@@ -19,7 +19,10 @@ Kinds (format kind: protoST class):
   list: PBFrozenList (an Array or an OrderedCollection is copied)
   tuple: PBTuple (@tup)              map: PBFrozenDict (@map)
   missing: PBMissing default         mutable: PBMutableObject (@mut)
-  ref: an atom (anything answering isPBReference), through the atomRef: block
+  ref: an atom (anything answering isPBReference: PBAtom, PBUnresolvedRef),
+       through the atomRef: block; a @ref is read with the tag a writer puts
+       (PBTypeRegistry canonicalTag:): a built-in name becomes its alias, an
+       application alias the declared name of its registered class
 
 Refused when written (PBValidationError naming the class): a Symbol (the @sym
 kind is reserved and not in format 4, Spec 4.4), a Fraction, a Character, a
@@ -64,6 +67,7 @@ Import from: 'protobase/values'.
 Import from: 'decimal'.
 Import from: 'calendar'.
 Import from: 'protobase/zonekeys'.
+Import from: 'protobase/registry'.
 
 "UUID values use the global UUID of protoST's lib/uuid.st (plan Task 5) when a
  program has imported it; this module does not import it, since that library
@@ -86,11 +90,6 @@ PBCodec class >> _decimalMinExponent
 
 PBCodec class >> _decimalMaxAdjusted
   ^ 999999999999999999.
-
-"The number of built-in type aliases (format spec 'Built-in type aliases');
- the table itself is PBTypeRegistry's (plan Task 9)."
-PBCodec class >> _builtinAliasCount
-  ^ 22.
 
 "The most nested msgpack containers msgpack-python's packer writes."
 PBCodec class >> _maxWireDepth
@@ -659,9 +658,12 @@ PBCodec class >> _decodeRef: aBody resolver: aResolver
     ^ self _corrupt: '@ref' body: aBody because: 'the segment is 16 bytes (or, in format 2, 32 hexadecimal digits)'].
   (offset isInteger and: [offset >= 0]) ifFalse: [
     ^ self _corrupt: '@ref' body: aBody because: 'the offset is an integer >= 0'].
-  ((tag isInteger and: [tag between: 0 and: self _builtinAliasCount - 1])
-      or: [tag isString and: [tag notEmpty]]) ifFalse: [
+  ((tag isInteger and: [tag between: 0 and: PBTypeRegistry builtinCount - 1])
+      or: [tag isString and: [tag isSymbol not and: [tag notEmpty]]]) ifFalse: [
     ^ self _corrupt: '@ref' body: aBody because: 'the type tag is an alias of the table or a type name'].
+  "The name a writer would put: a built-in name (format 2) becomes its alias, an
+   application alias the declared name of its registered class (format spec, Type names)."
+  tag := PBTypeRegistry canonicalTag: tag.
   aResolver isNil ifTrue: [
     ^ PBUnresolvedRef pointer: (PBAtomPointer segment: bytes offset: offset) tag: tag].
   ^ aResolver refTo: bytes offset: offset tag: tag.

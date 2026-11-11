@@ -21,3 +21,12 @@
   (zone names, mutable names, reference type names) is checked for lone surrogates. Empty
   containers are charged one msgpack level less, and `canonical:enclosingDepth:` and
   `toWire:atomRef:enclosingDepth:` take the depth of an enclosing record.
+- Conformance runners for the value layers: `PBNotation` (`describe:`, `build:`, `describeRaw:`,
+  `floatHex:`, `floatFromHex:`) and the vector checks of `tests/conformance`.
+- Framing and the type registry: `PBSegmentHeader`, `PBRecordHeader`, `PBRootRecord` and
+  `PBAtomEnvelope` (`framing.st`); `PBTypeRegistry`, `PBAtom` and `PBOpaqueAtom`
+  (`registry.st`). The built-in alias table now lives in `PBTypeRegistry builtinNames`;
+  `PBNotation builtinAliasNames` is removed. `PBCodec` reads a `@ref` with the writer's tag: a
+  format-2 built-in name becomes its alias, an application alias the declared name. The
+  `framing` vectors and the invalid `record`, `segment` and `root` vectors pass, and so do
+  `ref-format2`, `ref-name-of-builtin` and `ref-alias`.

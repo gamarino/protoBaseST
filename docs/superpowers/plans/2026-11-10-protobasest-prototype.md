@@ -618,9 +618,6 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   | Vector (section/id) | What protoBaseST does | Why | Removed by |
   |---|---|---|---|
   | `values/uuid` | decode: `PBNotSupportedError` | `lib/uuid.st` is not in protoST 0.9.0 | Task 5, Step 6 |
-  | `values_decode_only/ref-format2` | re-encodes with the type name, not the alias | the name→alias table is `PBTypeRegistry`'s | Task 9 |
-  | `values_decode_only/ref-name-of-builtin` | the same | the same | Task 9 |
-  | `values_decode_only/ref-alias` | keeps the alias name `conformance.LegacyInvoice`; it does not map it to the declared name | application aliases are `PBTypeRegistry`'s | Task 9 |
   | `values_decode_only/datetime-zone-format3` | decodes to a `PBLegacyZoneDateTime` (wall clock), not the instant; re-encoding it is `PBValidationError` | the instant needs a tz database (design §4.3) | permanent, design §4.3 |
   | `values_read_not_rewritten/map-zone-key-format3` | re-encoding is refused, as listed; the decoded keys are the format-3 wall clocks, not instants | the same | permanent, design §4.3 |
   | `values_read_not_rewritten/map-nan-keys-format3` | re-encodes instead of `PBValidationError` | the NaN-token conflict of a writer is `PBKeys checkMapKeys:` | Task 10 |
@@ -628,6 +625,10 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   | `invalid/value-instant-wall-out-of-range` | accepted and presented in UTC | the wall-clock range needs the zone's rules; the format spec (Known gaps) lets a reader without a database present the instant in UTC | permanent, design §4.3 |
   | `invalid/map-key-bool-and-int` | accepted | the cross-kind conflict rule needs order keys | Task 10 |
   | `invalid/map-key-equal-numbers` | accepted | the same | Task 10 |
+
+  Removed by Task 9: `values_decode_only/ref-format2`, `ref-name-of-builtin` and `ref-alias`
+  (the reader maps a built-in name to its alias and an application alias to its declared name
+  through `PBTypeRegistry`; the runner now matches them).
 - [ ] **Step 4:** run. Expected: PASS, with exactly the expected differences above. A
   failing vector that is not listed is a codec bug (fix it in Task 7's files); never edit a
   vector, and never add an entry without a reason and a removing task (or "permanent" with
@@ -711,6 +712,19 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   **Gate of week 1** (Spec §11): `values`, `values_*`, `invalid` at the value, record,
   segment and root layers, and `framing`.
 - [ ] **Step 5:** commit `Framing: segment, record, root and atom envelope; the type registry`.
+- **As implemented** (calls of the Task 9 implementer, see its report):
+  - `PBTypeRegistry`, `PBAtom` and `PBOpaqueAtom` are in `src/protobase/registry.st`, not in
+    `framing.st`: `PBCodec` (below `framing.st`, which needs the codec) reads `@ref` tags through
+    the registry, so the registry is a module of its own between `values.st` and `codec.st`.
+  - `PBAtom`'s memo holds the loaded envelope (tag, oid, state), not only the state: an unloaded
+    stub learns its oid from the record. `state` answers the envelope's state.
+  - A built-in type whose class is not registered yet is `PBNotSupportedError`, never corruption.
+  - Task 11's resolver answers `PBTypeRegistry unloadedAtomFor: tag at: pointer storage: self`,
+    which builds a `PBOpaqueAtom` that keeps the name it was referenced by for an unknown
+    application name (`PBOpaqueAtom unloadedAt:storage:` alone is refused: it needs the name).
+  - Task 12 extends `PBOpaqueAtom` (in `registry.st`) instead of defining it in `records.st`, and
+    replaces the test-side `ConformanceInvoice` of `_vectors.st` (a `PBAtom` subclass) by a
+    `PBObject` subclass.
 
 ### Task 10: Order keys, hash keys and exact tokens
 

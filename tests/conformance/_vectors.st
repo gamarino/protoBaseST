@@ -8,13 +8,29 @@
 Vectors checks, before anything is read: the SHA-256 of vectors.sha256 is the
 digest pinned in the format spec (and in fetch_vectors.sh), every file the
 list names has the listed SHA-256 (manifest.json included, as ../manifest.json),
-and the manifest's built-in alias list is the table of PBNotation. A mismatch
+the manifest's built-in alias list is the table of PBTypeRegistry, and every
+file the manifest names is listed: a 'file' or 'canonical' path, and the
+segment and space.root of each database-type section ('dir' and 'segment'). A mismatch
 signals Error: a vector is never edited, so no run goes on over a changed one.
 The listing is not walked for unlisted files: fetch_vectors.sh checks that at
-vendoring time."
+vendoring time.
+
+It also registers ConformanceInvoice, the application type of the vectors
+(conformance.Invoice, persisted before as conformance.LegacyInvoice; ProtoBase
+tests/conformance/model.py), as every implementation that reads them must."
 
 Import from: 'protobase'.
 Import from: '_expected_differences'.
+
+PBAtom subclass: #ConformanceInvoice.
+
+ConformanceInvoice class >> typeName
+  ^ 'conformance.Invoice'.
+
+ConformanceInvoice class >> typeAliases
+  ^ #('conformance.LegacyInvoice').
+
+PBTypeRegistry register: ConformanceInvoice.
 
 Object subclass: #Vectors classVariableNames: 'Manifest JSONModule'.
 
@@ -52,19 +68,33 @@ Vectors class >> _load
       ifFalse: [self bytesOf: path]) sha256 hex asLowercase.
     actual = digest ifFalse: [^ self _fail: path , ' does not match vectors.sha256']].
   manifest := JSONModule JSON parse: 'manifest.json' asFileReference contents.
-  (manifest at: 'builtin_type_aliases') asArray = PBNotation builtinAliasNames asArray ifFalse: [
-    ^ self _fail: 'builtin_type_aliases differ from the table of PBNotation'].
+  (manifest at: 'builtin_type_aliases') asArray = PBTypeRegistry builtinNames asArray ifFalse: [
+    ^ self _fail: 'builtin_type_aliases differ from the table of PBTypeRegistry'].
   (self _referencedFiles: manifest) do: [:path |
     (listed includes: path) ifFalse: [
       ^ self _fail: 'the manifest refers to ' , path , ', which vectors.sha256 does not list (it would be read unverified)']].
   ^ manifest.
 
-"Every path the manifest names with a 'file' or 'canonical' key (strings only: in the
- cluster section 'canonical' is a flag), relative to vectors/."
+"Every path the manifest names, relative to vectors/: the strings of the 'file' and
+ 'canonical' keys (in the cluster section 'canonical' is a flag), and, for each
+ top-level section with a 'dir' and a 'segment' (database, legacy_database,
+ polyglot_database), the files <dir>/<segment> and <dir>/space.root. A section
+ with only one of the two keys is a manifest the runner does not understand."
 Vectors class >> _referencedFiles: aNode
   | paths |
   paths := Set new.
   self _collectFiles: aNode into: paths.
+  aNode associations do: [:section |
+    | v |
+    v := section value.
+    ((v isKindOf: Dictionary) and: [(v includesKey: 'dir') or: [v includesKey: 'segment']]) ifTrue: [
+      | dir segment |
+      dir := v at: 'dir' ifAbsent: [nil].
+      segment := v at: 'segment' ifAbsent: [nil].
+      (segment isKindOf: Dictionary) ifFalse: [
+        (dir isString and: [segment isString]) ifFalse: [
+          ^ self _fail: 'the section ' , section key , ' has no string dir and segment'].
+        paths add: dir , '/' , segment; add: dir , '/space.root']]].
   ^ paths.
 
 Vectors class >> _collectFiles: aNode into: aSet
@@ -157,6 +187,8 @@ VectorRun >> end: anId
 VectorRun >> failures
   ^ failures.
 
-"'values 72/73 expected 1': passes over the vectors, then the expected ones."
+"'values 72/73 expected 1': passes over the vectors, then the expected ones
+ ('framing 10/10' when there are none)."
 VectorRun >> summaryAs: aLabel
-  ^ aLabel , ' ' , passes printString , '/' , total printString , ' expected ' , expectedCount printString.
+  ^ aLabel , ' ' , passes printString , '/' , total printString
+    , (expectedCount = 0 ifTrue: [''] ifFalse: [' expected ' , expectedCount printString]).
