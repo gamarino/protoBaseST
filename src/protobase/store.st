@@ -533,6 +533,7 @@ PBFileStorage >> pushAtom: anEnvelope
   record := PBRecordHeader encodeKind: PBRecordHeader atomKind payload: anEnvelope encode.
   ^ self _writeOperation: [
     | w offset |
+    self _stopIfCloseRequested: 'before choosing the segment'.
     w := self _segmentFor: record size.
     self _stopIfCloseRequested: 'before appending a record'.
     offset := self _write: [w append: record] what: 'appending a record to the segment ' , w segmentHex.
@@ -587,18 +588,21 @@ PBFileStorage >> tryLockRoot
 
 "Releases the root lock, best effort: it never signals, and answers whether
  it released it. It is refused (logged, the lock kept) while a write is in
- progress on this storage: the lock covers the whole publish. A failure to
- unlock or to close space.lock, or a call while the lock is not held, is
- written to stderr (closing the file releases the OS lock in any case)."
+ progress on this storage: the lock covers the whole publish. On a closed
+ storage it answers false silently: the close released the lock (the pattern
+ [replaceRoot: r] ensure: [unlockRoot] meets this when a close was completed by
+ the publish). A failure to unlock or to close space.lock, or a call on an open
+ storage while the lock is not held, is written to stderr (closing the file
+ releases the OS lock in any case)."
 PBFileStorage >> unlockRoot
   | s mine |
   mine := { #writing. Object new }.
   s := state value.
   (s == #idle and: [state value: mine ifCurrent: s]) ifFalse: [
-    self isClosed ifFalse: [
+    self _stateKind == #writing ifTrue: [
       self _log: 'unlockRoot refused: a write is in progress on this storage; the root lock is kept'.
       ^ false].
-    rootLock value isNil ifTrue: [self _log: 'unlockRoot: the root lock is not held by this storage'].
+    "Closed, or a close requested: the close releases the lock."
     ^ false].
   ^ [rootLock value isNil
       ifTrue: [self _log: 'unlockRoot: the root lock is not held by this storage'. false]
@@ -712,6 +716,7 @@ PBFileStorage >> _startSegment
   id := _PBFrame uuidBytes: self newSegmentId.
   id isNil ifTrue: [^ PBUserError signal: 'PBFileStorage newSegmentId must answer a UUID'].
   hex := id hex asLowercase.
+  self _stopIfCloseRequested: 'before creating the segment ' , hex.
   w := self _write: [self _newSegmentWriter: id] what: 'creating the segment ' , hex.
   writer value: w ifCurrent: nil.
   self _write: [self _syncDirectory] what: 'syncing the space directory after creating the segment ' , hex.
