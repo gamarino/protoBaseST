@@ -17,7 +17,7 @@
 # cluster vectors of tests/conformance/cluster.st): they are shown under its PASS line, so a skip is
 # always visible where the run is read.
 # Each *.sh file passes with exit 0, is skipped with exit 77, and fails otherwise. The lines of a
-# passing *.sh file's output that start with "NOTE: " are shown under its PASS line (a workaround
+# passing *.sh file's output that start with "NOTE: " or "SKIP: " are shown under its PASS line (a workaround
 # a test relies on is stated where the run is read, never hidden).
 # "EXPECT-ERROR" needs a text (an error class or message): the bare form is a test failure, and so
 # is a module parse error that the text does not name, so a broken import cannot pass.
@@ -126,7 +126,7 @@ run_sh() {
     rc=$?
     case $rc in
         0)  echo "PASS: $(rel "$file")"
-            printf '%s\n' "$out" | grep '^NOTE: ' | sed 's/^/    /'
+            printf '%s\n' "$out" | grep -E '^(NOTE|SKIP): ' | sed 's/^/    /'
             return 0 ;;
         77) echo "SKIP: $(rel "$file"): $(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1)"; return 77 ;;
         *)  echo "FAIL: $(rel "$file"): exit=$rc: $(printf '%s\n' "$out" | tail -n 3 | tr '\n' ' ')"; return 1 ;;
