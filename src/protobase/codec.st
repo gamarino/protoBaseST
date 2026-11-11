@@ -610,7 +610,7 @@ PBCodec class >> _decodeUUID: aBody
   uuid := self _uuidClass.
   uuid isNil ifTrue: [
     ^ PBNotSupportedError signal: 'PBCodec: the @uuid value ' , (self _preview: aBody)
-      , ' needs protoST''s UUID (lib/uuid.st, protoST 0.9.1), imported by the program'].
+      , ' needs protoST''s UUID (lib/uuid.st, protoST 0.10.0), imported by the program'].
   ^ uuid fromBytes: aBody.
 
 PBCodec class >> _decodeMap: aBody resolver: aResolver

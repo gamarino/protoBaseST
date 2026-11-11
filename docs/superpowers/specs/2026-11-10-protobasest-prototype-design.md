@@ -23,7 +23,7 @@ follow `docs/source/concurrency-model.rst` and `proto_db/transactions.py` at the
 | 3 | Immutability of stored values | By convention: built once, never assigned afterwards. No frozen instances (§4.1) |
 | 4 | Names | ProtoBase's names with the `PB` prefix, the camelCase translation of the real API at the tag (§5) |
 | 5 | Conflict granularity | **The same as ProtoBase**: per-root and per-cell read sets, the replace and merge rules, and the mutable-cell rules of D35 (§7) |
-| 6 | Early primitives | Approved: protoIO 0.4.1 and protoST 0.9.1 with `randomBytes:` and a microsecond clock, in weeks 0-1, once the protoPython release frees DEV12 (§9) |
+| 6 | Early primitives | Approved: protoIO 0.5.0 and protoST 0.10.0 (ruling R10) with `randomBytes:` and a microsecond clock, in weeks 0-1, once the protoPython release frees DEV12 (§9) |
 
 ## 1. Intent
 
@@ -702,7 +702,7 @@ STATUS deviations.
 
 | Need | Why | Where | When |
 |---|---|---|---|
-| OS random bytes, `ByteArray randomBytes: n` | oids, segment UUID4 names, `origin`. `Random` is a 32-bit Park-Miller generator, unfit for identities | protoIO `random::bytes(n)` (`getrandom`; `BCryptGenRandom` on Windows), bound by protoST | **Approved** for protoIO 0.4.1 / protoST 0.9.1, weeks 0-1, once the protoPython release frees DEV12 |
+| OS random bytes, `ByteArray randomBytes: n` | oids, segment UUID4 names, `origin`. `Random` is a 32-bit Park-Miller generator, unfit for identities | protoIO `random::bytes(n)` (`getrandom`; `BCryptGenRandom` on Windows), bound by protoST | **Approved** for protoIO 0.5.0 / protoST 0.10.0 (ruling R10), weeks 0-1, once the protoPython release frees DEV12 |
 | A UTC clock in microseconds | `committed_at` | protoIO `clock::utcMicroseconds()` plus a protoST binding | **Approved**, same release |
 | `Decimal` | `@dec`; rank-3 order and hash | protoST `lib/decimal.st`, Smalltalk over `LargeInteger`: parse, to-scientific-string, exact comparison, special values; no arithmetic context yet | Week 1, Smalltalk only |
 | Calendar values and fixed offsets | `@date`, `@time`, `@dt`, `@td` | protoST `lib/calendar.st`, Smalltalk | Week 1 |
@@ -815,7 +815,7 @@ work out explicitly.
 
 | Week | Dates | Work | Gate |
 |---|---|---|---|
-| 0 | 11-11 to 11-14 | `protoBaseST` skeleton; pinned Python venv; the three checks of §9 on the installed 0.9.0; protoIO `random::bytes` and the µs clock written, released as 0.4.1 / protoST 0.9.1 when DEV12 is free | the checks pass; the release is scheduled |
+| 0 | 11-11 to 11-14 | `protoBaseST` skeleton; pinned Python venv; the three checks of §9 on the installed 0.9.0; protoIO `random::bytes` and the µs clock written, released as protoIO 0.5.0 / protoST 0.10.0 (ruling R10) when DEV12 is free | the checks pass; the release is scheduled |
 | 1 | 11-12 to 11-18 | `Decimal`, calendar values and `UUID` in protoST `lib/`; codec with every refusal; framing for formats 2-4; vector runner and notation printer | `values`, `values_*`, `invalid` (storage layers), `framing` |
 | 2 | 11-19 to 11-25 | order keys, hash keys, exact tokens; lazy loading; read path for every collection, records, opaque atoms; `history`, `snapshotAt:`, `getMutable:`; `PBTransaction` read side (snapshot, tokens, read sets) | `order`, `hashes`, `exact_tokens`, `atom_*`, `database`, `legacy_database` (with listed refusals), `polyglot_database` read; test 10.2 |
 | 3 | 11-26 to 12-01 | AVL writes; `PBList`, `PBDictionary`, `PBHashDictionary`, `PBSet`, records and mutable cells with their operation logs; the publisher (lock, validation, merge, save, publish, outcome); `run:` | tests 10.3, 10.4, 10.5, 10.7; the polyglot byte-for-byte check |

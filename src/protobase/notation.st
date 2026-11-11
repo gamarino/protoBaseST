@@ -422,7 +422,7 @@ PBNotation class >> _buildUUID: aHexText
   | uuid |
   uuid := PBCodec _uuidClass.
   uuid isNil ifTrue: [
-    ^ PBNotSupportedError signal: 'PBNotation: a uuid needs protoST''s UUID (lib/uuid.st, protoST 0.9.1), imported by the program'].
+    ^ PBNotSupportedError signal: 'PBNotation: a uuid needs protoST''s UUID (lib/uuid.st, protoST 0.10.0), imported by the program'].
   ^ uuid fromBytes: (self _bytesFromHex: aHexText).
 
 PBNotation class >> _buildRef: body
