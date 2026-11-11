@@ -47,7 +47,8 @@ Atoms. An atom is identified by its oid, as ProtoBase's map_key_ids and
 Atom.__eq__ do: a stub loads its record to read it, so a map holding
 references to two records of one oid is refused, and an atom's key does not
 change when it is saved. An atom whose oid is not assigned yet (assignment
-comes with plan Task 15) has no key: PBNotSupportedError. A PBUnresolvedRef
+comes with plan Task 15) has no key: PBNotSupportedError; a lookup by it (or
+by a tuple holding it) misses, as in ProtoBase (isUnsavedProbe:). A PBUnresolvedRef
 (decoded without a resolver) has no known oid: as a map key it is identified
 by its pointer, a weaker rule than the format's (two references to two records
 of one oid are two keys there), and it has no order key.
@@ -210,6 +211,21 @@ PBKeys class >> _oidOf: anAtom
     ^ PBNotSupportedError signal: 'PBKeys: ' , (self _preview: anAtom)
       , ' has no oid yet (oids are assigned on first need from plan Task 15), so it has no key'].
   ^ anAtom oid.
+
+"Whether a lookup by aValue must miss: aValue is an atom whose oid is not
+ assigned yet (no oid, no pointer), or a tuple holding one at any depth. No
+ stored key can equal it: ProtoBase assigns such an atom a fresh oid on first
+ need and then misses (review note N1 of plan Task 10). The other items of
+ such a tuple must still be keys, since ProtoBase orders every item: an item
+ orderKey: refuses signals here as it would in any lookup."
+PBKeys class >> isUnsavedProbe: aValue
+  | unsaved |
+  (aValue isKindOf: PBAtom) ifTrue: [^ aValue knownOid isNil and: [aValue pointer isNil]].
+  (aValue isKindOf: PBTuple) ifFalse: [^ false].
+  unsaved := aValue asArray select: [:each | self isUnsavedProbe: each].
+  unsaved isEmpty ifTrue: [^ false].
+  aValue do: [:each | (unsaved includes: each) ifFalse: [self orderKey: each]].
+  ^ true.
 
 PBKeys class >> _oidBytes: anOid
   (anOid isKindOf: ByteArray) ifTrue: [^ anOid].
@@ -665,6 +681,7 @@ PBMapKeyIndex >> _setIds: aDictionary zoned: aZonedOrNil
 "The position of aKey (1-based), or 0. A lookup that needs a zone's offsets
  to answer signals PBNotSupportedError."
 PBMapKeyIndex >> indexOf: aKey
+  (PBKeys isUnsavedProbe: aKey) ifTrue: [^ 0].
   zoned isNil ifFalse: [self _checkProbe: aKey].
   ^ ids at: (PBKeys _keyId: aKey mode: #read) ifAbsent: [0].
 

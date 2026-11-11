@@ -15,6 +15,7 @@ ProtoBase's ObjectSpace, Database, Snapshot and HistoryEntry
   aDatabase name, history                   history: PBHistoryEntry objects, newest
                                             first, through previous
   aDatabase snapshotAt: anEntryOrSnapshot   the PBSnapshot of that version
+  aDatabase newTransaction                  a PBTransaction (transactions.st)
   aSnapshot version, committedAt, rootNames, getRootObject:, mutableNames,
             getMutable:                     names sorted; an absent name reads nil
   anEntry   version, committedAt, rootNames, mutableNames, getMutable: (no
@@ -28,7 +29,7 @@ checks that the version is one of this database: the name its entry or
 snapshot records, and its origin (DatabaseRoot origin), must be this
 database's, else PBReferenceError (ProtoBase Database._check_owned); any
 other argument is PBReferenceError (the prototype has no snapshot references
-as bytes). Transactions come with plan Task 13."
+as bytes). PBDatabase >> newTransaction is in transactions.st."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/values'.
@@ -90,9 +91,19 @@ PBObjectSpace >> _checkOpen
 "The PBSpaceRoot the storage's root record points to now, or nil (an empty
  space)."
 PBObjectSpace >> _currentSpaceRoot
-  | record root |
+  ^ self _spaceRootAt: self _snapshotRecord.
+
+"The storage's current root record (a PBRootRecord), or nil for an empty
+ space: what a new transaction starts from (ProtoBase _snapshot_record)."
+PBObjectSpace >> _snapshotRecord
   self _checkOpen.
-  record := storage readRoot.
+  ^ storage readRoot.
+
+"The PBSpaceRoot aRootRecord points to, nil for nil. A space root committed by
+ a cluster node is PBNotSupportedError."
+PBObjectSpace >> _spaceRootAt: aRootRecord
+  | record root |
+  record := aRootRecord.
   record isNil ifTrue: [^ nil].
   root := PBTypeRegistry unloadedAtomFor: (PBTypeRegistry aliasOf: PBSpaceRoot typeName)
     at: record pointer storage: storage.
@@ -104,11 +115,15 @@ PBObjectSpace >> _currentSpaceRoot
 
 "The current PBDatabaseRoot of the database aName, or nil."
 PBObjectSpace >> _databaseRootNamed: aName
-  | root found |
-  root := self _currentSpaceRoot.
-  root isNil ifTrue: [^ nil].
-  found := root databases getAt: aName.
-  ^ _PBTree node: found kind: PBDatabaseRoot in: root databases.
+  ^ self _databaseRootNamed: aName in: self _currentSpaceRoot.
+
+"The PBDatabaseRoot of the database aName in aSpaceRoot (nil: an empty
+ space), or nil."
+PBObjectSpace >> _databaseRootNamed: aName in: aSpaceRoot
+  | found |
+  aSpaceRoot isNil ifTrue: [^ nil].
+  found := aSpaceRoot databases getAt: aName.
+  ^ _PBTree node: found kind: PBDatabaseRoot in: aSpaceRoot databases.
 
 PBObjectSpace >> listDatabases
   | root |

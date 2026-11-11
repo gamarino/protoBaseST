@@ -57,7 +57,29 @@ holding an instant within a day of year 1 or 9999 can be read but not re-written
 A string holding a lone surrogate is refused (`PBValidationError`). So is a value nested deeper
 than 511 msgpack containers, the most ProtoBase's msgpack writes (an empty container counts one
 level less). Inside an atom record a value sits 2 levels deep, so the limit there is 509
-(`PBCodec canonical:enclosingDepth:`).
+(`PBCodec canonical:enclosingDepth:`). ProtoBase's reader, which recurses two Python frames per
+level, raises `RecursionError` from about 333 nested lists under Python's default recursion limit,
+so a value that deep is readable from Python only with a raised limit.
+
+## Transactions (read side)
+
+A transaction reads the version that was current when it started, and remembers what it read,
+as ProtoBase's does (design spec 7.1). The writes and `commit` come later in the plan.
+
+```smalltalk
+Import from: 'protobase'.
+space := PBObjectSpace storage: (PBFileStorage path: '/srv/erp').
+tx := (space openDatabase: 'erp') newTransaction.
+(tx getRootObject: 'invoices') count.            "recorded in the read set"
+(PBMutableObject name: 'customer:acme') get: tx.  "a mutable cell, recorded too"
+tx rootNames.                                     "records nothing"
+tx abort.                                         "afterwards, every message is PBUserError"
+space close.
+```
+
+The first read of a name records its token: an atom's storage pointer, a plain value's exact
+token (so `1` and `1.0` differ), or `#absent`. The bookkeeping is one immutable `PBTxState` in an
+`Atom`, replaced with `swap:`; the protoST layer takes no lock.
 
 Until the order keys exist (plan Task 10), the keys of a `PBFrozenDict` and the items of a list
 compare with `=` within one class: `1` and `1.0` are different keys there.

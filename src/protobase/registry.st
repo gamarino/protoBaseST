@@ -362,14 +362,30 @@ PBAtom >> unloadedCopy
   pointer isNil ifTrue: [^ self].
   ^ self class unloadedAt: pointer storage: storage.
 
-"The loaded envelope, loading it once through the storage."
+"The loaded envelope, loading it once through the storage.
+
+ A load that needs, while it decodes, the record it is loading (a map key in
+ the state that refers back to the record, directly or through other records
+ whose keys are loaded in turn: a key is identified by its oid, which loads
+ it) is PBCorruptionError naming the pointer, never a recursion without end.
+ ProtoBase cannot load such a record either (its load recurses until Python's
+ RecursionError); no writer produces one, since a record can only refer to
+ records written before it (review note N3 of plan Task 10). The loads in
+ progress on this call stack are found with _PBLoadInProgress, a resumable
+ signal each load answers for its own pointer: no state is shared, so loads
+ on other threads are independent."
 PBAtom >> _envelope
   | envelope missing |
   envelope := memo value.
   envelope isNil ifFalse: [^ envelope].
   (storage isNil or: [pointer isNil]) ifTrue: [
     ^ PBUserError signal: self class name , ': an atom with no stored record has no state to load'].
-  envelope := storage loadAt: pointer expecting: self tag.
+  (_PBLoadInProgress pointer: pointer) signal == true ifTrue: [
+    ^ PBCorruptionError signal: 'the record at ' , pointer printString , ' (' , (PBTypeRegistry nameOfTag: self tag)
+      , ') cannot be loaded: decoding its state needs the record itself (a map key refers back to it)'].
+  envelope := [storage loadAt: pointer expecting: self tag]
+    on: _PBLoadInProgress do: [:probe |
+      probe pointer = pointer ifTrue: [probe resume: true] ifFalse: [probe pass]].
   missing := self class requiredFields reject: [:field | envelope state includesKey: field].
   missing isEmpty ifFalse: [
     ^ PBCorruptionError signal: 'the atom at ' , pointer printString , ' (' , (PBTypeRegistry nameOfTag: self tag)
@@ -399,6 +415,24 @@ PBAtom >> oid
 
 PBAtom >> printOn: aStream
   aStream nextPutAll: self class name; nextPutAll: '('; print: pointer; nextPut: $).
+
+"The question a load asks the loads in progress on its call stack: is one of
+ them loading the record at pointer? A load in progress at that pointer
+ resumes it with true; unanswered, it answers nil (PBAtom >> _envelope)."
+Exception subclass: #_PBLoadInProgress instanceVariableNames: 'pointer'.
+
+_PBLoadInProgress class >> pointer: aPBAtomPointer
+  ^ self new _setPointer: aPBAtomPointer.
+
+_PBLoadInProgress >> _setPointer: aPBAtomPointer
+  "Runs once, on a fresh instance."
+  pointer := aPBAtomPointer.
+
+_PBLoadInProgress >> pointer
+  ^ pointer.
+
+_PBLoadInProgress >> isResumable
+  ^ true.
 
 "=== PBOpaqueAtom ==========================================================="
 

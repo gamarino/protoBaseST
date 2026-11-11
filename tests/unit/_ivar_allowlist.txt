@@ -26,3 +26,7 @@ PBSnapshot>>_setRoot:database:
 PBObjectSpace>>_setStorage:lockTimeout:
 PBDatabase>>_setSpace:name:
 PBNotation class>>_setJSON:
+PBTxState>>_setReads:writes:replaced:mreads:mwrites:mexpected:state:
+PBTransaction>>_setDatabase:record:spaceRoot:root:
+PBTxState class>>_initializeMarks
+_PBLoadInProgress>>_setPointer:

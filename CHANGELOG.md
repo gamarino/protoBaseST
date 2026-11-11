@@ -39,3 +39,21 @@
   Every built-in type now has its class. The `database`, `legacy_database` and
   `polyglot_database` contents and the invalid `atom` vectors pass; the cluster vectors are
   visible skips (clusters are outside the prototype).
+- The transaction, read side (plan Task 13, `transactions.st`): `PBDatabase >> newTransaction`
+  snapshots the root record, the `SpaceRoot` and the `DatabaseRoot` once; `PBTransaction` has
+  `getRootObject:`, `rootNames`, `getMutable:`, `mutableNames`, `abort`, `isActive`, `database`
+  and the test-visible `readSet` and `mutableReadSet`. The first read of a name records its token
+  (an atom's pointer, a plain value's exact token, `#absent`) in one immutable `PBTxState` held
+  in an `Atom` and replaced with `swap:`. After `abort` every other message is `PBUserError`.
+  `PBMutableObject >> get:` reads a cell through a transaction.
+- A lookup by an atom with no oid yet (or a tuple holding one) answers absent in a `PBFrozenDict`
+  and in every collection, as in ProtoBase, instead of `PBNotSupportedError`. A record that
+  needs itself to be decoded (a map key referring back to it) is `PBCorruptionError` naming its
+  pointer, where ProtoBase recurses until Python's `RecursionError`.
+- The ERP example's record types, `examples/erp/erp_model.st` and `erp_model.py` (`Invoice`,
+  `Customer`; `demo.erp.AuditNote` is Python-only). Design spec 10.2 runs: a space ProtoBase
+  writes is dumped by protoBaseST exactly as by ProtoBase's verifier
+  (`tests/interop/py_to_st.sh`).
+- ProtoBase reads back the deepest attribute protoBaseST writes (509 nested lists) only with a
+  raised Python recursion limit: at the default limit its reader raises `RecursionError` from
+  about 333 nested lists (`tests/interop/st_deep_to_py.sh` prints both outcomes).

@@ -258,8 +258,8 @@ PBMissing _initializeDefault.
 "=== PBMutableObject ========================================================="
 
 "ProtoBase MutableObject, the value part: a handle naming a cell of the
- database's mutable table (@mut). get: and set:value: come with the
- transactions (plan Tasks 13 and 18)."
+ database's mutable table (@mut). get: is in transactions.st; set:value:
+ comes with the write side of transactions (plan Task 18)."
 Object subclass: #PBMutableObject instanceVariableNames: 'cellName'.
 
 "aName is a non-empty String; a Symbol is accepted and kept as its String,

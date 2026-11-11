@@ -994,7 +994,10 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
 - Test:
   - `tests/interop/py_to_st.sh` with `tests/interop/_st_dump.st`;
   - `tests/unit/tx_read_set.st`;
-  - `tests/unit/tx_states.st` (read side: `abort`, then any message is `PBUserError`).
+  - `tests/unit/tx_states.st` (read side: `abort`, then any message is `PBUserError`);
+  - `tests/unit/tx_atom_depth.st`, `tests/unit/tx_atom_map_keys.st`, and
+    `tests/interop/st_deep_to_py.sh` with `tests/interop/_st_deep_space.st` and
+    `tests/interop/py_read_deep.py` (the depth bullet below).
 
 **Interfaces:**
 - Consumes: Task 12.
@@ -1029,7 +1032,12 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     `toWire:atomRef:enclosingDepth:`). `tx_atom_depth.st` writes an attribute of 509 nested
     lists (accepted, and read back by ProtoBase in the interop run) and one of 510 (refused
     with `PBValidationError` before any byte is written, never protoST's raw msgpack
-    `Error`).
+    `Error`). Found in Task 13: ProtoBase's reader decodes nested lists recursively (two
+    Python frames per level), so under Python's default recursion limit it raises
+    `RecursionError` from about 333 nested lists, and its writer from about 497.
+    `st_deep_to_py.sh` therefore reads the 509-deep record with a raised recursion limit
+    (`py_read_deep.py`), and prints the outcome at the default limit; the limit is
+    ProtoBase's, reported to the maintainer, and protoBaseST keeps the format's 509.
   - `tx_read_set.st`, on a copy of the database vector: reading two roots and an absent name
     records three entries; reading again does not change them; `rootNames` records nothing.
   - Atom map keys through the real resolver (from Task 10 fix round 1, which must be kept):
@@ -1037,6 +1045,19 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     are identified by their oids (`PBKeys _keyId:mode:` loads them); a state holding a map with
     references to two records of one oid is `PBCorruptionError`. `tx_atom_map_keys.st` checks
     it on a space with two versions of one atom.
+  - Lookups by an unsaved atom (review note N1 of Task 10): a lookup (`at:ifAbsent:`,
+    `includesKey:`, `getAt:`, `has:`, `countOf:`) whose probe is, or holds in a tuple, an atom
+    with no oid and no pointer answers absent, as ProtoBase does (it assigns a fresh oid and
+    misses), never `PBNotSupportedError`; the tuple's other items must still be keys.
+    `orderKey:` and `hashKey:` of such an atom keep signalling `PBNotSupportedError` until
+    Task 15 assigns oids. `tx_atom_map_keys.st` checks a `PBFrozenDict` and every collection.
+  - A record that needs itself to be decoded (review note N3 of Task 10): a map key that
+    refers back to the record being loaded, directly or through another record keyed by it.
+    ProtoBase recurses until Python's `RecursionError`; protoBaseST signals
+    `PBCorruptionError` naming the pointer (the loads in progress on the call stack answer a
+    resumable `_PBLoadInProgress` signal for their own pointer), and the transaction stays
+    usable. `tx_atom_map_keys.st` checks a self-keyed record and two records keyed by each
+    other.
 - [ ] **Step 2:** run. Expected: FAIL.
 - [ ] **Step 3:** implement.
 - [ ] **Step 4:** run everything. Expected: PASS. **Gate of week 2** (Spec §11): `order`,
