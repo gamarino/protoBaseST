@@ -597,9 +597,16 @@ PBFileStorage >> tryLockRoot
 PBFileStorage >> unlockRoot
   | s mine |
   mine := { #writing. Object new }.
-  s := state value.
-  (s == #idle and: [state value: mine ifCurrent: s]) ifFalse: [
-    self _stateKind == #writing ifTrue: [
+  "The answer follows from one reading of the state (Task 17 review, round 3):
+   idle is swapped for this call's write mark, retried when the swap is lost to
+   another state change, as close does; a write in progress refuses (logged);
+   closed or a close requested answers false silently. Before, a write that
+   ended between two readings made the call answer false without unlocking or
+   logging."
+  [s := state value.
+   s == #idle and: [(state value: mine ifCurrent: s) not]] whileTrue.
+  s == #idle ifFalse: [
+    (s isArray and: [s first == #writing]) ifTrue: [
       self _log: 'unlockRoot refused: a write is in progress on this storage; the root lock is kept'.
       ^ false].
     "Closed, or a close requested: the close releases the lock."
