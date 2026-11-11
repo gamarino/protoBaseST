@@ -1557,8 +1557,9 @@ final".
     `PROTOIO_REF` in `.github/workflows/ci.yml` (line 88, comment lines 82-87) and in
     `.github/workflows/cross-platform.yml` (line 29, comment lines 27-28). Date the
     CHANGELOG section `0.10.0 - <date>`.
-  - Push the branch and open a PR. Wait for CI to pass on Linux, macOS and Windows.
-  - Merge, tag `v0.10.0`, and build the deb with the recipe in
+  - Push `feat/protobase-support` (which holds `feat/random-clock`, merged locally) and open a
+    PR from it into protoST `main`. Wait for CI to pass on Linux, macOS and Windows.
+  - Merge it into `main`, tag `v0.10.0`, and build the deb with the recipe in
     `project_protoio030_protost090_binary_storage` (docker `pc-deb-build:24.04 --dns 8.8.8.8`,
     protoIO at the tag as a sibling, `-DPROTOCORE_REQUIRE_PACKAGE=ON`, `cpack -G DEB`).
   - Create the GitHub release with the deb.
