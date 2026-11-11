@@ -1,4 +1,4 @@
-"EXPECT: ok 23"
+"EXPECT: ok 25"
 "FS 'Hash keys': bit_length is the bits of |v| (Python's int.bit_length, never
  Smalltalk's highBit of a negative), and an integer payload is fed as its
  two's-complement little-endian bytes of length bit_length // 8 + 1, preceded
@@ -26,4 +26,9 @@ c that: 'residue: of Decimal 1E+999999999999' is: (PBKeys residue: (Decimal from
 c that: 'residue: of -1' is: (PBKeys residue: -1) equals: p - 1.
 c that: 'residue: of 1/2 times 2' is: (PBKeys residue: 1 / 2) * 2 \\ p equals: 1.
 c that: 'residue: of Decimal 0.5 is that of 1/2' is: (PBKeys residue: (Decimal fromString: '0.5')) equals: (PBKeys residue: 1 / 2).
+"A Fraction whose denominator is a multiple of P has no inverse modulo P (CPython hashes
+ it as infinity, 314159). ProtoBase has no such value (a float's denominator is a power
+ of two), so there is no residue to agree on: PBValidationError."
+c that: 'residue: of 1/P' signals: PBValidationError containing: 'multiple' during: [PBKeys residue: 1 / p].
+c that: 'residue: of -3/(2P)' signals: PBValidationError containing: 'multiple' during: [PBKeys residue: -3 / (2 * p)].
 c report displayNl.

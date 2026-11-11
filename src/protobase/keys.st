@@ -338,11 +338,18 @@ PBKeys class >> signedBytes: anInteger
  becoming -2. Modulo P that is x mod P, the residue ProtoBase computes
  (proto_db/values.py _number_residue), except where -1 became -2: a hash of
  -2 is that of a negative number, told apart by the hash of its magnitude
- (1 when x = -1 mod P, 2 when x = -2 mod P)."
+ (1 when x = -1 mod P, 2 when x = -2 mod P). A Fraction whose denominator
+ is a multiple of P has no inverse modulo P (CPython hashes it as infinity,
+ 314159) and is PBValidationError: ProtoBase has no such value (a float's
+ denominator is a power of two, and format 4 has no fractions), so it
+ defines no residue for it."
 PBKeys class >> residue: aNumber
   | p h |
   p := self modulus.
   aNumber isInteger ifTrue: [^ aNumber \\ p].
+  ((aNumber isKindOf: Fraction) and: [aNumber denominator \\ p = 0]) ifTrue: [
+    ^ PBValidationError signal: 'PBKeys residue: the denominator of ' , (self _preview: aNumber)
+      , ' is a multiple of 2^61 - 1, so the number has no residue modulo it'].
   ((aNumber isKindOf: Fraction) or: [(aNumber isKindOf: Decimal) and: [aNumber isFinite]]) ifTrue: [
     h := aNumber hash.
     h = -2 ifTrue: [
