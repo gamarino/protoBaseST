@@ -41,13 +41,18 @@ since ProtoBase would refuse to read it back if the wall clock fell outside.
 A format-3 ['zone', key] datetime is read as a PBLegacyZoneDateTime and is
 never written.
 
-Strings: a String holding a lone surrogate (16rD800..16rDFFF) is not valid
-UTF-8 and is refused with PBValidationError (format spec, Known gaps).
+Strings: every string the codec writes (a value, a map key, a fixed zone's
+name, a mutable name, a reference's type name) is checked: one holding a lone
+surrogate (16rD800..16rDFFF) is not valid UTF-8 and is refused with
+PBValidationError (format spec, Known gaps). Zone keys are ASCII by the
+pinned list.
 
 Nesting: a value whose wire form nests more than 511 msgpack containers is
 refused with PBValidationError. That is the most msgpack-python's packer (and
 so ProtoBase) writes; a list is 1 container, a tuple 2, a map entry 3, a
-tagged scalar 1 to 3.
+tagged scalar 1 to 3, an empty container 1 less. Inside an atom record a
+value sits 2 levels deep, so the atom writer (plan Task 13) passes that
+enclosing depth.
 
 Decoding checks the tree that MessagePack decodeOrdered: answers: map keys are
 strings, no ext value, exactly one key per tagged map, one spelling for @int,
@@ -111,6 +116,11 @@ PBCodec class >> _uuidClass
 PBCodec class >> canonical: aValue
   ^ self _canonical: aValue depth: 0.
 
+"As canonical:, for a value whose wire form sits inside anInteger msgpack
+ containers (2 for an attribute value inside an atom record)."
+PBCodec class >> canonical: aValue enclosingDepth: anInteger
+  ^ self _canonical: aValue depth: anInteger.
+
 "d is the number of msgpack containers around v's wire form."
 PBCodec class >> _canonical: v depth: d
   | result |
@@ -122,18 +132,19 @@ PBCodec class >> _tooDeep
   ^ PBValidationError signal: 'PBCodec: a value nested deeper than ' , self _maxWireDepth printString
     , ' msgpack levels cannot be stored (the most msgpack-python writes)'.
 
-"The msgpack containers of a canonical v's own wire form, its items not
- counted: 1 for a list, 2 for a tuple (map, array) or an empty map, 3 for a
- map with entries (map, array, pair), and for a tagged scalar its map and
+"The msgpack levels a canonical v's own wire form adds below its position,
+ its items not counted, as msgpack-python counts them (an empty container
+ opens no level for items): a list 1 (empty 0), a tuple 2 (empty 1), a map 3
+ (empty 1: the map and its empty array), and for a tagged scalar its map and
  arrays (a @dt or @time with a zone: 3)."
 PBCodec class >> _ownWireDepth: v
   v isNil ifTrue: [^ 0].
   (v == true or: [v == false]) ifTrue: [^ 0].
   v isInteger ifTrue: [^ (v between: self _intMin and: self _intMax) ifTrue: [0] ifFalse: [1]].
   (v isFloat or: [v isString or: [v isKindOf: ByteArray]]) ifTrue: [^ 0].
-  (v isKindOf: PBFrozenList) ifTrue: [^ 1].
-  (v isKindOf: PBTuple) ifTrue: [^ 2].
-  (v isKindOf: PBFrozenDict) ifTrue: [^ v isEmpty ifTrue: [2] ifFalse: [3]].
+  (v isKindOf: PBFrozenList) ifTrue: [^ v isEmpty ifTrue: [0] ifFalse: [1]].
+  (v isKindOf: PBTuple) ifTrue: [^ v isEmpty ifTrue: [1] ifFalse: [2]].
+  (v isKindOf: PBFrozenDict) ifTrue: [^ v isEmpty ifTrue: [1] ifFalse: [3]].
   ((v isKindOf: DateTime) or: [v isKindOf: TimeOfDay]) ifTrue: [^ v zone isNil ifTrue: [2] ifFalse: [3]].
   ((v isKindOf: CalendarDate) or: [v isKindOf: TimeSpan]) ifTrue: [^ 2].
   (self _isReference: v) ifTrue: [^ 2].
@@ -174,6 +185,7 @@ PBCodec class >> _canonicalShallow: v depth: d
       , ') cannot be reduced to its base value yet'].
   v == PBMissing default ifTrue: [^ v].
   (v isKindOf: PBMutableObject) ifTrue: [
+    self _checkUTF8: (self _field: 'cellName' of: v base: PBMutableObject).
     v class == PBMutableObject ifTrue: [^ v].
     ^ PBMutableObject name: (self _field: 'cellName' of: v base: PBMutableObject)].
   (v isKindOf: PBTuple) ifTrue: [^ self _canonicalItems: v class: PBTuple depth: d + 2].
@@ -183,7 +195,9 @@ PBCodec class >> _canonicalShallow: v depth: d
   (v isKindOf: PBFrozenDict) ifTrue: [^ self _canonicalMap: v depth: d + 3].
   (v isKindOf: Dictionary) ifTrue: [
     ^ self _refuse: v because: 'its order is unspecified, and the order is part of the bytes; use PBFrozenDict'].
-  (self _isReference: v) ifTrue: [^ v].
+  (self _isReference: v) ifTrue: [
+    ((v respondsTo: #tag) and: [v tag isString]) ifTrue: [self _checkUTF8: v tag].
+    ^ v].
   ^ self _refuse: v because: 'it is not a canonical value of format 4'.
 
 PBCodec class >> _refuse: v because: aString
@@ -239,6 +253,7 @@ PBCodec class >> _isDecimalInRange: aDecimal
 PBCodec class >> _canonicalZone: z
   z isNil ifTrue: [^ nil].
   (z isKindOf: ZoneOffset) ifTrue: [
+    self _checkUTF8: (self _field: 'name' of: z base: ZoneOffset).
     z class == ZoneOffset ifTrue: [^ z].
     ^ ZoneOffset microseconds: (self _field: 'microseconds' of: z base: ZoneOffset)
         name: (self _field: 'name' of: z base: ZoneOffset)].
@@ -352,6 +367,10 @@ PBCodec class >> _unkeyableReason: k legacyAllowed: aBoolean
  standard blocks."
 PBCodec class >> toWire: aValue atomRef: aBlock
   ^ self _wire: (self canonical: aValue) ref: aBlock.
+
+"As toWire:atomRef:, inside anInteger enclosing msgpack containers."
+PBCodec class >> toWire: aValue atomRef: aBlock enclosingDepth: anInteger
+  ^ self _wire: (self canonical: aValue enclosingDepth: anInteger) ref: aBlock.
 
 "The block that writes a reference as its pointer: {'@ref': [segment, offset,
  tag]}, from the reference's pointer and tag."

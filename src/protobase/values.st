@@ -57,6 +57,12 @@ _PBItems class >> same: a as: b
  ten and no Decimal hash. A NaN's probe is its identity; an object of
  another class falls back to its class name (checked pairwise)."
 _PBItems class >> probe: k
+  ^ self probe: k coarse: false.
+
+"With coarse true, every aware or format-3 datetime has one probe (#('zoned')):
+ checkDecidableKeys: groups keys that may differ only in such datetimes."
+_PBItems class >> probe: k coarse: aBoolean
+  (aBoolean and: [self _isZoned: k]) ifTrue: [^ #('zoned')].
   k isNil ifTrue: [^ #('nil')].
   k == true ifTrue: [^ #('true')].
   k == false ifTrue: [^ #('false')].
@@ -76,7 +82,7 @@ _PBItems class >> probe: k
   (k isKindOf: CalendarDate) ifTrue: [^ { 'date'. k ordinal }].
   (k isKindOf: TimeSpan) ifTrue: [^ { 'td'. k totalMicroseconds }].
   (k isKindOf: _PBSequence) ifTrue: [
-    ^ { k class name. k asArray collect: [:each | self probe: each] }].
+    ^ { k class name. k asArray collect: [:each | self probe: each coarse: aBoolean] }].
   (k isKindOf: PBMutableObject) ifTrue: [^ { 'mut'. k name }].
   (k isKindOf: PBUnresolvedRef) ifTrue: [
     ^ { 'ref'. k pointer segmentHex. k pointer offset. k tag }].
@@ -95,29 +101,95 @@ _PBItems class >> _decimalProbe: d
   [(digits at: digits size - zeros) = $0] whileTrue: [zeros := zeros + 1].
   ^ { 'dec'. d sign. digits copyFrom: 1 to: digits size - zeros. d exponent + zeros }.
 
-"Signals PBNotSupportedError when some keys of aKeyArray (or items of tuple
- keys) are format-3 zone datetimes whose conflicts with other keys need the
- zone's offsets: format-3 keys of two zones, or a format-3 key with an aware
- DateTime (format spec, 'Map keys' and 'Known gaps'). Format-3 keys of one
- zone conflict exactly when their wall clocks are equal, fold ignored."
-_PBItems class >> checkDecidableKeys: aKeyArray
-  | zones aware |
-  zones := OrderedCollection new.
-  aware := OrderedCollection new.
-  aKeyArray do: [:k | self _collectDateTimes: k zones: zones aware: aware].
-  zones isEmpty ifTrue: [^ self].
-  (zones asSet size > 1 or: [aware notEmpty]) ifTrue: [
-    ^ PBNotSupportedError signal: 'A map whose keys hold a format-3 zone datetime in '
-      , zones first , ' and ' , (aware isEmpty ifTrue: [zones asSet size printString , ' zones'] ifFalse: [aware first printString])
-      , ': whether they conflict needs the zone offsets, and protoBaseST has no time-zone database (design 4.3)'].
+"The most a fixed offset or a zone's offset moves a wall clock from its
+ instant (|offset| < 24 h, format spec 'Canonical values')."
+_PBItems class >> offsetWindow
+  ^ 86399999999.
 
-_PBItems class >> _collectDateTimes: k zones: zones aware: aware
+"Signals PBNotSupportedError when two keys of aKeyArray could conflict and
+ only the zone's offsets can tell (format spec, 'Map keys' and 'Known gaps').
+ That is exactly when the two keys are the same item at every position
+ (the key itself, or each item of a tuple key) except positions holding
+ datetimes, and at one such position one key holds a format-3 zone datetime
+ and the other either an aware datetime whose instant lies within 24 h of its
+ wall clock, or a format-3 datetime of another zone whose wall clock lies
+ within 48 h. Format-3 datetimes of one zone conflict exactly when their wall
+ clocks are equal (fold ignored), which needs no offset. Linear apart from a
+ sort per datetime position: keys are grouped by a probe in which every aware
+ or format-3 datetime is one token."
+_PBItems class >> checkDecidableKeys: aKeyArray
+  | buckets |
+  (aKeyArray anySatisfy: [:k | self _holdsLegacy: k]) ifFalse: [^ self].
+  buckets := Dictionary new.
+  aKeyArray do: [:k |
+    (buckets at: (self probe: k coarse: true) ifAbsentPut: [OrderedCollection new]) add: k].
+  buckets keysAndValuesDo: [:probe :bucket |
+    bucket size > 1 ifTrue: [
+      (self _zonedPathsOf: bucket first prefix: #()) do: [:path |
+        self _checkDateTimes: (bucket collect: [:k | self _at: path in: k])]]].
+
+_PBItems class >> _holdsLegacy: k
+  (k isKindOf: _PBSequence) ifTrue: [^ k asArray anySatisfy: [:each | self _holdsLegacy: each]].
+  ^ (k isKindOf: DateTime) and: [k isClassObject not and: [k isLegacyZone]].
+
+_PBItems class >> _isZoned: k
+  ^ (k isKindOf: DateTime) and: [k isClassObject not and: [k isNaive not]].
+
+"The index paths, within k, of its aware and format-3 datetimes."
+_PBItems class >> _zonedPathsOf: k prefix: anArray
+  | out |
+  (self _isZoned: k) ifTrue: [^ OrderedCollection with: anArray].
+  out := OrderedCollection new.
   (k isKindOf: _PBSequence) ifTrue: [
-    k do: [:each | self _collectDateTimes: each zones: zones aware: aware].
-    ^ self].
-  ((k isKindOf: DateTime) and: [k isClassObject not]) ifFalse: [^ self].
-  k isLegacyZone ifTrue: [^ zones add: k zone key].
-  k isNaive ifFalse: [aware add: k].
+    k keysAndValuesDo: [:i :each | out addAll: (self _zonedPathsOf: each prefix: anArray , { i })]].
+  ^ out.
+
+_PBItems class >> _at: aPath in: k
+  | v |
+  v := k.
+  aPath do: [:i | v := v at: i].
+  ^ v.
+
+"Datetimes at one position of keys that match everywhere else."
+_PBItems class >> _checkDateTimes: aCollection
+  | w legacy aware utcs sorted n next |
+  w := self offsetWindow.
+  legacy := (aCollection select: [:each | each isLegacyZone]) asArray.
+  legacy isEmpty ifTrue: [^ self].
+  aware := ((aCollection reject: [:each | each isLegacyZone]) asArray)
+    sort: [:a :b | a utcOrdinalMicroseconds <= b utcOrdinalMicroseconds].
+  utcs := aware collect: [:each | each utcOrdinalMicroseconds].
+  legacy do: [:l |
+    | i |
+    i := self _firstIndexIn: utcs atLeast: l localOrdinalMicroseconds - w.
+    (i <= utcs size and: [(utcs at: i) <= (l localOrdinalMicroseconds + w)]) ifTrue: [
+      ^ self _undecidable: l and: (aware at: i)]].
+  sorted := legacy copy sort: [:a :b | a localOrdinalMicroseconds <= b localOrdinalMicroseconds].
+  n := sorted size.
+  next := Array new: n.
+  n - 1 to: 1 by: -1 do: [:i |
+    next at: i put: (((sorted at: i + 1) zone = (sorted at: i) zone)
+      ifTrue: [next at: i + 1] ifFalse: [i + 1])].
+  1 to: n - 1 do: [:i |
+    | j |
+    j := next at: i.
+    (j notNil and: [(sorted at: j) localOrdinalMicroseconds - (sorted at: i) localOrdinalMicroseconds <= (2 * w)])
+      ifTrue: [^ self _undecidable: (sorted at: i) and: (sorted at: j)]].
+
+"The first index of aSortedArray whose element is >= x (size + 1 if none)."
+_PBItems class >> _firstIndexIn: aSortedArray atLeast: x
+  | lo hi |
+  lo := 1. hi := aSortedArray size + 1.
+  [lo < hi] whileTrue: [
+    | mid |
+    mid := (lo + hi) // 2.
+    (aSortedArray at: mid) < x ifTrue: [lo := mid + 1] ifFalse: [hi := mid]].
+  ^ lo.
+
+_PBItems class >> _undecidable: aLegacy and: other
+  ^ PBNotSupportedError signal: 'A map whose keys hold the format-3 zone datetime ' , aLegacy printString
+    , ' and ' , other printString , ' at the same position: whether they conflict needs the offsets of '
+    , aLegacy zone key , ', and protoBaseST has no time-zone database (design 4.3)'.
 
 "=== the two sequence kinds ================================================="
 
@@ -531,7 +603,9 @@ PBLegacyZoneDateTime >> _orderWith: anObject
 
 "Python's rule without a database: a value in the same zone compares by its
  wall clock (fold ignored); a naive DateTime or another object is never
- equal; any other aware value needs the zone's offsets and signals."
+ equal; an aware value whose instant is more than 24 h from this wall clock
+ (48 h for a format-3 value of another zone) is never equal; any other aware
+ value needs the zone's offsets and signals."
 PBLegacyZoneDateTime >> = anObject
   self isClassObject ifTrue: [^ self == anObject].
   self == anObject ifTrue: [^ true].
@@ -539,6 +613,12 @@ PBLegacyZoneDateTime >> = anObject
   anObject isNaive ifTrue: [^ false].
   (anObject isLegacyZone and: [anObject zone = self zone]) ifTrue: [
     ^ self localOrdinalMicroseconds = anObject localOrdinalMicroseconds].
+  "Offsets are under 24 h: far enough apart, the two can never be one instant."
+  anObject isLegacyZone
+    ifTrue: [(self localOrdinalMicroseconds - anObject localOrdinalMicroseconds) abs > (2 * _PBItems offsetWindow)
+      ifTrue: [^ false]]
+    ifFalse: [(self localOrdinalMicroseconds - anObject utcOrdinalMicroseconds) abs > _PBItems offsetWindow
+      ifTrue: [^ false]].
   ^ self _unsupported: 'equality with ' , anObject printString.
 
 "The wall clock, then the zone key in brackets."

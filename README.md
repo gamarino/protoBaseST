@@ -43,11 +43,20 @@ datetime is read and presented in UTC. Writing one within a day of year 1 or yea
 refused with `PBNotSupportedError`, because its wall clock in the zone may leave the calendar's
 range. A format-3 `["zone", key]` datetime is read as a `PBLegacyZoneDateTime`
 (`isLegacyZone` answers true). It is never written, and it signals `PBNotSupportedError`
-whenever an answer needs its offset: order, hash, instant, comparison with another zone, or a
-map key that might conflict with an aware key.
+whenever an answer needs its offset: order, hash, instant, comparison with an aware value
+within 24 h of its wall clock, or a map with two keys that could conflict. Two keys could
+conflict exactly when they are the same item at every position (the key, or each item of a
+tuple key) except datetime positions, and at one of these one holds a format-3 datetime and the
+other an aware datetime whose instant is within 24 h of that wall clock, or a format-3 datetime
+of another zone within 48 h. Every offset is under 24 h, so farther keys never conflict. A
+pinned key may still be refused by a ProtoBase host whose tz database lacks it (113 backward
+links on a host without `tzdata-legacy`); protoBaseST accepts and keeps such keys, and an atom
+holding an instant within a day of year 1 or 9999 can be read but not re-written.
 
 A string holding a lone surrogate is refused (`PBValidationError`). So is a value nested deeper
-than 511 msgpack containers, the most ProtoBase's msgpack writes.
+than 511 msgpack containers, the most ProtoBase's msgpack writes (an empty container counts one
+level less). Inside an atom record a value sits 2 levels deep, so the limit there is 509
+(`PBCodec canonical:enclosingDepth:`).
 
 Until the order keys exist (plan Task 10), the keys of a `PBFrozenDict` and the items of a list
 compare with `=` within one class: `1` and `1.0` are different keys there.

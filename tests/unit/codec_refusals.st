@@ -1,4 +1,4 @@
-"EXPECT: ok 51"
+"EXPECT: ok 55"
 "Spec 10.5: values outside format 4 are refused when written, with
  PBValidationError naming the class, never stored in another form."
 Import from: 'protobase'.
@@ -12,7 +12,7 @@ Price >> exponent
 CalendarDate subclass: #Holiday.
 Holiday >> year
   ^ 1.
-| c price nest zoned |
+| c price nest zoned surrogate |
 c := Check new.
 {
   { 'a Symbol'. #foobarbaz. 'Symbol' }.
@@ -90,4 +90,15 @@ c that: 'a fixed-zone @time in 508 lists (511 containers)' is: (PBCodec decode: 
   equals: PBFrozenList.
 c that: 'a fixed-zone @time in 509 lists (512 containers)' signals: PBValidationError containing: '511' during: [
   PBCodec encode: (zoned value: 509)].
+"Every string the codec writes is checked for lone surrogates."
+surrogate := String with: (Character value: 16rD800).
+c that: 'a lone surrogate in a fixed zone name' signals: PBValidationError containing: 'surrogate' during: [
+  PBCodec encode: (DateTime year: 2026 month: 1 day: 1 hour: 0 minute: 0 second: 0 microsecond: 0 fold: 0
+    zone: (ZoneOffset microseconds: 0 name: surrogate))].
+c that: 'a lone surrogate in a time zone name' signals: PBValidationError containing: 'surrogate' during: [
+  PBCodec encode: (TimeOfDay hour: 1 minute: 0 second: 0 microsecond: 0 fold: 0 zone: (ZoneOffset microseconds: 0 name: surrogate))].
+c that: 'a lone surrogate in a mutable name' signals: PBValidationError containing: 'surrogate' during: [
+  PBCodec encode: (PBMutableObject name: 'cell' , surrogate)].
+c that: 'a lone surrogate in a reference type name' signals: PBValidationError containing: 'surrogate' during: [
+  PBCodec encode: (PBUnresolvedRef pointer: (PBAtomPointer segment: (ByteArray new: 16) offset: 0) tag: 'app.' , surrogate)].
 c report displayNl.

@@ -743,8 +743,11 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     - `checkMapKeys:` replaces the interim rule of `_PBItems` (same class and `=`) and keeps
       its linear-time duplicate check: keys are bucketed by order key or hash key, never
       compared pairwise on untrusted input.
-    - It keeps Task 7's refusal of format-3 zone keys whose conflicts need offsets:
-      `PBNotSupportedError` for format-3 keys of two zones, or next to an aware key.
+    - It keeps Task 7's refusal of format-3 zone keys whose conflicts need offsets, with
+      exactly Task 7's rule (design §4.3): `PBNotSupportedError` only for two keys equal at
+      every position except datetime positions, with a format-3 datetime against an aware one
+      within 24 h or a format-3 one of another zone within 48 h. Its order-key bucketing must
+      keep this rule (or refine it), never widen it; `codec_tagged.st` holds the cases.
     - It decodes format-3 NaN keys as distinct, and refuses them on write.
     - Once this task lands, remove `map-nan-keys-format3`, `map-decimal-nan-keys-format3`,
       `map-key-bool-and-int` and `map-key-equal-numbers` from Task 8's expected-differences
@@ -753,7 +756,9 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
 - [ ] **Step 1: failing tests.**
   - `keys_bit_length.st`: `0`→0, `-1`→1, `255`→8, `-128`→8, and `2^61-1`→61.
   - The feed lengths of FS: `0` is `00`, `255` is `ff 00`, `-1` is `ff`, `-128` is `80 ff`.
-  - `keys_map_key_rule.st`: `{true→1, 1→2}` is accepted; `{1→a, 1.0→b}` is refused; NaN
+  - `keys_map_key_rule.st`: `{true→1, 1→2}` is refused (FS "Map keys": `1`, `1.0`,
+    `Decimal("1.00")` and `true` conflict pairwise; vector `invalid/map-key-bool-and-int`);
+    `{true→1, 2→2}` and `{false→1, true→2}` are accepted; `{1→a, 1.0→b}` is refused; NaN
     twice is refused.
   - The three conformance files compare against the manifest.
 - [ ] **Step 2:** run. Expected: FAIL.
@@ -928,6 +933,14 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     It SKIPs without the venv.
   - `tx_states.st`: after `abort`, `getRootObject:`, `rootNames` and `abort` each signal
     `PBUserError`.
+  - Atom depth (added by the Task 7 re-review): ProtoBase packs an attribute value inside the
+    atom payload `{"t", "oid", "s": {name: value}}` at depth 2, so the effective limit for a
+    stored attribute value is 509 msgpack containers. The atom writer passes the enclosing
+    depth 2 to the codec (`PBCodec canonical:enclosingDepth:` or
+    `toWire:atomRef:enclosingDepth:`). `tx_atom_depth.st` writes an attribute of 509 nested
+    lists (accepted, and read back by ProtoBase in the interop run) and one of 510 (refused
+    with `PBValidationError` before any byte is written, never protoST's raw msgpack
+    `Error`).
   - `tx_read_set.st`, on a copy of the database vector: reading two roots and an absent name
     records three entries; reading again does not change them; `rootNames` records nothing.
 - [ ] **Step 2:** run. Expected: FAIL.

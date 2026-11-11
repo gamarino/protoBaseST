@@ -1,4 +1,4 @@
-"EXPECT: ok 112"
+"EXPECT: ok 121"
 "Each tagged form of FS 'Canonical values' (the bytes come from ProtoBase's
  encoder at v2.0.0rc1): the value encodes to the bytes, the bytes decode to an
  equal value of the right class, and re-encode to the same bytes. @uuid is in
@@ -8,7 +8,7 @@ Import from: '_check'.
 Object subclass: #TestResolver.
 TestResolver >> refTo: aByteArray offset: anInteger tag: aTag
   ^ { aByteArray hex. anInteger. aTag }.
-| c roundTrip seg ref legacy legacy0 ny gap |
+| c roundTrip seg ref legacy legacy0 ny gap fmt3 utc |
 c := Check new.
 "value, hex, expected class: encode, decode, re-encode."
 roundTrip := [:label :value :hex :class |
@@ -173,5 +173,33 @@ c that: 'two NaN objects' is: (PBFrozenDict withAssociations: {
 "A large map is checked through the probes (it would be 12.5 million comparisons pairwise)."
 c that: 'a map of 5000 decimal keys' is: (PBFrozenDict withAssociations:
   ((1 to: 5000) asArray collect: [:i | (Decimal sign: 0 coefficient: i exponent: -2) -> i])) size equals: 5000.
+
+"The refusal is exactly where a conflict is possible (N5): keys that match at
+ every other position, with the datetimes within the offset window."
+fmt3 := [:y :mo :d :h :zone | PBCodec fromWire: (MessagePackMap withAll: { '@dt' -> { y. mo. d. h. 0. 0. 0. 0. { 'zone'. zone } } }) resolver: nil].
+utc := [:y :mo :d :h | DateTime year: y month: mo day: d hour: h minute: 0 second: 0 microsecond: 0 fold: 0 zone: ZoneOffset utc].
+c that: 'one tuple key holding a format-3 and an aware datetime' is: (PBFrozenDict withAssociations: {
+  (PBTuple withAll: { fmt3 value: 2026 value: 3 value: 8 value: 12 value: 'America/New_York'. utc value: 2026 value: 3 value: 8 value: 16 }) -> 1 }) size equals: 1.
+c that: 'a format-3 key and an aware key years apart' is: (PBFrozenDict withAssociations: {
+  (fmt3 value: 2026 value: 3 value: 8 value: 12 value: 'America/New_York') -> 1. (utc value: 2020 value: 1 value: 1 value: 0) -> 2 }) size equals: 2.
+c that: 'a format-3 key and an aware key 25 h apart' is: (PBFrozenDict withAssociations: {
+  (fmt3 value: 2026 value: 3 value: 8 value: 12 value: 'America/New_York') -> 1. (utc value: 2026 value: 3 value: 9 value: 13) -> 2 }) size equals: 2.
+c that: 'a format-3 key and an aware key 23 h apart' signals: PBNotSupportedError containing: 'America/New_York' during: [
+  PBFrozenDict withAssociations: {
+    (fmt3 value: 2026 value: 3 value: 8 value: 12 value: 'America/New_York') -> 1. (utc value: 2026 value: 3 value: 9 value: 11) -> 2 }].
+c that: 'datetimes at different tuple positions' is: (PBFrozenDict withAssociations: {
+  (PBTuple withAll: { fmt3 value: 2026 value: 3 value: 8 value: 12 value: 'America/New_York'. 1 }) -> 1.
+  (PBTuple withAll: { 1. utc value: 2026 value: 3 value: 8 value: 16 }) -> 2 }) size equals: 2.
+c that: 'tuples that differ at another position' is: (PBFrozenDict withAssociations: {
+  (PBTuple withAll: { fmt3 value: 2026 value: 3 value: 8 value: 12 value: 'America/New_York'. 'a' }) -> 1.
+  (PBTuple withAll: { utc value: 2026 value: 3 value: 8 value: 16. 'b' }) -> 2 }) size equals: 2.
+c that: 'format-3 keys of two zones 3 days apart' is: (PBFrozenDict withAssociations: {
+  (fmt3 value: 2026 value: 3 value: 8 value: 12 value: 'America/New_York') -> 1.
+  (fmt3 value: 2026 value: 3 value: 11 value: 12 value: 'Europe/Paris') -> 2 }) size equals: 2.
+c that: 'format-3 keys of two zones 47 h apart' signals: PBNotSupportedError containing: 'Europe/Paris' during: [
+  PBFrozenDict withAssociations: {
+    (fmt3 value: 2026 value: 3 value: 8 value: 12 value: 'America/New_York') -> 1.
+    (fmt3 value: 2026 value: 3 value: 10 value: 11 value: 'Europe/Paris') -> 2 }].
+c that: 'a lookup by an aware key years away' is: (gap at: (utc value: 2020 value: 1 value: 1 value: 0) ifAbsent: ['absent']) equals: 'absent'.
 
 c report displayNl.

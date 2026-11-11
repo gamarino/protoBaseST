@@ -15,3 +15,8 @@
   read and presented in UTC. Format-3 zone-datetime map keys whose conflicts need offsets are
   refused (`PBNotSupportedError`). Lone surrogates and values nested deeper than 511 msgpack
   containers are refused with `PBValidationError`. Duplicate map keys are found in linear time.
+- The format-3 key refusal applies only to two keys that could conflict (equal at every other
+  position, datetimes within the 24 h or 48 h offset window). Every string the codec writes
+  (zone names, mutable names, reference type names) is checked for lone surrogates. Empty
+  containers are charged one msgpack level less, and `canonical:enclosingDepth:` and
+  `toWire:atomRef:enclosingDepth:` take the depth of an enclosing record.

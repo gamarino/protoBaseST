@@ -182,6 +182,17 @@ protoST has no IANA database (readiness §3). The rules, all explicit:
     the reader's database, and this list is protoBaseST's database of keys.
   - A key newer than the pinned release is refused explicitly until the list is regenerated,
     which is a deliberate commit.
+  - **Cost: a pinned key may be refused by a ProtoBase host** (decided at the Task 7
+    re-review). ProtoBase checks a key against the host's own tz database, so a host without
+    some of the pinned names refuses them when it reads. On the reference host (no
+    `tzdata-legacy` and no `tzdata` Python package), ProtoBase refuses 113 of the 597 pinned
+    keys, the backward links such as `US/Eastern` and `America/Buenos_Aires`, with
+    `ProtoCorruptionError "Malformed @time value"`. ProtoBase on a host that has those links
+    writes the same keys. The format makes key validity relative to the reader's database
+    (Known gaps), so protoBaseST neither refuses nor rewrites such keys: refusing them on
+    write would make protoBaseST unable to re-save an atom that ProtoBase wrote legitimately,
+    and the reader must accept them in any case. Cross-implementation tests (§10.2, §10.3)
+    use canonical Zone names only.
 - A format-4 `["instant", key]` datetime is read as its UTC instant **plus the zone key**. It
   orders, hashes, tokenizes and re-encodes exactly, because none of that needs the zone's
   rules (D58). Asking for its wall clock signals `TimeZoneUnavailable` (protoST's calendar,
@@ -195,7 +206,8 @@ protoST has no IANA database (readiness §3). The rules, all explicit:
   - **Writing.** An instant within one day of year 1 or year 9999 is refused with
     `PBNotSupportedError`, because ProtoBase refuses to read such a value back when its wall
     clock leaves the range. The cost: a `datetime.max`-style sentinel in an IANA zone cannot
-    be written from protoST.
+    be written from protoST, and an atom that holds such an in-band instant written by
+    ProtoBase can be read but not modified (re-written) by protoBaseST.
 - Building a zoned datetime from a wall clock is refused (`TimeZoneUnavailable`, call C7). The
   application stores a UTC or fixed-offset datetime, or a naive datetime plus the zone name.
 - **A format-3 `["zone", key]` datetime** (legacy data) is read *lazily*. This supersedes the
@@ -205,7 +217,17 @@ protoST has no IANA database (readiness §3). The rules, all explicit:
   signals `PBNotSupportedError` naming the zone:
   - its hash, its order and its UTC instant;
   - equality with an aware value of another zone or kind;
-  - a map whose keys pair it with such a value, or with a format-3 key of another zone.
+  - a map with two keys that could conflict. That is exactly when the two keys are the same
+    item at every position (the key itself, or each item of a tuple key, nested tuples
+    included) except positions that hold aware or format-3 datetimes, and at one such
+    position one key holds a format-3 datetime and the other either an aware datetime whose
+    UTC instant is within 24 h of the format-3 wall clock, or a format-3 datetime of another
+    zone whose wall clock is within 48 h. Every offset is under 24 h, so keys farther apart
+    can never be one instant, and keys that differ at another position never conflict. The
+    check is linear apart from one sort per datetime position: keys are grouped by a coarse
+    probe in which every aware or format-3 datetime is one token, and only a group of two or
+    more keys is examined. A map with one key is never refused. Equality (`=`) applies the
+    same 24 h and 48 h windows and answers false outside them.
 
   Writing it is refused with `PBValidationError`. Two things need no offset and work:
   - its wall-clock date;
