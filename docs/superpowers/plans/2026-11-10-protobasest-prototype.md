@@ -1290,6 +1290,12 @@ cut in `docs/not-done.md`. A blind write never ships without its merge.
   - `PBFileStorage >> save: anAtom` → a `PBAtomPointer`. It saves unsaved children first, in
     depth-first order, assigns node and collection oids, writes the envelope with
     `persistedFields` order, and records the pointer in the atom.
+    *(Amended by Task 15.)* The graph walk exists: `PBAtom >> _saveInto: aStorage` saves the
+    dependents first, persists the oid drawn in memory and records the atom's place (its
+    `saved` cell); the state is written in the order it was built, which is ProtoBase's
+    (`indexes, count, root` for an empty collection, `persistedFields` later). `save:` is
+    `anAtom _saveInto: self`, and `PBFileStorage` adds `pushAtom: aPBAtomEnvelope` → the
+    pointer of the ATOM record it appends to the owned segment.
     - The first save creates `<uuid hex>.seg` with `#create #exclusive` and a UUID4 name,
       writes the header, `sync`s it, and `FileSystem syncDirectory:` once.
     - Later saves `append:`.

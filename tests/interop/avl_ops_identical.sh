@@ -5,7 +5,10 @@
 # prints each operation and, every 10 operations, its tree node by node; py_avl_replay.py
 # applies the same operations in ProtoBase, runs check_invariants after each one, and
 # requires every node line identical: shape, heights, counts, weights, keys, values, value
-# boxes and the encoded bytes of each state. avl_ops_identical_large.sh does the same at
+# boxes and the encoded bytes of each state. The 'list' sequence (plan Task 15) applies
+# PBList's messages (insertAt:, setAt:, removeAt:, appendFirst:, appendLast:, extend:,
+# sliceFrom:to:, head:, tail:, negative positions and nil bounds included) and ProtoBase's
+# List replays them: the lists' trees must be identical too. avl_ops_identical_large.sh does the same at
 # about 2000 nodes. Exit 77 without the interop venv.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,7 +20,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 
-for kind in pos key counted; do
+for kind in pos key counted list; do
     (cd "$HERE" && "$PROTOST" _st_avl_ops.st "$kind" > "$TMP/$kind.txt") || fail "_st_avl_ops.st $kind exited $?"
     "$PY" "$HERE/py_avl_replay.py" "$kind" "$TMP/$kind.txt" || fail "py_avl_replay.py $kind"
 done

@@ -33,6 +33,9 @@ avl.py over a root node, or nil for the empty tree:
   PBAvl posAppend: root value: v              pos_insert at count
   PBAvl posSet: root at: i value: v           pos_set (0 <= i < count)
   PBAvl posRemove: root at: i                 pos_remove (0 <= i < count)
+  PBAvl posFromArray: anArray                 pos_from_iterable (a balanced tree)
+  PBAvl posConcat: left with: right           pos_concat
+  PBAvl posSlice: root from: a to: b          pos_slice (0 <= a <= b <= count)
   PBAvl keyAt: root key: k                    the node of key k, or nil
   PBAvl keyPut: root key: k value: v nodeClass: aClass     key_put:
                                               { root. replaced. old value }
@@ -556,6 +559,81 @@ PBAvl class >> _posRemove: aNode at: anIndex
     ^ self _balance: aNode left: (self _posRemove: left at: anIndex) right: (self _right: aNode)].
   anIndex = lc ifTrue: [^ self _removeNode: aNode].
   ^ self _balance: aNode left: left right: (self _posRemove: (self _right: aNode) at: anIndex - lc - 1).
+
+"A balanced positional tree of the values of anArray, in order (ProtoBase
+ pos_from_iterable over _build_balanced: the middle value at the root, so
+ subtree sizes differ by at most one); nil for an empty Array. Recursion depth
+ is about log2 of the size."
+PBAvl class >> posFromArray: anArray
+  ^ self _buildFrom: anArray low: 1 high: anArray size + 1.
+
+PBAvl class >> _buildFrom: anArray low: lo high: hi
+  | mid |
+  lo >= hi ifTrue: [^ nil].
+  "ProtoBase's mid = (lo + hi) // 2 over 0-based bounds."
+  mid := (lo - 1 + (hi - 1)) // 2 + 1.
+  ^ PBPosNode value: (anArray at: mid)
+    left: (self _buildFrom: anArray low: lo high: mid)
+    right: (self _buildFrom: anArray low: mid + 1 high: hi).
+
+"The tree of aLeft's values followed by aRight's (ProtoBase pos_concat), in
+ O(log n)."
+PBAvl class >> posConcat: aLeft with: aRight
+  self _root: aLeft kind: PBPosNode.
+  self _root: aRight kind: PBPosNode.
+  ^ self _join2: aLeft with: aRight.
+
+"The tree of the values at positions aStart .. aStop - 1, 0 <= aStart <= aStop
+ <= count (ProtoBase pos_slice), in O(log n); the same root for the whole
+ range."
+PBAvl class >> posSlice: aRoot from: aStart to: aStop
+  | n tail |
+  self _root: aRoot kind: PBPosNode.
+  n := self _count: aRoot.
+  self _index: aStart upTo: n.
+  self _index: aStop upTo: n.
+  aStop < aStart ifTrue: [
+    ^ PBValidationError signal: 'PBAvl: slice stop ' , aStop printString , ' is before start ' , aStart printString].
+  (aStart = 0 and: [aStop = n]) ifTrue: [^ aRoot].
+  tail := (self _posSplit: aRoot at: aStart) at: 2.
+  ^ (self _posSplit: tail at: aStop - aStart) at: 1.
+
+"--- joins and splits (ProtoBase _join, _join2, _pos_split) ---"
+
+"The tree of aLeft, aPivot's payload and aRight, for trees of any heights
+ (all of aLeft before the pivot, all of aRight after); descends the spine of
+ the taller tree only."
+PBAvl class >> _join: aPivot left: aLeft right: aRight
+  | hl hr |
+  hl := self _height: aLeft.
+  hr := self _height: aRight.
+  hl > (hr + 1) ifTrue: [
+    ^ self _balance: aLeft left: (self _left: aLeft)
+      right: (self _join: aPivot left: (self _right: aLeft) right: aRight)].
+  hr > (hl + 1) ifTrue: [
+    ^ self _balance: aRight left: (self _join: aPivot left: aLeft right: (self _left: aRight))
+      right: (self _right: aRight)].
+  ^ aPivot withLeft: aLeft right: aRight.
+
+PBAvl class >> _join2: aLeft with: aRight
+  | popped |
+  aRight isNil ifTrue: [^ aLeft].
+  aLeft isNil ifTrue: [^ aRight].
+  popped := self _popFirst: aRight.
+  ^ self _join: (popped at: 2) left: aLeft right: (popped at: 1).
+
+"{ the first anIndex values of aNode. the rest }."
+PBAvl class >> _posSplit: aNode at: anIndex
+  | left lc split |
+  aNode isNil ifTrue: [^ { nil. nil }].
+  left := self _left: aNode.
+  lc := self _count: left.
+  anIndex <= lc ifTrue: [
+    anIndex = lc ifTrue: [^ { left. self _join: aNode left: nil right: (self _right: aNode) }].
+    split := self _posSplit: left at: anIndex.
+    ^ { split at: 1. self _join: aNode left: (split at: 2) right: (self _right: aNode) }].
+  split := self _posSplit: (self _right: aNode) at: anIndex - lc - 1.
+  ^ { self _join: aNode left: left right: (split at: 1). split at: 2 }.
 
 "--- keyed trees ---"
 

@@ -22,13 +22,39 @@ envelope (framing.st). An application class may reserve more names with
 reservedAttributeNames (class side); DBObject's (dbObjectBehaviourNames) are
 checked in every subclass whatever it answers there.
 
-PBOpaqueAtom, the record of a type with no class here, is in registry.st;
-with: (ProtoBase's with_) comes with the writer (plan Task 15)."
+New records (plan Task 15), each a new atom with its own oid, drawn on first
+need (ProtoBase D21); the receiver of with:value: and withAll: never changes:
+
+  PBObject withAll: { 'name' -> 'Ada'. 'born' -> 1815 }
+                               ProtoBase DBObject(name=..., born=...); an
+                               application class builds its records the same
+                               way (Invoice withAll: {...}); PBObject new is
+                               an empty record
+  aRecord with: aName value: v ProtoBase with_(name=v): a new record holding
+                               the receiver's attributes with aName set to v
+                               (nil defines it as nil)
+  aRecord withAll: { ... }     with_(**changes)
+
+The attributes keep the order they were given in; a change keeps an existing
+attribute's place and appends a new one, as ProtoBase's dict update does (the
+order ProtoBase writes). Values pass through PBCodec canonical: at once.
+Attribute names are checked as the format spec's 'Atom records' requires, with
+PBValidationError: a non-empty String that does not start with _, is not oid,
+atom_pointer or context, nor a behaviour name of DBObject (with_,
+has_defined_attr) or of the class (reservedAttributeNames); a name given twice
+in one call is refused too. A class need not be registered to build records;
+its records are refused when saved until it is (PBObjectSpace
+registerAtomClass:), as ProtoBase refuses a class with no declared type name.
+
+PBOpaqueAtom, the record of a type with no class here, is in registry.st; it
+refuses with:value: and withAll: (PBNotSupportedError naming its type)."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/values'.
 Import from: 'protobase/registry'.
 Import from: 'protobase/keys'.
+Import from: 'protobase/codec'.
+Import from: 'protobase/framing'.
 
 PBAtom subclass: #PBObject.
 
@@ -63,6 +89,70 @@ PBObject class >> _checkPersistedNames: aState at: aPointer
       ^ PBCorruptionError signal: 'the record at ' , aPointer printString , ' (' , self typeName
         , ') holds the attribute ' , name printString , ', a name ' , self name , ' reserves (reservedAttributeNames)']].
   ^ aState.
+
+"=== new records ==============================================================="
+
+"A new record of this class holding the attributes anArray lists (Associations
+ name -> value, in order)."
+PBObject class >> withAll: anArray
+  ^ self _unsavedWithState: (self _state: #() with: anArray).
+
+"An empty record of this class (ProtoBase DBObject())."
+PBObject class >> new
+  ^ self withAll: #().
+
+"The PBFrozenDict of the attributes anArrayOfAssociations (a record's state, in
+ order) updated by the changes aChanges: an existing name keeps its place, a
+ new one is appended, each value canonical, each name checked."
+PBObject class >> _state: anArrayOfAssociations with: aChanges
+  | names values given |
+  ((aChanges isKindOf: Array) or: [aChanges isKindOf: OrderedCollection]) ifFalse: [
+    ^ PBValidationError signal: self name , ': the attributes are an Array of Associations (name -> value), not '
+      , (PBKeys _preview: aChanges)].
+  names := OrderedCollection new.
+  values := OrderedCollection new.
+  anArrayOfAssociations do: [:each |
+    names addLast: (self _checkAttributeName: each key).
+    values addLast: each value].
+  given := Set new.
+  aChanges do: [:each |
+    | name i |
+    (each isKindOf: Association) ifFalse: [
+      ^ PBValidationError signal: self name , ': an attribute is an Association (name -> value), not '
+        , (PBKeys _preview: each)].
+    name := self _checkAttributeName: each key.
+    (given includes: name) ifTrue: [
+      ^ PBValidationError signal: self name , ': the attribute ' , name printString , ' is given twice'].
+    given add: name.
+    i := names indexOf: name.
+    i = 0
+      ifTrue: [names addLast: name. values addLast: (PBCodec canonical: each value)]
+      ifFalse: [values at: i put: (PBCodec canonical: each value)]].
+  ^ PBFrozenDict withAssociations: ((1 to: names size) asArray collect: [:i | (names at: i) -> (values at: i)]).
+
+"aName, when it may be a persisted attribute of this class; PBValidationError
+ naming the rule it breaks otherwise (format spec 'Atom records')."
+PBObject class >> _checkAttributeName: aName
+  | why |
+  why := PBAtomEnvelope _nameProblem: aName.
+  why isNil ifFalse: [^ PBValidationError signal: self name , ': ' , why].
+  (PBObject dbObjectBehaviourNames includes: aName) ifTrue: [
+    ^ PBValidationError signal: self name , ': the attribute name ' , aName printString
+      , ' is a behaviour name of DBObject: no persisted attribute may carry it'].
+  (self reservedAttributeNames includes: aName) ifTrue: [
+    ^ PBValidationError signal: self name , ': the attribute name ' , aName printString , ' is a name '
+      , self name , ' reserves (reservedAttributeNames)'].
+  ^ aName.
+
+"A new record of this class (a new atom, with its own oid) holding the
+ receiver's attributes with aName set to aValue (ProtoBase with_)."
+PBObject >> with: aName value: aValue
+  ^ self withAll: { aName -> aValue }.
+
+"A new record of this class holding the receiver's attributes updated by
+ anArray (Associations name -> value), ProtoBase's with_(**changes)."
+PBObject >> withAll: anArray
+  ^ self class _unsavedWithState: (self class _state: self state associations with: anArray).
 
 "The value of the attribute aName; nil when the record does not hold it."
 PBObject >> at: aName

@@ -195,6 +195,55 @@ space close.
   (`python -m proto_db.tools.verify`). A format-3 zone datetime cannot be described as ProtoBase
   describes it (its UTC instant) without the zone's rules: `PBNotSupportedError`.
 
+## New versions: lists, dictionaries and records
+
+Every collection message and every record change answers a new version, a new atom with its
+own oid; the receiver never changes (design spec 4.1). The names are ProtoBase's, so `add:`,
+`remove:` and `removeAt:` do not mean what Pharo's do (design spec 5.3): a statement that
+discards the result changes nothing.
+
+```smalltalk
+lines := PBList new.                                   "an empty list, positions 0-based"
+lines := (lines appendLast: 'a') appendLast: 'c'.
+lines := lines insertAt: 1 value: 'b'.                 "insertAt: count appends"
+(lines getAt: -1).                                     "'c': a negative position counts from the end"
+(lines sliceFrom: 1 to: nil) elements.                 "#('b' 'c'): Python slice rules"
+lines appendLast: 'd'.                                 "changes nothing: the new list is discarded"
+lines := lines extend: #('d' 'e').                     "#('a' 'b' 'c' 'd' 'e')"
+
+totals := (PBDictionary new setAt: 1043 value: 12) setAt: 1043.0 value: 13.   "one key"
+totals := totals removeAt: 9999.                       "absent: a new version, same content"
+
+PBObjectSpace registerAtomClass: Invoice.              "needed to save, not to build"
+inv := Invoice withAll: { 'number' -> 1043. 'total' -> (Decimal fromString: '12.50') }.
+paid := inv with: 'paidOn' value: (CalendarDate year: 2026 month: 11 day: 11).
+inv = paid.                                            "false: two atoms, two oids"
+```
+
+- `PBList` (`collections.st`): `new`, `setAt:value:`, `insertAt:value:`, `removeAt:`,
+  `appendFirst:`, `appendLast:`, `extend:`, `sliceFrom:to:`, `head:`, `tail:`. A position out
+  of range or that is not an Integer is `PBValidationError`, exactly where ProtoBase's `List`
+  raises (`tests/unit/list_positions.st` holds ProtoBase's answers, recorded by
+  `tests/interop/py_list_positions.py`). `extend:` of nothing answers the receiver, as
+  ProtoBase's. `PBDictionary`: `new`, `setAt:value:`, `removeAt:`. `PBSet`: `new`, `add:`,
+  `remove:` (the set algebra and the operation logs come later in the plan).
+- Values, keys and elements pass through `PBCodec canonical:` at once; a key or element that is
+  not orderable (a NaN, a list, a map) is `PBValidationError`. The trees are built as ProtoBase
+  builds them: `tests/interop/avl_ops_identical.sh` replays 1000 seeded `PBList` operations in
+  ProtoBase and compares every node, byte for byte.
+- A collection that has an index refuses every change with `PBNotSupportedError` naming its
+  indexes: ProtoBase updates the indexes in the same step, which protoBaseST cannot do.
+- `PBObject withAll:` (and `Invoice withAll:`), `with:value:` and `withAll:` on a record: the
+  attributes keep the order given, a change keeps an attribute's place. Attribute names follow
+  the format spec's "Atom records" rule (no leading `_`, not `oid`, `atom_pointer` or `context`,
+  not `with_`, `has_defined_attr` or a name the class reserves): `PBValidationError`.
+- The save (`PBAtom >> _saveInto: aStorage`, ProtoBase's `_save`; the file storage's side and
+  the publisher come later) writes every dependent before the record that refers to it, so a
+  record only refers to earlier records; it persists the oid the atom drew in memory, and
+  records the atom's place, so a second save writes nothing. A class not registered under its
+  `typeName` is refused when saved. `PBAtom >> _decodedTwin` (ProtoBase `_decoded_twin`)
+  answers the atom a load of a saved atom's record would produce.
+
 ## Running the tests
 
 The tests need a protoST binary 0.10.0 or newer (run from a protoST checkout on the branch that

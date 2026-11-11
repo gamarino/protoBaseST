@@ -6,6 +6,8 @@
 
   pos, key, counted   the random sequences of the unit tests (Random seed: 20261110),
                       1000 / 1000 / 600 operations, a checkpoint every 10
+  list                1000 PBList operations (AvlOps nextListOpFor:, plan Task 15): the
+                      tree of the list after each, a checkpoint every 10
   pos-large           2000 appends, 1000 random operations, 500 removes of the first
                       element, 500 removes of the last; a checkpoint every 500
   key-large           2000 puts of ascending Integer keys, 1000 random operations (four in
@@ -22,7 +24,7 @@ Import from: '_avl_ops'.
 
 | args kind ops root size every steps queue apply emit next |
 args := Smalltalk arguments.
-args size = 1 ifFalse: ['usage: _st_avl_ops.st <pos|key|counted|pos-large|key-large>' displayNl. Smalltalk exit: 2].
+args size = 1 ifFalse: ['usage: _st_avl_ops.st <pos|key|counted|list|pos-large|key-large>' displayNl. Smalltalk exit: 2].
 kind := args at: 1.
 ops := AvlOps new.
 root := nil.
@@ -48,6 +50,17 @@ apply := [:op |
   ('op ' , (AvlOps textOf: op)) displayNl.
   steps \\ every = 0 ifTrue: [emit value]].
 kind = 'pos' ifTrue: [1000 timesRepeat: [apply value: (ops nextPosOpFor: size)]].
+kind = 'list' ifTrue: [
+  | list |
+  list := PBList new.
+  1000 timesRepeat: [
+    | op |
+    op := ops nextListOpFor: list count.
+    list := AvlOps applyListOp: op to: list.
+    root := list stateAt: 'root'.
+    steps := steps + 1.
+    ('op ' , (AvlOps textOf: op)) displayNl.
+    steps \\ every = 0 ifTrue: [emit value]]].
 kind = 'key' ifTrue: [1000 timesRepeat: [apply value: ops nextKeyOp]].
 kind = 'counted' ifTrue: [600 timesRepeat: [apply value: ops nextCountedOp]].
 kind = 'pos-large' ifTrue: [

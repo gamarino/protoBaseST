@@ -73,3 +73,17 @@
   about 333 nested lists. `tests/interop/st_deep_to_py.sh` states the workaround in a `NOTE:`
   line naming ask B12 (which the runner now shows under PASS) and fails once ProtoBase reads the
   record at the default limit. `_st_dump.st` also reads versions 2 and 1 of the ERP database.
+- New versions (plan Task 15): `PBList new` and `setAt:value:`, `insertAt:value:`, `removeAt:`,
+  `appendFirst:`, `appendLast:`, `extend:`, `sliceFrom:to:`, `head:`, `tail:` with ProtoBase's
+  positions (Review Focus 5); `PBDictionary new`, `setAt:value:`, `removeAt:`; `PBSet new`,
+  `add:`, `remove:`; `PBObject withAll:`, `with:value:` and `withAll:` on a record. Each answers a
+  new atom and leaves the receiver unchanged; values are canonical at once; a collection with an
+  index refuses every change (`PBNotSupportedError` naming the indexes). `PBAvl posFromArray:`,
+  `posConcat:with:` and `posSlice:from:to:` build ProtoBase's trees for `extend:` and the slices.
+- The save, dependents first (`PBAtom >> _saveInto:` over a storage answering `pushAtom:`): every
+  record refers only to records written before it; the record carries the oid drawn in memory;
+  the atom records its place (`pointer`, `isSaved`), so it is written once. `PBAtom >>
+  _decodedTwin` is ProtoBase's `_decoded_twin`. Building an atom no longer needs its class to
+  be registered; saving it does.
+- The class comments of `PBList`, `PBDictionary`, `PBSet` and `PBCountedSet` start with "Every
+  message answers a new version; the receiver never changes."

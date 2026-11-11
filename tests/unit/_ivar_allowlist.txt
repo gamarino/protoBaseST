@@ -34,3 +34,5 @@ _PBLoadResolver>>_setStorage:chain:
 _PBReadMap>>_setEntries:
 PBNode class>>_initializeShapes
 PBKeyNode>>_setOid:pointer:storage:
+_PBPlace>>_setPointer:storage:
+PBIndexedCollection class>>_initializeShapes

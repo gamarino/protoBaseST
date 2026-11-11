@@ -266,21 +266,32 @@ PBTypeRegistry class >> unloadedAtomFor: aTag at: aPointer storage: aStorage
 "=== PBAtom ================================================================="
 
 "The abstract base of every persistent object. An atom holds oid (an Atom
- cell holding nil or its 16-byte oid), its pointer (nil until saved), its
- storage, and memo (an Atom cell holding nil or the loaded envelope: what
+ cell holding nil or its 16-byte oid), its pointer and storage (a stub's, set
+ when it is made; nil for an atom made in memory), saved (for an atom made in
+ memory, an Atom cell holding nil or the _PBPlace its save recorded; nil for a
+ stub), and memo (an Atom cell holding nil or the loaded envelope: what
  storage loadAt:expecting: answers, tag, oid and the state PBFrozenDict). The
- two cells are the runtime-only fields a load or a first need fills (plan,
- immutability by convention); each is filled by compare-and-swap, so two
+ cells are the runtime-only fields a load, a first need or the save fills
+ (plan, immutability by convention), as ProtoBase sets oid and atom_pointer
+ with object.__setattr__; each is filled once, by compare-and-swap, so two
  threads that race install one value and both answer it.
 
  Identity (ProtoBase D21, core/atom.py _assign_oid): an atom's oid is not a
  storage id. A stored atom's oid is its record's (a stub loads the record to
  read it). An atom that is not stored draws a random version-4 UUID in memory
  on first need (oid, =, hash, an order key or a hash key), never by saving;
- the writer (plan Task 15) persists that same oid. Two atoms are = when they
- are the same object or have the same oid, and hash by their oid, as
- ProtoBase's Atom.__eq__ and __hash__."
-Object subclass: #PBAtom instanceVariableNames: 'oid pointer storage memo'.
+ the save (_saveInto:, a first need too) persists that same oid. Two atoms
+ are = when they are the same object or have the same oid, and hash by their
+ oid, as ProtoBase's Atom.__eq__ and __hash__.
+
+ The save (ProtoBase Atom._save) writes the dependents first: every atom a
+ record refers to (attribute values, map keys, tree nodes, value boxes) is
+ saved before the record, so a record only refers to records written before
+ it, never to itself or forward (the save-dependents-first invariant; the
+ reader's PBCorruptionError for a record that needs itself stays as a defence
+ against damaged data). Atoms are immutable and built from atoms that exist
+ already, so the references of unsaved atoms form no cycle."
+Object subclass: #PBAtom instanceVariableNames: 'oid pointer storage saved memo'.
 
 "The declared type name, two or more dotted ASCII identifiers; nil for an
  abstract class (never registered)."
@@ -313,17 +324,19 @@ PBAtom class >> _checkPersistedNames: aState at: aPointer
   ^ aState.
 
 "An atom of this class that is not stored: no pointer, no storage, no oid
- until its first need draws one (PBAtom >> oid), holding aPBFrozenDict as its state (a read-side value, such as the empty
- CountedSet a RepeatedKeysDictionary answers for an absent key). The public
- constructors of new atoms come with the writer (plan Task 15)."
+ until its first need draws one (PBAtom >> oid), holding aPBFrozenDict as its
+ state; the protected constructor under the public ones (PBObject withAll:,
+ PBList new and the mutators, the AVL writes). The class need not be
+ registered yet: as in ProtoBase, a class with no registered type name is
+ refused when the atom is saved (PBAtom >> tag)."
 PBAtom class >> _unsavedWithState: aPBFrozenDict
   (aPBFrozenDict isKindOf: PBFrozenDict) ifFalse: [
     ^ PBValidationError signal: self name , ': the state of an atom is a PBFrozenDict, not ' , aPBFrozenDict printString].
-  ^ self _unsavedWithState: aPBFrozenDict tag: (PBTypeRegistry tagFor: self).
+  ^ self _unsavedWithState: aPBFrozenDict tag: nil.
 
-"As _unsavedWithState:, for a caller that built aPBFrozenDict itself and
- computed aTag once with PBTypeRegistry tagFor: self (the AVL writes, which
- build many nodes)."
+"As _unsavedWithState:, for a caller that built aPBFrozenDict itself. aTag is
+ kept in the in-memory envelope only (the AVL writes pass the tag they computed
+ once per class); the save writes PBAtom >> tag, read from the class."
 PBAtom class >> _unsavedWithState: aPBFrozenDict tag: aTag
   ^ (self basicNew _setOid: nil pointer: nil storage: nil)
     _installState: (PBAtomEnvelope basicNew _setTag: aTag oid: nil state: aPBFrozenDict).
@@ -343,11 +356,13 @@ PBAtom class >> unloadedAt: aPointer storage: aStorage
   ^ self basicNew _setOid: nil pointer: aPointer storage: aStorage.
 
 PBAtom >> _setOid: anOid pointer: aPointer storage: aStorage
-  "Runs once, on a fresh instance."
+  "Runs once, on a fresh instance. A stub (aPointer given) is stored from the
+   start and has no saved cell; an atom made in memory gets one."
   memo isNil ifFalse: [^ PBUserError signal: 'PBAtom is initialised once'].
   oid := Atom on: anOid.
   pointer := aPointer.
   storage := aStorage.
+  saved := aPointer isNil ifTrue: [Atom on: nil] ifFalse: [nil].
   memo := Atom on: nil.
   ^ self.
 
@@ -355,8 +370,26 @@ PBAtom >> _setOid: anOid pointer: aPointer storage: aStorage
 PBAtom >> isPBReference
   ^ true.
 
+"The atom's PBAtomPointer: a stub's, or the one its save recorded; nil while
+ it is not saved."
 PBAtom >> pointer
-  ^ pointer.
+  | place |
+  pointer isNil ifFalse: [^ pointer].
+  saved isNil ifTrue: [^ nil].
+  place := saved value.
+  ^ place isNil ifTrue: [nil] ifFalse: [place pointer].
+
+"The storage the atom is stored in (nil while it is not saved)."
+PBAtom >> _storage
+  | place |
+  storage isNil ifFalse: [^ storage].
+  saved isNil ifTrue: [^ nil].
+  place := saved value.
+  ^ place isNil ifTrue: [nil] ifFalse: [place storage].
+
+"Whether the atom has a record (a stub, or an atom whose save is done)."
+PBAtom >> isSaved
+  ^ self pointer notNil.
 
 "The oid when this atom holds it already (nil otherwise), without loading or
  drawing one: a stub learns its oid from its record, an atom that is not stored
@@ -375,8 +408,10 @@ PBAtom >> isLoaded
  not keep the record loaded (DatabaseRoot previous, D53). An atom with no
  stored record answers itself."
 PBAtom >> unloadedCopy
-  pointer isNil ifTrue: [^ self].
-  ^ self class unloadedAt: pointer storage: storage.
+  | ptr |
+  ptr := self pointer.
+  ptr isNil ifTrue: [^ self].
+  ^ self class unloadedAt: ptr storage: self _storage.
 
 "The loaded envelope, loading it once through the storage."
 PBAtom >> _envelope
@@ -464,7 +499,138 @@ PBAtom >> hash
   ^ self oid hash.
 
 PBAtom >> printOn: aStream
-  aStream nextPutAll: self class name; nextPutAll: '('; print: pointer; nextPut: $).
+  aStream nextPutAll: self class name; nextPutAll: '('; print: self pointer; nextPut: $).
+
+"=== the save (ProtoBase Atom._save) ========================================
+
+ aStorage is what a record is written to: it answers pushAtom: aPBAtomEnvelope
+ with the PBAtomPointer of the ATOM record it appended (ProtoBase's
+ storage.push_atom). PBFileStorage gains it with its owned segment (plan Task
+ 17); saves run on the space's publisher (plan Task 18), one at a time."
+
+"A saved atom's place: its pointer and the storage it was written to (an
+ immutable pair, what the saved cell of an atom holds)."
+Object subclass: #_PBPlace instanceVariableNames: 'pointer storage'.
+
+_PBPlace class >> pointer: aPointer storage: aStorage
+  ^ self basicNew _setPointer: aPointer storage: aStorage.
+
+_PBPlace >> _setPointer: aPointer storage: aStorage
+  "Runs once, on a fresh instance."
+  pointer isNil ifFalse: [^ PBUserError signal: '_PBPlace is immutable'].
+  pointer := aPointer.
+  storage := aStorage.
+  ^ self.
+
+_PBPlace >> pointer
+  ^ pointer.
+
+_PBPlace >> storage
+  ^ storage.
+
+"Saves this atom into aStorage unless it is saved there already, and answers
+ its pointer. Every atom it refers to that is not saved is saved first, depth
+ first in the order the encoder meets the references (attribute order; in a
+ value, item order; a map entry's key before its value), each once, as
+ ProtoBase's _save: so every reference in a written record points to an
+ earlier record. Each record carries the atom's oid, drawn now if no need drew
+ it before (ProtoBase D21), and the state in the order it was built (the
+ order ProtoBase's constructors and _with set the attributes). Each atom
+ records its place once saved (pointer answers it). The walk keeps an explicit
+ stack, so a long chain of records does not recurse.
+
+ Refused with PBValidationError: a class not registered under its typeName
+ (PBTypeRegistry tagFor:, as ProtoBase refuses a class with no declared
+ __type_name__), a value the codec refuses, an atom stored in another storage
+ (its pointer would mean nothing in aStorage)."
+PBAtom >> _saveInto: aStorage
+  | stack known |
+  known := self _pointerIn: aStorage.
+  known isNil ifFalse: [^ known].
+  "Pairs { atom. its unsaved references, or nil before they are listed }."
+  stack := OrderedCollection new.
+  stack addLast: self; addLast: nil.
+  [stack notEmpty] whileTrue: [
+    | refs atom |
+    refs := stack removeLast.
+    atom := stack last.
+    refs isNil
+      ifTrue: [
+        (atom _pointerIn: aStorage) isNil
+          ifTrue: [
+            refs := OrderedCollection new.
+            atom state _pbAddUnsavedAtomsTo: refs in: aStorage.
+            stack addLast: refs.
+            refs size to: 1 by: -1 do: [:i | stack addLast: (refs at: i); addLast: nil]]
+          ifFalse: [stack removeLast]]
+      ifFalse: [
+        stack removeLast.
+        "A dependent met twice is saved once: the second visit finds it saved."
+        (atom _pointerIn: aStorage) isNil ifTrue: [atom _pushInto: aStorage]]].
+  ^ self pointer.
+
+"The pointer of this atom in aStorage, or nil while it is not saved; an atom
+ stored in another storage is PBValidationError."
+PBAtom >> _pointerIn: aStorage
+  | place |
+  pointer isNil ifFalse: [
+    storage == aStorage ifTrue: [^ pointer].
+    ^ self _storedElsewhere: aStorage].
+  place := saved value.
+  place isNil ifTrue: [^ nil].
+  place storage == aStorage ifTrue: [^ place pointer].
+  ^ self _storedElsewhere: aStorage.
+
+PBAtom >> _storedElsewhere: aStorage
+  ^ PBValidationError signal: self printString , ' is stored in ' , self _storage printString
+    , ', not in ' , aStorage printString , ': a record of one storage cannot refer to it'.
+
+"Writes this atom's record, whose references are all saved in aStorage, and
+ records its place."
+PBAtom >> _pushInto: aStorage
+  | ptr |
+  ptr := aStorage pushAtom: (PBAtomEnvelope tag: self tag oid: self oid state: self state).
+  (saved value: (_PBPlace pointer: ptr storage: aStorage) ifCurrent: nil) ifFalse: [
+    ^ PBUnexpectedError signal: self printString , ' was saved twice at once: saves of one atom must run on one publisher'].
+  ^ ptr.
+
+"Adds to anOrderedCollection the atoms the receiver refers to that are not
+ saved in aStorage, in encoder order (a value holds none; the containers and
+ the atoms below answer theirs). A reference read without a resolver
+ (PBUnresolvedRef) is a pointer already."
+Object >> _pbAddUnsavedAtomsTo: anOrderedCollection in: aStorage
+  ^ self.
+
+PBAtom >> _pbAddUnsavedAtomsTo: anOrderedCollection in: aStorage
+  (self _pointerIn: aStorage) isNil ifTrue: [anOrderedCollection addLast: self].
+
+_PBSequence >> _pbAddUnsavedAtomsTo: anOrderedCollection in: aStorage
+  1 to: self size do: [:i | (self at: i) _pbAddUnsavedAtomsTo: anOrderedCollection in: aStorage].
+
+PBFrozenDict >> _pbAddUnsavedAtomsTo: anOrderedCollection in: aStorage
+  | ks |
+  ks := self keys.
+  1 to: ks size do: [:i |
+    (ks at: i) _pbAddUnsavedAtomsTo: anOrderedCollection in: aStorage.
+    (self _valueAt: i) _pbAddUnsavedAtomsTo: anOrderedCollection in: aStorage].
+
+"The decoded twin of this saved atom (ProtoBase Atom._decoded_twin): the atom a
+ load of its record would produce, built from its state without reading the
+ storage. A new object of this class, a stub of the same pointer and storage
+ holding the same oid, loaded with the state as its record decodes (each
+ reference a stub of the storage, each value canonical). It is = to this atom
+ (one oid) and leaves it untouched. An atom that is not saved has no twin
+ (PBUserError)."
+PBAtom >> _decodedTwin
+  | ptr st envelope |
+  ptr := self pointer.
+  ptr isNil ifTrue: [^ PBUserError signal: self printString , ' is not saved: only a saved atom has a decoded twin'].
+  st := self _storage.
+  envelope := PBAtomEnvelope
+    decode: (PBAtomEnvelope tag: self tag oid: self oid state: self state) encode
+    expecting: self tag
+    resolver: (_PBLoadResolver storage: st chain: { ptr }).
+  ^ (self class basicNew _setOid: envelope oid pointer: ptr storage: st) _installState: envelope.
 
 "=== PBOpaqueAtom ==========================================================="
 
@@ -528,6 +694,12 @@ PBOpaqueAtom >> doesNotUnderstand: aMessage
 
 PBOpaqueAtom >> printOn: aStream
   aStream nextPutAll: 'PBOpaqueAtom('; nextPutAll: referencedName; nextPutAll: ', '; print: pointer; nextPut: $).
+
+"An opaque atom is never written (D59): it is always a stub, so a save only
+ refers to it. Its decoded twin would need its type's behaviour."
+PBOpaqueAtom >> _decodedTwin
+  ^ PBNotSupportedError signal: 'this ' , referencedName
+    , ' atom has no class registered in this process: protoBaseST never writes it, so it has no decoded twin'.
 
 PBTypeRegistry _initializeRegistry.
 

@@ -5,6 +5,8 @@
   ops := AvlOps new.                 a generator over Random seed: AvlOps seed (20261110)
   ops nextPosOpFor: n                the next operation on a positional tree of n elements
   ops nextKeyOp / nextCountedOp      the next operation on a keyed / weighted keyed tree
+  ops nextListOpFor: n               the next PBList operation on a list of n elements
+  AvlOps applyListOp: op to: aList   the PBList that operation answers
   AvlOps valueOf: aToken             the value a token stands for
   AvlOps dump: aRoot                 the lines that describe aRoot, node by node
 
@@ -52,6 +54,55 @@ AvlOps >> nextPosOpFor: anInteger
   k = 5 ifTrue: [^ { #append. anInteger. self valueToken }].
   (k between: 6 and: 7) ifTrue: [^ { #set. self between: 0 and: anInteger - 1. self valueToken }].
   ^ { #remove. self between: 0 and: anInteger - 1 }.
+
+"An operation on a PBList of anInteger elements (plan Task 15), with ProtoBase's List
+ messages and 0-based positions, negative ones included: insertAt: 20 %, appendFirst: and
+ appendLast: 5 % each, setAt: 10 %, removeAt: 15 %, extend: 15 % (0 to 12 values), and
+ sliceFrom:to: 10 % (a bound may be nil or outside the list), head: and tail: 5 % each,
+ removeAt: 10 % more; below 30 elements extend: takes the share of the slices, head:,
+ tail: and the second removeAt:, so the list grows back after a slice. Forms: { #insertAt. i. token }, { #appendFirst. token }, { #appendLast.
+ token }, { #setAt. i. token }, { #removeAt. i }, { #extend. n. token... }, { #sliceFrom.
+ a. b } (a bound 'nil' or an Integer), { #head. n }, { #tail. n }."
+AvlOps >> nextListOpFor: anInteger
+  | n k |
+  n := anInteger.
+  k := self between: 1 and: 20.
+  n = 0 ifTrue: [k := 12].
+  k <= 4 ifTrue: [^ { #insertAt. self between: n negated and: n. self valueToken }].
+  k = 5 ifTrue: [^ { #appendFirst. self valueToken }].
+  k = 6 ifTrue: [^ { #appendLast. self valueToken }].
+  k <= 8 ifTrue: [^ { #setAt. self between: n negated and: n - 1. self valueToken }].
+  k <= 11 ifTrue: [^ { #removeAt. self between: n negated and: n - 1 }].
+  (k <= 14 or: [n < 30]) ifTrue: [
+    | count |
+    count := self between: 0 and: 12.
+    ^ { #extend. count } , ((1 to: count) asArray collect: [:i | self valueToken])].
+  k <= 16 ifTrue: [^ { #sliceFrom. self sliceBoundFor: n. self sliceBoundFor: n }].
+  k = 17 ifTrue: [^ { #head. self between: n negated and: n }].
+  k = 18 ifTrue: [^ { #tail. self between: n negated and: n }].
+  ^ { #removeAt. self between: n negated and: n - 1 }.
+
+"A slice bound for a list of n elements: 'nil' one time in six, otherwise an Integer in
+ -n-2 .. n+2."
+AvlOps >> sliceBoundFor: n
+  (self between: 1 and: 6) = 1 ifTrue: [^ 'nil'].
+  ^ self between: n negated - 2 and: n + 2.
+
+"aList after anOp (nextListOpFor:)."
+AvlOps class >> applyListOp: anOp to: aList
+  | o b |
+  o := anOp at: 1.
+  b := [:x | x = 'nil' ifTrue: [nil] ifFalse: [x]].
+  o = #insertAt ifTrue: [^ aList insertAt: (anOp at: 2) value: (self valueOf: (anOp at: 3))].
+  o = #appendFirst ifTrue: [^ aList appendFirst: (self valueOf: (anOp at: 2))].
+  o = #appendLast ifTrue: [^ aList appendLast: (self valueOf: (anOp at: 2))].
+  o = #setAt ifTrue: [^ aList setAt: (anOp at: 2) value: (self valueOf: (anOp at: 3))].
+  o = #removeAt ifTrue: [^ aList removeAt: (anOp at: 2)].
+  o = #extend ifTrue: [^ aList extend: ((anOp copyFrom: 3 to: anOp size) collect: [:t | self valueOf: t])].
+  o = #sliceFrom ifTrue: [^ aList sliceFrom: (b value: (anOp at: 2)) to: (b value: (anOp at: 3))].
+  o = #head ifTrue: [^ aList head: (anOp at: 2)].
+  o = #tail ifTrue: [^ aList tail: (anOp at: 2)].
+  ^ Error signal: 'AvlOps: unknown list operation ' , anOp printString.
 
 "A keyed operation: put 50 %, delete 50 % (of a key that may be absent). Over the 120
  keys of keyToken the tree holds about 60 keys (height 6 to 8)."
