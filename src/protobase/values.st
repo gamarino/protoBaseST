@@ -59,10 +59,13 @@ _PBItems class >> same: a as: b
 _PBItems class >> probe: k
   ^ self probe: k coarse: false.
 
-"With coarse true, every aware or format-3 datetime has one probe (#('zoned')):
- checkDecidableKeys: groups keys that may differ only in such datetimes."
+"With coarse true, every aware or format-3 datetime has one probe (#('zoned')),
+ and numbers compare as the format's map keys do (the order-key rule: true,
+ 1, 1.0 and Decimal 1.00 are one key): checkDecidableKeys: groups keys that
+ may differ only in such datetimes."
 _PBItems class >> probe: k coarse: aBoolean
   (aBoolean and: [self _isZoned: k]) ifTrue: [^ #('zoned')].
+  (aBoolean and: [self _isNumeric: k]) ifTrue: [^ self _numericProbe: k].
   k isNil ifTrue: [^ #('nil')].
   k == true ifTrue: [^ #('true')].
   k == false ifTrue: [^ #('false')].
@@ -89,6 +92,37 @@ _PBItems class >> probe: k coarse: aBoolean
   k class name = 'UUID' ifTrue: [^ { 'uuid'. k bytes hex }].
   ^ { 'other'. k class name }.
 
+_PBItems class >> _isNumeric: k
+  k isClassObject ifTrue: [^ false].
+  ^ k == true or: [k == false or: [k isInteger or: [k isFloat or: [k isKindOf: Decimal]]]].
+
+"Numerically equal bools, integers, floats and decimals have one probe: a
+ decimal's (sign, digits without trailing zeros, exponent), or one probe for
+ zero, one per infinite sign; a NaN is itself only. A float is converted
+ exactly (its binary fraction has a finite decimal expansion, at most 1074
+ digits); a decimal is never expanded, so a huge exponent costs nothing."
+_PBItems class >> _numericProbe: k
+  | f n d k2 |
+  k == true ifTrue: [^ self _numericProbe: 1].
+  k == false ifTrue: [^ self _numericProbe: 0].
+  (k isKindOf: Decimal) ifTrue: [
+    | p |
+    p := self _decimalProbe: k.
+    (p first = 'nan') ifTrue: [^ p].
+    ^ { 'num' } , (p copyFrom: 2 to: p size)].
+  k isFloat ifTrue: [
+    k isNaN ifTrue: [^ { 'nan'. k identityHash }].
+    k isInfinite ifTrue: [^ { 'num'. k < 0 ifTrue: [1] ifFalse: [0] }].
+    k = 0.0 ifTrue: [^ #('num')].
+    f := k asExactFraction.
+    f isInteger ifTrue: [^ self _numericProbe: f].
+    n := f numerator. d := f denominator. k2 := 0.
+    [d > 1] whileTrue: [d := d // 2. k2 := k2 + 1].
+    "n / 2^k2 = n * 5^k2 / 10^k2; n is odd, so the digits end in 5, not 0."
+    ^ { 'num'. n < 0 ifTrue: [1] ifFalse: [0]. (n abs * (5 raisedTo: k2)) printString. k2 negated }].
+  k = 0 ifTrue: [^ #('num')].
+  ^ { 'num' } , ((self _decimalProbe: (Decimal sign: (k < 0 ifTrue: [1] ifFalse: [0]) coefficient: k abs exponent: 0)) copyFrom: 2 to: 4).
+
 "Equal decimals have one probe: the sign, the coefficient's digits without
  trailing zeros and the matching exponent (zero has one probe, -0 included)."
 _PBItems class >> _decimalProbe: d
@@ -108,9 +142,10 @@ _PBItems class >> offsetWindow
 
 "Signals PBNotSupportedError when two keys of aKeyArray could conflict and
  only the zone's offsets can tell (format spec, 'Map keys' and 'Known gaps').
- That is exactly when the two keys are the same item at every position
- (the key itself, or each item of a tuple key) except positions holding
- datetimes, and at one such position one key holds a format-3 zone datetime
+ That is exactly when the two keys are equal under the order-key rule at
+ every position (the key itself, or each item of a tuple key) except
+ positions holding datetimes (numbers fold: true, 1, 1.0 and Decimal 1.00 are
+ one key), and at one such position one key holds a format-3 zone datetime
  and the other either an aware datetime whose instant lies within 24 h of its
  wall clock, or a format-3 datetime of another zone whose wall clock lies
  within 48 h. Format-3 datetimes of one zone conflict exactly when their wall

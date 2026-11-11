@@ -217,10 +217,10 @@ protoST has no IANA database (readiness §3). The rules, all explicit:
   signals `PBNotSupportedError` naming the zone:
   - its hash, its order and its UTC instant;
   - equality with an aware value of another zone or kind;
-  - a map with two keys that could conflict. That is exactly when the two keys are the same
-    item at every position (the key itself, or each item of a tuple key, nested tuples
-    included) except positions that hold aware or format-3 datetimes, and at one such
-    position one key holds a format-3 datetime and the other either an aware datetime whose
+  - a map with two keys that could conflict. That is exactly when the two keys are equal
+    under the order-key rule at every position (the key itself, or each item of a tuple key,
+    nested tuples included) except positions that hold aware or format-3 datetimes, and at
+    one such position one key holds a format-3 datetime and the other either an aware datetime whose
     UTC instant is within 24 h of the format-3 wall clock, or a format-3 datetime of another
     zone whose wall clock is within 48 h. Every offset is under 24 h, so keys farther apart
     can never be one instant, and keys that differ at another position never conflict. The
@@ -228,6 +228,9 @@ protoST has no IANA database (readiness §3). The rules, all explicit:
     probe in which every aware or format-3 datetime is one token, and only a group of two or
     more keys is examined. A map with one key is never refused. Equality (`=`) applies the
     same 24 h and 48 h windows and answers false outside them.
+    At the other positions numbers fold as the order-key rule says: `true`, `1`, `1.0` and
+    `Decimal("1.00")` are one item (corrected at the Task 7 re-review, N6). Other items
+    compare by class and `=`, which for them is the same equality.
 
   Writing it is refused with `PBValidationError`. Two things need no offset and work:
   - its wall-clock date;

@@ -45,8 +45,9 @@ range. A format-3 `["zone", key]` datetime is read as a `PBLegacyZoneDateTime`
 (`isLegacyZone` answers true). It is never written, and it signals `PBNotSupportedError`
 whenever an answer needs its offset: order, hash, instant, comparison with an aware value
 within 24 h of its wall clock, or a map with two keys that could conflict. Two keys could
-conflict exactly when they are the same item at every position (the key, or each item of a
-tuple key) except datetime positions, and at one of these one holds a format-3 datetime and the
+conflict exactly when they are equal under the format's order-key rule at every position (the
+key, or each item of a tuple key) except datetime positions (so `true`, `1`, `1.0` and
+`Decimal 1.00` are one item there), and at one of these one holds a format-3 datetime and the
 other an aware datetime whose instant is within 24 h of that wall clock, or a format-3 datetime
 of another zone within 48 h. Every offset is under 24 h, so farther keys never conflict. A
 pinned key may still be refused by a ProtoBase host whose tz database lacks it (113 backward

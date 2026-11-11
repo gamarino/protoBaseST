@@ -744,10 +744,12 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
       its linear-time duplicate check: keys are bucketed by order key or hash key, never
       compared pairwise on untrusted input.
     - It keeps Task 7's refusal of format-3 zone keys whose conflicts need offsets, with
-      exactly Task 7's rule (design §4.3): `PBNotSupportedError` only for two keys equal at
-      every position except datetime positions, with a format-3 datetime against an aware one
-      within 24 h or a format-3 one of another zone within 48 h. Its order-key bucketing must
-      keep this rule (or refine it), never widen it; `codec_tagged.st` holds the cases.
+      exactly Task 7's rule (design §4.3): `PBNotSupportedError` only for two keys equal under
+      the order-key rule at every position except datetime positions, with a format-3
+      datetime against an aware one within 24 h or a format-3 one of another zone within 48 h.
+      Its order-key bucketing must refuse every such pair and only those, and replaces Task 7's
+      coarse probe (numbers already fold there; every other item still compares by class and
+      `=`); `codec_tagged.st` holds the cases.
     - It decodes format-3 NaN keys as distinct, and refuses them on write.
     - Once this task lands, remove `map-nan-keys-format3`, `map-decimal-nan-keys-format3`,
       `map-key-bool-and-int` and `map-key-equal-numbers` from Task 8's expected-differences

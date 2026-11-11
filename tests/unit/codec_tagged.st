@@ -1,4 +1,4 @@
-"EXPECT: ok 121"
+"EXPECT: ok 126"
 "Each tagged form of FS 'Canonical values' (the bytes come from ProtoBase's
  encoder at v2.0.0rc1): the value encodes to the bytes, the bytes decode to an
  equal value of the right class, and re-encode to the same bytes. @uuid is in
@@ -8,7 +8,7 @@ Import from: '_check'.
 Object subclass: #TestResolver.
 TestResolver >> refTo: aByteArray offset: anInteger tag: aTag
   ^ { aByteArray hex. anInteger. aTag }.
-| c roundTrip seg ref legacy legacy0 ny gap fmt3 utc |
+| c roundTrip seg ref legacy legacy0 ny gap fmt3 utc nyT utcT |
 c := Check new.
 "value, hex, expected class: encode, decode, re-encode."
 roundTrip := [:label :value :hex :class |
@@ -200,6 +200,19 @@ c that: 'format-3 keys of two zones 47 h apart' signals: PBNotSupportedError con
   PBFrozenDict withAssociations: {
     (fmt3 value: 2026 value: 3 value: 8 value: 12 value: 'America/New_York') -> 1.
     (fmt3 value: 2026 value: 3 value: 10 value: 11 value: 'Europe/Paris') -> 2 }].
+"Other positions compare as map keys do (order-key rule: true, 1, 1.0 and
+ Decimal 1.00 are one key), so these tuples could conflict (N6)."
+nyT := [:x | PBTuple withAll: { fmt3 value: 2026 value: 3 value: 8 value: 12 value: 'America/New_York'. x }].
+utcT := [:x | PBTuple withAll: { utc value: 2026 value: 3 value: 8 value: 16. x }].
+c that: '(format-3, 1) and (aware, 1.0)' signals: PBNotSupportedError containing: 'America/New_York' during: [
+  PBFrozenDict withAssociations: { (nyT value: 1) -> 1. (utcT value: 1.0) -> 2 }].
+c that: '(format-3, true) and (aware, 1)' signals: PBNotSupportedError containing: 'America/New_York' during: [
+  PBFrozenDict withAssociations: { (nyT value: true) -> 1. (utcT value: 1) -> 2 }].
+c that: '(format-3, 1) and (aware, Decimal 1.00)' signals: PBNotSupportedError containing: 'America/New_York' during: [
+  PBFrozenDict withAssociations: { (nyT value: 1) -> 1. (utcT value: (Decimal fromString: '1.00')) -> 2 }].
+c that: '(format-3, 1) and (aware, 2.0)' is: (PBFrozenDict withAssociations: { (nyT value: 1) -> 1. (utcT value: 2.0) -> 2 }) size equals: 2.
+c that: '(format-3, 0.1) and (aware, Decimal 0.1)' is: (PBFrozenDict withAssociations: {
+  (nyT value: 0.1) -> 1. (utcT value: (Decimal fromString: '0.1')) -> 2 }) size equals: 2.
 c that: 'a lookup by an aware key years away' is: (gap at: (utc value: 2020 value: 1 value: 1 value: 0) ifAbsent: ['absent']) equals: 'absent'.
 
 c report displayNl.

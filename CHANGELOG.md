@@ -16,7 +16,8 @@
   refused (`PBNotSupportedError`). Lone surrogates and values nested deeper than 511 msgpack
   containers are refused with `PBValidationError`. Duplicate map keys are found in linear time.
 - The format-3 key refusal applies only to two keys that could conflict (equal at every other
-  position, datetimes within the 24 h or 48 h offset window). Every string the codec writes
+  position under the order-key rule, so `true`, `1`, `1.0` and `Decimal 1.00` are one item there,
+  and datetimes within the 24 h or 48 h offset window). Every string the codec writes
   (zone names, mutable names, reference type names) is checked for lone surrogates. Empty
   containers are charged one msgpack level less, and `canonical:enclosingDepth:` and
   `toWire:atomRef:enclosingDepth:` take the depth of an enclosing record.
