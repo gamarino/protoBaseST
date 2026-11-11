@@ -37,14 +37,16 @@ Vectors class >> _fail: aString
   ^ Error signal: 'Vectors: ' , aString.
 
 Vectors class >> _load
-  | listing manifest |
+  | listing manifest listed |
   listing := 'vectors.sha256' asFileReference binaryContents.
   listing sha256 hex asLowercase = self pinnedDigest ifFalse: [
     ^ self _fail: 'vectors.sha256 digest is ' , listing sha256 hex , ', not the pinned ' , self pinnedDigest].
+  listed := Set new.
   (listing utf8Decoded lines select: [:line | line notEmpty]) do: [:line |
     | digest path actual |
     digest := line copyFrom: 1 to: 64.
     path := line copyFrom: 67 to: line size.
+    listed add: path.
     actual := (path = '../manifest.json'
       ifTrue: ['manifest.json' asFileReference binaryContents]
       ifFalse: [self bytesOf: path]) sha256 hex asLowercase.
@@ -52,7 +54,27 @@ Vectors class >> _load
   manifest := JSONModule JSON parse: 'manifest.json' asFileReference contents.
   (manifest at: 'builtin_type_aliases') asArray = PBNotation builtinAliasNames asArray ifFalse: [
     ^ self _fail: 'builtin_type_aliases differ from the table of PBNotation'].
+  (self _referencedFiles: manifest) do: [:path |
+    (listed includes: path) ifFalse: [
+      ^ self _fail: 'the manifest refers to ' , path , ', which vectors.sha256 does not list (it would be read unverified)']].
   ^ manifest.
+
+"Every path the manifest names with a 'file' or 'canonical' key (strings only: in the
+ cluster section 'canonical' is a flag), relative to vectors/."
+Vectors class >> _referencedFiles: aNode
+  | paths |
+  paths := Set new.
+  self _collectFiles: aNode into: paths.
+  ^ paths.
+
+Vectors class >> _collectFiles: aNode into: aSet
+  (aNode isKindOf: Dictionary) ifTrue: [
+    aNode associations do: [:each |
+      ((each key = 'file' or: [each key = 'canonical']) and: [each value isString])
+        ifTrue: [aSet add: each value].
+      self _collectFiles: each value into: aSet]].
+  ((aNode isKindOf: Array) and: [aNode isString not]) ifTrue: [
+    aNode do: [:each | self _collectFiles: each into: aSet]].
 
 "=== one run over a manifest section ==========================================="
 
@@ -86,19 +108,30 @@ VectorRun >> begin
   hard := false.
 
 "Runs aBlock for the stage aStage of the current vector: it answers nil when the
- check holds, or the reason it does not. A PBDBError the block lets out is a
- failed stage; any other Error is a defect of the implementation, never an expected
- difference."
+ check holds, or the reason it does not (a mismatch: no error class). A PBDBError the
+ block lets out is a failed stage with its class; any other Error is a defect of the
+ implementation, never an expected difference."
 VectorRun >> stage: aStage of: anId do: aBlock
-  | why |
-  why := [aBlock value] on: Error do: [:e |
+  ^ self vector: anId stage: aStage do: [
+    | why |
+    why := aBlock value.
+    why isNil ifTrue: [nil] ifFalse: [{ aStage. why }]].
+
+"As stage:of:do:, for a block that names the failed stage itself: it answers nil or
+ { stage. reason }. aStage names a stage that dies with an internal error."
+VectorRun >> vector: anId stage: aStage do: aBlock
+  | failed |
+  failed := [aBlock value] on: Error do: [:e |
     (e isKindOf: PBDBError)
-      ifTrue: [e class name , ': ' , e messageText]
-      ifFalse: [hard := true. 'INTERNAL ' , e class name , ': ' , e messageText printString]].
-  why isNil ifFalse: [
-    failedStages add: aStage.
+      ifTrue: [{ aStage. e messageText. e class name }]
+      ifFalse: [hard := true. { aStage. 'INTERNAL ' , e class name , ': ' , e messageText printString }]].
+  failed isNil ifFalse: [
+    | why |
+    why := failed at: 2.
+    failedStages add: { failed at: 1. failed size > 2 ifTrue: [failed at: 3] ifFalse: [nil] }.
     (expected includesKey: anId) ifFalse: [
-      ('FAIL ' , anId , ' (' , aStage , '): ' , (why size > 300 ifTrue: [(why copyFrom: 1 to: 300) , '...'] ifFalse: [why]))
+      ('FAIL ' , anId , ' (' , (failed at: 1) , '): '
+        , (failed size > 2 ifTrue: [(failed at: 3) , ': '] ifFalse: ['']) , (why size > 300 ifTrue: [(why copyFrom: 1 to: 300) , '...'] ifFalse: [why]))
         displayNl]].
 
 "Closes the vector: counts it as passed, as an expected difference, or as a failure."
@@ -115,7 +148,7 @@ VectorRun >> end: anId
     ^ self].
   (hard or: [failedStages asArray ~= (entry at: 3)]) ifTrue: [
     failures := failures + 1.
-    ('FAIL ' , anId , ': the expected difference is in the stages ' , (entry at: 3) printString
+    ('FAIL ' , anId , ': the expected difference is (stage, error class) ' , (entry at: 3) printString
       , ', the vector fails ' , failedStages asArray printString , (hard ifTrue: [' with an internal error'] ifFalse: [''])) displayNl.
     ^ self].
   expectedCount := expectedCount + 1.

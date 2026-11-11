@@ -19,15 +19,15 @@ entries do: [:entry |
   id := entry at: 'id'.
   expectedClass := classes at: (entry at: 'error') ifAbsent: [nil].
   run begin.
-  run stage: 'accepted' of: id do: [
+  run vector: id stage: 'refusal' do: [
     | outcome |
     expectedClass isNil ifTrue: [PBValidationError signal: 'the manifest lists the unknown error ' , (entry at: 'error') printString].
     outcome := [PBCodec decode: (Vectors bytesOf: (entry at: 'file')). nil]
       on: PBDBError do: [:e |
         (e isKindOf: expectedClass) ifTrue: [#refused] ifFalse: [e class name , ': ' , e messageText]].
     outcome isNil
-      ifTrue: ['accepted, but ' , (entry at: 'error') , ' was expected']
-      ifFalse: [outcome == #refused ifTrue: [nil] ifFalse: ['refused with ' , outcome , ', not ' , expectedClass name]]].
+      ifTrue: [{ 'accepted'. 'accepted, but ' , (entry at: 'error') , ' was expected' }]
+      ifFalse: [outcome == #refused ifTrue: [nil] ifFalse: [{ 'refusal'. 'refused with ' , outcome , ', not ' , expectedClass name }]]].
   run end: id].
 run failures > 0
   ifTrue: [('FAILED ' , run failures printString , ' vector(s)') displayNl]

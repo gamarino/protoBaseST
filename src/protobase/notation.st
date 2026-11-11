@@ -92,7 +92,8 @@ PBNotation class >> floatFromHex: aString
   s := aString.
   negative := s notEmpty and: [s first = $-].
   negative ifTrue: [s := s copyFrom: 2 to: s size].
-  (s size > 6 and: [(s copyFrom: 1 to: 2) = '0x' and: [(s at: 4) = $.]]) ifFalse: [^ self _badHex: aString].
+  "Canonical: 0x, one lead digit, '.', 13 digits, 'p', a sign, the exponent (at least 20 characters)."
+  (s size >= 20 and: [(s copyFrom: 1 to: 2) = '0x' and: [(s at: 4) = $.]]) ifFalse: [^ self _badHex: aString].
   lead := (s at: 3) = $0 ifTrue: [0] ifFalse: [(s at: 3) = $1 ifTrue: [1] ifFalse: [^ self _badHex: aString]].
   p := s indexOf: $p.
   p = 18 ifFalse: [^ self _badHex: aString].
@@ -103,10 +104,12 @@ PBNotation class >> floatFromHex: aString
   ((s at: 19) = $+ or: [(s at: 19) = $-]) ifFalse: [^ self _badHex: aString].
   exponent := (s copyFrom: 20 to: s size) asInteger.
   (exponent isNil or: [exponent printString ~= (s copyFrom: 20 to: s size)]) ifTrue: [^ self _badHex: aString].
+  "No 'p-0' (zero is written p+0) and no zero mantissa on a lead 0 other than the zero text above."
+  ((s at: 19) = $- and: [exponent = 0]) ifTrue: [^ self _badHex: aString].
   (s at: 19) = $- ifTrue: [exponent := exponent negated].
   lead = 0
     ifTrue: [
-      (mantissa = 0 ifTrue: [exponent = 0] ifFalse: [exponent = -1022]) ifFalse: [^ self _badHex: aString].
+      (mantissa ~= 0 and: [exponent = -1022]) ifFalse: [^ self _badHex: aString].
       bits := mantissa]
     ifFalse: [
       (exponent between: -1022 and: 1023) ifFalse: [^ self _badHex: aString].

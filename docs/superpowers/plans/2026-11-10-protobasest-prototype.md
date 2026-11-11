@@ -703,6 +703,10 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   - An object's atom class answers `isPBReference` true, as `PBUnresolvedRef` does.
   - Remove `ref-format2`, `ref-name-of-builtin` and `ref-alias` from Task 8's
     expected-differences list; Task 8's runner must then match them.
+  - `PBNotation` (Task 8) holds a literal copy of the 22 built-in aliases
+    (`builtinAliasNames`, used by `_typeName:` and `_buildRef:`). Replace it with
+    `PBTypeRegistry`, delete `builtinAliasNames`, and make `tests/conformance/_vectors.st`
+    compare the registry's built-in table with the manifest's `builtin_type_aliases`.
 - [ ] **Step 4:** run `tests/run_tests.sh tests/conformance tests/unit`. Expected: PASS.
   **Gate of week 1** (Spec §11): `values`, `values_*`, `invalid` at the value, record,
   segment and root layers, and `framing`.
@@ -828,6 +832,11 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   - `tests/conformance/polyglot_read.st`;
   - `tests/conformance/cluster.st`, which prints `SKIP:`-prefixed lines for each cluster
     item, then `cluster skipped visibly`, and exits 0;
+    This runner also owns the invalid-vector layers `roots_log` and `message` (an acceptor
+    log and cluster wire messages): the cluster is out of the prototype's scope (Spec §10.5:
+    a space with `cluster/` is refused), so it prints one `SKIP: invalid <layer> <id>` line per
+    manifest entry of those two layers, naming the id, and the Task 25 accounting check
+    accepts exactly those lines as justified skips;
   - `tests/unit/read_cross_kind_keys.st` (Review Focus 1, on a Python-written space made by
     `tests/interop/py_make_keys_space.py`, a `.sh` wrapper);
   - `tests/unit/read_opaque_refusals.st`;
@@ -1068,6 +1077,10 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
   - `tests/unit/rebase_hashdict.st`;
   - `tests/unit/consumed_d33.st`;
   - `tests/unit/hashdict_set_ops.st`.
+  - `tests/conformance/invalid_log.st`: every invalid vector of the `log` layer
+    (`log-version-3`, `log-kind-mismatch`, `log-mid-corruption`) is refused by the operation-log
+    reader with the listed class (`EXPECT: invalid log-layer N/N`, N computed from the
+    manifest).
 
 **Interfaces:**
 - Consumes: Task 15.
@@ -1424,6 +1437,14 @@ If this task is cut, `docs/not-done.md` says so, and any `PBCountedSet` mutator 
   `ctest -L tsan`. Expected: PASS. List every SKIP; none may come from the new tests.
 - [ ] **Step 3:** in protoBaseST, from a clean clone with the venv, run `tests/run_tests.sh`
   twice. Expected: `failed 0, skipped 0` both times.
+- [ ] **Step 3b (all-vectors accounting, added by the Task 8 review):**
+  `tests/conformance/accounting.st` walks every id of every manifest section (`values`,
+  `values_*`, `invalid`, `order`, `hashes`, `exact_tokens`, `atom_*`, `framing`, `database`,
+  `legacy_database`, `polyglot_database`, `cluster`) and fails unless each one is run by some
+  runner, listed as an expected difference, or listed as a justified `SKIP:` line of
+  `cluster.st` (`roots_log` and `message` layers, the cluster section). The runners record the
+  ids they ran; an id that no runner names is a FAIL, so a vector can never be silently
+  unrun.
 - [ ] **Step 4:** run a whole-branch review per repository with superpowers:requesting-code-review,
   and fix every finding, cheap "can stay" items included (maintainer rule). Then re-run Steps
   1-3.

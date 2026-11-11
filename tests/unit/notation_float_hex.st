@@ -1,4 +1,4 @@
-"EXPECT: ok 51"
+"EXPECT: ok 80"
 "PBNotation floatHex: and floatFromHex: against CPython's float.hex (literals pasted from
  CPython 3.12), bit exact in both directions."
 Import from: 'protobase'.
@@ -43,7 +43,24 @@ c that: 'nan back' isTrue: (PBNotation floatFromHex: 'nan') isNaN.
 c that: 'inf back' is: (PBNotation floatFromHex: 'inf') equals: Float infinity.
 c that: '-inf back' is: (PBNotation floatFromHex: '-inf') equals: Float infinity negated.
 "Texts the notation never writes are refused."
-#('' '1.5' '0x1.8p+0' '0x1.8000000000000p0' '0x2.0000000000000p+0' '0x1.8000000000000p+1024'
+#('' '1.5' '0x1.8p+0' '0x0.0000000000000p+0' '-0x0.0000000000000p+0' '0x1.8000000000000p-0'
+  '0x1.8000000000000p' '0x1.8000000000000p+' '0x1.8000000000000p+01' '0x1.8000000000000p+x'
+  '0x1.800000000000p+0' '0x1.80000000000000p+0' '0x1.800000000000Ap+0' '0x0.0000000000001p-1022x'
+  '0x1' '0x' '-' '0x1.8000000000000' '0x1.8000000000000p0' '0x2.0000000000000p+0' '0x1.8000000000000p+1024'
   '0x0.0000000000001p-1021' '0X1.8000000000000p+0' 'NaN') do: [:bad |
   c that: bad printString , ' refused' signals: PBValidationError during: [PBNotation floatFromHex: bad]].
+
+"5e-324, the smallest subnormal. protoST 0.9.0 does not parse the literal 5e-324 (float literal
+ out of range), so the value is made from CPython's bits for it (0x0000000000000001)."
+c that: '5e-324 from bits' is: (PBNotation floatHex: ((Check bytes: '0000000000000001') float64At: 1 bigEndian: true))
+  equals: '0x0.0000000000001p-1022'.
+c that: '5e-324 back' is: (MessagePack encode: (PBNotation floatFromHex: '0x0.0000000000001p-1022')) hex
+  equals: 'cb0000000000000001'.
+"NaNs of any payload and sign describe as 'nan' (Python writes repr); reading it gives a NaN."
+#('7ff8000000000001' '7ff0000000000001' 'fff8000000000000' '7ffdeadbeef00001') do: [:bits |
+  | nan |
+  nan := (Check bytes: bits) float64At: 1 bigEndian: true.
+  c that: bits , ' is a NaN' isTrue: nan isNaN.
+  c that: bits , ' floatHex:' is: (PBNotation floatHex: nan) equals: 'nan'.
+  c that: bits , ' describe:' is: (PBNotation describe: nan) equals: (Dictionary new at: 'float' put: 'nan'; yourself)].
 c report displayNl.
