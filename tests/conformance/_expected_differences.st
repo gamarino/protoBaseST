@@ -10,7 +10,8 @@ stages is an Array of { stage. error class name }: the class name is nil when th
 fails by a mismatch (no error), else the PBDBError class it signals; both must match.
 
 section is the manifest section ('values', 'values_decode_only',
-'values_read_not_rewritten', 'invalid', 'order', 'hashes', 'exact_tokens'; the
+'values_read_not_rewritten', 'invalid', 'order', 'hashes', 'exact_tokens',
+'database', whose ids are record offsets; the
 key runners name a value 'kind body', as _keyvectors.st does). stages are the checks of the vector
 that fail, exactly (a vector that fails a stage or an error class not listed, or passes a listed
 one, is a FAIL of the runner, so the list cannot go stale):
@@ -20,7 +21,8 @@ one, is a FAIL of the runner, so the list cannot go stale):
   reencode   the decoded value does not re-encode to the canonical file
   refuse     the decoded value is re-encoded instead of refused (PBValidationError)
   accepted   an invalid vector is accepted instead of refused
-  refusal    (never listed) an invalid vector is refused with the wrong class
+  refusal    an invalid vector is refused with the wrong class (listed only while
+             the class that refuses it correctly does not exist yet)
   order      (order.st) the value does not order after every earlier one
   hash       (hashes.st) the value's hash key is not the listed one
   token      (tokens.st) the value's exact token is not the listed one
@@ -58,7 +60,37 @@ ExpectedDifferences class >> all
       'Task 5, Step 6' }.
     { 'exact_tokens'. 'uuid 12345678123456781234567812345678'. #(#('token' 'PBNotSupportedError')).
       'the value cannot be built: lib/uuid.st is not in protoST 0.9.0 (PBNotation build: signals PBNotSupportedError)'.
-      'Task 5, Step 6' } }.
+      'Task 5, Step 6' }.
+    { 'database'. '13966'. #(#('decode' 'PBNotSupportedError')).
+      'the record holds a @uuid value, which needs lib/uuid.st (not in protoST 0.9.0): its envelope is refused with PBNotSupportedError'.
+      'Task 5, Step 6' }.
+    { 'invalid'. 'atom-extra-key'. #(#('refusal' 'PBNotSupportedError')).
+      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
+      'Task 12' }.
+    { 'invalid'. 'atom-short-oid'. #(#('refusal' 'PBNotSupportedError')).
+      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
+      'Task 12' }.
+    { 'invalid'. 'atom-tag-float'. #(#('refusal' 'PBNotSupportedError')).
+      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
+      'Task 12' }.
+    { 'invalid'. 'atom-unknown-alias'. #(#('refusal' 'PBNotSupportedError')).
+      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
+      'Task 12' }.
+    { 'invalid'. 'atom-other-type'. #(#('refusal' 'PBNotSupportedError')).
+      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
+      'Task 12' }.
+    { 'invalid'. 'atom-missing-field'. #(#('refusal' 'PBNotSupportedError')).
+      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
+      'Task 12' }.
+    { 'invalid'. 'atom-reserved-name'. #(#('refusal' 'PBNotSupportedError')).
+      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
+      'Task 12' }.
+    { 'invalid'. 'atom-underscore-name'. #(#('refusal' 'PBNotSupportedError')).
+      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
+      'Task 12' }.
+    { 'invalid'. 'atom-bytes-name'. #(#('refusal' 'PBNotSupportedError')).
+      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
+      'Task 12' } }.
 
 "The entries of one section, as an OrderedCollection."
 ExpectedDifferences class >> forSection: aSection

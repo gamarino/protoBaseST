@@ -19,3 +19,5 @@ PBSegmentHeader>>_setVersion:segment:
 PBRecordHeader>>_setKind:length:payloadCrc:
 PBRootRecord>>_setVersion:segment:offset:epoch:
 PBAtomEnvelope>>_setTag:oid:state:
+PBSegmentReader>>_setSegment:file:header:
+PBFileStorage>>_setDirectory:
