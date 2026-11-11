@@ -416,3 +416,141 @@ PBAtomEnvelope >> encode
     each key -> (PBCodec toWire: each value atomRef: PBCodec pointerRef enclosingDepth: 2)]).
   ^ MessagePack encode: (MessagePackMap withAll: {
     't' -> (PBTypeRegistry writerTag: tag). 'oid' -> oid. 's' -> wireState }).
+
+"=== PBFramedLog ============================================================"
+
+"The reader of the framed log files of format 4 (format spec v2.0.0rc1,
+ 'Framed log files'; ProtoBase proto_db/storage/logfile.py scan and
+ read_log): every append-only log of a cluster node (roots.log, ranges.log,
+ segments.log). Clusters are outside the prototype (design spec 10.5), so
+ protoBaseST never opens such a log; the reader exists for the conformance
+ vectors of the 'log' layer, and it reads exactly as ProtoBase does.
+
+ Header (14 bytes): PDB2LOG\0, the log format version (u16 LE, 2) and the kind
+ (4 ASCII bytes: ROOT, RANG or SEGS). A header that is only a prefix of the
+ expected one (possibly followed by zero bytes, and nothing else) is a new
+ log; any other header is PBCorruptionError, another version
+ PBNotSupportedError. Then frames: C1 F7 | payload length (u32 LE, > 0) |
+ payload CRC32 | CRC32 of the 10 bytes before it | the payload.
+
+ At the first position that does not hold a valid frame the reader decides
+ between a torn tail, dropped (fewer bytes than a frame header remain; the
+ header is valid and its frame extends past the end; or no valid frame
+ starts after it: after the frame's extent when its header is valid, at any
+ later offset when it is not) and mid-log corruption, PBCorruptionError (such
+ a search finds a valid frame). The search tries every candidate offset (the
+ frame magic) with its 10-byte header CRC and checks the payload CRC only of
+ a candidate whose header is valid and whose extent fits. Unlike ProtoBase,
+ which derives a long payload's CRC from prefix CRCs, it computes each such
+ CRC directly: a file crafted with many header-valid frames costs time
+ quadratic in its size (implementation-specific, format spec 'Normative';
+ the answer is the same)."
+Object subclass: #PBFramedLog.
+
+"PDB2LOG\0"
+PBFramedLog class >> magic
+  ^ #[80 68 66 50 76 79 71 0].
+
+PBFramedLog class >> formatVersion
+  ^ 2.
+
+PBFramedLog class >> frameMagic
+  ^ #[193 247].
+
+"The size of the file header, and of a frame's header."
+PBFramedLog class >> headerSize
+  ^ 14.
+
+"The 14-byte header of a log of kind aKindBytes (4 bytes)."
+PBFramedLog class >> headerOfKind: aKindBytes
+  | w |
+  w := WriteStream on: ByteArray new.
+  w nextPutAll: self magic.
+  w nextPutUnsigned: self formatVersion width: 2 bigEndian: false.
+  w nextPutAll: aKindBytes.
+  ^ w contents.
+
+"The payloads of the valid frames of the log aByteArray of kind aKind (a
+ String of 4 ASCII characters, such as 'ROOT'), in order, as an Array of
+ ByteArrays (ProtoBase read_log): a torn tail is ignored; mid-log corruption
+ and a foreign header are PBCorruptionError, another format version
+ PBNotSupportedError."
+PBFramedLog class >> payloadsOf: aByteArray kind: aKind
+  | kind expected size payloads pos |
+  (aByteArray isKindOf: ByteArray) ifFalse: [
+    ^ PBValidationError signal: 'PBFramedLog payloadsOf:kind: a ByteArray was expected, not ' , aByteArray class name].
+  kind := (aKind isString and: [aKind isSymbol not]) ifTrue: [aKind utf8Encoded] ifFalse: [nil].
+  (kind notNil and: [kind size = 4 and: [(kind asArray detect: [:b | (b between: 32 and: 126) not] ifNone: [nil]) isNil]]) ifFalse: [
+    ^ PBValidationError signal: 'PBFramedLog: a log kind is 4 ASCII characters, not ' , aKind printString].
+  expected := self headerOfKind: kind.
+  size := aByteArray size.
+  (size >= 14 and: [(aByteArray copyFrom: 1 to: 14) = expected]) ifFalse: [
+    ^ self _otherHeader: aByteArray expected: expected kind: aKind].
+  payloads := OrderedCollection new.
+  pos := 14.
+  [pos < size] whileTrue: [
+    | payload length later |
+    payload := self _frameAt: pos in: aByteArray.
+    payload isNil ifTrue: [
+      length := self _frameLengthAt: pos in: aByteArray.
+      later := length isNil
+        ifTrue: [self _firstValidFrameFrom: pos + 1 in: aByteArray]
+        ifFalse: [
+          pos + 14 + length > size
+            ifTrue: [nil]  "the writer's frame, cut short"
+            ifFalse: [self _firstValidFrameFrom: pos + 14 + length in: aByteArray]].
+      later isNil ifFalse: [
+        ^ PBCorruptionError signal: 'The ' , aKind , ' log is corrupt: the entry at offset ' , pos printString
+          , ' is invalid but a valid entry follows at offset ' , later printString
+          , ' (not a torn tail; nothing was truncated)'].
+      ^ payloads asArray].
+    payloads addLast: payload.
+    pos := pos + 14 + payload size].
+  ^ payloads asArray.
+
+"A header other than expected: a new log (a prefix of it, then zero bytes
+ only) answers no payload; a log of another version is PBNotSupportedError;
+ anything else PBCorruptionError."
+PBFramedLog class >> _otherHeader: aByteArray expected: expected kind: aKind
+  | size keep version |
+  size := aByteArray size.
+  keep := 0.
+  [keep < (size min: 14) and: [(aByteArray at: keep + 1) = (expected at: keep + 1)]] whileTrue: [keep := keep + 1].
+  ((keep + 1 to: size) detect: [:i | (aByteArray at: i) ~= 0] ifNone: [nil]) isNil ifTrue: [^ Array new: 0].
+  (size >= 14 and: [(aByteArray copyFrom: 1 to: 8) = self magic]) ifTrue: [
+    version := aByteArray unsignedShortAt: 9 bigEndian: false.
+    version = self formatVersion ifFalse: [
+      ^ PBNotSupportedError signal: 'The ' , aKind , ' log has format version ' , version printString
+        , '; this version reads ' , self formatVersion printString].
+    ^ PBCorruptionError signal: 'The log is a ' , (aByteArray copyFrom: 11 to: 14) printString , ' log, not a '
+      , aKind , ' log'].
+  ^ PBCorruptionError signal: 'The log does not start with a valid ' , aKind , ' log header but holds other data'.
+
+"The payload length of a valid frame header at the 0-based offset aPos, or
+ nil (truncated, another magic, a zero length or a header CRC mismatch)."
+PBFramedLog class >> _frameLengthAt: aPos in: aByteArray
+  | length |
+  aPos + 14 > aByteArray size ifTrue: [^ nil].
+  ((aByteArray at: aPos + 1) = 193 and: [(aByteArray at: aPos + 2) = 247]) ifFalse: [^ nil].
+  length := aByteArray unsignedLongAt: aPos + 3 bigEndian: false.
+  length = 0 ifTrue: [^ nil].
+  (aByteArray copyFrom: aPos + 1 to: aPos + 10) crc32 = (aByteArray unsignedLongAt: aPos + 11 bigEndian: false)
+    ifFalse: [^ nil].
+  ^ length.
+
+"The payload of a valid frame at the 0-based offset aPos, or nil."
+PBFramedLog class >> _frameAt: aPos in: aByteArray
+  | length end payload |
+  length := self _frameLengthAt: aPos in: aByteArray.
+  length isNil ifTrue: [^ nil].
+  end := aPos + 14 + length.
+  end > aByteArray size ifTrue: [^ nil].
+  payload := aByteArray copyFrom: aPos + 15 to: end.
+  payload crc32 = (aByteArray unsignedLongAt: aPos + 7 bigEndian: false) ifFalse: [^ nil].
+  ^ payload.
+
+"The 0-based offset of the first valid frame at or after aStart, or nil."
+PBFramedLog class >> _firstValidFrameFrom: aStart in: aByteArray
+  aStart to: aByteArray size - 14 do: [:p |
+    ((aByteArray at: p + 1) = 193 and: [(self _frameAt: p in: aByteArray) notNil]) ifTrue: [^ p]].
+  ^ nil.

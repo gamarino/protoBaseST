@@ -225,8 +225,9 @@ inv = paid.                                            "false: two atoms, two oi
   of range or that is not an Integer is `PBValidationError`, exactly where ProtoBase's `List`
   raises (`tests/unit/list_positions.st` holds ProtoBase's answers, recorded by
   `tests/interop/py_list_positions.py`). `extend:` of nothing answers the receiver, as
-  ProtoBase's. `PBDictionary`: `new`, `setAt:value:`, `removeAt:`. `PBSet`: `new`, `add:`,
-  `remove:` (the set algebra and the operation logs come later in the plan).
+  ProtoBase's. `PBDictionary` and `PBHashDictionary`: `new`, `setAt:value:`, `removeAt:`.
+  `PBSet`: `new`, `add:`, `remove:`, `union:`, `intersection:`, `difference:` (see
+  "Operation logs and merges" below).
 - Values, keys and elements pass through `PBCodec canonical:` at once; a key or element that is
   not orderable (a NaN, a list, a map) is `PBValidationError`. The trees are built as ProtoBase
   builds them: `tests/interop/avl_ops_identical.sh` replays 1000 seeded `PBList` operations in
@@ -254,6 +255,45 @@ inv = paid.                                            "false: two atoms, two oi
   atom that race end the same way whatever the interleaving: into one storage both answer the
   first pointer published, into two storages the later one is `PBValidationError`. `PBAtom >> _decodedTwin` (ProtoBase `_decoded_twin`)
   answers the atom a load of a saved atom's record would produce.
+
+## Operation logs and merges
+
+`PBDictionary`, `PBHashDictionary` and `PBSet` are ProtoBase's `ConcurrentOptimized`
+collections: each version remembers the intents that derived it, so a commit can replay them
+onto a version another transaction committed meanwhile instead of replacing it (ProtoBase D33;
+the publisher that does so comes later in the plan).
+
+```smalltalk
+mine := (PBDictionary new setAt: 'a' value: 1) removeAt: 'z'.
+mine opLog.            "PBFrozenList(PBTuple('set', 'a', 1), PBTuple('remove', 'z'))"
+mine isMergeable.      "true: built by new and derived only by logged mutators"
+theirs := PBDictionary new setAt: 'b' value: 2.
+(mine rebaseOnto: theirs) items.          "{'a'->1. 'b'->2}"
+
+s := ((PBSet new add: 1) add: 2) intersection: #(2).   "logs add 1, add 2, remove 1"
+s := s union: (PBSet new add: 3).
+```
+
+- `opLog` is a `PBFrozenList` of `PBTuple`s with ProtoBase's op names: `('set' k v)` and
+  `('remove' k)` for the dictionaries, `('add' e)` and `('remove' e)` for a set. Every mutator
+  call logs its intent, a blind write that changes nothing included. A `PBDictionary` logs a
+  large value as the `PBValueBox` its node holds, so a replay reuses it.
+- `logComplete` (and `isMergeable`, which answers it) is true for a version built by `new`
+  and derived only by logged mutators; false for a loaded version and everything derived
+  from it. A `PBList` has no log and is never mergeable.
+- `rebaseOnto: current` replays the net effect of the log onto `current` through the public
+  mutators: the last intent per key (element), keys compared by order key, in order of last
+  occurrence, so a set then a remove of one key nets to a remove. `current` must be of the
+  receiver's class (`PBValidationError`); a `current` with an index is `PBNotSupportedError`.
+  The answer's log is `current`'s extended by the replay, as ProtoBase's: a rebase onto a
+  loaded version is not mergeable again.
+- `markConsumed` (called by the publisher after a commit) sets the version's `consumed` cell:
+  the version, and every version derived from it afterwards, are no longer mergeable, so a
+  value reused in a later transaction replaces instead of replaying the same operations again
+  (D33). A version derived before the mark keeps its own state.
+- `union:`, `intersection:` and `difference:` are ProtoBase's folds of `add:` and `remove:`,
+  so the log records each element's intent; the operand is a set or anything answering `do:`
+  except a String.
 
 ## Running the tests
 

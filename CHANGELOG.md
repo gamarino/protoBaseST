@@ -93,3 +93,18 @@
   when the list is indexed, as ProtoBase's; `extend:` of a String is refused up front. A
   non-Integer slice bound (a Boolean included) is refused, a documented deviation from Python's
   slice rules.
+- Operation logs and merges (plan Task 16, ProtoBase `ConcurrentOptimized`, D33): every
+  `PBDictionary`, `PBHashDictionary` and `PBSet` version carries `opLog` (a `PBFrozenList` of
+  `PBTuple`s `('set' k v)`, `('remove' k)`, `('add' e)`, kept internally as a persistent chain,
+  so a mutator logs in O(1)), `logComplete`/`isMergeable` and a `consumed` cell that
+  `markConsumed` sets. `rebaseOnto:` replays the net effect (the last intent per key, by order
+  key, in order of last occurrence) through the public mutators; a current of another class
+  is `PBValidationError`, one with an index `PBNotSupportedError`. A `PBDictionary` logs a
+  large value in its stored form, so a replay reuses the `PBValueBox` (ProtoBase D51).
+- `PBHashDictionary >> setAt:value:` and `removeAt:` (buckets of `(key, value)` tuples under
+  the hash key); `PBSet >> union:`, `intersection:` and `difference:`, ProtoBase's folds of
+  `add:` and `remove:`.
+- `PBFramedLog payloadsOf:kind:` reads a framed log file (ProtoBase `logfile.read_log`): torn
+  tail versus mid-log corruption, another version `PBNotSupportedError`. Clusters stay outside
+  the prototype; the invalid `log` vectors are refused with the listed class
+  (`tests/conformance/invalid_log.st`).

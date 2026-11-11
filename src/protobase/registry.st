@@ -338,7 +338,13 @@ PBAtom class >> _unsavedWithState: aPBFrozenDict
  kept in the in-memory envelope only (the AVL writes pass the tag they computed
  once per class); the save writes PBAtom >> tag, read from the class."
 PBAtom class >> _unsavedWithState: aPBFrozenDict tag: aTag
-  ^ (self basicNew _setOid: nil pointer: nil storage: nil)
+  ^ self _unsaved: self basicNew withState: aPBFrozenDict tag: aTag.
+
+"aBlank (a fresh basicNew instance of this class, which a subclass may have
+ given its own runtime-only fields first) made an unsaved atom holding
+ aPBFrozenDict."
+PBAtom class >> _unsaved: aBlank withState: aPBFrozenDict tag: aTag
+  ^ (aBlank _setOid: nil pointer: nil storage: nil)
     _installState: (PBAtomEnvelope basicNew _setTag: aTag oid: nil state: aPBFrozenDict).
 
 PBAtom >> _installState: anEnvelope

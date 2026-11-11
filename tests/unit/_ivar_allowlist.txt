@@ -36,3 +36,5 @@ PBNode class>>_initializeShapes
 PBKeyNode>>_setOid:pointer:storage:
 _PBPlace>>_setPointer:storage:
 PBIndexedCollection class>>_initializeShapes
+PBIndexedCollection>>_setLog:complete:
+_PBOpLog>>_setPrevious:op:
