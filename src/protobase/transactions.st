@@ -40,9 +40,11 @@ other token is a ByteArray, a PBAtomPointer or a PBTuple, never a String).
 
 The bookkeeping is one immutable PBTxState in an Atom, replaced with swap:
 (design spec 7.1): reads, writes, replaced, mreads, mwrites, mexpected and
-state (#active, #committing, #committed, #aborted). The maps are PBFrozenDicts
-keyed by name; replaced and mexpected are sets, held as PBFrozenDicts from
-name to true. A call reads the snapshot outside the swap (a read has no side
+state (#active, #committing, #committed, #aborted). reads and mreads are
+_PBReadMaps (persistent: a first read costs O(log n), not a rebuild); the
+other maps are PBFrozenDicts keyed by name (empty until plan Task 18, which
+must give them the same persistent form before it fills them); replaced and
+mexpected are sets, held as PBFrozenDicts from name to true. A call reads the snapshot outside the swap (a read has no side
 effect) and records its token inside it, so two actors misusing one
 transaction still see each call happen entirely before or after the other.
 The writes, commit and the publisher come with plan Task 18."
@@ -57,6 +59,57 @@ Import from: 'protobase/roots'.
 Import from: 'protobase/space'.
 
 "=== PBTxState ================================================================="
+
+"=== _PBReadMap ==============================================================="
+
+"A read set: name -> token, in first-read order, persistent. Adding a name
+ answers a new map in O(log n) and leaves the receiver unchanged: the entries
+ live in a protoST Dictionary, which is a wrapper over an immutable protoCore
+ map, so copy shares the structure and at:put: on the copy path-copies one
+ branch (LANGUAGE 9.10). The Dictionary is filled before the new map is made
+ and never changed afterwards, nor ever answered (immutability by convention,
+ as every value of this module). Each entry is { position. token }, so the
+ order is rebuilt in O(n) when the map is answered as a PBFrozenDict (review
+ M5 of plan Task 13: a PBFrozenDict rebuilt on every first read made n reads
+ cost O(n^2))."
+Object subclass: #_PBReadMap instanceVariableNames: 'entries'.
+
+_PBReadMap class >> empty
+  ^ self basicNew _setEntries: Dictionary new.
+
+_PBReadMap >> _setEntries: aDictionary
+  "Runs once, on a fresh instance."
+  entries isNil ifFalse: [^ PBUserError signal: '_PBReadMap is immutable'].
+  entries := aDictionary.
+  ^ self.
+
+_PBReadMap >> size
+  ^ entries size.
+
+_PBReadMap >> includesKey: aName
+  ^ entries includesKey: aName.
+
+"The token of aName; an absent name signals KeyNotFound."
+_PBReadMap >> at: aName
+  ^ (entries at: aName) at: 2.
+
+"A map that also maps aName (absent here) to aToken, last in order."
+_PBReadMap >> with: aName token: aToken
+  | copy |
+  (entries includesKey: aName) ifTrue: [
+    ^ PBUserError signal: '_PBReadMap: ' , aName printString , ' is recorded already'].
+  copy := entries copy.
+  copy at: aName put: { entries size + 1. aToken }.
+  ^ _PBReadMap basicNew _setEntries: copy.
+
+"The map as a PBFrozenDict, in first-read order."
+_PBReadMap >> asFrozenDict
+  | ordered |
+  ordered := Array new: entries size.
+  entries keysAndValuesDo: [:name :entry | ordered at: (entry at: 1) put: name -> (entry at: 2)].
+  ^ PBFrozenDict withAssociations: ordered.
+
+"=== PBTxState ================================================================"
 
 "The bookkeeping of a transaction at one moment: immutable; every change
  answers a new PBTxState."
@@ -82,7 +135,7 @@ PBTxState class >> removed
 PBTxState class >> initial
   | empty |
   empty := PBFrozenDict withAssociations: #().
-  ^ self basicNew _setReads: empty writes: empty replaced: empty mreads: empty mwrites: empty
+  ^ self basicNew _setReads: _PBReadMap empty writes: empty replaced: empty mreads: _PBReadMap empty mwrites: empty
     mexpected: empty state: #active.
 
 PBTxState class >> states
@@ -99,7 +152,7 @@ PBTxState >> _setReads: r writes: w replaced: rp mreads: mr mwrites: mw mexpecte
   state := aSymbol.
   ^ self.
 
-"Root name -> token of the first read of each root."
+"Root name -> token of the first read of each root (a _PBReadMap)."
 PBTxState >> reads
   ^ reads.
 
@@ -111,7 +164,7 @@ PBTxState >> writes
 PBTxState >> replaced
   ^ replaced.
 
-"Cell name -> token of the first read of each mutable cell."
+"Cell name -> token of the first read of each mutable cell (a _PBReadMap)."
 PBTxState >> mreads
   ^ mreads.
 
@@ -137,22 +190,18 @@ PBTxState >> checkActive
 
 "A copy whose reads also map aName to aToken."
 PBTxState >> withRead: aName token: aToken
-  ^ PBTxState basicNew _setReads: (PBTxState _map: reads with: aName -> aToken) writes: writes
+  ^ PBTxState basicNew _setReads: (reads with: aName token: aToken) writes: writes
     replaced: replaced mreads: mreads mwrites: mwrites mexpected: mexpected state: state.
 
 "A copy whose mreads also map aName to aToken."
 PBTxState >> withMutableRead: aName token: aToken
   ^ PBTxState basicNew _setReads: reads writes: writes replaced: replaced
-    mreads: (PBTxState _map: mreads with: aName -> aToken) mwrites: mwrites mexpected: mexpected state: state.
+    mreads: (mreads with: aName token: aToken) mwrites: mwrites mexpected: mexpected state: state.
 
 "A copy in the state aSymbol."
 PBTxState >> withState: aSymbol
   ^ PBTxState basicNew _setReads: reads writes: writes replaced: replaced mreads: mreads mwrites: mwrites
     mexpected: mexpected state: aSymbol.
-
-"aPBFrozenDict with anAssociation added (its key must be absent)."
-PBTxState class >> _map: aPBFrozenDict with: anAssociation
-  ^ PBFrozenDict withAssociations: aPBFrozenDict associations , { anAssociation }.
 
 PBTxState >> printOn: aStream
   aStream nextPutAll: 'PBTxState('; print: state; nextPutAll: ', '; print: reads size; nextPutAll: ' reads)'.
@@ -222,11 +271,11 @@ PBTransaction >> _activeState
 
 "Root name -> token of every root read so far (module comment), a PBFrozenDict."
 PBTransaction >> readSet
-  ^ bookkeeping value reads.
+  ^ bookkeeping value reads asFrozenDict.
 
 "Cell name -> token of every mutable cell read so far, a PBFrozenDict."
 PBTransaction >> mutableReadSet
-  ^ bookkeeping value mreads.
+  ^ bookkeeping value mreads asFrozenDict.
 
 "=== roots ===================================================================="
 

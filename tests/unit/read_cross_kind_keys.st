@@ -1,4 +1,4 @@
-"EXPECT: ok 64"
+"EXPECT: ok 75"
 "Review Focus 1 (plan Task 12): keys written by ProtoBase are found from protoST by
  their order keys. The space is written by ProtoBase v2.0.0rc1
  (tests/interop/py_make_keys_space.py, through the helper _make_keys_space.sh) into a
@@ -12,7 +12,9 @@
  through PBCodec canonical: first; that step is pinned by a String holding a lone
  surrogate, which PBKeys orderKey: accepts and canonical: refuses (PBValidationError).
  This last check is the codec's documented refusal (plan Task 4), not ProtoBase parity:
- Python's canonical accepts lone surrogates. SKIP without the interop venv."
+ Python's canonical accepts lone surrogates. Keys float('inf') and float('-inf') written
+ by ProtoBase in a plain map, a Dictionary and a HashDictionary (whose buckets hash the
+ infinities) are found by Float and Decimal infinities (review I1 of plan Task 13). SKIP without the interop venv."
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -79,6 +81,19 @@ c that: 'a stored Decimal key reads back as a Decimal' isTrue: ((tx getRootObjec
   c that: each key , ' getAt: true' is: (each value getAt: true) equals: 'true'.
   c that: each key , ' getAt: 1' is: (each value getAt: 1) equals: 'one'.
   c that: each key , ' getAt: 1.0' is: (each value getAt: 1.0) equals: 'one'].
+
+{ 'map' -> (tx getRootObject: 'inf'). 'Dictionary' -> (tx getRootObject: 'infd'). 'HashDictionary' -> (tx getRootObject: 'infh') } do: [:each |
+  | m get |
+  m := each value.
+  get := (m isKindOf: PBFrozenDict)
+    ifTrue: [[:k | m at: k ifAbsent: [nil]]]
+    ifFalse: [[:k | m getAt: k]].
+  c that: each key , ' keyed by infinity' is: (get value: Float infinity) equals: 'up'.
+  c that: each key , ' keyed by -infinity' is: (get value: Float infinity negated) equals: 'down'.
+  c that: each key , ' found by Decimal Infinity' is: (get value: (Decimal fromString: 'Infinity')) equals: 'up'].
+c that: 'the plain map has three keys' is: (tx getRootObject: 'inf') size equals: 3.
+c that: 'Dictionary: the infinities sort at the ends' is: (tx getRootObject: 'infd') keys asArray
+  equals: { Float infinity negated. 2. Float infinity }.
 
 surrogate := String with: (Character value: 16rD800).
 c that: 'orderKey: accepts a lone surrogate' isTrue: (PBKeys orderKey: surrogate) notNil.

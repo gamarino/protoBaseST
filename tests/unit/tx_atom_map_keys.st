@@ -1,4 +1,4 @@
-"EXPECT: ok 25"
+"EXPECT: ok 28"
 "Atom map keys read through a transaction and the storage's real resolver (plan Task 13,
  keeping Task 10 fix round 1): a map whose keys are references is decoded with the
  storage's resolver, and its stub keys are identified by their oids (PBKeys _keyId:mode:
@@ -6,20 +6,21 @@
  holding a map with references to two records of one oid is PBCorruptionError. The space
  holds two versions of one atom (two records, one oid).
 
- Review note N1: a lookup by an atom whose oid is not assigned yet (no oid, no pointer),
- or by a tuple holding one, answers absent, as ProtoBase does (it assigns a fresh oid and
- misses), in a PBFrozenDict and in every collection; the tuple's other items must still
- be keys.
+ An atom that is not stored draws its oid on first need (ProtoBase D21, ruling R13), so a
+ lookup by it, or by a tuple holding it, misses in a PBFrozenDict and in every collection;
+ the tuple's other items must still be keys. A first load inside an application's
+ `on: Exception do:` answers the data (review C1).
 
  Review note N3: a record whose map key refers back to the record itself, directly or
- through another record, cannot be loaded: ProtoBase recurses until Python's
- RecursionError; protoBaseST signals PBCorruptionError naming the pointer, and the
- transaction stays usable."
+ through another record, can only come from damaged data or a writer that breaks the
+ save-dependents-first invariant. ProtoBase recurses until Python's RecursionError;
+ protoBaseST signals PBCorruptionError naming the pointer, and the transaction stays
+ usable."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_spaces'.
 
-| c base b seg a1 a2 bee good twice selfRef sizeA offA cycleB cycleA spaceRoot space tx m fresh stub2 db vectors people |
+| c base b seg a1 a2 bee good twice other otherTx selfRef sizeA offA cycleB cycleA spaceRoot space tx m fresh stub2 db vectors people |
 c := Check new.
 base := FileSystem temp / ('pbst-tx-atom-map-keys-' , Smalltalk pid printString).
 base deleteAll.
@@ -59,15 +60,28 @@ stub2 := tx getRootObject: 'a2'.
 c that: 'found by a stub of another record of the same oid' is: (m at: stub2 ifAbsent: ['absent']) equals: 'seven'.
 c that: 'two records of one oid in one map' signals: PBCorruptionError during: [(tx getRootObject: 'twice') at: 'm'].
 
-"N1: lookups by an atom whose oid is not assigned yet miss."
+"An atom that is not stored draws its oid on first need (ProtoBase D21, ruling R13): a
+ lookup by it misses, since no stored key has that fresh oid."
 fresh := PBObject _unsavedWithState: (PBFrozenDict withAssociations: #()).
 c that: 'at:ifAbsent: by an unsaved atom' is: (m at: fresh ifAbsent: ['absent']) equals: 'absent'.
 c that: 'includesKey: by an unsaved atom' is: (m includesKey: fresh) equals: false.
 c that: 'a tuple holding an unsaved atom' is: (m includesKey: (PBTuple withAll: { 1. fresh })) equals: false.
-c that: 'orderKey: still refuses it' signals: PBNotSupportedError during: [PBKeys orderKey: fresh].
+c that: 'the unsaved atom has drawn its oid' is: fresh knownOid size equals: 16.
+
+"A first read inside an application's catch-all handler answers the data: loading
+ signals nothing a handler could catch (review C1)."
+other := PBObjectSpace storage: (PBFileStorage path: base / 'keys').
+otherTx := (other openDatabase: 'keys') newTransaction.
+c that: 'a first load inside on: Exception do:' is: ([((otherTx getRootObject: 'good') at: 'm') size]
+  on: Exception do: [:e | 'caught ' , e class name]) equals: 2.
+c that: 'whose stub keys are found' is: (((otherTx getRootObject: 'good') at: 'm') at: ((otherTx getRootObject: 'good') at: 'm') keys first) equals: 'seven'.
+c that: 'N3 still refuses inside on: Exception do:' is: ([(otherTx getRootObject: 'self') at: 'm']
+  on: Exception do: [:e | e class name]) equals: 'PBCorruptionError'.
+otherTx abort.
+other close.
 
 "N3: a record that needs itself to be decoded."
-c that: 'a map key that is its own record' signals: PBCorruptionError containing: 'refers back' during: [
+c that: 'a map key that is its own record' signals: PBCorruptionError containing: 'save-dependents-first' during: [
   (tx getRootObject: 'self') at: 'm'].
 c that: 'and again (nothing was cached)' signals: PBCorruptionError containing: 'refers back' during: [
   (tx getRootObject: 'self') at: 'm'].
@@ -78,7 +92,8 @@ c that: 'and still reads' is: (((tx getRootObject: 'good') at: 'm') at: stub2) e
 tx abort.
 space close.
 
-"N1 in the collections, on a copy of the database vector."
+"An unsaved atom as a lookup probe in every collection (ruling R13, which replaced
+ review note N1), on a copy of the database vector: its oid is drawn, so it misses."
 (base / 'database') ensureCreateDirectory.
 '../conformance/vectors/database' asFileReference files do: [:f | f copyTo: base / 'database' / f basename].
 space := PBObjectSpace storage: (PBFileStorage path: base / 'database').

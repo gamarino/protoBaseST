@@ -12,6 +12,7 @@ v2.0.0rc1; format spec v2.0.0rc1, 'Segments and records' and 'Root records'):
   aStorage loadAt: aPointer expecting: aTag
                                         the PBAtomEnvelope of the ATOM record at
                                         aPointer; its references resolve lazily
+                                        (map keys at once: loadAt:expecting:within:)
   aStorage refTo: bytes offset: n tag: t
                                         the resolver of PBCodec: an unloaded atom
   aStorage recordsOfSegment: aUUID      the diagnostic walk of a complete segment
@@ -251,11 +252,17 @@ PBFileStorage >> recordAt: aPointer
  envelope must pass PBAtomEnvelope decode:expecting:resolver:, with this
  storage resolving its references (refTo:offset:tag:)."
 PBFileStorage >> loadAt: aPointer expecting: aTag
+  ^ self loadAt: aPointer expecting: aTag within: { aPointer }.
+
+"As loadAt:expecting:, as part of decoding the records whose pointers aChain
+ lists (aPointer last; PBAtom >> _envelopeWithin:): the references are
+ resolved by a _PBLoadResolver that loads map keys within that chain."
+PBFileStorage >> loadAt: aPointer expecting: aTag within: aChain
   | record |
   record := self recordAt: aPointer.
   (record at: 1) isAtom ifFalse: [
     ^ PBCorruptionError signal: 'PBFileStorage: the record at ' , aPointer printString , ' is a BLOB, not an ATOM'].
-  ^ PBAtomEnvelope decode: (record at: 2) expecting: aTag resolver: self.
+  ^ PBAtomEnvelope decode: (record at: 2) expecting: aTag resolver: (_PBLoadResolver storage: self chain: aChain).
 
 "The resolver of PBCodec fromWire:resolver: (Task 7): the reference to the
  record at offset anOffset of the segment aSegmentBytes, of the type aTag, is an
@@ -265,6 +272,33 @@ PBFileStorage >> refTo: aSegmentBytes offset: anOffset tag: aTag
   ^ PBTypeRegistry unloadedAtomFor: aTag
     at: (PBAtomPointer segment: aSegmentBytes offset: anOffset)
     storage: self.
+
+"=== _PBLoadResolver ========================================================="
+
+"The resolver of one record's decoding: references become unloaded atoms of
+ its storage (refTo:offset:tag:), and a map key that is a reference is loaded
+ at once, within the chain of the records being decoded (loadKey:), since a
+ key is identified by its oid. Made per load, never shared, never kept by the
+ atoms it makes."
+Object subclass: #_PBLoadResolver instanceVariableNames: 'storage chain'.
+
+_PBLoadResolver class >> storage: aStorage chain: anArray
+  ^ self basicNew _setStorage: aStorage chain: anArray.
+
+_PBLoadResolver >> _setStorage: aStorage chain: anArray
+  "Runs once, on a fresh instance."
+  storage isNil ifFalse: [^ PBUserError signal: '_PBLoadResolver is initialised once'].
+  storage := aStorage.
+  chain := anArray.
+  ^ self.
+
+_PBLoadResolver >> refTo: aSegmentBytes offset: anOffset tag: aTag
+  ^ storage refTo: aSegmentBytes offset: anOffset tag: aTag.
+
+"Loads anAtom, a map key just decoded, within the chain (PBCorruptionError
+ when its record is one being decoded)."
+_PBLoadResolver >> loadKey: anAtom
+  anAtom pointer isNil ifFalse: [anAtom _envelopeWithin: chain].
 
 "The records of the segment aUUID (a UUID, its 16 bytes or its 32 hexadecimal
  digits), walked from offset 26: an Array of { offset. PBRecordHeader. payload }.

@@ -30,6 +30,8 @@ OnePayloadStorage >> loads
 OnePayloadStorage >> loadAt: aPointer expecting: aTag
   loads := loads + 1.
   ^ PBAtomEnvelope decode: payload expecting: aTag.
+OnePayloadStorage >> loadAt: aPointer expecting: aTag within: aChain
+  ^ self loadAt: aPointer expecting: aTag.
 
 | c oid map payload env seg ptr wire root rootBytes record storage stub ref opaque refBytes |
 c := Check new.

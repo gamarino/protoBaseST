@@ -14,6 +14,9 @@ The roots that pin the lookup rules (review I2 of plan Task 12):
   'dd', 'dh', 'ds', 'dcs'  a stored Decimal('1.00') ('dec'; counted twice), found by 1, 1.0
                            and Decimal 1
   'bd', 'bh'               True ('true') next to 1 ('one'): two keys
+  'inf', 'infd', 'infh'    keyed by float('inf') ('up'), float('-inf') ('down') and 2
+                           ('two'): a plain map, a Dictionary and a HashDictionary (review I1
+                           of plan Task 13: the infinities' order and hash keys)
 
 Run with the interop venv
 (tests/interop/env.sh): ProtoBase v2.0.0rc1 on PYTHONPATH.
@@ -56,6 +59,14 @@ def main(directory: str) -> None:
         assert bd.count == 2 and bh.count == 2 and bd.get_at(True) == "true" and bh.get_at(1) == "one"
         tx.set_root_object("bd", bd)
         tx.set_root_object("bh", bh)
+
+        inf = float("inf")
+        tx.set_root_object("inf", {inf: "up", -inf: "down", 2: "two"})
+        infd = tx.new_dictionary().set_at(inf, "up").set_at(-inf, "down").set_at(2, "two")
+        infh = tx.new_hash_dictionary().set_at(inf, "up").set_at(-inf, "down").set_at(2, "two")
+        assert infd.get_at(inf) == "up" and infh.get_at(-inf) == "down" and infh.count == 3
+        tx.set_root_object("infd", infd)
+        tx.set_root_object("infh", infh)
         tx.commit()
     finally:
         space.close()

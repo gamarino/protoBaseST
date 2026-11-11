@@ -22,7 +22,7 @@ time and time in an IANA zone, 8 fixed-offset time, 9 naive datetime, 10
 aware datetime, 11 timedelta, 12 uuid, 13 tuple, 14 atom, 15 mutable handle.
 
 The payload of rank 3 is an Integer or a Fraction (a float's exact value), a
-finite Decimal, or #negInf / #posInf. A decimal stays a Decimal: its exact
+finite Decimal, or PBOrderKey negInf / posInf. A decimal stays a Decimal: its exact
 value may be a power of ten too large to build (an untrusted 1E+999999999), so
 it is compared by Decimal's own exact comparison, which never expands a large
 exponent, and hashed through its residue modulo 2^61 - 1, derived from
@@ -46,9 +46,8 @@ lookups the same ids.
 Atoms. An atom is identified by its oid, as ProtoBase's map_key_ids and
 Atom.__eq__ do: a stub loads its record to read it, so a map holding
 references to two records of one oid is refused, and an atom's key does not
-change when it is saved. An atom whose oid is not assigned yet (assignment
-comes with plan Task 15) has no key: PBNotSupportedError; a lookup by it (or
-by a tuple holding it) misses, as in ProtoBase (isUnsavedProbe:). A PBUnresolvedRef
+change when it is saved. An atom that is not stored draws its oid in memory
+on first need (ProtoBase D21), so it is a key like any other. A PBUnresolvedRef
 (decoded without a resolver) has no known oid: as a map key it is identified
 by its pointer, a weaker rule than the format's (two references to two records
 of one oid are two keys there), and it has no order key.
@@ -65,7 +64,21 @@ Import from: 'uuid'.
 
 "An order key: a rank (0 to 15) and a payload of that rank. Keys compare by
  rank, then by payload; = and hash agree, and hash never hashes a Decimal."
-Object subclass: #PBOrderKey instanceVariableNames: 'rank payload'.
+Object subclass: #PBOrderKey instanceVariableNames: 'rank payload' classVariableNames: 'PosInf NegInf'.
+
+"The rank-3 payloads of the two infinities, made once when the module loads:
+ private objects compared with ==, never Symbols (a short Symbol is the equal
+ String in protoST, STATUS D35, so a Symbol mark was neither a Symbol nor a
+ number to the code that tested it, and an infinite key could not be hashed)."
+PBOrderKey class >> _initializeInfinities
+  PosInf isNil ifTrue: [PosInf := Object new].
+  NegInf isNil ifTrue: [NegInf := Object new].
+
+PBOrderKey class >> posInf
+  ^ PosInf.
+
+PBOrderKey class >> negInf
+  ^ NegInf.
 
 PBOrderKey class >> rank: anInteger payload: anObject
   ((anInteger isInteger) and: [anInteger between: 0 and: 15]) ifFalse: [
@@ -115,7 +128,8 @@ PBOrderKey >> = anObject
 PBOrderKey >> hash
   | h |
   rank = 3 ifTrue: [
-    h := payload isSymbol ifTrue: [payload hash] ifFalse: [PBKeys residue: payload].
+    h := payload == PosInf ifTrue: [314159] ifFalse: [
+      payload == NegInf ifTrue: [314158] ifFalse: [PBKeys residue: payload]].
     ^ (h bitXor: rank) \\ 1073741824].
   rank = 13 ifTrue: [
     h := payload size.
@@ -127,6 +141,8 @@ PBOrderKey >> printOn: aStream
   aStream nextPutAll: 'PBOrderKey('; print: rank; nextPutAll: ', '; print: payload; nextPut: $).
 
 "=== PBKeys ==================================================================="
+
+PBOrderKey _initializeInfinities.
 
 Object subclass: #PBKeys.
 
@@ -171,11 +187,11 @@ PBKeys class >> _orderKey: v
   v isInteger ifTrue: [^ self _key: 3 payload: v].
   v isFloat ifTrue: [
     v isNaN ifTrue: [^ self _refuse: v because: 'a NaN cannot be used as a key'].
-    v isInfinite ifTrue: [^ self _key: 3 payload: (v > 0 ifTrue: [#posInf] ifFalse: [#negInf])].
+    v isInfinite ifTrue: [^ self _key: 3 payload: (v > 0 ifTrue: [PBOrderKey posInf] ifFalse: [PBOrderKey negInf])].
     ^ self _key: 3 payload: v asExactFraction].
   (v isKindOf: Decimal) ifTrue: [
     v isNaN ifTrue: [^ self _refuse: v because: 'a NaN cannot be used as a key'].
-    v isInfinite ifTrue: [^ self _key: 3 payload: (v sign = 0 ifTrue: [#posInf] ifFalse: [#negInf])].
+    v isInfinite ifTrue: [^ self _key: 3 payload: (v sign = 0 ifTrue: [PBOrderKey posInf] ifFalse: [PBOrderKey negInf])].
     ^ self _key: 3 payload: v].
   v isSymbol ifTrue: [^ self _refuse: v because: 'a Symbol is not a value of format 4 (the @sym kind is reserved)'].
   v isString ifTrue: [^ self _key: 4 payload: v].
@@ -203,29 +219,10 @@ PBKeys class >> _orderKey: v
     ^ self _refuse: v because: 'a map is not an orderable key'].
   ^ self _refuse: v because: 'a ' , v class name , ' is not a value of format 4'.
 
-"The oid of anAtom: the one it holds, or its record's (a stub loads it). An
- atom with neither has no oid yet: PBNotSupportedError (plan Task 15 assigns
- oids on first need, as ProtoBase does)."
+"The oid of anAtom: its record's (a stub loads it), or, for an atom that is
+ not stored, the one it draws on first need (PBAtom >> oid, ProtoBase D21)."
 PBKeys class >> _oidOf: anAtom
-  (anAtom knownOid isNil and: [anAtom pointer isNil]) ifTrue: [
-    ^ PBNotSupportedError signal: 'PBKeys: ' , (self _preview: anAtom)
-      , ' has no oid yet (oids are assigned on first need from plan Task 15), so it has no key'].
   ^ anAtom oid.
-
-"Whether a lookup by aValue must miss: aValue is an atom whose oid is not
- assigned yet (no oid, no pointer), or a tuple holding one at any depth. No
- stored key can equal it: ProtoBase assigns such an atom a fresh oid on first
- need and then misses (review note N1 of plan Task 10). The other items of
- such a tuple must still be keys, since ProtoBase orders every item: an item
- orderKey: refuses signals here as it would in any lookup."
-PBKeys class >> isUnsavedProbe: aValue
-  | unsaved |
-  (aValue isKindOf: PBAtom) ifTrue: [^ aValue knownOid isNil and: [aValue pointer isNil]].
-  (aValue isKindOf: PBTuple) ifFalse: [^ false].
-  unsaved := aValue asArray select: [:each | self isUnsavedProbe: each].
-  unsaved isEmpty ifTrue: [^ false].
-  aValue do: [:each | (unsaved includes: each) ifFalse: [self orderKey: each]].
-  ^ true.
 
 PBKeys class >> _oidBytes: anOid
   (anOid isKindOf: ByteArray) ifTrue: [^ anOid].
@@ -251,10 +248,10 @@ PBKeys class >> _comparePayload: a with: b rank: aRank
  expands a large exponent."
 PBKeys class >> _compareNumber: a with: b
   a == b ifTrue: [^ 0].
-  a == #negInf ifTrue: [^ -1].
-  b == #negInf ifTrue: [^ 1].
-  a == #posInf ifTrue: [^ 1].
-  b == #posInf ifTrue: [^ -1].
+  a == PBOrderKey negInf ifTrue: [^ -1].
+  b == PBOrderKey negInf ifTrue: [^ 1].
+  a == PBOrderKey posInf ifTrue: [^ 1].
+  b == PBOrderKey posInf ifTrue: [^ -1].
   (a isKindOf: Decimal) ifTrue: [^ a _orderWith: b].
   (b isKindOf: Decimal) ifTrue: [^ (b _orderWith: a) negated].
   a = b ifTrue: [^ 0].
@@ -318,8 +315,8 @@ PBKeys class >> _feed: aKey on: w
   payload := aKey _payload.
   w putByte: rank.
   rank = 3 ifTrue: [
-    payload == #posInf ifTrue: [^ w putBytes: '+inf' utf8Encoded].
-    payload == #negInf ifTrue: [^ w putBytes: '-inf' utf8Encoded].
+    payload == PBOrderKey posInf ifTrue: [^ w putBytes: '+inf' utf8Encoded].
+    payload == PBOrderKey negInf ifTrue: [^ w putBytes: '-inf' utf8Encoded].
     ^ w nextPutUnsigned: (self residue: payload) width: 8 bigEndian: false].
   rank = 13 ifTrue: [
     w nextPutUnsigned: payload size width: 8 bigEndian: false.
@@ -681,7 +678,6 @@ PBMapKeyIndex >> _setIds: aDictionary zoned: aZonedOrNil
 "The position of aKey (1-based), or 0. A lookup that needs a zone's offsets
  to answer signals PBNotSupportedError."
 PBMapKeyIndex >> indexOf: aKey
-  (PBKeys isUnsavedProbe: aKey) ifTrue: [^ 0].
   zoned isNil ifFalse: [self _checkProbe: aKey].
   ^ ids at: (PBKeys _keyId: aKey mode: #read) ifAbsent: [0].
 

@@ -1,4 +1,4 @@
-"EXPECT: ok 26"
+"EXPECT: ok 32"
 "The read set of a transaction (plan Task 13, design spec 7.1, ProtoBase get_root_object
  and _token), on a copy of the database vector: the first read of a root records its
  token (an atom's storage pointer, a plain value's exact token, #absent for an absent
@@ -6,7 +6,9 @@
  getMutable: records in the mutable read set. A transaction reads the version that was
  current when it started. Tokens tell apart values that are equal keys: 1 and 1.0,
  Decimal 1 and Decimal 1.00; a value holding atoms is its exact token and the atoms'
- pointers."
+ pointers.
+ The read sets are persistent (review M5): recording a name answers a new map and leaves
+ the previous one unchanged, the first-read order is kept, and a name is recorded once."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_spaces'.
@@ -70,4 +72,15 @@ c that: 'a plain root''s token' is: (tx readSet at: 'x') equals: (PBKeys exactTo
 tx abort. later abort.
 space close.
 base deleteAll.
+
+"The persistent read map (review M5)."
+first := _PBReadMap empty with: 'b' token: 2.
+second := first with: 'a' token: 1.
+c that: 'the earlier map is unchanged' is: first size equals: 1.
+c that: 'and does not hold the new name' is: (first includesKey: 'a') equals: false.
+c that: 'the new map holds both' is: (second at: 'a') equals: 1.
+c that: 'in first-read order' is: second asFrozenDict keys asArray equals: #('b' 'a').
+c that: 'a name is recorded once' signals: PBUserError during: [second with: 'b' token: 3].
+c that: 'many reads keep their order' is: (((1 to: 500) inject: _PBReadMap empty into: [:m :i |
+  m with: 'n' , i printString token: i]) asFrozenDict associations collect: [:a | a value]) asArray equals: (1 to: 500) asArray.
 c report displayNl.

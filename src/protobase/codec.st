@@ -612,6 +612,7 @@ PBCodec class >> _decodeMap: aBody resolver: aResolver
     k := self fromWire: (pair at: 1) resolver: aResolver.
     reason := PBKeys _unkeyableReason: k legacyAllowed: true.
     reason isNil ifFalse: [^ self _corrupt: '@map' body: aBody because: reason].
+    self _loadKeyAtoms: k resolver: aResolver.
     k -> (self fromWire: (pair at: 2) resolver: aResolver)].
   "The reader's map-key rule (PBKeys checkMapKeys:reading: true) is the rule
    PBFrozenDict withAssociations: builds under: conflicting keys are
@@ -619,6 +620,14 @@ PBCodec class >> _decodeMap: aBody resolver: aResolver
    stay two keys."
   ^ [PBFrozenDict withAssociations: pairs] on: PBValidationError do: [:e |
     self _corrupt: '@map' body: aBody because: e messageText].
+
+"A key is identified by its oid: the atoms of the key k (an atom, or atoms in
+ a tuple) are loaded now through a resolver that loads keys
+ (_PBLoadResolver >> loadKey:, which refuses a record already being decoded)."
+PBCodec class >> _loadKeyAtoms: k resolver: aResolver
+  (aResolver isNil or: [(aResolver respondsTo: #loadKey:) not]) ifTrue: [^ self].
+  (k isKindOf: PBAtom) ifTrue: [^ aResolver loadKey: k].
+  (k isKindOf: PBTuple) ifTrue: [k do: [:each | self _loadKeyAtoms: each resolver: aResolver]].
 
 PBCodec class >> _decodeRef: aBody resolver: aResolver
   | f segment offset tag bytes |

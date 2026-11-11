@@ -59,7 +59,10 @@ than 511 msgpack containers, the most ProtoBase's msgpack writes (an empty conta
 level less). Inside an atom record a value sits 2 levels deep, so the limit there is 509
 (`PBCodec canonical:enclosingDepth:`). ProtoBase's reader, which recurses two Python frames per
 level, raises `RecursionError` from about 333 nested lists under Python's default recursion limit,
-so a value that deep is readable from Python only with a raised limit.
+so a value that deep is readable from Python only with a raised limit. ProtoBase accepted to make
+its codec non-recursive and to state a normative `MAX_VALUE_DEPTH` (candidate 509) in
+v2.0.0rc2 (ask B12); until then `tests/interop/st_deep_to_py.sh` raises the limit and says so in
+a `NOTE:` line on every run.
 
 ## Transactions (read side)
 
@@ -136,6 +139,16 @@ An atom read through a reference is a stub (`unloadedAt:storage:`, or
 `state`, `stateAt:` or `oid` loads the record through `storage loadAt:expecting:` and memoises the
 envelope in an `Atom` cell, checking the class's `requiredFields`. A field that an application
 record does not hold reads as nil; an opaque atom signals `PBNotSupportedError` naming its type.
+
+An oid is identity, not storage (ProtoBase D21). A stored atom's oid is its record's; an atom
+that is not stored draws a version-4 UUID in memory on its first need (`oid`, `=`, `hash`, or
+use as a key), published by compare-and-swap so two first readers agree on one oid. Atoms are
+`=` when they are one object or share an oid, and hash by it, so an atom not yet saved is a map
+key and a lookup probe like any other. A record whose state needs the record itself to be
+decoded (a map key referring back to it) is `PBCorruptionError` naming its pointer: ProtoBase
+saves every dependent before the record that refers to it, so such a record is damaged data or
+the work of a writer that breaks that invariant. The loads in progress are passed explicitly,
+never signalled, so an `on: Exception do:` around a read never changes what it answers.
 
 ## Reading a space
 

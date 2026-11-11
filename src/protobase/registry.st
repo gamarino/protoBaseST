@@ -265,12 +265,21 @@ PBTypeRegistry class >> unloadedAtomFor: aTag at: aPointer storage: aStorage
 
 "=== PBAtom ================================================================="
 
-"The abstract base of every persistent object. An atom holds its oid (nil
- until known), its pointer (nil until saved), its storage, and memo: an Atom
- cell holding nil or the loaded envelope (what storage loadAt:expecting:
- answers: tag, oid and the state PBFrozenDict). The memo is the one cell a
- load fills (plan, immutability by convention): two loads that race install
- the first envelope and both answer it."
+"The abstract base of every persistent object. An atom holds oid (an Atom
+ cell holding nil or its 16-byte oid), its pointer (nil until saved), its
+ storage, and memo (an Atom cell holding nil or the loaded envelope: what
+ storage loadAt:expecting: answers, tag, oid and the state PBFrozenDict). The
+ two cells are the runtime-only fields a load or a first need fills (plan,
+ immutability by convention); each is filled by compare-and-swap, so two
+ threads that race install one value and both answer it.
+
+ Identity (ProtoBase D21, core/atom.py _assign_oid): an atom's oid is not a
+ storage id. A stored atom's oid is its record's (a stub loads the record to
+ read it). An atom that is not stored draws a random version-4 UUID in memory
+ on first need (oid, =, hash, an order key or a hash key), never by saving;
+ the writer (plan Task 15) persists that same oid. Two atoms are = when they
+ are the same object or have the same oid, and hash by their oid, as
+ ProtoBase's Atom.__eq__ and __hash__."
 Object subclass: #PBAtom instanceVariableNames: 'oid pointer storage memo'.
 
 "The declared type name, two or more dotted ASCII identifiers; nil for an
@@ -303,8 +312,8 @@ PBAtom class >> persistedFields
 PBAtom class >> _checkPersistedNames: aState at: aPointer
   ^ aState.
 
-"An atom of this class that is not stored: no pointer, no storage, no oid,
- holding aPBFrozenDict as its state (a read-side value, such as the empty
+"An atom of this class that is not stored: no pointer, no storage, no oid
+ until its first need draws one (PBAtom >> oid), holding aPBFrozenDict as its state (a read-side value, such as the empty
  CountedSet a RepeatedKeysDictionary answers for an absent key). The public
  constructors of new atoms come with the writer (plan Task 15)."
 PBAtom class >> _unsavedWithState: aPBFrozenDict
@@ -330,7 +339,7 @@ PBAtom class >> unloadedAt: aPointer storage: aStorage
 PBAtom >> _setOid: anOid pointer: aPointer storage: aStorage
   "Runs once, on a fresh instance."
   memo isNil ifFalse: [^ PBUserError signal: 'PBAtom is initialised once'].
-  oid := anOid.
+  oid := Atom on: anOid.
   pointer := aPointer.
   storage := aStorage.
   memo := Atom on: nil.
@@ -343,10 +352,11 @@ PBAtom >> isPBReference
 PBAtom >> pointer
   ^ pointer.
 
-"The oid when this atom holds it already (nil otherwise), without loading:
- a stub learns its oid from its record (oid loads it)."
+"The oid when this atom holds it already (nil otherwise), without loading or
+ drawing one: a stub learns its oid from its record, an atom that is not stored
+ draws it on first need (oid)."
 PBAtom >> knownOid
-  ^ oid.
+  ^ oid value.
 
 "The tag a writer puts for this atom's type (PBTypeRegistry tagFor:)."
 PBAtom >> tag
@@ -362,30 +372,36 @@ PBAtom >> unloadedCopy
   pointer isNil ifTrue: [^ self].
   ^ self class unloadedAt: pointer storage: storage.
 
-"The loaded envelope, loading it once through the storage.
-
- A load that needs, while it decodes, the record it is loading (a map key in
- the state that refers back to the record, directly or through other records
- whose keys are loaded in turn: a key is identified by its oid, which loads
- it) is PBCorruptionError naming the pointer, never a recursion without end.
- ProtoBase cannot load such a record either (its load recurses until Python's
- RecursionError); no writer produces one, since a record can only refer to
- records written before it (review note N3 of plan Task 10). The loads in
- progress on this call stack are found with _PBLoadInProgress, a resumable
- signal each load answers for its own pointer: no state is shared, so loads
- on other threads are independent."
+"The loaded envelope, loading it once through the storage."
 PBAtom >> _envelope
+  ^ self _envelopeWithin: #().
+
+"The loaded envelope, loaded within aChain: an Array of the pointers whose
+ decoding is in progress on this call stack and needs this record (a map key
+ is identified by its oid, so decoding a map whose keys are references loads
+ them: PBCodec asks its resolver, _PBLoadResolver, to load each key within the
+ chain extended by the record being decoded).
+
+ A record whose pointer is already in the chain needs itself to be decoded (a
+ map key that refers back to the record, directly or through other records
+ keyed in turn): PBCorruptionError naming the pointer, never a recursion
+ without end. ProtoBase cannot load such a record either (its load recurses
+ until Python's RecursionError). ProtoBase saves every dependent before the
+ record that refers to it, so a record only points to earlier records: such a
+ record can only come from damaged data or from a writer that breaks that
+ save-dependents-first invariant (review note N3 of plan Task 10). The chain is passed explicitly, never
+ kept in a stub and never shared, so loads on other threads are independent and
+ an application's exception handlers see nothing."
+PBAtom >> _envelopeWithin: aChain
   | envelope missing |
   envelope := memo value.
   envelope isNil ifFalse: [^ envelope].
   (storage isNil or: [pointer isNil]) ifTrue: [
     ^ PBUserError signal: self class name , ': an atom with no stored record has no state to load'].
-  (_PBLoadInProgress pointer: pointer) signal == true ifTrue: [
+  (aChain includes: pointer) ifTrue: [
     ^ PBCorruptionError signal: 'the record at ' , pointer printString , ' (' , (PBTypeRegistry nameOfTag: self tag)
-      , ') cannot be loaded: decoding its state needs the record itself (a map key refers back to it)'].
-  envelope := [storage loadAt: pointer expecting: self tag]
-    on: _PBLoadInProgress do: [:probe |
-      probe pointer = pointer ifTrue: [probe resume: true] ifFalse: [probe pass]].
+      , ') cannot be loaded: decoding its state needs the record itself (a map key refers back to it: damaged data, or a writer that broke the save-dependents-first invariant)'].
+  envelope := storage loadAt: pointer expecting: self tag within: (aChain copyWith: pointer).
   missing := self class requiredFields reject: [:field | envelope state includesKey: field].
   missing isEmpty ifFalse: [
     ^ PBCorruptionError signal: 'the atom at ' , pointer printString , ' (' , (PBTypeRegistry nameOfTag: self tag)
@@ -408,31 +424,33 @@ PBAtom >> stateAt: aName
 PBAtom >> _absentField: aName
   ^ nil.
 
-"The atom's oid (16 bytes); an unloaded atom loads its record to answer it."
+"The atom's oid (16 bytes): the record's for a stored atom (a stub loads it);
+ for an atom that is not stored, the one drawn on first need (ProtoBase D21)."
 PBAtom >> oid
-  oid isNil ifFalse: [^ oid].
-  ^ self _envelope oid.
+  | known |
+  known := oid value.
+  known isNil ifFalse: [^ known].
+  pointer isNil ifFalse: [^ self _envelope oid].
+  oid value: self _newOid ifCurrent: nil.
+  ^ oid value.
+
+"A fresh oid: the 16 bytes of a version-4 UUID (ProtoBase uuid.uuid4()). The
+ seam a test overrides to drive two first readers in a chosen order."
+PBAtom >> _newOid
+  ^ UUID new bytes.
+
+"ProtoBase Atom.__eq__: the same object, or another atom of the same oid."
+PBAtom >> = anObject
+  self == anObject ifTrue: [^ true].
+  (anObject isClassObject not and: [anObject isKindOf: PBAtom]) ifFalse: [^ false].
+  ^ self oid = anObject oid.
+
+"ProtoBase Atom.__hash__: the hash of the oid."
+PBAtom >> hash
+  ^ self oid hash.
 
 PBAtom >> printOn: aStream
   aStream nextPutAll: self class name; nextPutAll: '('; print: pointer; nextPut: $).
-
-"The question a load asks the loads in progress on its call stack: is one of
- them loading the record at pointer? A load in progress at that pointer
- resumes it with true; unanswered, it answers nil (PBAtom >> _envelope)."
-Exception subclass: #_PBLoadInProgress instanceVariableNames: 'pointer'.
-
-_PBLoadInProgress class >> pointer: aPBAtomPointer
-  ^ self new _setPointer: aPBAtomPointer.
-
-_PBLoadInProgress >> _setPointer: aPBAtomPointer
-  "Runs once, on a fresh instance."
-  pointer := aPBAtomPointer.
-
-_PBLoadInProgress >> pointer
-  ^ pointer.
-
-_PBLoadInProgress >> isResumable
-  ^ true.
 
 "=== PBOpaqueAtom ==========================================================="
 

@@ -13,7 +13,9 @@
 #   "EXPECT: <text>"        exit 0, and the last non-empty stdout line equals <text>
 #   "EXPECT-ERROR: <text>"  non-zero exit, and the error output contains <text> (text optional)
 # A successful run whose last line starts with "SKIP: " counts as skipped.
-# Each *.sh file passes with exit 0, is skipped with exit 77, and fails otherwise.
+# Each *.sh file passes with exit 0, is skipped with exit 77, and fails otherwise. The lines of a
+# passing *.sh file's output that start with "NOTE: " are shown under its PASS line (a workaround
+# a test relies on is stated where the run is read, never hidden).
 # "EXPECT-ERROR" needs a text (an error class or message): the bare form is a test failure, and so
 # is a module parse error that the text does not name, so a broken import cannot pass.
 # A path argument that does not exist, or a run that finds no test, fails.
@@ -116,7 +118,9 @@ run_sh() {
     out="$(cd "$(dirname "$file")" && timeout "$TIMEOUT" bash "$file" </dev/null 2>&1)"
     rc=$?
     case $rc in
-        0)  echo "PASS: $(rel "$file")"; return 0 ;;
+        0)  echo "PASS: $(rel "$file")"
+            printf '%s\n' "$out" | grep '^NOTE: ' | sed 's/^/    /'
+            return 0 ;;
         77) echo "SKIP: $(rel "$file"): $(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1)"; return 77 ;;
         *)  echo "FAIL: $(rel "$file"): exit=$rc: $(printf '%s\n' "$out" | tail -n 3 | tr '\n' ' ')"; return 1 ;;
     esac

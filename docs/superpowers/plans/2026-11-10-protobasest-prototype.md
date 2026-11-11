@@ -795,9 +795,10 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     as ProtoBase's `map_key_ids` and `Atom.__eq__`. A stub's record is loaded to read it, so a
     decoded map holding references to two records of one oid is `PBCorruptionError`, and an
     atom's key never changes when it is saved. A `PBUnresolvedRef` (decoded without a resolver,
-    its oid unknown) is a map key by its pointer only, a weaker rule than the format's. An
-    atom whose oid is not assigned yet has no key: `orderKey:`, `hashKey:`, `isOrderable:` and
-    map construction signal `PBNotSupportedError` until Task 15 assigns oids.
+    its oid unknown) is a map key by its pointer only, a weaker rule than the format's.
+    Superseded by ruling R13 (Task 13 fix round 1): there is no atom without an oid. An
+    atom that is not stored draws its oid in memory on first need (ProtoBase D21), so it is a
+    key like any other; the `PBNotSupportedError` this note first required is gone.
   - Added by the Task 7 review:
     - `checkMapKeys:` replaces the interim rule of `_PBItems` (same class and `=`) and keeps
       its linear-time duplicate check: keys are bucketed by order key or hash key, never
@@ -1036,8 +1037,12 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     Python frames per level), so under Python's default recursion limit it raises
     `RecursionError` from about 333 nested lists, and its writer from about 497.
     `st_deep_to_py.sh` therefore reads the 509-deep record with a raised recursion limit
-    (`py_read_deep.py`), and prints the outcome at the default limit; the limit is
-    ProtoBase's, reported to the maintainer, and protoBaseST keeps the format's 509.
+    (`py_read_deep.py`); the limit is ProtoBase's, reported to the maintainer as ask B12,
+    and protoBaseST keeps the format's 509. ProtoBase accepted B12 (a non-recursive codec
+    and a normative `MAX_VALUE_DEPTH`, candidate 509, for v2.0.0rc2). Until then the
+    workaround is stated loudly (fix round 1, review M2): every run prints a `NOTE:` line
+    naming B12, which the runner shows under the PASS line, and the script fails once the
+    default limit reads the record, asking for the workaround to be dropped.
   - `tx_read_set.st`, on a copy of the database vector: reading two roots and an absent name
     records three entries; reading again does not change them; `rootNames` records nothing.
   - Atom map keys through the real resolver (from Task 10 fix round 1, which must be kept):
@@ -1045,19 +1050,35 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     are identified by their oids (`PBKeys _keyId:mode:` loads them); a state holding a map with
     references to two records of one oid is `PBCorruptionError`. `tx_atom_map_keys.st` checks
     it on a space with two versions of one atom.
-  - Lookups by an unsaved atom (review note N1 of Task 10): a lookup (`at:ifAbsent:`,
-    `includesKey:`, `getAt:`, `has:`, `countOf:`) whose probe is, or holds in a tuple, an atom
-    with no oid and no pointer answers absent, as ProtoBase does (it assigns a fresh oid and
-    misses), never `PBNotSupportedError`; the tuple's other items must still be keys.
-    `orderKey:` and `hashKey:` of such an atom keep signalling `PBNotSupportedError` until
-    Task 15 assigns oids. `tx_atom_map_keys.st` checks a `PBFrozenDict` and every collection.
+  - Atom identity (ruling R13, fix round 1; it replaces review note N1 of Task 10 and its
+    `isUnsavedProbe:` gate): an oid is identity, not storage. As ProtoBase D21
+    (`core/atom.py` `_assign_oid`), an atom that is not stored draws a version-4 UUID in
+    memory (`UUID new`, through the seam `PBAtom >> _newOid`) on first need: `oid`, `=`,
+    `hash`, an order key or a hash key. It is published by compare-and-swap in the atom's
+    oid cell, with no lock, so two first readers agree on one oid. A stored atom takes its
+    oid from its record. `PBAtom >> =` is identity or equal oids and `hash` is the oid's, as
+    `Atom.__eq__`/`__hash__`. An unsaved atom is a map key and a lookup probe like any other;
+    a lookup by it misses where no stored key has its oid. `tx_atom_oid.st` checks an
+    unsaved atom as a key (insert, lookup, stable equality and hash), the stub of a record
+    carrying its oid finding its key, and two racing first readers, ordered through the
+    `_newOid` seam and an actor, never by timing; `tx_atom_map_keys.st` checks a
+    `PBFrozenDict` and every collection.
   - A record that needs itself to be decoded (review note N3 of Task 10): a map key that
     refers back to the record being loaded, directly or through another record keyed by it.
     ProtoBase recurses until Python's `RecursionError`; protoBaseST signals
-    `PBCorruptionError` naming the pointer (the loads in progress on the call stack answer a
-    resumable `_PBLoadInProgress` signal for their own pointer), and the transaction stays
-    usable. `tx_atom_map_keys.st` checks a self-keyed record and two records keyed by each
-    other.
+    `PBCorruptionError` naming the pointer, and the transaction stays usable. Such a record
+    is damaged data or the work of a writer that breaks the save-dependents-first invariant
+    (ProtoBase saves every dependent before the record that refers to it, so a record only
+    points to earlier records); it is not a gap of the format (ask B13 withdrawn). The loads
+    in progress are carried explicitly (fix round 1, review C1): a load passes the chain of
+    pointers being decoded to the resolver it decodes with (`_PBLoadResolver`), which loads
+    each atom map key within that chain; no signal is raised, so an application's
+    `on: Exception do:` around a read never sees the mechanism. `tx_atom_map_keys.st`
+    checks a self-keyed record, two records keyed by each other, and a first read inside a
+    catch-all handler.
+  - Read sets (fix round 1, review M5): `reads` and `mreads` are persistent `_PBReadMap`s
+    (a first read costs O(log n), not a rebuild of the map); `readSet` and
+    `mutableReadSet` answer them as `PBFrozenDict`s in first-read order.
 - [ ] **Step 2:** run. Expected: FAIL.
 - [ ] **Step 3:** implement.
 - [ ] **Step 4:** run everything. Expected: PASS. **Gate of week 2** (Spec §11): `order`,
@@ -1120,7 +1141,8 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
 **Files:**
 - Modify: `src/protobase/collections.st` (`PBList` and `PBDictionary` mutators),
   `src/protobase/records.st` (`PBObject` construction and `with:value:`) and
-  `src/protobase/framing.st` (`PBAtom class >> newOid`).
+  `src/protobase/registry.st` (the save persists the oid `PBAtom >> oid` drew; the lazy oid
+  itself came with Task 13 fix round 1).
 - Test:
   - `tests/unit/list_ops.st`;
   - `tests/unit/list_positions.st` (Review Focus 5, with expected results recorded from a
@@ -1128,19 +1150,20 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
   - `tests/unit/dict_ops.st`;
   - `tests/unit/object_with.st`;
   - `tests/unit/indexed_refusal.st`;
-  - `tests/unit/discarded_result.st`.
+  - `tests/unit/discarded_result.st`;
+  - `tests/unit/write_dependents_first.st` (save-dependents-first invariant).
 
 **Interfaces:**
 - Consumes: Task 14.
 - Produces:
-  - `PBAtom class >> newOid` → a 16-byte UUID4 ByteArray (`UUID new bytes`), as ProtoBase's
-    `uuid.uuid4()`. A record draws its oid at construction. A node or collection draws it
-    when saved.
+  - Oids (ruling R13, implemented in Task 13 fix round 1 and kept): every new atom (record,
+    node or collection) draws its oid lazily, on first need (`oid`, `=`, `hash`, a key, or
+    the save), as ProtoBase D21: `PBAtom >> oid` answers the oid cell, filled once by
+    compare-and-swap from `PBAtom >> _newOid` (16 bytes of `UUID new`, ProtoBase's
+    `uuid.uuid4()`). The writer persists exactly that oid (the save is a first need), never
+    draws a second one.
   - Atom keys (from Task 10 fix round 1, which must be kept): an atom's map-key and order-key
-    identity is its oid and never changes when it is saved. ProtoBase assigns a new atom's oid
-    on first need (`==`, `hash`, a key, or `_save`; D21), so a node or collection used as a key
-    before it is saved draws its oid then, once, through the atom's memo cell; the
-    `PBNotSupportedError` that Task 10 signals for an atom without an oid is removed.
+    identity is its oid and never changes when it is saved.
     `atom_keys_oid.st`: an unsaved atom used as a map key keeps its key after the save; the
     writer refuses `{atomV1 -> a, atomV2 -> b}` and `{saved A -> a, twin of A -> b}` (one oid,
     `PBValidationError`), as ProtoBase's reader would refuse those bytes.
@@ -1158,6 +1181,15 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
     `PBNotSupportedError` naming the index (Spec §7.4).
   - Class comments of `PBList`, `PBDictionary`, `PBSet` and `PBCountedSet` state, in their
     first sentence, "Every message answers a new version; the receiver never changes."
+  - Save-dependents-first (from Task 13 fix round 1, B13 withdrawn): the writer saves every
+    atom a record refers to (attribute values, map keys, collection nodes) before the record
+    itself, so every reference in a written record points to an earlier record, as
+    ProtoBase's `_save` does; a record never refers to itself or forward. The reader's
+    `PBCorruptionError` for a record that needs itself to be decoded stays, as a defence
+    against damaged data. `tests/unit/write_dependents_first.st`: records written by
+    protoBaseST (an atom keyed by another atom, a chain of three records, a collection of
+    records) are walked with `PBFileStorage recordsOfSegment:` and every `@ref` in a record
+    points to a lower offset, or to an earlier segment.
     The `PBList` comment states "Positions are zero-based, as in ProtoBase." Rulings 2 and 3.
 
 - [ ] **Step 1: failing tests.**

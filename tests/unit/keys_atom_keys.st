@@ -1,13 +1,13 @@
-"EXPECT: ok 17"
+"EXPECT: ok 19"
 "Atoms as map keys and order keys (FS 'Order keys', rank 14; ProtoBase
  map_key_ids and Atom.__eq__/__hash__): an atom is identified by its oid,
  whether it is a stub (its record is loaded to read the oid), a saved atom or
  an unsaved one that knows its oid, so its identity never changes when it is
  saved. Two keys of one oid conflict: a writer refuses the map
  (PBValidationError) and a reader refuses a map holding references to two
- records of one oid (PBCorruptionError). A fresh atom whose oid is not
- assigned yet (oid assignment comes with plan Task 15) has no key:
- PBNotSupportedError, from orderKey:, hashKey: and isOrderable: alike. A
+ records of one oid (PBCorruptionError). A fresh atom draws its oid in
+ memory on first need (ProtoBase D21), so it is a key whose order and hash
+ keys never change. A
  reference decoded without a resolver (PBUnresolvedRef) has no known oid: as
  a map key it is identified by its pointer."
 Import from: 'protobase'.
@@ -23,6 +23,8 @@ OidStorage >> setOids: aDictionary
   oids := aDictionary.
 OidStorage >> loadAt: aPointer expecting: aTag
   ^ PBAtomEnvelope tag: aTag oid: (oids at: aPointer offset) state: (PBFrozenDict withAssociations: #()).
+OidStorage >> loadAt: aPointer expecting: aTag within: aChain
+  ^ self loadAt: aPointer expecting: aTag.
 OidStorage >> refTo: aByteArray offset: anInteger tag: aTag
   ^ PBTypeRegistry unloadedAtomFor: aTag at: (PBAtomPointer segment: aByteArray offset: anInteger) storage: self.
 | c seg x y storage withOid stub fresh mapBytes bytes |
@@ -62,10 +64,12 @@ c that: 'unresolved references are keys by pointer' is: (PBCodec decode: bytes) 
 c that: 'a decoded map of two records of one oid is corrupt' signals: PBCorruptionError during: [
   PBCodec fromWire: (MessagePack decodeOrdered: bytes strictKeys: false) resolver: storage].
 c that: 'a decoded map of two oids' is: (PBCodec fromWire: (MessagePack decodeOrdered: (mapBytes value: #(26 150)) strictKeys: false) resolver: storage) size equals: 2.
-"A fresh atom, whose oid is not assigned yet."
-c that: 'orderKey: of a fresh atom' signals: PBNotSupportedError containing: 'oid' during: [PBKeys orderKey: fresh].
-c that: 'hashKey: of a fresh atom' signals: PBNotSupportedError containing: 'oid' during: [PBKeys hashKey: fresh].
-c that: 'isOrderable: of a fresh atom' signals: PBNotSupportedError containing: 'oid' during: [PBKeys isOrderable: fresh].
-c that: 'a fresh atom as a map key' signals: PBNotSupportedError containing: 'oid' during: [
-  PBFrozenDict withAssociations: { fresh -> 1 }].
+"An atom that is not stored draws its oid on first need (ProtoBase D21): it is a key
+ like any other, and its keys never change."
+c that: 'a fresh atom has no oid before its first need' is: fresh knownOid equals: nil.
+c that: 'orderKey: of a fresh atom is stable' is: (PBKeys orderKey: fresh) equals: (PBKeys orderKey: fresh).
+c that: 'its oid is now 16 bytes' is: fresh knownOid size equals: 16.
+c that: 'hashKey: of a fresh atom is stable' is: (PBKeys hashKey: fresh) equals: (PBKeys hashKey: fresh).
+c that: 'isOrderable: of a fresh atom' is: (PBKeys isOrderable: fresh) equals: true.
+c that: 'a fresh atom as a map key' is: ((PBFrozenDict withAssociations: { fresh -> 1 }) at: fresh) equals: 1.
 c report displayNl.

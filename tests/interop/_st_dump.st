@@ -3,12 +3,13 @@
  PBNotation dumpSpace:to: of the space, and reads the Python-written database 'erp' through
  a transaction: its describeDatabase: equals the snapshot's, every root read is in its read
  set, and the ERP records answer their accessors (Invoice isPaid, the customer through its
- PBMutableObject, the AuditNote as an opaque atom). Prints 'st dump ok', or each failed
+ PBMutableObject, the AuditNote as an opaque atom). Versions 2 and 1 are read through
+ snapshotAt:. Prints 'st dump ok', or each failed
  check and exits 1."
 Import from: 'protobase'.
 Import from: 'erp_model'.
 
-| args failures check space db tx snapshot json inv1001 inv1002 customer audit |
+| args failures check space db tx snapshot json inv1001 inv1002 customer audit older |
 args := Smalltalk arguments.
 args size = 2 ifFalse: [
   'usage: _st_dump.st <directory> <out.json>' displayNl.
@@ -50,6 +51,19 @@ check value: 'a Python-only type is opaque' value: audit class value: PBOpaqueAt
 check value: 'its type name' value: audit typeName value: 'demo.erp.AuditNote'.
 check value: 'its field' value: (audit at: 'text') value: 'created'.
 tx abort.
+
+"Older versions are read, not only counted (review M4): at version 2 invoice 1001 is
+ unpaid and the customer has its first name; version 1 has no collection roots yet."
+older := db snapshotAt: (db history at: 2).
+check value: 'version 2' value: older version value: 2.
+check value: 'invoice 1001 unpaid at version 2' value: ((older getRootObject: 'invoices') getAt: 1001) isPaid value: false.
+check value: 'the customer''s name at version 2' value: (older getMutable: 'customer:acme') name value: 'ACME S.A.'.
+check value: 'no sequence cell at version 2' value: (older getMutable: 'sequence') value: nil.
+older := db snapshotAt: (db history at: 3).
+check value: 'version 1' value: older version value: 1.
+check value: 'no tags at version 1' value: (older getRootObject: 'tags') value: nil.
+check value: 'invoice 1002 at version 1' value: ((older getRootObject: 'invoices') getAt: 1002) total printString value: '99.90'.
+check value: 'the audit note at version 1' value: ((older getRootObject: 'audit') at: 'text') value: 'created'.
 space close.
 
 failures isEmpty ifTrue: ['st dump ok' displayNl] ifFalse: [

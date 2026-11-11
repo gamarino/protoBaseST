@@ -46,14 +46,30 @@
   (an atom's pointer, a plain value's exact token, `#absent`) in one immutable `PBTxState` held
   in an `Atom` and replaced with `swap:`. After `abort` every other message is `PBUserError`.
   `PBMutableObject >> get:` reads a cell through a transaction.
-- A lookup by an atom with no oid yet (or a tuple holding one) answers absent in a `PBFrozenDict`
-  and in every collection, as in ProtoBase, instead of `PBNotSupportedError`. A record that
-  needs itself to be decoded (a map key referring back to it) is `PBCorruptionError` naming its
-  pointer, where ProtoBase recurses until Python's `RecursionError`.
+- Atom identity as ProtoBase D21 (ruling R13): an atom that is not stored draws its oid (a
+  version-4 UUID, `UUID new`) in memory on first need, published by compare-and-swap so two first
+  readers agree; a stored atom's oid is its record's. `PBAtom >> =` and `hash` go by oid, so an
+  unsaved atom is a map key and a lookup probe like any other (a lookup by it misses where no
+  stored key has its oid). `PBKeys isUnsavedProbe:` and the `PBNotSupportedError` for an atom
+  without an oid are removed.
+- A record that needs itself to be decoded (a map key referring back to it) is
+  `PBCorruptionError` naming its pointer, where ProtoBase recurses until Python's
+  `RecursionError`: damaged data, or a writer that breaks the save-dependents-first invariant.
+  The loads in progress are passed explicitly to the resolver (`_PBLoadResolver`) instead of
+  through a resumable exception, which any `on: Exception do:` around a read used to catch,
+  answering the handler's value instead of the data.
+- Map keys `Float infinity` and its negation (and Decimal infinities) are keys again: their
+  order-key payloads are private marker objects, not Symbols (a short Symbol is a String in
+  protoST, STATUS D35, so their hash was refused). ProtoBase-written maps, Dictionaries and
+  HashDictionaries keyed by infinities are read (`tests/unit/read_cross_kind_keys.st`).
+- A transaction's read sets are persistent maps: a first read costs O(log n) instead of
+  rebuilding the map.
 - The ERP example's record types, `examples/erp/erp_model.st` and `erp_model.py` (`Invoice`,
   `Customer`; `demo.erp.AuditNote` is Python-only). Design spec 10.2 runs: a space ProtoBase
   writes is dumped by protoBaseST exactly as by ProtoBase's verifier
   (`tests/interop/py_to_st.sh`).
 - ProtoBase reads back the deepest attribute protoBaseST writes (509 nested lists) only with a
   raised Python recursion limit: at the default limit its reader raises `RecursionError` from
-  about 333 nested lists (`tests/interop/st_deep_to_py.sh` prints both outcomes).
+  about 333 nested lists. `tests/interop/st_deep_to_py.sh` states the workaround in a `NOTE:`
+  line naming ask B12 (which the runner now shows under PASS) and fails once ProtoBase reads the
+  record at the default limit. `_st_dump.st` also reads versions 2 and 1 of the ERP database.

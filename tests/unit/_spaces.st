@@ -4,6 +4,8 @@
   ref := b add: aTag oid: n state: { 'name' -> value. ... }
                                  writes an ATOM record (oid: 16 bytes of n) and
                                  answers a PBUnresolvedRef to it, tagged aTag
+  ref := b add: aTag oidBytes: bytes16 state: { ... }
+                                 the same with the oid given
   b writeTo: aDirectory root: ref
                                  writes the segment and a space.root pointing at
                                  ref, and answers aDirectory
@@ -25,11 +27,15 @@ SpaceBuilder >> setSegment: aByteArray
   stream nextPutAll: (PBSegmentHeader encodeSegment: segment).
 
 SpaceBuilder >> add: aTag oid: n state: anArray
+  ^ self add: aTag oidBytes: (ByteArray withAll: ((1 to: 16) asArray collect: [:i | n])) state: anArray.
+
+"As add:oid:state:, with the record's oid given as its 16 bytes."
+SpaceBuilder >> add: aTag oidBytes: aByteArray state: anArray
   | offset |
   offset := stream contents size.
   stream nextPutAll: (PBRecordHeader encodeKind: 1 payload: (PBAtomEnvelope
     tag: aTag
-    oid: (ByteArray withAll: ((1 to: 16) asArray collect: [:i | n]))
+    oid: aByteArray
     state: (PBFrozenDict withAssociations: anArray)) encode).
   ^ PBUnresolvedRef pointer: (PBAtomPointer segment: segment offset: offset) tag: aTag.
 

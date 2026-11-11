@@ -29,4 +29,6 @@ PBNotation class>>_setJSON:
 PBTxState>>_setReads:writes:replaced:mreads:mwrites:mexpected:state:
 PBTransaction>>_setDatabase:record:spaceRoot:root:
 PBTxState class>>_initializeMarks
-_PBLoadInProgress>>_setPointer:
+PBOrderKey class>>_initializeInfinities
+_PBLoadResolver>>_setStorage:chain:
+_PBReadMap>>_setEntries:

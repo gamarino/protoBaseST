@@ -47,9 +47,7 @@ its indexes see) are its values; a RepeatedKeysDictionary's are the distinct
 records of each key, key by key.
 
 A probe key is made canonical first (PBCodec canonical:, so an Array finds a
-list) and then ordered or hashed (PBKeys). A probe that is, or holds in a
-tuple, an atom whose oid is not assigned yet finds nothing (PBKeys
-isUnsavedProbe:, as ProtoBase, which assigns it a fresh oid and misses). A bucket that is not a tuple, or an
+list) and then ordered or hashed (PBKeys). A bucket that is not a tuple, or an
 entry that is not a pair, is PBCorruptionError."
 
 Import from: 'protobase/errors'.
@@ -193,7 +191,6 @@ PBDictionary class >> persistedFields
 PBDictionary >> _nodeAt: aKey
   | key |
   key := self _probe: aKey.
-  (PBKeys isUnsavedProbe: key) ifTrue: [^ nil].
   ^ _PBTree nodeWithKey: (PBKeys orderKey: key) of: (self stateAt: 'root') in: self.
 
 PBDictionary >> getAt: aKey
@@ -255,7 +252,6 @@ PBHashDictionary >> _bucket: aHash
 PBHashDictionary >> _entryAt: aKey
   | key okey |
   key := self _probe: aKey.
-  (PBKeys isUnsavedProbe: key) ifTrue: [^ nil].
   okey := PBKeys orderKey: key.
   (self _bucket: (PBKeys hashKey: key)) do: [:entry |
     (PBKeys orderKey: (entry at: 1)) = okey ifTrue: [^ entry]].
@@ -347,7 +343,6 @@ PBHashBuckets >> do: aBlock
 PBHashBuckets >> _entryAt: anElement
   | element okey node pairs |
   element := self _probe: anElement.
-  (PBKeys isUnsavedProbe: element) ifTrue: [^ nil].
   okey := PBKeys orderKey: element.
   pairs := self _pairs.
   node := _PBTree nodeWithKey: (PBKeys orderKey: (PBKeys hashKey: element)) of: (self stateAt: 'root') in: self.
@@ -442,7 +437,6 @@ PBRepeatedKeysDictionary >> has: aKey
 PBRepeatedKeysDictionary >> _nodeAt: aKey
   | key |
   key := self _probe: aKey.
-  (PBKeys isUnsavedProbe: key) ifTrue: [^ nil].
   ^ _PBTree nodeWithKey: (PBKeys orderKey: key) of: (self stateAt: 'root') in: self.
 
 "Evaluates aBlock with each key and its PBCountedSet, in key order."
