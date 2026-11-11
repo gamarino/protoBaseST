@@ -1,4 +1,4 @@
-"EXPECT: ok 22"
+"EXPECT: ok 25"
 "PBFileStorage's reader cache and file handles (Task 11 review I1, M5, M6). The
  interleavings that a race would produce are forced through the seams, with no
  timing and no actors:
@@ -9,7 +9,10 @@
  close    the storage closes while a load is installing its reader: the load
           signals PBClosedError and the reader is closed, not cached
  handles  every refusal of a segment (foreign header, version, magic, truncated
-          header) and of an open (a damaged root record) closes the file it opened"
+          header) and of an open (a damaged root record) closes the file it opened
+ eio      a file-system error while the header is read (a fake file from the
+          _openFile: seam) is PBUnexpectedError naming the segment, and the
+          file is closed"
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -26,6 +29,30 @@ RecordingReader class >> openedFiles
   Opened isNil ifTrue: [Opened := OrderedCollection new].
   ^ Opened.
 
+"A file whose every read fails as an I/O error would (EIO)."
+Object subclass: #FailingFile instanceVariableNames: 'closed'.
+
+FailingFile >> readAt: anOffset size: n
+  ^ FileSystemError signal: 'read failed: Input/output error'.
+
+FailingFile >> size
+  ^ FileSystemError signal: 'fstat failed: Input/output error'.
+
+FailingFile >> close
+  closed := true.
+
+FailingFile >> isClosed
+  ^ closed == true.
+
+PBSegmentReader subclass: #FailingReader classVariableNames: 'Last'.
+
+FailingReader class >> _openFile: aFileReference
+  Last := FailingFile new.
+  ^ Last.
+
+FailingReader class >> lastFile
+  ^ Last.
+
 PBFileStorage subclass: #RecordingStorage instanceVariableNames: 'opened mode'.
 
 RecordingStorage >> mode: aSymbol
@@ -37,7 +64,8 @@ RecordingStorage >> opened
 
 RecordingStorage >> _openReader: aByteArray
   | mine |
-  mine := RecordingReader segment: aByteArray file: (self _segmentFile: aByteArray).
+  mine := (mode = #eio ifTrue: [FailingReader] ifFalse: [RecordingReader])
+    segment: aByteArray file: (self _segmentFile: aByteArray).
   self opened add: mine.
   (mode = #race and: [self opened size = 1]) ifTrue: [self _readerFor: aByteArray].
   mode = #close ifTrue: [self close].
@@ -112,6 +140,15 @@ c that: 'handles: a damaged root record at open' signals: PBCorruptionError duri
     value: (PBRootRecord segment: seg offset: 26 epoch: 1) encode)].
 c that: 'handles: five files were opened' is: files size equals: 5.
 c that: 'handles: every one is closed' isTrue: (files allSatisfy: [:f | f isClosed]).
+
+"--- eio: a file-system error while the header is read ---"
+st := RecordingStorage path: (spaceAt value: 'eio' value: seg value: good value: nil).
+st mode: #eio.
+c that: 'eio: PBUnexpectedError naming the segment' signals: PBUnexpectedError containing: seg hex asLowercase
+  during: [st recordAt: ptr].
+c that: 'eio: the file is closed' isTrue: FailingReader lastFile isClosed.
+c that: 'eio: nothing cached' is: st openSegmentCount equals: 0.
+st close.
 
 base deleteAll.
 c report displayNl.
