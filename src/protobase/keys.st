@@ -34,12 +34,23 @@ Map keys. Each key has a map-key id: its order key with every bool read as the
 number 0 or 1 (true, 1, 1.0 and Decimal 1.00 are one key). Two keys of one map
 conflict when their ids are equal: keys are bucketed in a Dictionary by id, in
 linear time, never compared pairwise. A NaN key is identified by its exact
-token when written (two NaNs of one encoding conflict) and by itself when read
-(format 3 kept such keys as two). A format-3 zone datetime (PBLegacyZoneDateTime)
-can be read as a key: it is identified by its zone and wall clock, and keys
-whose conflict would need the zone's offsets signal PBNotSupportedError
-(checkDecidableKeys:, design 4.3). PBMapKeyIndex is the index of a
-PBFrozenDict: its construction is the reader's rule, its lookups the same ids.
+token when written (two NaNs of one encoding conflict) and by its identity when
+read (format 3 kept such keys as two; a tuple holding a NaN is identified by
+its items, the NaN by identity, as Python's tuple equality). A format-3 zone
+datetime (PBLegacyZoneDateTime) can be read as a key: it is identified by its
+zone and wall clock, and keys whose conflict would need the zone's offsets
+signal PBNotSupportedError (checkDecidableKeys:, design 4.3). PBMapKeyIndex is
+the index of a PBFrozenDict: its construction is the reader's rule, its
+lookups the same ids.
+
+Atoms. An atom is identified by its oid, as ProtoBase's map_key_ids and
+Atom.__eq__ do: a stub loads its record to read it, so a map holding
+references to two records of one oid is refused, and an atom's key does not
+change when it is saved. An atom whose oid is not assigned yet (assignment
+comes with plan Task 15) has no key: PBNotSupportedError. A PBUnresolvedRef
+(decoded without a resolver) has no known oid: as a map key it is identified
+by its pointer, a weaker rule than the format's (two references to two records
+of one oid are two keys there), and it has no order key.
 
 This module needs no other protoBaseST module when it loads: the value classes
 (values.st, which imports it) and PBCodec are looked up when a method runs."
@@ -185,7 +196,7 @@ PBKeys class >> _orderKey: v
   (uuid notNil and: [v isKindOf: uuid]) ifTrue: [^ self _key: 12 payload: (self _unsignedBigEndian: v bytes)].
   (v isKindOf: PBTuple) ifTrue: [^ self _key: 13 payload: (v asArray collect: [:each | self _orderKey: each])].
   (v isKindOf: PBMutableObject) ifTrue: [^ self _key: 15 payload: v name].
-  (v isKindOf: PBAtom) ifTrue: [^ self _key: 14 payload: (self _unsignedBigEndian: (self _oidBytes: v oid))].
+  (v isKindOf: PBAtom) ifTrue: [^ self _key: 14 payload: (self _unsignedBigEndian: (self _oidBytes: (self _oidOf: v)))].
   (v isKindOf: PBUnresolvedRef) ifTrue: [
     ^ PBNotSupportedError signal: 'PBKeys: ' , v printString
       , ' was decoded without a resolver: its oid, which is its order key, is not known'].
@@ -194,6 +205,15 @@ PBKeys class >> _orderKey: v
   ((v isKindOf: PBFrozenDict) or: [v isKindOf: Dictionary]) ifTrue: [
     ^ self _refuse: v because: 'a map is not an orderable key'].
   ^ self _refuse: v because: 'a ' , v class name , ' is not a value of format 4'.
+
+"The oid of anAtom: the one it holds, or its record's (a stub loads it). An
+ atom with neither has no oid yet: PBNotSupportedError (plan Task 15 assigns
+ oids on first need, as ProtoBase does)."
+PBKeys class >> _oidOf: anAtom
+  (anAtom knownOid isNil and: [anAtom pointer isNil]) ifTrue: [
+    ^ PBNotSupportedError signal: 'PBKeys: ' , (self _preview: anAtom)
+      , ' has no oid yet (oids are assigned on first need from plan Task 15), so it has no key'].
+  ^ anAtom oid.
 
 PBKeys class >> _oidBytes: anOid
   (anOid isKindOf: ByteArray) ifTrue: [^ anOid].
@@ -388,13 +408,12 @@ PBKeys class >> checkMapKeys: anArray reading: aBoolean
         , (self _preview: k) , ' conflict (format spec, ''Map keys'')'].
     ids at: id put: k].
 
-"The map-key id of k, or nil for a key identified only by itself (a NaN, or
- a tuple holding one, when read). aMode is:
+"The map-key id of k. aMode is:
    #write  the writer's rule: a key that can never be a map key signals
            PBValidationError; a NaN is identified by its exact token
-   #read   the reader's rule, and lookups: a NaN is itself (nil); a format-3
-           zone datetime is its zone and wall clock; a key outside the rule
-           (a list, a map, an instant-form datetime, a non-value) is kept
+   #read   the reader's rule, and lookups: a NaN is its identity
+           (PBIdentityKey); a format-3 zone datetime is its zone and wall
+           clock; an object outside the format (a Symbol, a Fraction) is kept
            apart by its own =
    #coarse as #read, but every aware or format-3 datetime is one id: keys
            equal everywhere except at datetime positions share an id
@@ -408,28 +427,29 @@ PBKeys class >> _keyId: k mode: aMode
   k == true ifTrue: [^ self _key: 3 payload: 1].
   k == false ifTrue: [^ self _key: 3 payload: 0].
   ((k isFloat or: [k isKindOf: Decimal]) and: [k isNaN]) ifTrue: [
-    ^ aMode == #write ifTrue: [{ 'nan'. self exactToken: k }] ifFalse: [nil]].
+    ^ aMode == #write ifTrue: [{ 'nan'. self exactToken: k }] ifFalse: [PBIdentityKey on: k]].
   (k isKindOf: DateTime) ifTrue: [
     (aMode == #coarse and: [k isNaive not]) ifTrue: [^ #('zoned')].
     k isLegacyZone ifTrue: [^ { 'format-3'. k zone key. k localOrdinalMicroseconds }]].
   (k isKindOf: PBTuple) ifTrue: [
     | ids |
     ids := k asArray collect: [:each | self _keyId: each mode: aMode].
-    (ids includes: nil) ifTrue: [^ nil].
     ^ { 'tuple' } , ids].
-  "An atom: its oid when it is not saved; else its pointer, which names one
-   atom and needs no load (a map read from a record does not load its keys)."
-  ((k isKindOf: PBAtom) and: [k pointer notNil]) ifTrue: [^ { 'pointer'. k pointer }].
+  "An atom is its oid (its order key, through the next lines); a reference
+   decoded without a resolver, whose oid is unknown, its pointer."
   (k isKindOf: PBUnresolvedRef) ifTrue: [^ { 'pointer'. k pointer }].
   aMode == #write ifTrue: [^ self _orderKey: k].
   ^ [self _orderKey: k] on: PBValidationError do: [:e | e return: { 'other'. k }].
 
 "Why k can never be a map key (FS 'Map keys'), or nil. With aBoolean true (a
- reader), a format-3 zone datetime is accepted: format 3 wrote such keys."
+ reader), a format-3 zone datetime is accepted: format 3 wrote such keys. An
+ Array or OrderedCollection is a list (PBCodec canonical: makes it one), a
+ Dictionary a map."
 PBKeys class >> _unkeyableReason: k legacyAllowed: aBoolean
   k isClassObject ifTrue: [^ nil].
-  (k isKindOf: PBFrozenList) ifTrue: [^ 'a list cannot be a map key'].
-  (k isKindOf: PBFrozenDict) ifTrue: [^ 'a map cannot be a map key'].
+  ((k isKindOf: PBFrozenList) or: [(k isKindOf: Array) or: [k isKindOf: OrderedCollection]]) ifTrue: [
+    ^ 'a list cannot be a map key'].
+  ((k isKindOf: PBFrozenDict) or: [k isKindOf: Dictionary]) ifTrue: [^ 'a map cannot be a map key'].
   ((k isKindOf: Decimal) and: [k isSignaling]) ifTrue: [^ 'a signaling decimal NaN cannot be a map key'].
   ((k isKindOf: DateTime) and: [k isLegacyZone]) ifTrue: [
     ^ aBoolean ifTrue: [nil] ifFalse: ['a datetime in an IANA time zone cannot be a map key']].
@@ -466,9 +486,7 @@ PBKeys class >> checkDecidableKeys: aKeyArray
   (aKeyArray anySatisfy: [:k | self _holdsLegacy: k]) ifFalse: [^ self].
   buckets := Dictionary new.
   aKeyArray do: [:k |
-    | id |
-    id := self _keyId: k mode: #coarse.
-    id isNil ifFalse: [(buckets at: id ifAbsentPut: [OrderedCollection new]) add: k]].
+    (buckets at: (self _keyId: k mode: #coarse) ifAbsentPut: [OrderedCollection new]) add: k].
   buckets keysAndValuesDo: [:id :bucket |
     bucket size > 1 ifTrue: [
       (self _zonedPathsOf: bucket first prefix: #()) do: [:path |
@@ -479,6 +497,14 @@ PBKeys class >> _holdsLegacy: k
   k isClassObject ifTrue: [^ false].
   (k isKindOf: PBTuple) ifTrue: [^ k asArray anySatisfy: [:each | self _holdsLegacy: each]].
   ^ (k isKindOf: DateTime) and: [k isLegacyZone].
+
+"True when k is, or a tuple k holds, an aware or format-3 datetime (no
+ allocation: most keys hold none)."
+PBKeys class >> _holdsZoned: k
+  (self _isZoned: k) ifTrue: [^ true].
+  (k isClassObject not and: [k isKindOf: PBTuple]) ifTrue: [
+    k do: [:each | (self _holdsZoned: each) ifTrue: [^ true]]].
+  ^ false.
 
 PBKeys class >> _isZoned: k
   ^ k isClassObject not and: [(k isKindOf: DateTime) and: [k isNaive not]].
@@ -539,39 +565,65 @@ PBKeys class >> _undecidable: aLegacy and: other
     , ' and ' , other printString , ' at the same position: whether they conflict needs the offsets of '
     , aLegacy zone key , ', and protoBaseST has no time-zone database (design 4.3)'.
 
+"=== PBIdentityKey ============================================================"
+
+"The id of a key identified by identity (a NaN, when read): = is ==, hash is
+ the identity hash."
+Object subclass: #PBIdentityKey instanceVariableNames: 'object'.
+
+PBIdentityKey class >> on: anObject
+  ^ self basicNew _setObject: anObject.
+
+PBIdentityKey >> _setObject: anObject
+  "Runs once, on a fresh instance."
+  object isNil ifFalse: [^ PBUserError signal: 'PBIdentityKey is immutable'].
+  object := anObject.
+  ^ self.
+
+PBIdentityKey >> _object
+  ^ object.
+
+PBIdentityKey >> = anObject
+  self isClassObject ifTrue: [^ self == anObject].
+  ^ (anObject isClassObject not and: [anObject class == PBIdentityKey]) and: [object == anObject _object].
+
+PBIdentityKey >> hash
+  self isClassObject ifTrue: [^ super hash].
+  ^ object identityHash.
+
 "=== PBMapKeyIndex ============================================================"
 
 "The key index of a PBFrozenDict, built once with it: map-key id -> position
- (the reader's rule, PBKeys _keyId:mode: #read), and the positions of keys
- identified only by themselves (NaNs). Building it refuses two keys with one
- id, or one object twice, with PBValidationError ('appears twice': a map is
- never collapsed), and runs checkDecidableKeys: when a key holds a format-3
- zone datetime. Never exposed, never changed after it is built."
-Object subclass: #PBMapKeyIndex instanceVariableNames: 'keys ids loose legacy'.
+ (the reader's rule, PBKeys _keyId:mode: #read). Building it refuses a key
+ that can never be a map key (a list, a map, a signaling NaN, an instant-form
+ datetime), and two keys of one id (one object twice included), with
+ PBValidationError ('appears twice': a map is never collapsed); it runs
+ checkDecidableKeys: when a key holds a format-3 zone datetime.
+
+ When a key holds an aware or format-3 datetime, the index also keeps, per
+ coarse id (PBKeys _keyId:mode: #coarse) and per datetime position, the aware
+ datetimes sorted by instant and the format-3 ones sorted by wall clock, with
+ for each the next one of another zone. A lookup then checks only its probe:
+ a probe holding no such datetime needs no check (the keys were proved
+ pairwise decidable when the map was built), and a probe holding one is placed
+ by binary search. Never exposed, never changed after it is built."
+Object subclass: #PBMapKeyIndex instanceVariableNames: 'ids zoned'.
 
 PBMapKeyIndex class >> on: aKeyArray
-  | ids loose seen legacy |
-  legacy := aKeyArray anySatisfy: [:k | PBKeys _holdsLegacy: k].
-  legacy ifTrue: [PBKeys checkDecidableKeys: aKeyArray].
+  | ids |
+  aKeyArray do: [:k |
+    | reason |
+    reason := PBKeys _unkeyableReason: k legacyAllowed: true.
+    reason isNil ifFalse: [^ PBValidationError signal: 'PBFrozenDict: ' , reason]].
+  PBKeys checkDecidableKeys: aKeyArray.
   ids := Dictionary new.
-  loose := OrderedCollection new.
-  seen := Dictionary new.
   1 to: aKeyArray size do: [:i |
     | k id |
     k := aKeyArray at: i.
     id := PBKeys _keyId: k mode: #read.
-    id isNil
-      ifTrue: [
-        | bucket |
-        "One object twice: bucketed by identity hash, then compared by identity."
-        bucket := seen at: k identityHash ifAbsentPut: [OrderedCollection new].
-        (bucket anySatisfy: [:j | (aKeyArray at: j) == k]) ifTrue: [^ self _twice: k as: k].
-        bucket add: i.
-        loose add: i]
-      ifFalse: [
-        (ids includesKey: id) ifTrue: [^ self _twice: k as: (aKeyArray at: (ids at: id))].
-        ids at: id put: i]].
-  ^ self basicNew _setKeys: aKeyArray copy ids: ids loose: loose asArray legacy: legacy.
+    (ids includesKey: id) ifTrue: [^ self _twice: k as: (aKeyArray at: (ids at: id))].
+    ids at: id put: i].
+  ^ self basicNew _setIds: ids zoned: (self _zonedColumnsOf: aKeyArray).
 
 PBMapKeyIndex class >> _twice: aKey as: anEarlierKey
   | text earlier |
@@ -580,22 +632,90 @@ PBMapKeyIndex class >> _twice: aKey as: anEarlierKey
   ^ PBValidationError signal: 'PBFrozenDict: the key ' , text , ' appears twice'
     , (earlier = text ifTrue: [''] ifFalse: [' (it conflicts with the key ' , earlier , ', format spec ''Map keys'')']).
 
-PBMapKeyIndex >> _setKeys: aKeyArray ids: aDictionary loose: anArray legacy: aBoolean
+"nil when no key holds an aware or format-3 datetime; else coarse id ->
+ (index path -> column). A column is { aware sorted by instant. their
+ instants. format-3 sorted by wall clock. their wall clocks. next }, next at i
+ the first later position whose zone differs from the one at i (or nil)."
+PBMapKeyIndex class >> _zonedColumnsOf: aKeyArray
+  | groups out |
+  (aKeyArray anySatisfy: [:k | PBKeys _holdsZoned: k]) ifFalse: [^ nil].
+  groups := Dictionary new.
+  aKeyArray do: [:k |
+    | paths |
+    paths := PBKeys _zonedPathsOf: k prefix: #().
+    paths isEmpty ifFalse: [
+      | byPath |
+      byPath := groups at: (PBKeys _keyId: k mode: #coarse) ifAbsentPut: [Dictionary new].
+      paths do: [:path | (byPath at: path ifAbsentPut: [OrderedCollection new]) add: (PBKeys _at: path in: k)]]].
+  groups isEmpty ifTrue: [^ nil].
+  out := Dictionary new.
+  groups keysAndValuesDo: [:id :byPath |
+    | columns |
+    columns := Dictionary new.
+    byPath keysAndValuesDo: [:path :datetimes | columns at: path put: (self _columnOf: datetimes)].
+    out at: id put: columns].
+  ^ out.
+
+PBMapKeyIndex class >> _columnOf: aCollection
+  | aware legacy n next |
+  aware := (aCollection reject: [:each | each isLegacyZone]) asArray
+    sort: [:a :b | a utcOrdinalMicroseconds <= b utcOrdinalMicroseconds].
+  legacy := (aCollection select: [:each | each isLegacyZone]) asArray
+    sort: [:a :b | a localOrdinalMicroseconds <= b localOrdinalMicroseconds].
+  n := legacy size.
+  next := Array new: n.
+  n - 1 to: 1 by: -1 do: [:i |
+    next at: i put: (((legacy at: i + 1) zone = (legacy at: i) zone)
+      ifTrue: [next at: i + 1] ifFalse: [i + 1])].
+  ^ { aware. aware collect: [:each | each utcOrdinalMicroseconds].
+      legacy. legacy collect: [:each | each localOrdinalMicroseconds]. next }.
+
+PBMapKeyIndex >> _setIds: aDictionary zoned: aZonedOrNil
   "Runs once, on a fresh instance."
-  keys isNil ifFalse: [^ PBUserError signal: 'PBMapKeyIndex is immutable'].
-  keys := aKeyArray.
+  ids isNil ifFalse: [^ PBUserError signal: 'PBMapKeyIndex is immutable'].
   ids := aDictionary.
-  loose := anArray.
-  legacy := aBoolean.
+  zoned := aZonedOrNil.
   ^ self.
 
 "The position of aKey (1-based), or 0. A lookup that needs a zone's offsets
  to answer signals PBNotSupportedError."
 PBMapKeyIndex >> indexOf: aKey
-  | id |
-  (legacy or: [PBKeys _holdsLegacy: aKey]) ifTrue: [PBKeys checkDecidableKeys: keys , { aKey }].
-  id := PBKeys _keyId: aKey mode: #read.
-  id isNil ifTrue: [
-    loose do: [:i | (keys at: i) == aKey ifTrue: [^ i]].
-    ^ 0].
-  ^ ids at: id ifAbsent: [0].
+  zoned isNil ifFalse: [self _checkProbe: aKey].
+  ^ ids at: (PBKeys _keyId: aKey mode: #read) ifAbsent: [0].
+
+"Signals PBNotSupportedError when aKey and a key of the map could conflict
+ and only a zone's offsets can tell (the rule of checkDecidableKeys:)."
+PBMapKeyIndex >> _checkProbe: aKey
+  | paths columns |
+  (PBKeys _holdsZoned: aKey) ifFalse: [^ self].
+  paths := PBKeys _zonedPathsOf: aKey prefix: #().
+  paths isEmpty ifTrue: [^ self].
+  columns := zoned at: (PBKeys _keyId: aKey mode: #coarse) ifAbsent: [^ self].
+  paths do: [:path |
+    | column |
+    column := columns at: path ifAbsent: [nil].
+    column isNil ifFalse: [self _check: (PBKeys _at: path in: aKey) against: column]].
+
+PBMapKeyIndex >> _check: aDateTime against: aColumn
+  | w aware utcs legacy locals next i |
+  w := PBKeys offsetWindow.
+  aware := aColumn at: 1. utcs := aColumn at: 2.
+  legacy := aColumn at: 3. locals := aColumn at: 4. next := aColumn at: 5.
+  aDateTime isLegacyZone
+    ifTrue: [
+      | l j |
+      l := aDateTime localOrdinalMicroseconds.
+      i := PBKeys _firstIndexIn: utcs atLeast: l - w.
+      (i <= utcs size and: [(utcs at: i) <= (l + w)]) ifTrue: [
+        ^ PBKeys _undecidable: aDateTime and: (aware at: i)].
+      i := PBKeys _firstIndexIn: locals atLeast: l - (2 * w).
+      i <= locals size ifTrue: [
+        j := (legacy at: i) zone = aDateTime zone ifTrue: [next at: i] ifFalse: [i].
+        (j notNil and: [(locals at: j) <= (l + (2 * w))]) ifTrue: [
+          ^ PBKeys _undecidable: aDateTime and: (legacy at: j)]]]
+    ifFalse: [
+      | u |
+      u := aDateTime utcOrdinalMicroseconds.
+      i := PBKeys _firstIndexIn: locals atLeast: u - w.
+      (i <= locals size and: [(locals at: i) <= (u + w)]) ifTrue: [
+        ^ PBKeys _undecidable: (legacy at: i) and: aDateTime]].

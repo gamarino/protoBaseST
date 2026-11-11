@@ -777,7 +777,17 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     mode, then encoded.
   - `PBKeys class >> checkMapKeys: aPBFrozenDict`, the FS "Map keys" conflict rule, which
     signals `PBValidationError`. `PBCodec` calls it on encode, and on decode for format 4.
-  - `PBFrozenDict` lookups now compare by order key.
+  - `PBFrozenDict` keys and lookups compare by map-key id (FS "Map keys"): the order key with
+    every bool read as 0 or 1, as ProtoBase's decoded map (a Python dict) does, so `at: true`
+    finds the key `1` (C-T10-3); a NaN by identity (a tuple holding one by its items'
+    identity, as Python's tuple equality); a format-3 zone datetime by zone and wall clock.
+  - Atom keys (fix round 1, review I1): every `PBAtom` key is its rank-14 order key, its oid,
+    as ProtoBase's `map_key_ids` and `Atom.__eq__`. A stub's record is loaded to read it, so a
+    decoded map holding references to two records of one oid is `PBCorruptionError`, and an
+    atom's key never changes when it is saved. A `PBUnresolvedRef` (decoded without a resolver,
+    its oid unknown) is a map key by its pointer only, a weaker rule than the format's. An
+    atom whose oid is not assigned yet has no key: `orderKey:`, `hashKey:`, `isOrderable:` and
+    map construction signal `PBNotSupportedError` until Task 15 assigns oids.
   - Added by the Task 7 review:
     - `checkMapKeys:` replaces the interim rule of `_PBItems` (same class and `=`) and keeps
       its linear-time duplicate check: keys are bucketed by order key or hash key, never
@@ -1005,6 +1015,11 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     `Error`).
   - `tx_read_set.st`, on a copy of the database vector: reading two roots and an absent name
     records three entries; reading again does not change them; `rootNames` records nothing.
+  - Atom map keys through the real resolver (from Task 10 fix round 1, which must be kept):
+    a map whose keys are references is decoded with the storage's resolver, and its stub keys
+    are identified by their oids (`PBKeys _keyId:mode:` loads them); a state holding a map with
+    references to two records of one oid is `PBCorruptionError`. `tx_atom_map_keys.st` checks
+    it on a space with two versions of one atom.
 - [ ] **Step 2:** run. Expected: FAIL.
 - [ ] **Step 3:** implement.
 - [ ] **Step 4:** run everything. Expected: PASS. **Gate of week 2** (Spec §11): `order`,
@@ -1083,6 +1098,14 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
   - `PBAtom class >> newOid` → a 16-byte UUID4 ByteArray (`UUID new bytes`), as ProtoBase's
     `uuid.uuid4()`. A record draws its oid at construction. A node or collection draws it
     when saved.
+  - Atom keys (from Task 10 fix round 1, which must be kept): an atom's map-key and order-key
+    identity is its oid and never changes when it is saved. ProtoBase assigns a new atom's oid
+    on first need (`==`, `hash`, a key, or `_save`; D21), so a node or collection used as a key
+    before it is saved draws its oid then, once, through the atom's memo cell; the
+    `PBNotSupportedError` that Task 10 signals for an atom without an oid is removed.
+    `atom_keys_oid.st`: an unsaved atom used as a map key keeps its key after the save; the
+    writer refuses `{atomV1 -> a, atomV2 -> b}` and `{saved A -> a, twin of A -> b}` (one oid,
+    `PBValidationError`), as ProtoBase's reader would refuse those bytes.
   - `PBList new`, plus the mutators of Spec §5.2. Each answers a new `PBList` and leaves the
     receiver unchanged: `setAt:value:`, `insertAt:value:`, `removeAt:`, `appendFirst:`,
     `appendLast:`, `extend:`, `sliceFrom:to:`, `head:`, `tail:`. Positions are zero-based

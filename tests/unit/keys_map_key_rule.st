@@ -1,4 +1,4 @@
-"EXPECT: ok 29"
+"EXPECT: ok 34"
 "FS 'Map keys': 1, 1.0, Decimal 1.00 and true conflict pairwise; bools in a map
  without the numbers 0 and 1 are valid keys; two NaNs with one encoding
  conflict when written (a reader keeps them as two keys, format 3); a map is
@@ -6,7 +6,7 @@
  equal keys), and PBCodec refuses conflicting keys when it writes."
 Import from: 'protobase'.
 Import from: '_check'.
-| c map nanMap dec |
+| c map nanMap dec nan |
 c := Check new.
 dec := Decimal fromString: '1.00'.
 c that: '{true -> 1. 1 -> 2} is refused' signals: PBValidationError containing: 'twice' during: [
@@ -58,4 +58,18 @@ c that: 'a decoded vector map: true conflicts with 1' signals: PBCorruptionError
   PBCodec decode: ('../conformance/vectors/invalid/map-key-bool-and-int.bin' asFileReference binaryContents)].
 c that: 'a decoded vector map: equal numbers conflict' signals: PBCorruptionError during: [
   PBCodec decode: ('../conformance/vectors/invalid/map-key-equal-numbers.bin' asFileReference binaryContents)].
+"A tuple holding a NaN finds itself through another tuple holding the same NaN
+ object (Python compares tuple items by identity first)."
+nan := Float nan.
+c that: 'a tuple key holding a NaN, looked up by an equal tuple' is: ((PBFrozenDict withAssociations: {
+  (PBTuple withAll: { nan. 1 }) -> 'x' }) at: (PBTuple withAll: { nan. 1 }) ifAbsent: ['absent']) equals: 'x'.
+c that: 'two tuples holding one NaN object are one key' signals: PBValidationError containing: 'twice' during: [
+  PBFrozenDict withAssociations: { (PBTuple withAll: { nan }) -> 1. (PBTuple withAll: { nan }) -> 2 }].
+"Keys that can never be map keys are refused when the map is built, as the decoder does."
+c that: 'a PBFrozenList key' signals: PBValidationError containing: 'list' during: [
+  PBFrozenDict withAssociations: { (PBFrozenList withAll: #(1)) -> 1 }].
+c that: 'an Array key' signals: PBValidationError containing: 'list' during: [
+  PBFrozenDict withAssociations: { #(1 2) -> 1 }].
+c that: 'a map key' signals: PBValidationError containing: 'map' during: [
+  PBFrozenDict withAssociations: { (PBFrozenDict withAssociations: #()) -> 1 }].
 c report displayNl.

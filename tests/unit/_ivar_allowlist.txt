@@ -5,7 +5,8 @@
 _PBSequence>>_setItems:
 PBFrozenDict>>_setKeys:values:index:
 PBOrderKey>>_setRank:payload:
-PBMapKeyIndex>>_setKeys:ids:loose:legacy:
+PBMapKeyIndex>>_setIds:zoned:
+PBIdentityKey>>_setObject:
 PBMissing class>>_initializeDefault
 PBMutableObject>>_setCellName:
 PBAtomPointer>>_setSegmentBytes:offset:

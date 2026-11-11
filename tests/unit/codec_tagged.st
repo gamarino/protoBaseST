@@ -1,4 +1,4 @@
-"EXPECT: ok 126"
+"EXPECT: ok 127"
 "Each tagged form of FS 'Canonical values' (the bytes come from ProtoBase's
  encoder at v2.0.0rc1): the value encodes to the bytes, the bytes decode to an
  equal value of the right class, and re-encode to the same bytes. @uuid is in
@@ -158,7 +158,7 @@ c that: 'a tuple holding a format-3 datetime against an aware one' signals: PBNo
   { Decimal fromString: '0'. Decimal fromString: '-0E+5' }.
   { 0.0. -0.0 }.
   { 2 raisedTo: 80. 2 raisedTo: 80 }.
-  { ny. DateTime year: 2026 month: 11 day: 1 hour: 1 minute: 30 second: 0 microsecond: 0 fold: 0 zone: (ZoneOffset microseconds: -18000000000) }.
+  { DateTime year: 2026 month: 11 day: 1 hour: 6 minute: 30 second: 0 microsecond: 0 fold: 0 zone: ZoneOffset utc. DateTime year: 2026 month: 11 day: 1 hour: 1 minute: 30 second: 0 microsecond: 0 fold: 0 zone: (ZoneOffset microseconds: -18000000000) }.
   { TimeOfDay hour: 1 minute: 2 second: 3 microsecond: 0 fold: 0 zone: (ZoneName key: 'Europe/Paris'). TimeOfDay hour: 1 minute: 2 second: 3 }.
   { PBTuple withAll: { 'a'. Decimal fromString: '1.0' }. PBTuple withAll: { 'a'. Decimal fromString: '1.00' } }.
   { 'abcdefghij'. 'abcdefghij' copy }.
@@ -166,6 +166,9 @@ c that: 'a tuple holding a format-3 datetime against an aware one' signals: PBNo
 } doWithIndex: [:pair :i |
   c that: 'duplicate keys ' , i printString signals: PBValidationError containing: 'twice' during: [
     PBFrozenDict withAssociations: { (pair at: 1) -> 1. (pair at: 2) -> 2 }]].
+"An instant-form datetime can never be a map key: refused when the map is built, as when it is read."
+c that: 'an instant-form key' signals: PBValidationError containing: 'IANA' during: [
+  PBFrozenDict withAssociations: { ny -> 1 }].
 "Keys of different classes conflict under the map-key rule (FS 'Map keys': 1 and 1.0
  are one key; keys_map_key_rule.st); two NaN objects are two keys when read."
 c that: '1 and 1.0' signals: PBValidationError containing: 'twice' during: [

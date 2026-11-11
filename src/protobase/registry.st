@@ -321,6 +321,11 @@ PBAtom >> isPBReference
 PBAtom >> pointer
   ^ pointer.
 
+"The oid when this atom holds it already (nil otherwise), without loading:
+ a stub learns its oid from its record (oid loads it)."
+PBAtom >> knownOid
+  ^ oid.
+
 "The tag a writer puts for this atom's type (PBTypeRegistry tagFor:)."
 PBAtom >> tag
   ^ PBTypeRegistry tagFor: self class.
