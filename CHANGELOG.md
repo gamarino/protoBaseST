@@ -87,3 +87,9 @@
   be registered; saving it does.
 - The class comments of `PBList`, `PBDictionary`, `PBSet` and `PBCountedSet` start with "Every
   message answers a new version; the receiver never changes."
+- The save refuses an unregistered class before writing any of its dependents, and two saves of
+  one atom that race end the same way whatever the interleaving (one storage: the first pointer
+  published; two storages: `PBValidationError`). `extend:` of nothing answers the receiver even
+  when the list is indexed, as ProtoBase's; `extend:` of a String is refused up front. A
+  non-Integer slice bound (a Boolean included) is refused, a documented deviation from Python's
+  slice rules.

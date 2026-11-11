@@ -1,4 +1,4 @@
-"EXPECT: ok 38"
+"EXPECT: ok 39"
 "PBList writes (plan Task 15; ProtoBase proto_db/collections/lists.py): PBList new and
  setAt:value:, insertAt:value:, removeAt:, appendFirst:, appendLast:, extend:,
  sliceFrom:to:, head: and tail: each answer a new list, a new atom with its own oid, and
@@ -56,6 +56,7 @@ c that: 'extend: a PBList' is: ext elements equals: #(1 2 3 1 2 30).
 c that: 'extend: an OrderedCollection' is: (empty extend: (OrderedCollection withAll: #(7 8))) elements equals: #(7 8).
 c that: 'extend: nothing answers the receiver, as ProtoBase' isTrue: (two extend: #()) == two.
 c that: 'extend: a non-collection' signals: PBValidationError during: [two extend: 5].
+c that: 'extend: a String is one value' signals: PBValidationError containing: 'appendLast:' during: [two extend: 'abc'].
 c that: 'extend: refuses a bad value before building' signals: PBValidationError during: [two extend: { 1. #sym:bol: }].
 
 "The seeded sequence against a model."

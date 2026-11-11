@@ -1,4 +1,4 @@
-"EXPECT: ok 20"
+"EXPECT: ok 27"
 "The save-dependents-first invariant (plan Task 15; ProtoBase Atom._save): the save writes
  every atom a record refers to (attribute values, map keys, collection nodes and boxes)
  before the record itself, so every reference in a written record points to an earlier
@@ -9,7 +9,9 @@
  offset of the segment. Each atom is written once, with the oid it drew in memory (D21:
  drawn by the save when no need drew it before), and records its place: a second save
  writes nothing. The records read back as written. A class that is not registered is
- refused when saved, as ProtoBase refuses a class with no declared type name. The file
+ refused when saved, before any of its dependents is written or bound to the storage, as
+ ProtoBase's _save checks the declared type name before it saves a child; once registered
+ (PBObjectSpace registerAtomClass:), the same record saves and reads back as its class. The file
  storage's write side is plan Task 17: the records go to the SegmentSink double
  (_sink.st), whose segment file is then opened with PBFileStorage."
 Import from: 'protobase'.
@@ -19,9 +21,12 @@ Import from: '_sink'.
 PBObject subclass: #Unregistered.
 Unregistered class >> typeName
   ^ 'tests.dependents.Unregistered'.
+PBObject subclass: #Registered.
+Registered class >> typeName
+  ^ 'tests.dependents.Registered'.
 
 | c seg sink k r k2 k3 d cc bb aa r1 r2 r3 l late drawn base st records refs forward oids walk
-  loaded count before |
+  loaded count before orphan reg |
 c := Check new.
 seg := ByteArray fromHex: '0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e'.
 sink := SegmentSink segment: seg.
@@ -63,6 +68,17 @@ c that: 'and pushes no record' is: sink offsets size equals: before + 1.
 c that: 'an unregistered class is refused' signals: PBValidationError containing: 'Unregistered'
   during: [(Unregistered withAll: { 'x' -> 1 }) _saveInto: sink].
 c that: 'and nothing was written' is: sink offsets size equals: before + 1.
+orphan := PBObject withAll: { 'y' -> 1 }.
+c that: 'an unregistered class with a dependent is refused' signals: PBValidationError containing: 'Unregistered'
+  during: [(Unregistered withAll: { 'x' -> orphan }) _saveInto: sink].
+c that: 'before its dependent is written' is: sink offsets size equals: before + 1.
+c that: 'and the dependent is not bound to the storage' is: orphan isSaved equals: false.
+"Registering the class makes its save succeed (plan Task 15: registering application classes)."
+reg := Registered withAll: { 'x' -> orphan }.
+c that: 'Registered, unregistered: refused' signals: PBValidationError during: [reg _saveInto: sink].
+PBObjectSpace registerAtomClass: Registered.
+reg _saveInto: sink.
+c that: 'once registered, it is saved' is: reg isSaved equals: true.
 
 "Walk the segment: every @ref points to a lower offset."
 base := FileSystem temp / ('pbst-dependents-' , Smalltalk pid printString).
@@ -91,8 +107,8 @@ records do: [:rec |
   oids add: (map at: 't' ifAbsent: [nil]) printString , (map at: 'oid' ifAbsent: [nil]) hex.
   walk value: (map at: 's' ifAbsent: [nil]) value: (rec at: 1)].
 "Counted by hand: 1 in r, 5 in d (2 nodes, the dictionary), 2 in the chain, 9 in the list
- (4 nodes, the list), 3 in late."
-c that: 'every reference was checked' is: refs equals: 20.
+ (4 nodes, the list), 3 in late, 1 in reg."
+c that: 'every reference was checked' is: refs equals: 21.
 c that: 'no reference to itself or forward' is: forward asArray equals: #().
 c that: 'each atom written once (distinct oids)' is: oids size equals: records size.
 "Read back."
@@ -100,6 +116,9 @@ loaded := PBTypeRegistry unloadedAtomFor: 19 at: aa pointer storage: st.
 c that: 'the chain reads back' is: (((loaded at: 'next') at: 'next') at: 'n') equals: 3.
 c that: 'with the oid of the record in memory' is: loaded oid equals: aa oid.
 c that: 'the stored map key finds the record' is: (((PBTypeRegistry unloadedAtomFor: 19 at: r pointer storage: st) at: 'm') at: k) equals: 'v'.
+loaded := PBTypeRegistry unloadedAtomFor: 'tests.dependents.Registered' at: reg pointer storage: st.
+c that: 'it reads back as a Registered' is: loaded class equals: Registered.
+c that: 'with its oid and its dependent' is: { loaded oid. (loaded at: 'x') at: 'y' } equals: { reg oid. 1 }.
 count := (PBTypeRegistry unloadedAtomFor: 5 at: l pointer storage: st).
 c that: 'the list reads back' is: ((count elements copyFrom: 1 to: 3) collect: [:each | each at: 'i']) equals: #(1 2 3).
 c that: 'its stored tree is valid' is: (PBAvl check: (count stateAt: 'root')) notNil equals: true.

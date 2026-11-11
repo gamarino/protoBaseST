@@ -1,4 +1,4 @@
-"EXPECT: ok 60"
+"EXPECT: ok 64"
 "PBList positions as ProtoBase's List takes them (plan Review Focus 5, call C15). Each line
  below is what ProtoBase v2.0.0rc1 answered for List [10, 20, 30, 40, 50], recorded by
  tests/interop/py_list_positions.py and pasted here: '<message> => <elements after it, or
@@ -7,11 +7,16 @@
  Python's None as nil. Positions are 0-based; a negative one counts from the end; getAt:
  count, setAt: count, removeAt: count and insertAt: count + 1 are refused, insertAt: count
  appends; a position that is not an Integer ('a', true, 1.0) is refused; slices, head: and
- tail: clamp like Python slices."
+ tail: clamp like Python slices.
+
+ Intended deviations, listed in 'deviations' with protoBaseST's answer: a slice bound
+ that is neither an Integer nor nil is PBValidationError. ProtoBase hands its bounds to
+ Python's slice.indices, which takes True as 1 and raises TypeError for 'a' and 1.0; in
+ Smalltalk a Boolean is not a number, and ProtoBase's own _position refuses bool."
 Import from: 'protobase'.
 Import from: '_check'.
 
-| c base recorded arg run l |
+| c base recorded deviations arg run l |
 c := Check new.
 recorded := #(
   'getAt: 0 => 10'
@@ -52,6 +57,9 @@ recorded := #(
   'sliceFrom: 2 to: 2 => []'
   'sliceFrom: -3 to: -1 => 30 40'
   'sliceFrom: 0 to: 5 => 10 20 30 40 50'
+  'sliceFrom: true to: nil => 20 30 40 50'
+  'sliceFrom: ''a'' to: nil => error TypeError'
+  'sliceFrom: 1.0 to: nil => error TypeError'
   'head: 0 => []'
   'tail: 0 => 10 20 30 40 50'
   'head: 2 => 10 20'
@@ -69,6 +77,11 @@ recorded := #(
   'extend: 1 2 3 => 10 20 30 40 50 1 2 3'
   'extend: empty => 10 20 30 40 50'
 ).
+deviations := Dictionary new.
+deviations
+  at: 'sliceFrom: true to: nil' put: 'error ProtoValidationError';
+  at: 'sliceFrom: ''a'' to: nil' put: 'error ProtoValidationError';
+  at: 'sliceFrom: 1.0 to: nil' put: 'error ProtoValidationError'.
 base := PBList new extend: #(10 20 30 40 50).
 "An argument word of a recorded message."
 arg := [:w |
@@ -98,7 +111,11 @@ run := [:text |
 recorded do: [:line |
   | text |
   text := line copyFrom: 1 to: (line findString: ' => ') - 1.
-  c that: text is: (run value: text) equals: line].
+  c that: text is: (run value: text) equals: (deviations at: text
+    ifPresent: [:mine | text , ' => ' , mine]
+    ifAbsent: [line])].
+c that: 'every deviation is a recorded case' isTrue: (deviations keys allSatisfy: [:k |
+  recorded anySatisfy: [:line | line beginsWith: k , ' => ']]).
 "The cases of the plan, by name."
 l := base count.
 c that: 'getAt: -1 is the last element' is: (base getAt: -1) equals: 50.

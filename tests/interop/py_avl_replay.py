@@ -135,7 +135,7 @@ def main(kind, path):
         return 1
     root = None
     lst = List() if kind == "list" else None
-    ops = checkpoints = 0
+    ops = checkpoints = records = 0
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -148,6 +148,13 @@ def main(kind, path):
                 root = apply(kind, root, line[3:].split(" "))
             avl.check_invariants(root)
             ops += 1
+        elif line.startswith("list "):
+            theirs = line[5:]
+            ours = f"{lst.count} {','.join(lst._state().keys())}"
+            if ours != theirs:
+                print(f"FAIL: list record before the next dump differs\n  ProtoBase  {ours}\n  protoST    {theirs}")
+                return 1
+            records += 1
         elif line.startswith("dump "):
             theirs = []
             while i < len(lines) and lines[i].startswith("node "):
@@ -165,10 +172,14 @@ def main(kind, path):
         elif line != "end":
             print(f"FAIL: unexpected line {line!r}")
             return 1
+    if kind == "list" and records != checkpoints:
+        print(f"FAIL: list: {records} list records compared for {checkpoints} checkpoints")
+        return 1
     if ops == 0 or checkpoints == 0:
         print(f"FAIL: {kind}: nothing compared ({ops} operations, {checkpoints} checkpoints)")
         return 1
-    print(f"{kind}: {ops} operations, {checkpoints} checkpoints identical")
+    extra = f", {records} list counts and field orders" if kind == "list" else ""
+    print(f"{kind}: {ops} operations, {checkpoints} checkpoints identical{extra}")
     return 0
 
 

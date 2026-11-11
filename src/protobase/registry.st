@@ -541,8 +541,10 @@ _PBPlace >> storage
 
  Refused with PBValidationError: a class not registered under its typeName
  (PBTypeRegistry tagFor:, as ProtoBase refuses a class with no declared
- __type_name__), a value the codec refuses, an atom stored in another storage
- (its pointer would mean nothing in aStorage)."
+ __type_name__), checked when the atom is first visited, so nothing beneath it
+ is written; a value the codec refuses; an atom stored in another storage (its
+ pointer would mean nothing in aStorage). A pointer pushAtom: answers stays
+ valid for the life of the storage: the atom keeps it."
 PBAtom >> _saveInto: aStorage
   | stack known |
   known := self _pointerIn: aStorage.
@@ -558,6 +560,10 @@ PBAtom >> _saveInto: aStorage
       ifTrue: [
         (atom _pointerIn: aStorage) isNil
           ifTrue: [
+            "The class is checked before any dependent is written or bound to
+             aStorage, as ProtoBase's _save checks the declared type name before
+             it encodes the state."
+            atom tag.
             refs := OrderedCollection new.
             atom state _pbAddUnsavedAtomsTo: refs in: aStorage.
             stack addLast: refs.
@@ -586,13 +592,18 @@ PBAtom >> _storedElsewhere: aStorage
     , ', not in ' , aStorage printString , ': a record of one storage cannot refer to it'.
 
 "Writes this atom's record, whose references are all saved in aStorage, and
- records its place."
+ records its place; answers the atom's pointer in aStorage. When another save
+ of this atom installed its place first (a compare-and-swap lost), the winner's
+ place decides, whatever the interleaving: in aStorage, its pointer is the
+ answer, as ProtoBase's _save answers the pointer the first save published
+ (the record just pushed is an orphan nothing refers to, in an append-only
+ segment); in another storage, PBValidationError, the error a sequential
+ second save meets (_pointerIn:)."
 PBAtom >> _pushInto: aStorage
   | ptr |
   ptr := aStorage pushAtom: (PBAtomEnvelope tag: self tag oid: self oid state: self state).
-  (saved value: (_PBPlace pointer: ptr storage: aStorage) ifCurrent: nil) ifFalse: [
-    ^ PBUnexpectedError signal: self printString , ' was saved twice at once: saves of one atom must run on one publisher'].
-  ^ ptr.
+  (saved value: (_PBPlace pointer: ptr storage: aStorage) ifCurrent: nil) ifTrue: [^ ptr].
+  ^ self _pointerIn: aStorage.
 
 "Adds to anOrderedCollection the atoms the receiver refers to that are not
  saved in aStorage, in encoder order (a value holds none; the containers and

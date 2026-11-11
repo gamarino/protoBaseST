@@ -6,8 +6,9 @@
 
   pos, key, counted   the random sequences of the unit tests (Random seed: 20261110),
                       1000 / 1000 / 600 operations, a checkpoint every 10
-  list                1000 PBList operations (AvlOps nextListOpFor:, plan Task 15): the
-                      tree of the list after each, a checkpoint every 10
+  list                1000 PBList operations (AvlOps nextListOpFor:, plan Task 15): at
+                      each checkpoint (every 10) a 'list <count> <state keys>' line, then
+                      the dump of the list's tree
   pos-large           2000 appends, 1000 random operations, 500 removes of the first
                       element, 500 removes of the last; a checkpoint every 500
   key-large           2000 puts of ascending Integer keys, 1000 random operations (four in
@@ -60,7 +61,10 @@ kind = 'list' ifTrue: [
     root := list stateAt: 'root'.
     steps := steps + 1.
     ('op ' , (AvlOps textOf: op)) displayNl.
-    steps \\ every = 0 ifTrue: [emit value]]].
+    steps \\ every = 0 ifTrue: [
+      ('list ' , list count printString , ' '
+        , (list state keys inject: '' into: [:acc :k | acc isEmpty ifTrue: [k] ifFalse: [acc , ',' , k]])) displayNl.
+      emit value]]].
 kind = 'key' ifTrue: [1000 timesRepeat: [apply value: ops nextKeyOp]].
 kind = 'counted' ifTrue: [600 timesRepeat: [apply value: ops nextCountedOp]].
 kind = 'pos-large' ifTrue: [

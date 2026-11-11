@@ -233,6 +233,15 @@ inv = paid.                                            "false: two atoms, two oi
   ProtoBase and compares every node, byte for byte.
 - A collection that has an index refuses every change with `PBNotSupportedError` naming its
   indexes: ProtoBase updates the indexes in the same step, which protoBaseST cannot do.
+  `extend:` of nothing still answers the receiver, as ProtoBase's.
+- Two intended deviations from ProtoBase's `List`, both refusals with `PBValidationError`:
+  - a slice bound that is neither an Integer nor nil (`sliceFrom: true to: nil`). ProtoBase
+    hands its bounds to Python's `slice.indices`, which takes `True` as 1; in Smalltalk a
+    Boolean is not a number, and ProtoBase's own positions refuse `bool`. `list_positions.st`
+    records ProtoBase's answers next to protoBaseST's.
+  - `extend:` of a String. Python's `extend("abc")` appends three one-character strings; in
+    Smalltalk a String's elements are Characters, which no format stores, so the String is
+    refused up front (use `appendLast:` for one string value).
 - `PBObject withAll:` (and `Invoice withAll:`), `with:value:` and `withAll:` on a record: the
   attributes keep the order given, a change keeps an attribute's place. Attribute names follow
   the format spec's "Atom records" rule (no leading `_`, not `oid`, `atom_pointer` or `context`,
@@ -241,7 +250,9 @@ inv = paid.                                            "false: two atoms, two oi
   the publisher come later) writes every dependent before the record that refers to it, so a
   record only refers to earlier records; it persists the oid the atom drew in memory, and
   records the atom's place, so a second save writes nothing. A class not registered under its
-  `typeName` is refused when saved. `PBAtom >> _decodedTwin` (ProtoBase `_decoded_twin`)
+  `typeName` is refused when saved, before anything beneath it is written. Two saves of one
+  atom that race end the same way whatever the interleaving: into one storage both answer the
+  first pointer published, into two storages the later one is `PBValidationError`. `PBAtom >> _decodedTwin` (ProtoBase `_decoded_twin`)
   answers the atom a load of a saved atom's record would produce.
 
 ## Running the tests

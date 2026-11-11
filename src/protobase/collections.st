@@ -318,16 +318,24 @@ PBList >> appendLast: aValue
   ^ self insertAt: self count value: aValue.
 
 "A list with the elements of aCollection (anything answering do:, a PBList
- included) appended in order; read in full before anything is built. An empty
- aCollection answers the receiver, as ProtoBase's extend."
+ included, but not a String or Symbol) appended in order; read in full before
+ anything is built. An empty aCollection answers the receiver, as ProtoBase's
+ extend, an indexed list included."
 PBList >> extend: aCollection
   | values |
-  self _checkWritable: 'extend:'.
   (aCollection isClassObject not and: [aCollection respondsTo: #do:]) ifFalse: [
     ^ PBValidationError signal: 'PBList extend: a collection was expected, not ' , (PBKeys _preview: aCollection)].
+  "A deviation from Python, where extend('abc') appends 'a', 'b' and 'c': a
+   String's elements are Characters, which no format stores."
+  aCollection isString ifTrue: [
+    ^ PBValidationError signal: 'PBList extend: a String is one value, not a collection of values: use appendLast: '
+      , (PBKeys _preview: aCollection)].
   values := OrderedCollection new.
   aCollection do: [:each | values addLast: (PBCodec canonical: each)].
+  "As ProtoBase: nothing to add answers the receiver before the indexes are
+   looked at, so an indexed list answers itself too."
   values isEmpty ifTrue: [^ self].
+  self _checkWritable: 'extend:'.
   ^ self
     _withRoot: (PBAvl posConcat: (self stateAt: 'root') with: (PBAvl posFromArray: values asArray))
     count: self count + values size.

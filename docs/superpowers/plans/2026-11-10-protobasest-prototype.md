@@ -1176,10 +1176,12 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
   - `PBList new`, plus the mutators of Spec §5.2. Each answers a new `PBList` and leaves the
     receiver unchanged: `setAt:value:`, `insertAt:value:`, `removeAt:`, `appendFirst:`,
     `appendLast:`, `extend:`, `sliceFrom:to:`, `head:`, `tail:`. Positions are zero-based
-    and follow C15.
+    and follow C15. *(Amended by the Task 15 review, M6.)* As ProtoBase's `extend`,
+    `extend:` of nothing answers the receiver itself, an indexed list included.
   - Values pass through `PBCodec canonical:` at once.
-  - `PBDictionary new`, `setAt:value:`, `removeAt:` (an absent key is a no-op, as
-    ProtoBase), each answering a new version. The operation log comes in Task 16.
+  - `PBDictionary new`, `setAt:value:`, `removeAt:` (an absent key leaves the content
+    unchanged and answers a new version with the same tree, as ProtoBase's `remove_at`),
+    each answering a new version. The operation log comes in Task 16.
   - `PBObject withAll: anArrayOfAssociations`; `Invoice withAll:` for subclasses;
     `with: aName value: v`; `withAll:` on an instance. Each answers a new record with a new
     oid. Attribute names are checked as in FS "Atom records".
@@ -1296,6 +1298,12 @@ cut in `docs/not-done.md`. A blind write never ships without its merge.
     (`indexes, count, root` for an empty collection, `persistedFields` later). `save:` is
     `anAtom _saveInto: self`, and `PBFileStorage` adds `pushAtom: aPBAtomEnvelope` → the
     pointer of the ATOM record it appends to the owned segment.
+    *(Task 15 review, M3 and M4.)* A pointer `pushAtom:` answers stays valid for the life of
+    the storage: the atom keeps it in its `saved` cell, so appended bytes are never retracted
+    (no truncation or discard of the tail of an aborted or failed commit; an unpublished
+    record is an orphan). Once `pushAtom:` exists, the unit tests that save into the
+    `SegmentSink` double (`write_dependents_first.st`, `atom_keys_oid.st`, `save_race.st`)
+    move to `PBFileStorage`, and `tests/unit/_sink.st` is deleted.
     - The first save creates `<uuid hex>.seg` with `#create #exclusive` and a UUID4 name,
       writes the header, `sync`s it, and `FileSystem syncDirectory:` once.
     - Later saves `append:`.

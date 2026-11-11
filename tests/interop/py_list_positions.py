@@ -47,6 +47,13 @@ for i in ["0", "4", "5", "-1", "-5", "-6"]:
 for lo, hi in [("nil", "nil"), ("1", "3"), ("-2", "nil"), ("nil", "-2"), ("3", "1"), ("-10", "10"),
                ("10", "20"), ("2", "2"), ("-3", "-1"), ("0", "5")]:
     CASES.append((f"sliceFrom: {lo} to: {hi}", (lambda a, z: lambda l: l.slice(a, z))(b(lo), b(hi))))
+# Slice bounds that are not Integers or None. ProtoBase hands them to Python's
+# slice.indices, which takes True as 1 and raises TypeError for the others; protoBaseST
+# refuses all three with PBValidationError (an intended deviation: a Boolean is not a
+# number in Smalltalk, and ProtoBase's own _position refuses bool). list_positions.st
+# records both answers.
+for word, arg in [("true", True), ("'a'", "a"), ("1.0", 1.0)]:
+    CASES.append((f"sliceFrom: {word} to: nil", (lambda a: lambda l: l.slice(a, None))(arg)))
 for n in ["0", "2", "-1", "5", "10", "-10"]:
     CASES.append((f"head: {n}", (lambda a: lambda l: l.head(a))(int(n))))
     CASES.append((f"tail: {n}", (lambda a: lambda l: l.tail(a))(int(n))))
