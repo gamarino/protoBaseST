@@ -1301,7 +1301,10 @@ cut in `docs/not-done.md`. A blind write never ships without its merge.
     *(Task 15 review, M3 and M4.)* A pointer `pushAtom:` answers stays valid for the life of
     the storage: the atom keeps it in its `saved` cell, so appended bytes are never retracted
     (no truncation or discard of the tail of an aborted or failed commit; an unpublished
-    record is an orphan). Once `pushAtom:` exists, the unit tests that save into the
+    record is an orphan). An orphan may repeat the oid of a reachable record (the loser of a
+    lost `saved` race writes one): any tool that scans segments by oid (checker, compaction,
+    replication) must consider only records reachable from a root (Task 15 review, R2-m1).
+    Once `pushAtom:` exists, the unit tests that save into the
     `SegmentSink` double (`write_dependents_first.st`, `atom_keys_oid.st`, `save_race.st`)
     move to `PBFileStorage`, and `tests/unit/_sink.st` is deleted.
     - The first save creates `<uuid hex>.seg` with `#create #exclusive` and a UUID4 name,
