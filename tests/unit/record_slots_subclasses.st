@@ -1,4 +1,4 @@
-"EXPECT: ok 22"
+"EXPECT: ok 39"
 "Plan Task 16b, fix round 1 (review I1, M2): an application subclass of a node class gets its
  own record shape, derived from its declarations when it is registered. A subclass that
  reorders its persistedFields keeps the slot layout of the accessors it inherits; the AVL
@@ -37,13 +37,19 @@ BadLayoutNode class >> typeName
 BadLayoutNode class >> slotFields
   ^ #('left' 'key' 'value' 'right' 'height' 'count').
 
+PBKeyNode subclass: #DuplicateFieldNode.
+DuplicateFieldNode class >> typeName
+  ^ 'slotstest.DuplicateFieldNode'.
+DuplicateFieldNode class >> persistedFields
+  ^ #('key' 'value' 'left' 'right' 'height' 'count' 'key').
+
 PBKeyNode subclass: #BadIntegerNode.
 BadIntegerNode class >> typeName
   ^ 'slotstest.BadIntegerNode'.
 BadIntegerNode class >> integerFields
   ^ #('height' 'count' 'rank').
 
-| c root keys sink stub node older bad tree walked |
+| c root keys sink stub node older bad tree walked seed prios put |
 c := Check new.
 PBTypeRegistry register: ReorderedNode; register: ExtendedNode.
 
@@ -73,6 +79,41 @@ c that: 'extended: count' is: root count equals: 8.
 c that: 'extended: a written node has no priority' is: root priority equals: nil.
 c that: 'extended: nor the field in its record' isTrue: (root state includesKey: 'priority') not.
 c that: 'extended: keyAt:' is: (PBAvl keyAt: root key: 6) value equals: 6.
+
+"Fix round 2 (review R2-I1): a write that copies a node carries the fields it does not know,
+ past the built-in layout, into the copy: a path copy on insert, the replaced node, all four
+ rotations and a removal keep each copied node's priority; only the nodes the write creates lack
+ it."
+seed := [:k :l :r | ExtendedNode _unsavedWithSlots:
+  ((ExtendedNode _fieldsKey: k value: k left: l right: r) copyWith: k * 100)].
+prios := [:r | | out | out := OrderedCollection new.
+  PBAvl nodesDo: [:x | out add: { x key. x priority }] over: r. out asArray].
+put := [:r :k | (PBAvl keyPut: r key: k value: k nodeClass: ExtendedNode) first].
+root := put value: (seed value: 3 value: (seed value: 2 value: nil value: nil) value: nil) value: 1.
+c that: 'right rotation: the left child rises' is: root key equals: 2.
+c that: 'right rotation: the copied nodes keep their priority' is: (prios value: root) equals: { {1. nil}. {2. 200}. {3. 300} }.
+root := put value: (seed value: 1 value: nil value: (seed value: 2 value: nil value: nil)) value: 3.
+c that: 'left rotation: the right child rises' is: root key equals: 2.
+c that: 'left rotation: the copied nodes keep their priority' is: (prios value: root) equals: { {1. 100}. {2. 200}. {3. nil} }.
+root := put value: (seed value: 3 value: (seed value: 1 value: nil value: nil) value: nil) value: 2.
+c that: 'left-right rotation: the new node rises' is: root key equals: 2.
+c that: 'left-right rotation: the copied nodes keep their priority' is: (prios value: root) equals: { {1. 100}. {2. nil}. {3. 300} }.
+root := put value: (seed value: 1 value: nil value: (seed value: 3 value: nil value: nil)) value: 2.
+c that: 'right-left rotation: the new node rises' is: root key equals: 2.
+c that: 'right-left rotation: the copied nodes keep their priority' is: (prios value: root) equals: { {1. 100}. {2. nil}. {3. 300} }.
+tree := seed value: 2 value: (seed value: 1 value: nil value: nil) value: (seed value: 3 value: nil value: nil).
+root := put value: tree value: 4.
+c that: 'insert: the path copies keep their priority' is: (prios value: root) equals: { {1. 100}. {2. 200}. {3. 300}. {4. nil} }.
+root := (PBAvl keyPut: tree key: 1 value: 99 nodeClass: ExtendedNode) first.
+c that: 'replace: the new value is stored' is: (PBAvl keyAt: root key: 1) value equals: 99.
+c that: 'replace: the replaced node and its path keep their priority' is: (prios value: root) equals: { {1. 100}. {2. 200}. {3. 300} }.
+root := (PBAvl keyRemove: tree key: 2) first.
+c that: 'remove: the remaining nodes keep their priority' is: (prios value: root) equals: { {1. 100}. {3. 300} }.
+root := (PBAvl keyRemove: tree key: 1) first.
+c that: 'remove of a leaf: the copied root keeps its priority' is: (prios value: root) equals: { {2. 200}. {3. 300} }.
+c that: 'and the copies are still of the subclass' is: root class equals: ExtendedNode.
+root _saveInto: sink.
+c that: 'a saved copy reads its carried priority back' is: root unloadedCopy priority equals: 200.
 
 "M2: an older record without the optional integer field loads; a present one is checked."
 older := ExtendedNode _unsavedWithState: (PBFrozenDict withAssociations: {
@@ -104,4 +145,7 @@ c that: 'a slot layout that does not extend the superclass''s' signals: PBUserEr
 c that: 'and the class is not registered' isTrue: (PBTypeRegistry isRegistered: 'slotstest.BadLayoutNode') not.
 c that: 'an integer field that is not a field' signals: PBUserError containing: 'rank' during: [
   PBTypeRegistry register: BadIntegerNode].
+c that: 'persistedFields that name a field twice (review R2-M1)' signals: PBUserError containing: 'name a field twice' during: [
+  PBTypeRegistry register: DuplicateFieldNode].
+c that: 'and that class is not registered' isTrue: (PBTypeRegistry isRegistered: 'slotstest.DuplicateFieldNode') not.
 c report displayNl.

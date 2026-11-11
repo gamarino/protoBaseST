@@ -409,15 +409,32 @@ PBKeyNode >> _pbKeyNodeIn: anOwner
 PBNode >> withLeft: aLeft right: aRight
   ^ self subclassResponsibility.
 
+"A new node of this class whose built-in slots are anArray, the values a write
+ computed for a copy of this node. The fields past them, an application
+ subclass's own, which the writes do not know, are carried from this node
+ unchanged: present when present here, with the same value, absent when absent
+ (review R2-I1). A class's slot layout starts with its superclass's
+ (_PBRecordShape build:), so those fields follow the built-in prefix. The
+ built-in classes have none and take the plain constructor."
+PBNode >> _copyWithSlots: anArray
+  | own |
+  own := slots == nil ifTrue: [self _slots] ifFalse: [slots].
+  own size > anArray size ifFalse: [^ PBNode _new: self class values: anArray].
+  ^ self class _unsavedWithSlots: anArray , (own copyFrom: anArray size + 1 to: own size)
+    state: (self class _recordShape stateOfSlots: anArray carrying: self state).
+
 "A new positional node holding aValue (boxed when large) over aLeft and aRight;
  height and count are computed from the children."
 PBPosNode class >> value: aValue left: aLeft right: aRight
-  ^ PBNode _new: self values: {
-    _PBTree boxed: aValue. aLeft. aRight.
+  ^ PBNode _new: self values: (self _fieldsValue: aValue left: aLeft right: aRight).
+
+"The values of the built-in slots of a new positional node."
+PBPosNode class >> _fieldsValue: aValue left: aLeft right: aRight
+  ^ { _PBTree boxed: aValue. aLeft. aRight.
     _PBTree heightOf: aLeft and: aRight. _PBTree countOf: aLeft and: aRight }.
 
 PBPosNode >> withLeft: aLeft right: aRight
-  ^ self class value: self storedValue left: aLeft right: aRight.
+  ^ self _copyWithSlots: (self class _fieldsValue: self storedValue left: aLeft right: aRight).
 
 "A new keyed node of key aKey (never boxed) holding aValue (boxed when large)
  over aLeft and aRight; anOrderKey is PBKeys orderKey: aKey, which the caller
@@ -437,12 +454,14 @@ PBKeyNode class >> _fieldsKey: aKey value: aValue left: aLeft right: aRight
     _PBTree heightOf: aLeft and: aRight. _PBTree countOf: aLeft and: aRight }.
 
 PBKeyNode >> withLeft: aLeft right: aRight
-  ^ self class key: self key orderKey: self orderKey value: self storedValue left: aLeft right: aRight.
+  ^ (self _copyWithSlots: (self class _fieldsKey: self key value: self storedValue left: aLeft right: aRight))
+    _publishOrderKey: self orderKey.
 
 "A new node of this class with this node's key and children, holding aValue
  (ProtoBase KeyNode._with_value: the stored key object is kept)."
 PBKeyNode >> withValue: aValue
-  ^ self class key: self key orderKey: self orderKey value: aValue left: self left right: self right.
+  ^ (self _copyWithSlots: (self class _fieldsKey: self key value: aValue left: self left right: self right))
+    _publishOrderKey: self orderKey.
 
 "As PBKeyNode's, for a value that is a (payload, count) pair (PBValidationError
  otherwise, ProtoBase _value_count); weight is the count plus the children's

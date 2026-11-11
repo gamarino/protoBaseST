@@ -426,11 +426,16 @@ PBAtom >> _installState: anEnvelope
  (heights, counts, weights), so the integer fields are not checked again.
  anArray is kept as the slots: never to be changed."
 PBAtom class >> _unsavedWithSlots: anArray
-  | shape slots |
+  | shape |
   shape := self _recordShape.
-  slots := shape slotsPadded: anArray.
+  ^ self _unsavedWithSlots: (shape slotsPadded: anArray) state: (shape stateOfSlots: anArray).
+
+"As _unsavedWithSlots:, for a writer that has every slot, aSlotArray, and the
+ state they make, aPBFrozenDict (a node copy that carries fields it does not
+ know: PBNode >> _copyWithSlots:)."
+PBAtom class >> _unsavedWithSlots: aSlotArray state: aPBFrozenDict
   ^ (self basicNew _setOid: nil pointer: nil storage: nil)
-    _installState: (PBAtomEnvelope basicNew _setTag: nil oid: nil state: (shape stateOfSlots: anArray) slots: slots).
+    _installState: (PBAtomEnvelope basicNew _setTag: nil oid: nil state: aPBFrozenDict slots: aSlotArray).
 
 "An unloaded atom (a stub) of this class: its record is at aPointer in
  aStorage and is loaded on first use."
@@ -794,12 +799,17 @@ _PBRecordShape class >> for: aClass
   ^ shape.
 
 "A new shape of aClass. PBUserError (a class declaration error) when its
+ persistedFields name a field twice (the decoder shares the shape's keys
+ without checking a record's names again, review R2-M1), its
  integerFields are not slot fields, or its
  slotFields do not start with its superclass's (the literal accessors it
  inherits would read the wrong slots)."
 _PBRecordShape class >> build: aClass
   | persisted slotFields inherited fields required ints optional |
   persisted := Array withAll: aClass persistedFields.
+  persisted asSet size = persisted size ifFalse: [
+    ^ PBUserError signal: aClass name , ': its persistedFields ' , persisted printString
+      , ' name a field twice (a record holds each field once)'].
   slotFields := aClass slotFields.
   inherited := (aClass superclass respondsTo: #slotFields) ifTrue: [aClass superclass slotFields] ifFalse: [nil].
   (inherited notNil and: [slotFields isNil or: [slotFields size < inherited size
@@ -890,6 +900,25 @@ _PBRecordShape >> stateOfSlots: anArray
     | i |
     i := persistedSlots at: p.
     i <= anArray size ifTrue: [keys addLast: (persisted at: p). values addLast: (anArray at: i)]].
+  ^ PBFrozenDict withAssociations: ((1 to: keys size) asArray collect: [:k | (keys at: k) -> (values at: k)]).
+
+"The state of a copy of the record aState whose first anArray size fields are
+ given by anArray (an AVL write): every later field is carried from aState,
+ present with its value when aState holds it, absent otherwise. The keys are
+ persisted, in order: the shared Array when every field is present."
+_PBRecordShape >> stateOfSlots: anArray carrying: aState
+  | keys values |
+  keys := OrderedCollection new.
+  values := OrderedCollection new.
+  1 to: persisted size do: [:p |
+    | i f |
+    i := persistedSlots at: p.
+    f := persisted at: p.
+    i <= anArray size
+      ifTrue: [keys addLast: f. values addLast: (anArray at: i)]
+      ifFalse: [(aState includesKey: f) ifTrue: [keys addLast: f. values addLast: (aState at: f)]]].
+  keys size = persisted size ifTrue: [
+    ^ PBFrozenDict _keys: persisted index: persistedIndex values: values asArray].
   ^ PBFrozenDict withAssociations: ((1 to: keys size) asArray collect: [:k | (keys at: k) -> (values at: k)]).
 
 "The slots of a record of this shape, given by a writer that has fewer values
