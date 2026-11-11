@@ -104,7 +104,11 @@
 - `PBHashDictionary >> setAt:value:` and `removeAt:` (buckets of `(key, value)` tuples under
   the hash key); `PBSet >> union:`, `intersection:` and `difference:`, ProtoBase's folds of
   `add:` and `remove:`.
-- `PBFramedLog payloadsOf:kind:` reads a framed log file (ProtoBase `logfile.read_log`): torn
-  tail versus mid-log corruption, another version `PBNotSupportedError`. Clusters stay outside
-  the prototype; the invalid `log` vectors are refused with the listed class
-  (`tests/conformance/invalid_log.st`).
+- `PBCountedSet` and `PBRepeatedKeysDictionary` are `ConcurrentOptimized`, as in ProtoBase: a
+  new empty one is mergeable and rebases to `current` unchanged (Task 16 review I1).
+- `_bucketHash:` on `PBHashDictionary` and `PBHashBuckets` (ProtoBase `_bucket_hash`): lookups
+  and writes file entries under it; multi-entry buckets match ProtoBase byte for byte
+  (`tests/interop/bucket_collisions_identical.sh`).
+- The invalid `log` vectors (framed log files, read by ProtoBase only in its cluster and
+  tiered storage) are justified skips of `tests/conformance/cluster.st` (ruling R14); the
+  runner prints the `SKIP:` lines of a passing test under its `PASS` line.

@@ -111,13 +111,20 @@ version carries two runtime-only fields, never persisted, and a cell:
 The log is a persistent chain (_PBOpLog): a mutator adds one link in O(1),
 and opLog builds the PBFrozenList on request. A PBList has no log (ProtoBase's
 List is not ConcurrentOptimized): it is never mergeable, rebaseOnto: is
-PBNotSupportedError, and markConsumed changes nothing that matters. The
-writes of PBCountedSet and PBRepeatedKeysDictionary, with their counter
-merges, come with plan Task 22.
+PBNotSupportedError, and markConsumed changes nothing that matters.
+PBCountedSet and PBRepeatedKeysDictionary are ConcurrentOptimized too: they
+have no mutators here, so their log is always empty, a new one is mergeable,
+and its rebase answers current unchanged, as ProtoBase's. PBCountedSet's
+writes, with their counter merge (ops ('transform' e removes adds)), come
+with plan Task 22; PBRepeatedKeysDictionary's writes are a non-goal (design
+spec, 'Non-goals').
 
 The trees are built by PBAvl, as ProtoBase's avl.py builds them, so one
 sequence of operations gives the same nodes in both implementations. A hash
-dictionary and a set file an entry under the hash key of its key (element)
+dictionary and a set file an entry under _bucketHash: of its key (element),
+the hash key (PBKeys hashKey:) unless a subclass overrides it (ProtoBase's
+_bucket_hash, the seam its tests use to force collisions; it must stay a pure
+function of the value, since persisted trees are ordered by it),
 in a bucket, a tuple of the entries of that hash in insertion order (a hash
 dictionary's entries are (key, value) tuples); a bucket emptied by a removal
 leaves the tree. A
@@ -322,9 +329,9 @@ PBIndexedCollection class >> _initializeShapes
 
 "=== the operation log ==="
 
-"Whether the class is ConcurrentOptimized in ProtoBase and logs its
- mutators here (PBDictionary, PBHashDictionary, PBSet; PBCountedSet and
- PBRepeatedKeysDictionary get their writes and logs with plan Task 22)."
+"Whether the class is ConcurrentOptimized in ProtoBase: PBDictionary,
+ PBHashDictionary, PBSet, PBCountedSet and PBRepeatedKeysDictionary (the
+ last two have no mutators here: their log stays empty)."
 PBIndexedCollection class >> _logsOperations
   ^ false.
 
@@ -374,7 +381,11 @@ PBIndexedCollection >> markConsumed
   ^ self.
 
 "current with the net effect of this version's log replayed through the
- public mutators (ProtoBase ConcurrentOptimized.rebase_onto)."
+ public mutators (ProtoBase ConcurrentOptimized.rebase_onto). The order of the
+ checks is protoBaseST's own: a class without a log (PBList) is refused first,
+ where ProtoBase's List has no rebase_onto at all (an AttributeError); then a
+ current of another class (ProtoBase's type check), then a current with an
+ index (design spec 7.4)."
 PBIndexedCollection >> rebaseOnto: current
   | ops target |
   self class _logsOperations ifFalse: [
@@ -451,9 +462,11 @@ PBIndexedCollection >> _elementsOf: aCollection for: aSelector
   (aCollection isClassObject not and: [aCollection respondsTo: #do:]) ifFalse: [
     ^ PBValidationError signal: self class name , ' ' , aSelector , ' a collection was expected, not '
       , (PBKeys _preview: aCollection)].
-  "A String's elements are Characters, which no format stores."
+  "A deviation from Python, where list('abc') is 'a', 'b' and 'c': a String's
+   elements are Characters, which no format stores."
   aCollection isString ifTrue: [
-    ^ PBValidationError signal: self class name , ' ' , aSelector , ' a String is one value, not a collection of values: '
+    ^ PBValidationError signal: self class name , ' ' , aSelector
+      , ' a String is one value, not a collection of values (store one String with appendLast:, add: or setAt:value:): '
       , (PBKeys _preview: aCollection)].
   out := OrderedCollection new.
   aCollection do: [:each | out addLast: each].
@@ -547,11 +560,7 @@ PBList >> appendLast: aValue
  extend, an indexed list included."
 PBList >> extend: aCollection
   | values |
-  "A deviation from Python, where extend('abc') appends 'a', 'b' and 'c': a
-   String's elements are Characters, which no format stores."
-  (aCollection isClassObject not and: [aCollection isString]) ifTrue: [
-    ^ PBValidationError signal: 'PBList extend: a String is one value, not a collection of values: use appendLast: '
-      , (PBKeys _preview: aCollection)].
+  "A String is refused (_elementsOf:for:)."
   values := self _elementsOf: aCollection for: 'extend:'.
   1 to: values size do: [:i | values at: i put: (PBCodec canonical: (values at: i))].
   "As ProtoBase: nothing to add answers the receiver before the indexes are
@@ -704,20 +713,17 @@ PBHashDictionary class >> requiredFields
 PBHashDictionary class >> persistedFields
   ^ #('root' 'count' 'indexes').
 
-"The bucket tuple of the hash key aHash (an empty Array when absent), checked."
-PBHashDictionary >> _bucket: aHash
-  | node |
-  node := _PBTree nodeWithKey: (PBKeys orderKey: aHash) of: (self stateAt: 'root') in: self.
-  ^ node isNil ifTrue: [#()] ifFalse: [_PBBuckets entriesOf: node value pairs: true in: self].
+"The hash a key is filed under (ProtoBase HashDictionary._bucket_hash): its
+ hash key. A subclass may override it (to force collisions in a test), but
+ it must stay a pure function of the key's value."
+PBHashDictionary >> _bucketHash: aCanonical
+  ^ PBKeys hashKey: aCanonical.
 
 "The (key, value) entry of aKey, or nil."
 PBHashDictionary >> _entryAt: aKey
-  | key okey |
-  key := self _probe: aKey.
-  okey := PBKeys orderKey: key.
-  (self _bucket: (PBKeys hashKey: key)) do: [:entry |
-    (PBKeys orderKey: (entry at: 1)) = okey ifTrue: [^ entry]].
-  ^ nil.
+  | found |
+  found := _PBBuckets find: (self _probe: aKey) in: (self stateAt: 'root') pairs: true owner: self.
+  ^ (found at: 3) = 0 ifTrue: [nil] ifFalse: [(found at: 2) at: (found at: 3)].
 
 PBHashDictionary >> getAt: aKey
   ^ self getAt: aKey default: nil.
@@ -817,14 +823,14 @@ _PBBuckets class >> entriesOf: aBucket pairs: aBoolean in: anOwner
           , (PBKeys _preview: entry)]]].
   ^ entries.
 
-"{ hash key. entries of its bucket (an Array, empty when absent). 1-based
- position of the entry of aCanonical in them, or 0 } (ProtoBase
- _HashBuckets._find and HashDictionary._find): the hash key first, then the
- order key, so a value that is neither hashable nor orderable is
+"{ bucket hash (anOwner _bucketHash:). entries of its bucket (an Array,
+ empty when absent). 1-based position of the entry of aCanonical in them, or
+ 0 } (ProtoBase _HashBuckets._find and HashDictionary._find): the bucket hash
+ first, then the order key, so a value that is neither hashable nor orderable is
  PBValidationError. With pairs, an entry's key is its first item."
 _PBBuckets class >> find: aCanonical in: aRoot pairs: aBoolean owner: anOwner
   | h okey node entries |
-  h := PBKeys hashKey: aCanonical.
+  h := anOwner _bucketHash: aCanonical.
   okey := PBKeys orderKey: aCanonical.
   node := _PBTree nodeWithKey: (PBKeys orderKey: h) of: aRoot in: anOwner.
   node isNil ifTrue: [^ { h. Array new: 0. 0 }].
@@ -874,17 +880,17 @@ PBHashBuckets >> entriesDo: aBlock
 PBHashBuckets >> do: aBlock
   self entriesDo: [:entry | aBlock value: (self _elementOf: entry)].
 
+"The hash an element is filed under (ProtoBase _HashBuckets._bucket_hash):
+ its hash key. A subclass may override it (to force collisions in a test),
+ but it must stay a pure function of the element's value."
+PBHashBuckets >> _bucketHash: aCanonical
+  ^ PBKeys hashKey: aCanonical.
+
 "The entry of anElement, or nil."
 PBHashBuckets >> _entryAt: anElement
-  | element okey node pairs |
-  element := self _probe: anElement.
-  okey := PBKeys orderKey: element.
-  pairs := self _pairs.
-  node := _PBTree nodeWithKey: (PBKeys orderKey: (PBKeys hashKey: element)) of: (self stateAt: 'root') in: self.
-  node isNil ifTrue: [^ nil].
-  (_PBBuckets entriesOf: node value pairs: pairs in: self) do: [:entry |
-    (PBKeys orderKey: (self _elementOf: entry)) = okey ifTrue: [^ entry]].
-  ^ nil.
+  | found |
+  found := _PBBuckets find: (self _probe: anElement) in: (self stateAt: 'root') pairs: self _pairs owner: self.
+  ^ (found at: 3) = 0 ifTrue: [nil] ifFalse: [(found at: 2) at: (found at: 3)].
 
 PBHashBuckets >> has: anElement
   ^ (self _entryAt: anElement) notNil.
@@ -996,6 +1002,11 @@ PBCountedSet class >> _emptyValueOf: aField
 PBCountedSet >> _pairs
   ^ true.
 
+"ConcurrentOptimized, as ProtoBase's CountedSet; its log stays empty until
+ its writes (plan Task 22)."
+PBCountedSet class >> _logsOperations
+  ^ true.
+
 "The sum of the counts."
 PBCountedSet >> totalCount
   ^ _PBTree integer: (self stateAt: 'total_count') field: 'total_count' of: self.
@@ -1033,6 +1044,11 @@ PBRepeatedKeysDictionary class >> persistedFields
 PBRepeatedKeysDictionary class >> _emptyValueOf: aField
   aField = 'total_count' ifTrue: [^ 0].
   ^ super _emptyValueOf: aField.
+
+"ConcurrentOptimized, as ProtoBase's RepeatedKeysDictionary; it has no
+ mutators here (its writes are a non-goal), so its log stays empty."
+PBRepeatedKeysDictionary class >> _logsOperations
+  ^ true.
 
 PBRepeatedKeysDictionary >> totalCount
   ^ _PBTree integer: (self stateAt: 'total_count') field: 'total_count' of: self.

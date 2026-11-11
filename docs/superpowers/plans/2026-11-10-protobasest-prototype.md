@@ -897,10 +897,11 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   - `tests/conformance/cluster.st`, which prints `SKIP:`-prefixed lines for each cluster
     item, then `cluster skipped visibly`, and exits 0;
     This runner also owns the invalid-vector layers `roots_log` and `message` (an acceptor
-    log and cluster wire messages): the cluster is out of the prototype's scope (Spec §10.5:
-    a space with `cluster/` is refused), so it prints one `SKIP: invalid <layer> <id>` line per
-    manifest entry of those two layers, naming the id, and the Task 25 accounting check
-    accepts exactly those lines as justified skips;
+    log and cluster wire messages), and since ruling R14 `log` (framed log files): the
+    cluster and the tiered storage are out of the prototype's scope (Spec §10.5: a space with
+    `cluster/` is refused), so it prints one `SKIP: invalid <layer> <id>` line per manifest
+    entry of those three layers, naming the id and the reason, and the Task 25 accounting
+    check accepts exactly those lines as justified skips;
   - `tests/unit/read_cross_kind_keys.st` (Review Focus 1, on a Python-written space made by
     `tests/interop/py_make_keys_space.py`, run through the helper
     `tests/interop/_make_keys_space.sh`: the leading `_` makes the runner treat it as a helper,
@@ -1229,10 +1230,13 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
   - `tests/unit/rebase_hashdict.st`;
   - `tests/unit/consumed_d33.st`;
   - `tests/unit/hashdict_set_ops.st`.
-  - `tests/conformance/invalid_log.st`: every invalid vector of the `log` layer
-    (`log-version-3`, `log-kind-mismatch`, `log-mid-corruption`) is refused by the operation-log
-    reader with the listed class (`EXPECT: invalid log-layer N/N`, N computed from the
-    manifest).
+  - *Amended by ruling R14 (Task 16 review I2):* the `tests/conformance/invalid_log.st`
+    deliverable is dropped. The `log` layer's vectors are framed log files
+    (`storage/logfile.py`), which ProtoBase reads only in its cluster and tiered storage, both
+    non-goals; collection operation logs are never persisted, so no "operation-log reader"
+    exists to test. `tests/conformance/cluster.st` prints one justified `SKIP: invalid log
+    <id>` line per manifest entry of the layer, beside `roots_log` and `message`, and the
+    runner shows those lines under its PASS line.
 
 **Interfaces:**
 - Consumes: Task 15.
@@ -1532,6 +1536,9 @@ cut in `docs/not-done.md`. A blind write never ships without its merge.
     `countOf:`, with `total_count` kept;
   - log entries `('transform' e removes adds)`;
   - net effect per element `c → max(c - removes, 0) + adds`.
+  - (Task 16 review I1) `PBCountedSet` already logs (`_logsOperations` true, an empty log
+    rebases to `current`); this task supplies its `('transform' ...)` ops in
+    `_replay:onto:` and its own `_netOps`. `PBRepeatedKeysDictionary` writes stay a non-goal.
 
 - [ ] **Step 1:** failing tests: the composed transform of add, add, remove onto a current
   count of 5 gives 6; removes below zero clamp at 0 before the adds.
@@ -1612,7 +1619,8 @@ If this task is cut, `docs/not-done.md` says so, and any `PBCountedSet` mutator 
   `values_*`, `invalid`, `order`, `hashes`, `exact_tokens`, `atom_*`, `framing`, `database`,
   `legacy_database`, `polyglot_database`, `cluster`) and fails unless each one is run by some
   runner, listed as an expected difference, or listed as a justified `SKIP:` line of
-  `cluster.st` (`roots_log` and `message` layers, the cluster section). The runners record the
+  `cluster.st` (`log`, `roots_log` and `message` layers, the cluster section; `log` added by
+  ruling R14). The runners record the
   ids they ran; an id that no runner names is a FAIL, so a vector can never be silently
   unrun.
 - [ ] **Step 4:** run a whole-branch review per repository with superpowers:requesting-code-review,

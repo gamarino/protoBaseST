@@ -12,7 +12,10 @@
 # STPATH=<repo>/src. Its first line (second after a "#!" line) is a directive:
 #   "EXPECT: <text>"        exit 0, and the last non-empty stdout line equals <text>
 #   "EXPECT-ERROR: <text>"  non-zero exit, and the error output contains <text> (text optional)
-# A successful run whose last line starts with "SKIP: " counts as skipped.
+# A successful run whose last line starts with "SKIP: " counts as skipped. A passing test may also
+# print justified per-item skips (lines starting with "SKIP: " before its last line, such as the
+# cluster vectors of tests/conformance/cluster.st): they are shown under its PASS line, so a skip is
+# always visible where the run is read.
 # Each *.sh file passes with exit 0, is skipped with exit 77, and fails otherwise. The lines of a
 # passing *.sh file's output that start with "NOTE: " are shown under its PASS line (a workaround
 # a test relies on is stated where the run is read, never hidden).
@@ -96,7 +99,11 @@ run_st() {
         echo "SKIP: $(rel "$file"): ${last#SKIP: }"; return 77
     fi
     if [[ $mode == value ]]; then
-        if [[ $rc -eq 0 && "$last" == "$expected" ]]; then echo "PASS: $(rel "$file")"; return 0; fi
+        if [[ $rc -eq 0 && "$last" == "$expected" ]]; then
+            echo "PASS: $(rel "$file")"
+            printf '%s\n' "$out" | grep '^SKIP: ' | sed 's/^/    /'
+            return 0
+        fi
         echo "FAIL: $(rel "$file"): expected [$expected], got exit=$rc last=[$last] stderr=[$errtext]"
         return 1
     fi

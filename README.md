@@ -280,7 +280,11 @@ s := s union: (PBSet new add: 3).
   large value as the `PBValueBox` its node holds, so a replay reuses it.
 - `logComplete` (and `isMergeable`, which answers it) is true for a version built by `new`
   and derived only by logged mutators; false for a loaded version and everything derived
-  from it. A `PBList` has no log and is never mergeable.
+  from it. A `PBList` has no log and is never mergeable. `PBCountedSet` and
+  `PBRepeatedKeysDictionary` are `ConcurrentOptimized` too but have no writes yet (their log
+  stays empty): a new empty one is mergeable, and its rebase answers `current` unchanged, as
+  ProtoBase's. `PBCountedSet`'s writes and counter merge come later in the plan;
+  `PBRepeatedKeysDictionary`'s writes are a non-goal.
 - `rebaseOnto: current` replays the net effect of the log onto `current` through the public
   mutators: the last intent per key (element), keys compared by order key, in order of last
   occurrence, so a set then a remove of one key nets to a remove. `current` must be of the
@@ -294,6 +298,14 @@ s := s union: (PBSet new add: 3).
 - `union:`, `intersection:` and `difference:` are ProtoBase's folds of `add:` and `remove:`,
   so the log records each element's intent; the operand is a set or anything answering `do:`
   except a String.
+- A hash dictionary or set files an entry under `_bucketHash:` of its key, the hash key unless
+  a subclass overrides it (ProtoBase's `_bucket_hash`, the seam for forcing collisions in
+  tests). `tests/interop/bucket_collisions_identical.sh` builds multi-entry buckets on both
+  sides and requires the same bucket bytes.
+- The invalid vectors of the `log` layer (framed log files) are justified skips of
+  `tests/conformance/cluster.st`, like the cluster's: ProtoBase reads such files only in its
+  cluster and tiered storage, outside the prototype. The runner shows every `SKIP:` line a
+  passing test prints under its `PASS` line.
 
 ## Running the tests
 

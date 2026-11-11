@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Self-test of tests/run_tests.sh: the runner must fail on a wrong error, a bare EXPECT-ERROR, a
-# broken import, a parse error, a missing path and an empty tree, and pass the right cases.
+# broken import, a parse error, a missing path and an empty tree, and pass the right cases; it must
+# show the SKIP lines a passing test prints.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER="$HERE/../run_tests.sh"
@@ -24,4 +25,10 @@ expect fail "broken import"                    "$FIX/broken_import.st"
 expect fail "parse error"                      "$FIX/parse_error.st"
 expect fail "missing path"                     "$HERE/no_such_path"
 expect fail "empty tree finds no test"         "$EMPTY"
+# A passing test's per-item skips are shown under its PASS line.
+if "$RUNNER" "$FIX/inner_skip.st" 2>&1 | grep -q '^    SKIP: item one: a justified reason$'; then
+    echo "ok: a passing test's SKIP lines are shown"
+else
+    echo "WRONG: a passing test's SKIP lines are not shown"; bad=1
+fi
 exit $bad
