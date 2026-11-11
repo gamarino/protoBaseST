@@ -14,7 +14,7 @@ v2.0.0rc1; format spec v2.0.0rc1, 'Segments and records' and 'Root records'):
                                         aPointer; its references resolve lazily
   aStorage refTo: bytes offset: n tag: t
                                         the resolver of PBCodec: an unloaded atom
-  aStorage recordsOfSegment: aUUID      the record walk of a segment
+  aStorage recordsOfSegment: aUUID      the diagnostic walk of a complete segment
   aStorage close                        later reads signal PBClosedError
 
 Opening checks what ProtoBase checks: a path that exists and is not a
@@ -31,7 +31,21 @@ file is named by (format spec, 'Segment header'). The readers are cached in an
 Atom over a PBFrozenDict (segment hex -> reader), replaced by compare-and-swap,
 never changed in place, so concurrent loads never lock. Two loads that open
 the same segment at once both open a reader; the first installed wins and the
-other closes its own. Every record is checked against its CRCs when read.
+other closes its own. close sets the closed flag before it empties the cache,
+and a load re-reads the flag after it installs a reader, so a reader installed
+while close runs is closed by the load that installed it (PBClosedError). A
+read under a reader that close closes meanwhile is PBClosedError too: protoST's
+BinaryFile keeps its descriptor until the read in progress returns. Every
+record is checked against its CRCs when read. The seams PBFileStorage >>
+_openReader: and PBSegmentReader class >> _openFile: open a reader and its
+file; tests override them to force each interleaving.
+
+The space is read by pointer only (the root, then each reference), as ProtoBase
+reads it: a segment is never scanned. A file storage never truncates a segment,
+so the tail of one may be torn by a crash, or growing under a live writer;
+nothing published points there. recordsOfSegment: is not a read path: it is
+the walk of a complete segment for the conformance runner and diagnostics, and
+it reports a torn tail or an append in progress as PBCorruptionError by design.
 
 This module writes nothing: the write side (segments, publishing the root
 under the owner lock) is Task 17."
@@ -57,18 +71,32 @@ PBSegmentReader class >> segment: aUUID file: aFileReference
   bytes := _PBFrame uuidBytes: aUUID.
   bytes isNil ifTrue: [
     ^ PBValidationError signal: 'PBSegmentReader: a segment UUID or 16 bytes was expected, not ' , aUUID printString].
-  file := [BinaryFile open: aFileReference options: #(#read)]
+  file := [self _openFile: aFileReference]
     on: FileSystemError do: [:e |
       (e isKindOf: FileDoesNotExist) ifTrue: [
         ^ PBCorruptionError signal: 'PBSegmentReader: the segment ' , bytes hex asLowercase , ' is missing'].
       ^ PBUnexpectedError signal: 'PBSegmentReader: cannot open the segment ' , bytes hex asLowercase , ': ' , e messageText].
   ok := false.
-  [header := PBSegmentHeader decode: (file readAt: 0 size: PBSegmentHeader byteSize).
+  [header := self _headerIn: file of: bytes.
    header segment = bytes ifFalse: [
      ^ PBCorruptionError signal: 'PBSegmentReader: the segment file ' , bytes hex asLowercase
        , '.seg has the header of the segment ' , header segmentHex].
    ok := true] ensure: [ok ifFalse: [file close]].
   ^ self basicNew _setSegment: bytes file: file header: header.
+
+"The seam that opens a segment file for reading (tests override it)."
+PBSegmentReader class >> _openFile: aFileReference
+  ^ BinaryFile open: aFileReference options: #(#read).
+
+"The PBSegmentHeader at the start of aBinaryFile, the segment aByteArray. Its
+ refusals name the segment; a failure of the file system is PBUnexpectedError."
+PBSegmentReader class >> _headerIn: aBinaryFile of: aByteArray
+  | hex bytes |
+  hex := aByteArray hex asLowercase.
+  bytes := [aBinaryFile readAt: 0 size: PBSegmentHeader byteSize] on: FileSystemError do: [:e |
+    ^ PBUnexpectedError signal: 'PBSegmentReader: cannot read the header of the segment ' , hex , ': ' , e messageText].
+  ^ [PBSegmentHeader decode: bytes] on: PBDBError do: [:e |
+    e class signal: e messageText , ' in the segment ' , hex].
 
 PBSegmentReader >> _setSegment: aByteArray file: aBinaryFile header: aHeader
   "Runs once, on a fresh instance."
@@ -115,8 +143,11 @@ PBSegmentReader >> recordAt: anOffset
   ^ { recordHeader. payload }.
 
 "Every record from offset 26 to the end of the file, in order: an Array of
- { offset. PBRecordHeader. payload }. A record that fails its checks, a torn
- tail included, is PBCorruptionError: the walk never skips bytes."
+ { offset. PBRecordHeader. payload }. The walk of a complete segment, for the
+ conformance runner and diagnostics, not a read path (see the module comment):
+ a record that fails its checks, a torn tail or an append in progress included,
+ is PBCorruptionError, since the walk never skips bytes. A tolerant walk for
+ recovery tooling would be another selector."
 PBSegmentReader >> records
   | out offset end |
   out := OrderedCollection new.
@@ -132,6 +163,9 @@ PBSegmentReader >> records
 "Closes the file (idempotent)."
 PBSegmentReader >> close
   file close.
+
+PBSegmentReader >> isClosed
+  ^ file isClosed.
 
 PBSegmentReader >> printOn: aStream
   self isClassObject ifTrue: [^ aStream nextPutAll: self name].
@@ -234,7 +268,9 @@ PBFileStorage >> refTo: aSegmentBytes offset: anOffset tag: aTag
     storage: self.
 
 "The records of the segment aUUID (a UUID, its 16 bytes or its 32 hexadecimal
- digits), walked from offset 26: an Array of { offset. PBRecordHeader. payload }."
+ digits), walked from offset 26: an Array of { offset. PBRecordHeader. payload }.
+ A diagnostic of a complete segment, not how the space is read: a torn tail or
+ an append in progress is PBCorruptionError (PBSegmentReader >> records)."
 PBFileStorage >> recordsOfSegment: aUUID
   | bytes reader |
   bytes := (aUUID isString and: [aUUID isSymbol not and: [aUUID size = 32]])
@@ -246,7 +282,8 @@ PBFileStorage >> recordsOfSegment: aUUID
   reader := self _readerFor: bytes.
   ^ self _whileOpen: [reader records].
 
-"The number of segment readers open now (one per segment read since the open)."
+"The number of segment readers cached now (one per segment read since the open;
+ 0 once closed)."
 PBFileStorage >> openSegmentCount
   ^ readers value size.
 
@@ -256,7 +293,7 @@ PBFileStorage >> _readerFor: aByteArray
   | hex mine |
   hex := aByteArray hex asLowercase.
   (readers value at: hex ifAbsent: [nil]) ifNotNil: [:cached | ^ cached].
-  mine := PBSegmentReader segment: aByteArray file: directory / (hex , self class segmentSuffix).
+  mine := self _openReader: aByteArray.
   [| current installed |
    current := readers value.
    installed := current at: hex ifAbsent: [nil].
@@ -265,10 +302,22 @@ PBFileStorage >> _readerFor: aByteArray
     whileFalse.
   ^ self _unlessClosed: mine.
 
-"aReader, unless the storage is closed: a close that ran while aReader was being
- installed may have missed it, so it is closed here and PBClosedError signalled."
+"The seam that opens the reader of the segment aByteArray on a cache miss (tests
+ override it to force the interleavings of the module comment)."
+PBFileStorage >> _openReader: aByteArray
+  ^ PBSegmentReader segment: aByteArray file: (self _segmentFile: aByteArray).
+
+"The file of the segment aByteArray: <uuid-hex>.seg in the space directory."
+PBFileStorage >> _segmentFile: aByteArray
+  ^ directory / (aByteArray hex asLowercase , self class segmentSuffix).
+
+"aReader, an installed reader, unless the storage is closed: a close that ran
+ while aReader was being installed may have missed it, so the cache is emptied
+ again (which closes aReader) and PBClosedError signalled."
 PBFileStorage >> _unlessClosed: aReader
-  closed value ifTrue: [aReader close. ^ PBClosedError signal: 'PBFileStorage: the storage is closed'].
+  closed value ifTrue: [
+    self close.
+    ^ PBClosedError signal: 'PBFileStorage: the storage is closed'].
   ^ aReader.
 
 "aBlock's value. An Error from a reader the storage closed meanwhile is
@@ -281,11 +330,16 @@ PBFileStorage >> _whileOpen: aBlock
     (e isKindOf: FileSystemError) ifTrue: [^ PBUnexpectedError signal: 'PBFileStorage: a read failed: ' , e messageText].
     e pass].
 
-"Closes every segment reader; later loads, walks and root reads signal
- PBClosedError. Idempotent."
+"Closes every segment reader and empties the cache; later loads, walks and root
+ reads signal PBClosedError. Idempotent. The flag is set first, so a load that
+ installs a reader after the cache is emptied sees it (_unlessClosed:)."
 PBFileStorage >> close
+  | empty taken |
   closed value: true ifCurrent: false.
-  readers value do: [:reader | reader close].
+  empty := PBFrozenDict withAssociations: #().
+  [taken := readers value.
+   readers value: empty ifCurrent: taken] whileFalse.
+  taken do: [:reader | reader close].
 
 PBFileStorage >> printOn: aStream
   self isClassObject ifTrue: [^ aStream nextPutAll: self name].

@@ -410,6 +410,10 @@ Read ProtoBase's code before guessing a behaviour.
     key runners (Task 10: `order`, `hashes`, `exact_tokens`); their EXPECT lines become
     `order ascending 43/43 equal 4/4 unorderable 5/5`, `hashes 36/36 atom_hashes 3/3` and
     `exact_tokens 34/34 atom_tokens 3/3`.
+  - Remove `database/13966` (added by Task 11: the database record holding a `@uuid`) from
+    `tests/conformance/_expected_differences.st`; the EXPECT line of
+    `tests/conformance/database_records.st` becomes `database records 127/127` (Task 11's brief
+    says `N/N`; it reads `126/127 expected 1` until this step).
 
 ---
 
@@ -960,6 +964,11 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   order: Set and HashDictionary iterate in tree order, then bucket order.
 - [ ] **Step 4:** run `tests/run_tests.sh tests/conformance tests/unit`. Expected: all PASS,
   including `invalid_atom.st` from Task 11.
+  Task 11 lists the 9 `invalid` entries `atom-*` (stage `refusal`, `PBNotSupportedError`,
+  removedBy `Task 12`) in `tests/conformance/_expected_differences.st`, because the built-in
+  types had no class: remove all 9, and set the EXPECT line of
+  `tests/conformance/invalid_atom.st` to `invalid atom-layer 9/9`. VectorRun fails any listed
+  entry that now matches, so they cannot stay.
 - [ ] **Step 5:** commit `Read path: AVL nodes, collections, records, opaque atoms, indexes, roots, history`.
 
 ### Task 13: Transaction read side, and the Python → protoST round trip (Spec §10.2)

@@ -1,4 +1,4 @@
-"EXPECT: ok 53"
+"EXPECT: ok 56"
 "PBFileStorage, read side (plan Task 11): opening a space (refusals of ProtoBase's
  FileStorage and of the prototype: cluster/), the root, record loads with lazy
  references, the segment walk, the segment header against the file name, and close.
@@ -145,10 +145,20 @@ c that: 'a root into a foreign segment' signals: PBCorruptionError containing: '
     value: (PBRootRecord segment: other offset: (offsets at: 4) epoch: 1) encode)].
 bytes := good copyReplaceFrom: 9 to: 10 with: #[5 0].
 st := PBFileStorage path: (spaceAt value: 'v5' value: seg value: bytes value: nil).
-c that: 'a segment of version 5' signals: PBNotSupportedError during: [st recordsOfSegment: seg].
+c that: 'a segment of version 5, named' signals: PBNotSupportedError containing: seg hex asLowercase during: [
+  st recordsOfSegment: seg].
+st close.
+st := PBFileStorage path: (spaceAt value: 'magic' value: seg value: (good copyReplaceFrom: 1 to: 1 with: #[0]) value: nil).
+c that: 'a bad segment magic, named' signals: PBCorruptionError containing: seg hex asLowercase during: [
+  st recordsOfSegment: seg].
 st close.
 torn := good copyFrom: 1 to: good size - 2.
-st := PBFileStorage path: (spaceAt value: 'torn' value: seg value: torn value: nil).
+"The normal crash case: the published root points before a torn tail."
+st := PBFileStorage path: (spaceAt value: 'torn' value: seg value: torn
+  value: (PBRootRecord segment: seg offset: (offsets at: 1) epoch: 2) encode).
+c that: 'a space with a torn tail opens at its root' is: st readRoot offset equals: (offsets at: 1).
+c that: 'its root record loads' is: ((st loadAt: st readRoot pointer expecting: 'storetest.Thing') state at: 'name')
+  equals: 'b'.
 c that: 'the walk refuses a torn tail' signals: PBCorruptionError during: [st recordsOfSegment: seg].
 c that: 'records before a torn tail load' is: ((st loadAt: (PBAtomPointer segment: seg offset: (offsets at: 1))
   expecting: 'storetest.Thing') state at: 'name') equals: 'b'.
