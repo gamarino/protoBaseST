@@ -143,3 +143,12 @@
   `tests/unit/_sink.st` is gone. `tests/interop/st_write_to_py.sh` runs ProtoBase's verifier on
   spaces protoST wrote, commits from each side on top of the other, and checks the root lock
   both ways; `compare_dumps.py --exact` compares dumps without the AuditNote normalisation.
+- File storage write side, review fix round 1: one storage state (an Atom changed by
+  compare-and-swap: idle, writing, close requested, closed), so `close` during a write is
+  completed by that write and never releases the root lock under a publish, and `unlockRoot`
+  during a write is refused; segment rollover as ProtoBase (`path:segmentMaxBytes:`, 256 MiB by
+  default), with every segment written since its last sync synced before a root is published;
+  the epoch of a publish is documented as the start epoch plus one. New tests:
+  `store_close_race.st`, `store_crash_states.st`, `store_segment_rollover.st`, the seams of
+  `tests/unit/_seams.st`, `tests/interop/crash_states_to_py.sh`, and the reverse lock
+  exclusion (protoST holds, ProtoBase times out) in `st_write_to_py.sh`.

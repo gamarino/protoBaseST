@@ -1,4 +1,4 @@
-"EXPECT: ok 37"
+"EXPECT: ok 38"
 "The write side's failure policy (plan Task 17; ProtoBase FileStorage: an OSError while
  writing leaves the instance failed), driven through the storage's seams, never by killing a
  process: a failure of the file system at a chosen step (a record append, the segment sync,
@@ -8,52 +8,12 @@
  crash at that step leaves: records appended before it read back, and space.root is the old
  root until the rename and the new one after it; a fresh storage opens the space and
  publishes over it. Also: a write that starts while another is in progress on the same
- storage is PBUserError and writes nothing (one writer at a time), and a write that close
- interrupts is PBClosedError, not a failure."
+ storage is PBUserError and writes nothing (one writer at a time), and a close during a write
+ past its last check lets it complete, then closes the storage (store_close_race.st covers
+ the checks)."
 Import from: 'protobase'.
 Import from: '_check'.
-
-"A segment writer that runs a block before its append or sync (to fail, or to act
- meanwhile)."
-PBSegmentWriter subclass: #SeamWriter instanceVariableNames: 'beforeAppend beforeSync'.
-SeamWriter >> beforeAppend: aBlock
-  beforeAppend := aBlock.
-SeamWriter >> beforeSync: aBlock
-  beforeSync := aBlock.
-SeamWriter >> append: aByteArray
-  beforeAppend isNil ifFalse: [beforeAppend value].
-  ^ super append: aByteArray.
-SeamWriter >> sync
-  beforeSync isNil ifFalse: [beforeSync value].
-  ^ super sync.
-
-"A storage whose seams fail on a chosen call: failing is { selector. n }, the n-th call of
- that seam signals FileSystemError. made is the SeamWriter of its owned segment."
-PBFileStorage subclass: #SeamStorage instanceVariableNames: 'failing calls made'.
-SeamStorage >> failOn: aSelector call: n
-  failing := { aSelector. n }.
-  calls := Dictionary new.
-SeamStorage >> _seam: aSelector
-  | n |
-  failing isNil ifTrue: [^ self].
-  n := (calls at: aSelector ifAbsent: [0]) + 1.
-  calls at: aSelector put: n.
-  ((failing at: 1) = aSelector and: [(failing at: 2) = n]) ifTrue: [
-    ^ FileSystemError signal: 'injected failure in ' , aSelector].
-SeamStorage >> _newSegmentWriter: aByteArray
-  made := SeamWriter create: aByteArray file: (self _segmentFile: aByteArray).
-  ^ made.
-SeamStorage >> _syncDirectory
-  self _seam: #_syncDirectory.
-  ^ super _syncDirectory.
-SeamStorage >> _writeRootTemp: aByteArray
-  self _seam: #_writeRootTemp:.
-  ^ super _writeRootTemp: aByteArray.
-SeamStorage >> _replaceRootFile
-  self _seam: #_replaceRootFile.
-  ^ super _replaceRootFile.
-SeamStorage >> writer
-  ^ made.
+Import from: '_seams'.
 
 | c base dir st x y z p1 p2 publish spaceRoot fresh inner outer env |
 c := Check new.
@@ -144,9 +104,15 @@ st close.
 st := SeamStorage path: (base / 'close') pathString.
 st save: (PBObject withAll: { 'x' -> 1 }).
 st writer beforeAppend: [st close].
-c that: 'a write that close interrupts' signals: PBClosedError during: [st pushAtom: env].
+"The append is past the write's last check: it completes, and the close it owes is made
+ when it ends."
+outer := st pushAtom: env.
+c that: 'a write past its last check completes despite a close' is: outer segmentBytes equals: st writer segment.
 c that: 'is not a failure' is: st isFailed equals: false.
-c that: 'the segment is closed' is: (st currentSegment) equals: nil.
+c that: 'the storage is closed when it ends' is: { st isClosed. st currentSegment. st writer isClosed } equals: { true. nil. true }.
+fresh := PBFileStorage path: (base / 'close') pathString.
+c that: 'the record is there' is: (fresh loadAt: outer expecting: 19) oid equals: env oid.
+fresh close.
 c that: 'a write after close' signals: PBClosedError during: [st pushAtom: env].
 c that: 'a flush after close' signals: PBClosedError during: [st flushSegment].
 base deleteAll.

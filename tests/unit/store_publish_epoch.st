@@ -1,4 +1,4 @@
-"EXPECT: ok 28"
+"EXPECT: ok 30"
 "PBFileStorage replaceRoot: and the root lock (plan Task 17): two publishes give epochs 1
  and 2. A publish needs the root lock, writes the current epoch plus one (any other epoch is
  PBConflictError, and nothing is written), and refuses a pointer that is not a SpaceRoot
@@ -8,6 +8,7 @@
  its own segment."
 Import from: 'protobase'.
 Import from: '_check'.
+Import from: '_seams'.
 
 | c base st other spaceRootAt r1 r2 r3 p1 p2 p3 obj |
 c := Check new.
@@ -18,7 +19,7 @@ base deleteAll.
 spaceRootAt := [:aStorage |
   aStorage save: (PBSpaceRoot _unsavedWithState: (PBFrozenDict withAssociations: { 'databases' -> PBDictionary new }))].
 
-st := PBFileStorage path: base pathString.
+st := SeamStorage path: base pathString.
 p1 := spaceRootAt value: st.
 c that: 'a publish needs the root lock' signals: PBUserError containing: 'root lock' during: [
   st replaceRoot: (PBRootRecord segment: p1 segmentBytes offset: p1 offset epoch: 1)].
@@ -55,6 +56,7 @@ c that: 'is excluded while the first holds the lock' is: other tryLockRoot equal
 st unlockRoot.
 c that: 'unlockRoot released it' is: st holdsRootLock equals: false.
 c that: 'unlockRoot when not held does not signal' is: (st unlockRoot; holdsRootLock) equals: false.
+c that: 'it logs why (captured, so the run stays silent)' isTrue: (st logged last includesSubstring: 'not held').
 c that: 'the second storage takes it' is: other tryLockRoot equals: true.
 c that: 'and the first is excluded' is: st tryLockRoot equals: false.
 p3 := spaceRootAt value: other.
@@ -65,8 +67,11 @@ c that: 'the first storage cannot publish without the lock' signals: PBUserError
   st replaceRoot: (PBRootRecord segment: p2 segmentBytes offset: p2 offset epoch: 3)].
 other close.
 c that: 'close released the lock' is: st tryLockRoot equals: true.
-c that: 'an epoch already published conflicts' signals: PBConflictError during: [
+"st built a commit on epoch 2 (start epoch + 1 = 3); another storage published 3 meanwhile:
+ the commit is stale and refused, never written over the newer root (no lost update)."
+c that: 'a commit built on a stale root is refused' signals: PBConflictError during: [
   st replaceRoot: (PBRootRecord segment: p2 segmentBytes offset: p2 offset epoch: 3)].
+c that: 'and the newer root stays' is: st readRoot pointer equals: p3.
 st close.
 c that: 'a closed storage: tryLockRoot' signals: PBClosedError during: [st tryLockRoot].
 c that: 'a closed storage: replaceRoot:' signals: PBClosedError during: [

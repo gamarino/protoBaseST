@@ -4,17 +4,22 @@ Usage: python py_extend_st_space.py check-create <directory>
        python py_extend_st_space.py commit <directory>
        python py_extend_st_space.py check-extend <directory>
        python py_extend_st_space.py hold-lock <directory>
+       python py_extend_st_space.py try-lock <directory>
 
-check-create  the database 'st' has versions 1 and 0, its roots read back as protoST wrote them
+check-create  the root is at epoch 2 and the database 'st' has versions 1 and 0, its roots read
+              back as protoST wrote them
 commit        commits version 2 of 'st' through ProtoBase's API (the root 'py' = 'from Python')
 check-extend  version 3, written by protoST on top of Python's commit, holds 'py' and 'st2'
 hold-lock     takes FileStorage.root_lock, prints 'locked', and holds it until stdin closes
+try-lock      tries FileStorage.root_lock with a 0.2 s timeout: prints 'timeout' when
+              ProtoTimeoutError (another holder), 'locked' when it took it (and releases it)
 
 Exit 0 when every check holds, 1 otherwise (each failed check is printed).
 """
 import sys
 
 from proto_db import FileStorage, ObjectSpace
+from proto_db.errors import ProtoTimeoutError
 
 FAILURES = []
 
@@ -25,7 +30,9 @@ def check(label, actual, expected):
 
 
 def check_create(directory):
-    space = ObjectSpace(FileStorage(directory))
+    storage = FileStorage(directory)
+    check("the root epoch", storage.read_root().epoch, 2)
+    space = ObjectSpace(storage)
     try:
         db = space.open_database("st")
         check("versions", [e.version for e in db.history()], [1, 0])
@@ -75,9 +82,20 @@ def hold_lock(directory):
         storage.close()
 
 
+def try_lock(directory):
+    storage = FileStorage(directory)
+    try:
+        with storage.root_lock(timeout=0.2):
+            print("locked", flush=True)
+    except ProtoTimeoutError:
+        print("timeout", flush=True)
+    finally:
+        storage.close()
+
+
 def main(mode, directory):
     {"check-create": check_create, "commit": commit, "check-extend": check_extend,
-     "hold-lock": hold_lock}[mode](directory)
+     "hold-lock": hold_lock, "try-lock": try_lock}[mode](directory)
     for failure in FAILURES:
         print(f"py_extend_st_space: FAIL {failure}")
     return 1 if FAILURES else 0

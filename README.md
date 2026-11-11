@@ -199,32 +199,43 @@ space close.
 
 `PBFileStorage` writes as the format spec's "minimal external writer" does, so ProtoBase
 processes share the directory (`tests/interop/st_write_to_py.sh`: ProtoBase's verifier accepts
-what protoST writes, each commits on top of the other, and the root lock excludes both ways).
-These are the publisher's operations (plan Task 18); applications commit through transactions:
+what protoST writes, across several segments, each commits on top of the other, and the root
+lock excludes both ways; `tests/interop/crash_states_to_py.sh`: both readers recover from the
+states a crash leaves). These are the publisher's operations (plan Task 18); applications
+commit through transactions:
 
 ```smalltalk
 st := PBFileStorage path: '/srv/erp'.
-ptr := st save: aSpaceRoot.        "dependents first, into the segment this storage owns"
+start := st readRoot.              "the root the commit is built on (nil: a new space)"
+ptr := st save: aSpaceRoot.        "dependents first, into the segments this storage owns"
 st flushSegment.                   "sync: the records are durable"
 st tryLockRoot.                    "true, or false while another process holds space.lock"
-st replaceRoot: (PBRootRecord segment: ptr segmentBytes offset: ptr offset epoch: 1).
-                                   "a new space's first publish; later, the current epoch + 1"
+st replaceRoot: (PBRootRecord segment: ptr segmentBytes offset: ptr offset
+  epoch: (start isNil ifTrue: [1] ifFalse: [start epoch + 1])).
+                                   "PBConflictError when the root moved since start"
 st unlockRoot.                     "best effort: a failure is logged to stderr, never signalled"
 ```
 
-- A storage writes only into the segment it created: `<uuid4 hex>.seg`, made `#create
+The epoch is the epoch of the root the commit was built on, plus one; never one computed from
+a root read under the lock, which would always pass and overwrite a newer commit.
+
+- A storage writes only into segments it created: `<uuid4 hex>.seg`, made `#create
   #exclusive` (a clash is `PBUnexpectedError`, never an append to another writer's file), with
-  the header synced and the directory synced once. Appended bytes are never truncated: a
-  pointer `pushAtom:` answers stays valid for the storage's life, and an unpublished record is a
-  harmless orphan (tools that scan by oid consider only records reachable from a root).
-- `replaceRoot:` needs the root lock (`PBUserError`), syncs the segment first, checks that the
-  pointer is a valid SpaceRoot record (`PBCorruptionError`) and that the epoch is the current one
-  plus one (`PBConflictError`), refuses a cluster node's space (`cluster/`, or a SpaceRoot with a
-  `cluster_term`: `PBNotSupportedError`), then writes `space.root.tmp`, syncs it, renames it over
-  `space.root` and syncs the directory.
+  the header synced and the directory synced once. A segment rolls over before it exceeds
+  `segmentMaxBytes` (ProtoBase's 256 MiB by default; `PBFileStorage path:segmentMaxBytes:`).
+  Appended bytes are never truncated: a pointer `pushAtom:` answers stays valid for the
+  storage's life, and an unpublished record is a harmless orphan (tools that scan by oid
+  consider only records reachable from a root).
+- `replaceRoot:` needs the root lock (`PBUserError`), syncs every segment written since its
+  last sync, checks that the pointer is a valid SpaceRoot record (`PBCorruptionError`) and that
+  the epoch is the current one plus one (`PBConflictError`), refuses a cluster node's space
+  (`cluster/`, or a SpaceRoot with a `cluster_term`: `PBNotSupportedError`), then writes
+  `space.root.tmp`, syncs it, renames it over `space.root` and syncs the directory.
 - A failure of the file system while writing is `PBUnexpectedError` and ends writing through
   that storage (`isFailed`); reads keep working. One write at a time: a write that starts while
-  another is in progress on the same storage is `PBUserError`.
+  another is in progress on the same storage is `PBUserError`. `close` never waits and never
+  releases the root lock under a publish: during a write it is completed by that write when it
+  ends; `unlockRoot` during a write is refused (logged).
 
 ## New versions: lists, dictionaries and records
 
