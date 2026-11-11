@@ -1,4 +1,4 @@
-"EXPECT: ok 40"
+"EXPECT: ok 50"
 "PBTypeRegistry (format spec, 'Type names (D57)', 'Atoms of unknown types (D59)',
  'Built-in type aliases'): aliases and names map to registered classes, an
  unknown proto_db. name is corruption, any other unknown valid name is an
@@ -27,6 +27,18 @@ AliasThief class >> typeName
   ^ 'acme.sales.Thief'.
 AliasThief class >> typeAliases
   ^ #('acme.sales.LegacyInvoice').
+
+PBAtom subclass: #LegacyPerson.
+LegacyPerson class >> typeName
+  ^ 'acme.people.Person'.
+LegacyPerson class >> typeAliases
+  ^ { 'myapp.models.make.<locals>.Person'. 'myapp.mod', (String with: (Character value: 232)), 'les.Personne' }.
+
+PBAtom subclass: #EmptyAlias.
+EmptyAlias class >> typeName
+  ^ 'acme.sales.Empty'.
+EmptyAlias class >> typeAliases
+  ^ #('').
 
 PBAtom subclass: #BadName.
 BadName class >> typeName
@@ -95,6 +107,21 @@ c that: 'the same name by another class' signals: PBValidationError containing: 
 c that: 'an alias taken by another class' signals: PBValidationError containing: 'already registered' during: [PBTypeRegistry register: AliasThief].
 c that: 'a refused registration leaves the table unchanged' isTrue: (PBTypeRegistry isRegistered: 'acme.sales.Thief') not.
 c that: 'tagFor: an unregistered class' signals: PBValidationError during: [PBTypeRegistry tagFor: OtherInvoice].
+
+"Aliases outside the grammar (pre-D57 Python default names) are declared and read."
+PBTypeRegistry register: LegacyPerson.
+c that: 'a <locals> alias' is: (PBTypeRegistry classForTag: 'myapp.models.make.<locals>.Person') equals: LegacyPerson.
+c that: 'a non-ASCII alias' is: (PBTypeRegistry classForTag: 'myapp.mod', (String with: (Character value: 232)), 'les.Personne') equals: LegacyPerson.
+c that: 'a <locals> alias reads as the declared name' is: (PBTypeRegistry canonicalTag: 'myapp.models.make.<locals>.Person') equals: 'acme.people.Person'.
+c that: 'an empty alias' signals: PBValidationError during: [PBTypeRegistry register: EmptyAlias].
+c that: 'an unregistered <locals> name, when read' signals: PBCorruptionError during: [PBTypeRegistry classForTag: 'other.make.<locals>.X'].
+
+"writerTag: refuses what every reader refuses; an alias is written as the declared name."
+c that: 'writerTag: bad' signals: PBValidationError during: [PBTypeRegistry writerTag: 'bad'].
+c that: 'writerTag: an unknown proto_db. name' signals: PBValidationError during: [PBTypeRegistry writerTag: 'proto_db.nonexistent.X'].
+c that: 'writerTag: alias 22' signals: PBValidationError during: [PBTypeRegistry writerTag: 22].
+c that: 'writerTag: a <locals> alias' is: (PBTypeRegistry writerTag: 'myapp.models.make.<locals>.Person') equals: 'acme.people.Person'.
+c that: 'writerTag: an opaque name' is: (PBTypeRegistry writerTag: 'polyglot.st.Order') equals: 'polyglot.st.Order'.
 
 "Canonical tags: a built-in name becomes its alias, an alias stays."
 c that: 'canonical of a built-in name' is: (PBTypeRegistry canonicalTag: 'proto_db.avl.CountedKeyNode') equals: 21.

@@ -385,7 +385,10 @@ PBCodec class >> _pointerRefOf: anAtom
   ptr := anAtom pointer.
   ptr isNil ifTrue: [
     ^ PBValidationError signal: 'PBCodec: ' , anAtom printString , ' is not saved: it has no pointer to refer to'].
-  ^ self _tagged: '@ref' body: { ptr segmentBytes. ptr offset. anAtom tag }.
+  "The canonical spelling (format spec, 'The name a writer puts in a reference'),
+   whatever was registered when the reference was read; a name every reader
+   refuses is PBValidationError."
+  ^ self _tagged: '@ref' body: { ptr segmentBytes. ptr offset. PBTypeRegistry writerTag: anAtom tag }.
 
 PBCodec class >> _tagged: aTag body: aBody
   ^ MessagePackMap withAll: { aTag -> aBody }.

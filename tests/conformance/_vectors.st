@@ -79,7 +79,9 @@ Vectors class >> _load
  'canonical' keys (in the cluster section 'canonical' is a flag), and, for each
  top-level section with a 'dir' and a 'segment' (database, legacy_database,
  polyglot_database), the files <dir>/<segment> and <dir>/space.root. A section
- with only one of the two keys is a manifest the runner does not understand."
+ whose 'segment' is a Dictionary (cluster) is skipped here: its file is collected
+ through its nested 'file' key. Any other section with a 'dir' or a 'segment' must
+ have both as strings, or the load fails."
 Vectors class >> _referencedFiles: aNode
   | paths |
   paths := Set new.

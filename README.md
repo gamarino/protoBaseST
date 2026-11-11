@@ -100,8 +100,12 @@ PBTypeRegistry classForTag: 'proto_db.nonexistent.X'.     "PBCorruptionError"
 
 A built-in type is written as its alias, its index in `PBTypeRegistry builtinNames` (the table
 of the format spec). Its name, as format 2 wrote it, is read too. A name or alias already taken by
-another class, a name outside the grammar, and a `proto_db.` name outside the table are refused
-by `register:` with `PBValidationError`. A built-in type whose class is not registered yet is
+another class, a declared name outside the grammar, and a `proto_db.` name outside the table are
+refused by `register:` with `PBValidationError`. An alias may be any non-empty string that is not
+a built-in name: old Python default names (`myapp.models.make.<locals>.Person`) are outside the
+grammar but name stored data, so a class declares them as ProtoBase does. A writer never writes
+an alias, nor a name every reader refuses (`PBTypeRegistry writerTag:`, `PBValidationError`).
+References compare equal by pointer and by the type their tags name. A built-in type whose class is not registered yet is
 `PBNotSupportedError`. `PBCodec` reads every `@ref` with the tag a writer puts: a built-in name
 becomes its alias, an application alias the declared name.
 

@@ -11,16 +11,28 @@ types (D59)' and 'Built-in type aliases', with ProtoBase's proto_db/core/atom.py
   PBTypeRegistry tagFor: aClass       the tag a writer puts in a record or a @ref
   PBTypeRegistry nameOfTag: aTag      the declared type name a tag stands for
   PBTypeRegistry canonicalTag: aTag   the tag a writer puts for the type aTag names
+  PBTypeRegistry writerTag: aTag      the same, refusing (PBValidationError) a
+                                      name every reader must refuse
   PBTypeRegistry builtinNames         the normative table of the 22 built-in aliases
 
   PBAtom          the abstract base of every persistent object: oid, pointer,
                   storage and the lazy-load memo
   PBOpaqueAtom    an atom of a type this process has no class for (D59)
 
-The registry is process-wide: one Atom cell over a PBFrozenDict that maps each
+The registry is process-wide: one Atom cell over a table that maps each
 registered name (declared names and aliases) to a PBTuple { class. declared
-name }. A registration builds a new map and installs it by compare-and-swap,
-so readers never lock and never see a half-made table.
+name }. The table is a hashed Dictionary snapshot, so a lookup takes constant
+time; it is private and never changed once installed: a registration copies
+it, adds its names to the copy and installs the copy by compare-and-swap, so
+readers never lock and never see a half-made table. The built-in alias table
+is built once, when the module loads, the same way.
+
+Declared names follow the grammar of 'Type names' (two or more dotted ASCII
+identifiers). Aliases are any non-empty strings (format spec D57: every
+implementation of a type declares the same aliases, and ProtoBase accepts any
+non-empty str in __type_aliases__): a pre-D57 Python default name such as
+'myapp.models.make.<locals>.Person', or one with non-ASCII identifiers, is
+outside the grammar but still names stored data. Writers never write an alias.
 
 Lookups of a name never registered:
   - a built-in name (or alias Integer) whose class is not registered yet is
@@ -37,7 +49,7 @@ them in typeAliases, as ProtoBase's __type_aliases__."
 Import from: 'protobase/errors'.
 Import from: 'protobase/values'.
 
-Object subclass: #PBTypeRegistry classVariableNames: 'Registry'.
+Object subclass: #PBTypeRegistry classVariableNames: 'Registry BuiltinNames BuiltinAliases'.
 
 "=== the built-in alias table ================================================"
 
@@ -45,6 +57,9 @@ Object subclass: #PBTypeRegistry classVariableNames: 'Registry'.
  index here (0-based). Append-only (D51). The conformance runner checks it
  against manifest.json's builtin_type_aliases. Answers a fresh copy."
 PBTypeRegistry class >> builtinNames
+  ^ BuiltinNames copy.
+
+PBTypeRegistry class >> _builtinTable
   ^ #('proto_db.avl.KeyNode' 'proto_db.avl.PosNode' 'proto_db.avl.ValueBox'
       'proto_db.collections.IndexSet' 'proto_db.collections.IndexedCollection'
       'proto_db.collections.List' 'proto_db.collections.Dictionary'
@@ -55,17 +70,15 @@ PBTypeRegistry class >> builtinNames
       'proto_db.indexing.RangeIndex' 'proto_db.indexing.VectorIndex'
       'proto_db.transactions.SpaceRoot' 'proto_db.transactions.DatabaseRoot'
       'proto_db.core.dbobject.DBObject' 'proto_db.avl._Node'
-      'proto_db.avl.CountedKeyNode') copy.
+      'proto_db.avl.CountedKeyNode').
 
 PBTypeRegistry class >> builtinCount
   ^ 22.
 
-"The alias Integer of a built-in type name, or nil."
+"The alias Integer of a built-in type name, or nil (constant time)."
 PBTypeRegistry class >> aliasOf: aName
-  | i |
   (aName isString and: [aName isSymbol not]) ifFalse: [^ nil].
-  i := self builtinNames indexOf: aName.
-  ^ i > 0 ifTrue: [i - 1] ifFalse: [nil].
+  ^ BuiltinAliases at: aName ifAbsent: [nil].
 
 "=== the grammar ============================================================="
 
@@ -94,9 +107,14 @@ PBTypeRegistry class >> _isIdentifier: aString
 "=== the process-wide table =================================================="
 
 PBTypeRegistry class >> _initializeRegistry
-  Registry := Atom on: (PBFrozenDict withAssociations: #()).
+  | aliases |
+  BuiltinNames := self _builtinTable copy.
+  aliases := Dictionary new.
+  BuiltinNames doWithIndex: [:name :i | aliases at: name put: i - 1].
+  BuiltinAliases := aliases.
+  Registry := Atom on: Dictionary new.
 
-"The current table (an immutable PBFrozenDict)."
+"The current table: a Dictionary snapshot, never changed once installed."
 PBTypeRegistry class >> _table
   ^ Registry value.
 
@@ -105,8 +123,9 @@ PBTypeRegistry class >> _entryFor: aName
   ^ self _table at: aName ifAbsent: [nil].
 
 "Registers aClass under aClass typeName and each of aClass typeAliases. The
- name and every alias must follow the grammar; a name of the reserved proto_db.
- namespace must be in the built-in table, and an alias never is. A name or an
+ name must follow the grammar, and a name of the reserved proto_db. namespace
+ must be in the built-in table; an alias is any non-empty String that is not a
+ built-in name (see the module comment). A name or an
  alias already registered by another class is PBValidationError. Registering
  the same class again is a no-op. Answers aClass."
 PBTypeRegistry class >> register: aClass
@@ -121,9 +140,9 @@ PBTypeRegistry class >> register: aClass
     ^ PBValidationError signal: 'PBTypeRegistry: ' , aClass name , ' typeAliases must be an Array of type names, not '
       , aliases printString].
   aliases do: [:alias |
-    (self isValidName: alias) ifFalse: [
+    ((alias isString and: [alias isSymbol not]) and: [alias notEmpty]) ifFalse: [
       ^ PBValidationError signal: 'PBTypeRegistry: the alias ' , alias printString , ' of ' , aClass name
-        , ' is not a type name (two or more dotted ASCII identifiers)'].
+        , ' is not a non-empty String'].
     (self aliasOf: alias) isNil ifFalse: [
       ^ PBValidationError signal: 'PBTypeRegistry: the alias ' , alias printString , ' of ' , aClass name
         , ' is a built-in type name'].
@@ -144,7 +163,8 @@ PBTypeRegistry class >> register: aClass
             ^ PBValidationError signal: 'PBTypeRegistry: the type name ' , key printString
               , ' is already registered by ' , (entry at: 1) name]]].
     additions isEmpty ifTrue: [^ aClass].
-    new := PBFrozenDict withAssociations: old associations , additions asArray.
+    new := old copy.
+    additions do: [:each | new at: each key put: each value].
     Registry value: new ifCurrent: old ] whileFalse.
   ^ aClass.
 
@@ -172,7 +192,7 @@ PBTypeRegistry class >> nameOfTag: aTag
   | entry |
   (aTag isInteger and: [aTag ~~ true and: [aTag ~~ false]]) ifTrue: [
     (aTag between: 0 and: self builtinCount - 1) ifFalse: [^ self _badTag: aTag].
-    ^ self builtinNames at: aTag + 1].
+    ^ BuiltinNames at: aTag + 1].
   ((aTag isString and: [aTag isSymbol not]) and: [aTag notEmpty]) ifFalse: [^ self _badTag: aTag].
   entry := self _entryFor: aTag.
   ^ entry isNil ifTrue: [aTag] ifFalse: [entry at: 2].
@@ -185,6 +205,24 @@ PBTypeRegistry class >> canonicalTag: aTag
   name := self nameOfTag: aTag.
   alias := self aliasOf: name.
   ^ alias isNil ifTrue: [name] ifFalse: [alias].
+
+"As canonicalTag:, for a writer: a tag every reader must refuse (malformed, a
+ name outside the grammar, an unknown proto_db. name) is PBValidationError.
+ An unknown application name is valid (an opaque atom's, written as read)."
+PBTypeRegistry class >> writerTag: aTag
+  | tag |
+  tag := [self canonicalTag: aTag] on: PBCorruptionError do: [:e |
+    ^ PBValidationError signal: 'PBTypeRegistry: cannot write the type tag ' , aTag printString , ': ' , e messageText].
+  tag isInteger ifTrue: [^ tag].
+  ((self isValidName: tag) and: [(tag beginsWith: 'proto_db.') not]) ifFalse: [
+    ^ PBValidationError signal: 'PBTypeRegistry: cannot write the type name ' , tag printString
+      , ', which every reader refuses (outside the grammar, or an unknown proto_db. name)'].
+  ^ tag.
+
+"Whether two tags name one type once aliases are mapped (malformed tags
+ compare as written)."
+PBTypeRegistry class >> isTag: aTag sameTypeAs: otherTag
+  ^ [(self nameOfTag: aTag) = (self nameOfTag: otherTag)] on: PBCorruptionError do: [:e | aTag = otherTag].
 
 "The class a persisted tag names (see the module comment for unknown names)."
 PBTypeRegistry class >> classForTag: aTag
@@ -245,7 +283,11 @@ PBAtom class >> typeAliases
   ^ #().
 
 "The fields every record of this exact type must hold: a record without one
- is PBCorruptionError when it is loaded (D58)."
+ is PBCorruptionError when it is loaded (D58). Only the classes of built-in
+ types list fields (format spec, 'Required fields'): an application class,
+ an application subclass of a built-in collection included, answers its
+ built-in base's list unchanged, never a longer one, since a field it adds in
+ a later release may be absent from its older records (it reads as nil)."
 PBAtom class >> requiredFields
   ^ #().
 
@@ -364,3 +406,14 @@ PBOpaqueAtom >> printOn: aStream
   aStream nextPutAll: 'PBOpaqueAtom('; nextPutAll: referencedName; nextPutAll: ', '; print: pointer; nextPut: $).
 
 PBTypeRegistry _initializeRegistry.
+
+"=== PBUnresolvedRef equality ==============================================="
+
+"Two references are equal when they hold the same pointer and name the same
+ type once aliases are mapped (PBTypeRegistry isTag:sameTypeAs:): equality does
+ not depend on the spelling read. Defined here, not in values.st, because the
+ alias table is the registry's; hash is the pointer's (values.st)."
+PBUnresolvedRef >> = anObject
+  self isClassObject ifTrue: [^ self == anObject].
+  ^ (anObject isClassObject not and: [anObject class == PBUnresolvedRef])
+    and: [self pointer = anObject pointer and: [PBTypeRegistry isTag: self tag sameTypeAs: anObject tag]].

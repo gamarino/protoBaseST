@@ -9,7 +9,8 @@ The containers and handles of ProtoBase's canonical values (format spec,
   PBMissing        ProtoBase MISSING (@missing), a singleton: PBMissing default
   PBMutableObject  ProtoBase MutableObject (@mut), the handle part: name: and name
   PBAtomPointer    ProtoBase AtomPointer: 16 segment bytes and an offset
-  PBUnresolvedRef  a @ref decoded without a resolver; it encodes back to the same @ref
+  PBUnresolvedRef  a @ref decoded without a resolver; it encodes back to the @ref,
+                   with the type in its canonical spelling
 
 Every value is immutable (Spec decision 3): a class-side constructor copies its
 arguments and calls a private initialiser once; no other method assigns an
@@ -532,7 +533,8 @@ PBAtomPointer >> printOn: aStream
 "=== PBUnresolvedRef ========================================================="
 
 "A @ref decoded with no resolver: the pointer and the type tag as read (an
- alias Integer or a type name). It encodes back to the same @ref."
+ alias Integer or a type name). It encodes back to the same @ref, with the type
+ in its canonical spelling (PBCodec, PBTypeRegistry writerTag:)."
 Object subclass: #PBUnresolvedRef instanceVariableNames: 'pointer tag'.
 
 PBUnresolvedRef class >> pointer: aPBAtomPointer tag: aTag
@@ -561,10 +563,8 @@ PBUnresolvedRef >> tag
 PBUnresolvedRef >> isPBReference
   ^ true.
 
-PBUnresolvedRef >> = anObject
-  self isClassObject ifTrue: [^ self == anObject].
-  ^ (anObject isClassObject not and: [anObject class == PBUnresolvedRef])
-    and: [pointer = anObject pointer and: [tag = anObject tag]].
+"PBUnresolvedRef >> = is defined in registry.st: two references are equal by
+ pointer and by the type their tags name, which needs the alias table."
 
 PBUnresolvedRef >> hash
   self isClassObject ifTrue: [^ self identityHash].

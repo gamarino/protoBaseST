@@ -719,6 +719,13 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   - `PBAtom`'s memo holds the loaded envelope (tag, oid, state), not only the state: an unloaded
     stub learns its oid from the record. `state` answers the envelope's state.
   - A built-in type whose class is not registered yet is `PBNotSupportedError`, never corruption.
+  - Registration (fix round 1): a declared name follows the grammar and a `proto_db.` declared
+    name must be in the table; an alias is any non-empty string that is not a built-in name, as
+    ProtoBase's `__type_aliases__` (pre-D57 names such as `pkg.mod.f.<locals>.Person`). Writers
+    use `PBTypeRegistry writerTag:`, which writes the canonical spelling and refuses a name
+    every reader refuses. The table is a private hashed `Dictionary` snapshot behind the
+    `Atom` (constant-time lookup), copied on each registration and never changed once
+    installed, not a `PBFrozenDict` (whose lookup is linear).
   - Task 11's resolver answers `PBTypeRegistry unloadedAtomFor: tag at: pointer storage: self`,
     which builds a `PBOpaqueAtom` that keeps the name it was referenced by for an unknown
     application name (`PBOpaqueAtom unloadedAt:storage:` alone is refused: it needs the name).
@@ -806,15 +813,21 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     (Task 18).
   - `readRoot` → a `PBRootRecord`, or nil when there is no `space.root`.
   - `loadAt: aPointer expecting: aTag` → the decoded envelope. The segment header is checked
-    once per segment, and the reader is cached per segment UUID in an `Atom` over a
-    `PBFrozenDict`.
+    once per segment (`PBSegmentHeader decode:`), and its `segment` must equal the UUID of the
+    file name `<uuid-hex>.seg` (FS "Segment header": it MUST equal the UUID in the file name;
+    a mismatch is `PBCorruptionError`). The reader is cached per segment UUID in an `Atom` over
+    a `PBFrozenDict`.
   - `refTo:offset:tag:`, the resolver of Task 7, which answers
-    `(PBTypeRegistry classForTag: tag) unloadedAt: ... storage: self`.
+    `PBTypeRegistry unloadedAtomFor: tag at: pointer storage: self` (Task 9: a class's
+    `unloadedAt:storage:`, or, for an unknown application name, a `PBOpaqueAtom` that keeps
+    the name it was referenced by; `PBOpaqueAtom unloadedAt:storage:` alone is refused).
   - `recordsOfSegment: aUUID` → the `(offset, header, payload)` walk from offset 26, used by
     the runner.
   - `close`, after which every load signals `PBClosedError`.
 
 - [ ] **Step 1: failing tests.**
+  - `store_open_refusals.st` also holds a segment whose header UUID differs from its file
+    name: loading from it is `PBCorruptionError`.
   - `database_records.st`: for every `database.records` entry, the record at `offset` has the
     listed `kind`, `size`, `tag`, `type`, `oid` and `state` (through `describeRaw:` or
     `describe:`). When `canonical` is true, re-encoding gives the same bytes.
@@ -833,7 +846,9 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     and walk only (writes come in Task 14);
   - `src/protobase/collections.st`: `PBIndexSet`, `PBList`, `PBDictionary`,
     `PBHashDictionary`, `PBSet`, `PBCountedSet`, `PBRepeatedKeysDictionary`; read API only;
-  - `src/protobase/records.st`: `PBObject`, `PBOpaqueAtom`;
+  - `src/protobase/records.st`: `PBObject`. `PBOpaqueAtom` already exists in
+    `src/protobase/registry.st` (Task 9): extend it there (or with methods of `PBOpaqueAtom`
+    in `records.st`), never define a second class;
   - `src/protobase/indexes.st`: `PBEqualityIndex`, `PBRangeIndex`, `PBVectorIndex`, decoded
     and kept, with `name`, `keySpec` and `hasMemberTokens`;
   - `src/protobase/roots.st`: `PBSpaceRoot`, `PBDatabaseRoot`;
@@ -869,8 +884,14 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     - `at: aName` (absent: nil), `hasDefinedAttr:`, `attributeNames`;
     - `PBObject class >> typeName` is `'proto_db.core.dbobject.DBObject'`, and application
       subclasses override `typeName` and `typeAliases`;
+    - loading a `PBObject` refuses (`PBCorruptionError`) a persisted attribute named like a
+      behaviour name of DBObject, `with_` or `has_defined_attr` (FS "Attribute names"; vector
+      `invalid/atom-reserved-name`, run by `invalid_atom.st`). The Task 9 envelope checks only
+      the names every type refuses;
     - `PBObjectSpace registerAtomClass: aClass` → `PBTypeRegistry register:`.
-  - `PBOpaqueAtom`: `typeName`, `at:`, `attributeNames`. Any other message, including
+  - `PBOpaqueAtom`: its type name (the instance-side `tag` of Task 9, which is the name it was
+    referenced by; an instance-side `typeName` would collide with `PBAtom class >> typeName`,
+    K14), `at:`, `attributeNames`. Any other message, including
     `doesNotUnderstand:`, and any collection use signal `PBNotSupportedError` naming the
     type.
   - `PBObjectSpace storage: aStorage` and `storage:lockTimeout:` (the default lockTimeout is
@@ -889,9 +910,11 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
 
 - [ ] **Step 1: failing tests.**
   - `database_contents.st`: open `vectors/database` read-only (a copy in a temp directory,
-    never the vendored files), register a protoST `Invoice` with `typeName`
-    `'conformance.Invoice'` and `typeAliases` `#('conformance.LegacyInvoice')` (defined in
-    `tests/conformance/_model.st`), and compare `describeDatabase:` with `contents` (roots,
+    never the vendored files), with the conformance type registered: `ConformanceInvoice`
+    (`typeName` `'conformance.Invoice'`, `typeAliases` `#('conformance.LegacyInvoice')`),
+    which `_vectors.st` defines and registers since Task 9. Its single home moves to
+    `tests/conformance/_model.st`, imported by `_vectors.st`, where it becomes a `PBObject`
+    subclass; no runner registers a second class under those names. Compare `describeDatabase:` with `contents` (roots,
     mutables, indexes, origin).
   - `legacy_database.st` does the same on `vectors/legacy`. The format-3 `["zone", key]`
     datetimes are refused, as *expected entries listed in the runner* by root name. Index

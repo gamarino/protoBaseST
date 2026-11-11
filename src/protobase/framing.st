@@ -45,7 +45,12 @@ _PBFrame class >> u32: anInteger on: aStream
 "msgpack data decoded in order, map keys of any type kept; malformed bytes
  are PBCorruptionError naming aWhat."
 _PBFrame class >> decodeMsgpack: aByteArray what: aWhat
-  ^ [MessagePack decodeOrdered: aByteArray strictKeys: false]
+  ^ self decodeMsgpack: aByteArray what: aWhat strictKeys: false.
+
+"As decodeMsgpack:what:, refusing (with strictKeys true) a map key that is not
+ a str or a bin, as msgpack-python's strict_map_key."
+_PBFrame class >> decodeMsgpack: aByteArray what: aWhat strictKeys: aBoolean
+  ^ [MessagePack decodeOrdered: aByteArray strictKeys: aBoolean]
     on: Error do: [:e |
       (e isKindOf: MessageNotUnderstood) ifTrue: [e pass].
       PBCorruptionError signal: aWhat , ': malformed msgpack: ' , e messageText].
@@ -232,7 +237,9 @@ PBRootRecord class >> decode: aByteArray
   body := aByteArray copyFrom: 5 to: aByteArray size.
   body crc32 = (aByteArray unsignedLongAt: 1 bigEndian: false) ifFalse: [
     ^ PBCorruptionError signal: 'PBRootRecord: CRC mismatch in root record'].
-  fields := _PBFrame decodeMsgpack: body what: 'PBRootRecord'.
+  "Strict keys, as msgpack-python's default in ProtoBase decode_root: a map key that
+   is not a string (or bin) is corruption."
+  fields := _PBFrame decodeMsgpack: body what: 'PBRootRecord' strictKeys: true.
   (fields isKindOf: MessagePackMap) ifFalse: [^ PBCorruptionError signal: 'PBRootRecord: the body is not a map'].
   get := [:key | fields at: key ifAbsent: [^ PBCorruptionError signal: 'PBRootRecord: malformed root record: no ' , key]].
   version := get value: 'version'.
@@ -293,7 +300,7 @@ PBRootRecord >> encode
 Object subclass: #PBAtomEnvelope instanceVariableNames: 'tag oid state'.
 
 "An envelope to write: aTag is an alias Integer or a type name (written in
- its canonical form), anOid 16 bytes (or a UUID), aState a PBFrozenDict of
+ its canonical form; a name every reader refuses is PBValidationError), anOid 16 bytes (or a UUID), aState a PBFrozenDict of
  attribute names to values. Each value is made canonical (PBCodec canonical:,
  two msgpack containers deep, as it sits in the record), so a value that
  cannot be stored is refused here, with PBValidationError."
@@ -309,9 +316,7 @@ PBAtomEnvelope class >> tag: aTag oid: anOid state: aState
     why isNil ifFalse: [^ PBValidationError signal: 'PBAtomEnvelope: ' , why]].
   canonicalState := PBFrozenDict withAssociations: (aState associations collect: [:each |
     each key -> (PBCodec canonical: each value enclosingDepth: 2)]).
-  ^ self basicNew _setTag: ([PBTypeRegistry canonicalTag: aTag] on: PBCorruptionError do: [:e |
-      PBValidationError signal: 'PBAtomEnvelope: ' , e messageText])
-    oid: bytes state: canonicalState.
+  ^ self basicNew _setTag: (PBTypeRegistry writerTag: aTag) oid: bytes state: canonicalState.
 
 "Why aName cannot be a persisted attribute name, or nil."
 PBAtomEnvelope class >> _nameProblem: aName
@@ -370,7 +375,9 @@ PBAtomEnvelope class >> _checkTag: t expecting: aTypeTag
   | stored expected |
   stored := PBTypeRegistry nameOfTag: t.
   expected := PBTypeRegistry nameOfTag: aTypeTag.
-  stored = expected ifTrue: [^ self].
+  stored = expected ifTrue: [
+    (self _isKnown: stored) ifFalse: [PBTypeRegistry checkOpaqueName: stored].
+    ^ self].
   ((self _isKnown: expected) or: [self _isKnown: stored]) ifFalse: [
     PBTypeRegistry checkOpaqueName: expected; checkOpaqueName: stored.
     ^ self].
@@ -408,4 +415,4 @@ PBAtomEnvelope >> encode
   wireState := MessagePackMap withAll: (state associations collect: [:each |
     each key -> (PBCodec toWire: each value atomRef: PBCodec pointerRef enclosingDepth: 2)]).
   ^ MessagePack encode: (MessagePackMap withAll: {
-    't' -> (PBTypeRegistry canonicalTag: tag). 'oid' -> oid. 's' -> wireState }).
+    't' -> (PBTypeRegistry writerTag: tag). 'oid' -> oid. 's' -> wireState }).

@@ -1,4 +1,4 @@
-"EXPECT: ok 61"
+"EXPECT: ok 72"
 "The checks of framing.st beyond the vectors: the atom envelope rules of the
  format spec ('Atom records', 'How a reader resolves a reference'), the field
  types of a root record, record and segment refusals, and PBAtom's lazy load
@@ -96,6 +96,10 @@ c that: 'an opaque reference to a proto_db. record name' signals: PBCorruptionEr
   PBAtomEnvelope decode: (payload value: 'proto_db.x.Y' value: oid value: (map value: #())) expecting: 'poly.st.Order'].
 c that: 'an opaque record behind a proto_db. reference name' signals: PBCorruptionError during: [
   PBAtomEnvelope decode: (payload value: 'poly.st.Order' value: oid value: (map value: #())) expecting: 'proto_db.x.Y'].
+c that: 'equal names outside the grammar' signals: PBCorruptionError during: [
+  PBAtomEnvelope decode: (payload value: 'bad' value: oid value: (map value: #())) expecting: 'bad'].
+c that: 'equal unknown proto_db. names' signals: PBCorruptionError during: [
+  PBAtomEnvelope decode: (payload value: 'proto_db.x.Y' value: oid value: (map value: #())) expecting: 'proto_db.x.Y'].
 c that: 'a known record behind an unknown reference name' signals: PBCorruptionError during: [
   PBAtomEnvelope decode: (payload value: 19 value: oid value: (map value: #())) expecting: 'poly.st.Order'].
 c that: 'an unknown record behind a known reference name' signals: PBCorruptionError during: [
@@ -118,6 +122,12 @@ c that: 'tag:oid:state: refuses a short oid' signals: PBValidationError during: 
   PBAtomEnvelope tag: 19 oid: #[1 2] state: (PBFrozenDict withAssociations: #())].
 c that: 'tag:oid:state: refuses a bad tag' signals: PBValidationError during: [
   PBAtomEnvelope tag: 99 oid: oid state: (PBFrozenDict withAssociations: #())].
+c that: 'tag:oid:state: refuses a name outside the grammar' signals: PBValidationError during: [
+  PBAtomEnvelope tag: 'bad' oid: oid state: (PBFrozenDict withAssociations: #())].
+c that: 'tag:oid:state: refuses an unknown proto_db. name' signals: PBValidationError during: [
+  PBAtomEnvelope tag: 'proto_db.nonexistent.X' oid: oid state: (PBFrozenDict withAssociations: #())].
+c that: 'tag:oid:state: writes an alias as the declared name' is: (PBAtomEnvelope tag: 'acme.sales.LegacyInvoice' oid: oid
+  state: (PBFrozenDict withAssociations: #())) tag equals: 'acme.sales.Invoice'.
 
 "Root records: keys in order, field types checked."
 root := PBRootRecord segment: seg offset: 26 epoch: 7.
@@ -136,11 +146,25 @@ c that: 'a negative offset' signals: PBCorruptionError during: [
   PBRootRecord decode: (rootBytes value: { 'version' -> 4. 'segment' -> seg. 'offset' -> -1. 'epoch' -> 7 })].
 c that: 'a missing epoch' signals: PBCorruptionError during: [
   PBRootRecord decode: (rootBytes value: { 'version' -> 4. 'segment' -> seg. 'offset' -> 26 })].
+c that: 'a non-string key in the root body' signals: PBCorruptionError during: [
+  PBRootRecord decode: (rootBytes value: { 'version' -> 4. 'segment' -> seg. 'offset' -> 26. 'epoch' -> 7. 5 -> 1 })].
 c that: 'a short segment' signals: PBCorruptionError during: [
   PBRootRecord decode: (rootBytes value: { 'version' -> 4. 'segment' -> #[1 2]. 'offset' -> 26. 'epoch' -> 7 })].
 c that: 'a malformed version-5 root is corruption first' signals: PBCorruptionError during: [
   PBRootRecord decode: (rootBytes value: { 'version' -> 5. 'segment' -> #[1]. 'offset' -> 26. 'epoch' -> 7 })].
 c that: 'extra keys are ignored' is: (PBRootRecord decode: (rootBytes value: { 'version' -> 3. 'segment' -> seg. 'offset' -> 26. 'epoch' -> 7. 'x' -> 'y' })) epoch equals: 7.
+
+"References: equal whatever spelling was read; written in the canonical spelling."
+c that: 'refs equal across an alias' is: (PBUnresolvedRef pointer: ptr tag: 'acme.sales.LegacyInvoice')
+  equals: (PBUnresolvedRef pointer: ptr tag: 'acme.sales.Invoice').
+c that: 'refs equal across a built-in name' is: (PBUnresolvedRef pointer: ptr tag: 'proto_db.collections.Dictionary')
+  equals: (PBUnresolvedRef pointer: ptr tag: 6).
+c that: 'refs of other types differ' isTrue: (PBUnresolvedRef pointer: ptr tag: 5) ~= (PBUnresolvedRef pointer: ptr tag: 6).
+c that: 'a ref read before its class was registered is written with the declared name'
+  is: (PBCodec encode: (PBUnresolvedRef pointer: ptr tag: 'acme.sales.LegacyInvoice'))
+  equals: (PBCodec encode: (PBUnresolvedRef pointer: ptr tag: 'acme.sales.Invoice')).
+c that: 'a ref whose name every reader refuses is not written' signals: PBValidationError during: [
+  PBCodec encode: (PBUnresolvedRef pointer: ptr tag: 'bad')].
 
 "Records and segment headers."
 record := PBRecordHeader encodeKind: 1 payload: #[1 2 3].
