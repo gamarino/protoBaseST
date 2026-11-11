@@ -13,3 +13,9 @@ Import from: 'protobase/codec'.
 Import from: 'protobase/notation'.
 Import from: 'protobase/framing'.
 Import from: 'protobase/store'.
+Import from: 'protobase/avl'.
+Import from: 'protobase/collections'.
+Import from: 'protobase/records'.
+Import from: 'protobase/indexes'.
+Import from: 'protobase/roots'.
+Import from: 'protobase/space'.

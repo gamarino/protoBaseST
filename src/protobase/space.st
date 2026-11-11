@@ -1,0 +1,260 @@
+"-- space.st: PBObjectSpace, PBDatabase, PBSnapshot and PBHistoryEntry, read side --
+
+ProtoBase's ObjectSpace, Database, Snapshot and HistoryEntry
+(proto_db/transactions.py at v2.0.0rc1; design spec 5.2 and 6), reading:
+
+  PBObjectSpace registerAtomClass: aClass   PBTypeRegistry register: aClass
+  PBObjectSpace storage: aStorage           a space over aStorage (it owns it:
+                                            close closes it); lockTimeout 30000 ms
+  PBObjectSpace storage: s lockTimeout: ms  ms, a positive SmallInteger (the root
+                                            lock wait of a commit, plan Task 18)
+  aSpace listDatabases                      the database names, sorted
+  aSpace openDatabase: aName                the PBDatabase; an absent name is
+                                            PBValidationError
+  aSpace close                              idempotent; later calls: PBClosedError
+  aDatabase name, history                   history: PBHistoryEntry objects, newest
+                                            first, through previous
+  aDatabase snapshotAt: anEntryOrSnapshot   the PBSnapshot of that version
+  aSnapshot version, committedAt, rootNames, getRootObject:, mutableNames,
+            getMutable:                     names sorted; an absent name reads nil
+  anEntry   version, committedAt, rootNames, mutableNames, getMutable: (no
+            getRootObject:, as in ProtoBase: open the version with snapshotAt:)
+
+Every read goes to the storage's current root: there is no cache of roots. A
+space whose SpaceRoot carries cluster_term was committed by a cluster node and
+is PBNotSupportedError, like a directory holding cluster/ (PBFileStorage),
+since clusters are outside the prototype (design spec 10.5). snapshotAt:
+checks that the version is one of this database: the name its entry or
+snapshot records, and its origin (DatabaseRoot origin), must be this
+database's, else PBReferenceError (ProtoBase Database._check_owned); any
+other argument is PBReferenceError (the prototype has no snapshot references
+as bytes). Transactions come with plan Task 13."
+
+Import from: 'protobase/errors'.
+Import from: 'protobase/values'.
+Import from: 'protobase/registry'.
+Import from: 'protobase/avl'.
+Import from: 'protobase/collections'.
+Import from: 'protobase/records'.
+Import from: 'protobase/roots'.
+
+Object subclass: #_PBNameCheck.
+
+"aName, a non-empty String; PBValidationError otherwise (ProtoBase _check_name)."
+_PBNameCheck class >> check: aName what: aWhat
+  ((aName isString and: [aName isSymbol not]) and: [aName notEmpty]) ifTrue: [^ aName].
+  ^ PBValidationError signal: 'A ' , aWhat , ' name must be a non-empty String, not ' , aName printString.
+
+"=== PBObjectSpace ============================================================"
+
+Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed'.
+
+PBObjectSpace class >> registerAtomClass: aClass
+  ^ PBTypeRegistry register: aClass.
+
+PBObjectSpace class >> defaultLockTimeout
+  ^ 30000.
+
+PBObjectSpace class >> storage: aStorage
+  ^ self storage: aStorage lockTimeout: self defaultLockTimeout.
+
+PBObjectSpace class >> storage: aStorage lockTimeout: milliseconds
+  (aStorage isNil or: [aStorage isClassObject]) ifTrue: [
+    ^ PBValidationError signal: 'PBObjectSpace storage: a storage was expected, not ' , aStorage printString].
+  ((milliseconds isKindOf: SmallInteger) and: [milliseconds > 0]) ifFalse: [
+    ^ PBValidationError signal: 'PBObjectSpace: lockTimeout is a positive SmallInteger of milliseconds, not '
+      , milliseconds printString].
+  ^ self basicNew _setStorage: aStorage lockTimeout: milliseconds.
+
+PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds
+  "Runs once, on a fresh instance."
+  storage isNil ifFalse: [^ PBUserError signal: 'PBObjectSpace is initialised once'].
+  storage := aStorage.
+  lockTimeout := milliseconds.
+  closed := Atom on: false.
+  ^ self.
+
+PBObjectSpace >> storage
+  ^ storage.
+
+"Milliseconds a commit waits for the root lock."
+PBObjectSpace >> lockTimeout
+  ^ lockTimeout.
+
+PBObjectSpace >> isClosed
+  ^ closed value.
+
+PBObjectSpace >> _checkOpen
+  closed value ifTrue: [^ PBClosedError signal: 'PBObjectSpace is closed'].
+
+"The PBSpaceRoot the storage's root record points to now, or nil (an empty
+ space)."
+PBObjectSpace >> _currentSpaceRoot
+  | record root |
+  self _checkOpen.
+  record := storage readRoot.
+  record isNil ifTrue: [^ nil].
+  root := PBTypeRegistry unloadedAtomFor: (PBTypeRegistry aliasOf: PBSpaceRoot typeName)
+    at: record pointer storage: storage.
+  root clusterTerm isNil ifFalse: [
+    ^ PBNotSupportedError signal: 'PBObjectSpace: the space root at ' , record pointer printString
+      , ' was committed by a cluster node (cluster_term ' , root clusterTerm printString
+      , '): clusters are not supported by protoBaseST'].
+  ^ root.
+
+"The current PBDatabaseRoot of the database aName, or nil."
+PBObjectSpace >> _databaseRootNamed: aName
+  | root found |
+  root := self _currentSpaceRoot.
+  root isNil ifTrue: [^ nil].
+  found := root databases getAt: aName.
+  ^ _PBTree node: found kind: PBDatabaseRoot in: root databases.
+
+PBObjectSpace >> listDatabases
+  | root |
+  root := self _currentSpaceRoot.
+  root isNil ifTrue: [^ #()].
+  ^ _PBNames sorted: root databases keys.
+
+PBObjectSpace >> openDatabase: aName
+  _PBNameCheck check: aName what: 'database'.
+  (self _databaseRootNamed: aName) isNil ifTrue: [
+    ^ PBValidationError signal: 'Database ' , aName printString , ' does not exist'].
+  ^ PBDatabase basicNew _setSpace: self name: aName.
+
+"Closes the space and its storage. Idempotent."
+PBObjectSpace >> close
+  (closed value: true ifCurrent: false) ifTrue: [storage close].
+
+PBObjectSpace >> printOn: aStream
+  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
+  aStream nextPutAll: 'PBObjectSpace('; print: storage; nextPut: $).
+
+"=== PBDatabase ==============================================================="
+
+"A handle on a named database of a space: cheap and stateless, as ProtoBase's."
+Object subclass: #PBDatabase instanceVariableNames: 'space dbName'.
+
+PBDatabase >> _setSpace: aSpace name: aName
+  "Runs once, on a fresh instance."
+  space isNil ifFalse: [^ PBUserError signal: 'PBDatabase is initialised once'].
+  space := aSpace.
+  dbName := aName.
+  ^ self.
+
+PBDatabase >> space
+  ^ space.
+
+"The database name (the class name when sent to the class object, K14)."
+PBDatabase >> name
+  self isClassObject ifTrue: [^ super name].
+  ^ dbName.
+
+"The current PBDatabaseRoot; PBValidationError when the database is gone."
+PBDatabase >> _currentRoot
+  | root |
+  root := space _databaseRootNamed: dbName.
+  root isNil ifTrue: [^ PBValidationError signal: 'Database ' , dbName printString , ' does not exist'].
+  ^ root.
+
+"The committed versions, newest first, as PBHistoryEntry objects."
+PBDatabase >> history
+  | root entries |
+  root := self _currentRoot.
+  entries := OrderedCollection new.
+  [root notNil] whileTrue: [
+    entries add: (PBHistoryEntry basicNew _setRoot: root database: dbName).
+    root := root previous].
+  ^ entries asArray.
+
+"The read-only PBSnapshot of the version a PBHistoryEntry or a PBSnapshot
+ names, after the identity checks (module comment)."
+PBDatabase >> snapshotAt: aReference
+  | recordedName root |
+  space _checkOpen.
+  (aReference isClassObject not and: [(aReference isKindOf: PBSnapshot) or: [aReference isKindOf: PBHistoryEntry]])
+    ifFalse: [
+      ^ PBReferenceError signal: 'snapshotAt: a PBHistoryEntry or a PBSnapshot was expected, not '
+        , aReference printString].
+  recordedName := aReference databaseName.
+  root := aReference _root.
+  recordedName = dbName ifFalse: [
+    ^ PBReferenceError signal: 'The reference names the database ' , recordedName printString , ', not '
+      , dbName printString].
+  root origin = self _currentRoot origin ifFalse: [
+    ^ PBReferenceError signal: 'The reference names a version of another database, not of ' , dbName printString
+      , ' (another incarnation of the name, or another space)'].
+  ^ PBSnapshot basicNew _setRoot: root database: self.
+
+PBDatabase >> printOn: aStream
+  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
+  aStream nextPutAll: 'PBDatabase('; print: dbName; nextPut: $).
+
+"=== the versions ============================================================="
+
+"The read messages of one version (a PBDatabaseRoot): PBHistoryEntry and
+ PBSnapshot."
+Object subclass: #_PBVersionView instanceVariableNames: 'root'.
+
+_PBVersionView >> _root
+  ^ root.
+
+_PBVersionView >> version
+  ^ root version.
+
+"When the version was committed: an aware UTC DateTime."
+_PBVersionView >> committedAt
+  ^ root committedAt.
+
+"The names of the roots of this version, sorted."
+_PBVersionView >> rootNames
+  ^ _PBNames sorted: root objects keys.
+
+"The names of the mutable cells of this version, sorted."
+_PBVersionView >> mutableNames
+  ^ _PBNames sorted: root mutables keys.
+
+"The value of the mutable cell aName in this version, nil when absent."
+_PBVersionView >> getMutable: aName
+  ^ root mutables getAt: (_PBNameCheck check: aName what: 'mutable').
+
+_PBVersionView subclass: #PBHistoryEntry instanceVariableNames: 'databaseName'.
+
+PBHistoryEntry >> _setRoot: aDatabaseRoot database: aName
+  "Runs once, on a fresh instance."
+  root isNil ifFalse: [^ PBUserError signal: 'PBHistoryEntry is initialised once'].
+  root := aDatabaseRoot.
+  databaseName := aName.
+  ^ self.
+
+"The name of the database this version belongs to."
+PBHistoryEntry >> databaseName
+  ^ databaseName.
+
+PBHistoryEntry >> printOn: aStream
+  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
+  aStream nextPutAll: 'PBHistoryEntry(version '; print: root version; nextPut: $).
+
+_PBVersionView subclass: #PBSnapshot instanceVariableNames: 'database'.
+
+PBSnapshot >> _setRoot: aDatabaseRoot database: aDatabase
+  "Runs once, on a fresh instance."
+  root isNil ifFalse: [^ PBUserError signal: 'PBSnapshot is initialised once'].
+  root := aDatabaseRoot.
+  database := aDatabase.
+  ^ self.
+
+"The PBDatabase this version belongs to."
+PBSnapshot >> database
+  ^ database.
+
+PBSnapshot >> databaseName
+  ^ database name.
+
+"The value of the root aName in this version, nil when absent."
+PBSnapshot >> getRootObject: aName
+  ^ root objects getAt: (_PBNameCheck check: aName what: 'root').
+
+PBSnapshot >> printOn: aStream
+  self isClassObject ifTrue: [^ aStream nextPutAll: self name].
+  aStream nextPutAll: 'PBSnapshot('; print: database name; nextPutAll: ', version '; print: root version; nextPut: $).

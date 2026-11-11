@@ -12,10 +12,21 @@ at v2.0.0rc1:
                                       scalars, plus array and mpmap
   PBNotation floatHex: aFloat         Python's float.hex (nan, inf, -inf as repr)
   PBNotation floatFromHex: aString    the Float of such a text, bit exact
+  PBNotation describeObject: anObject the content description of a stored object
+                                      (records, opaque atoms and collections by
+                                      their content, recursively)
+  PBNotation describeDatabase: aSnapshotOrTransaction
+                                      roots, mutables, indexes and origin, as
+                                      ProtoBase's notation.describe_database
+  PBNotation dumpSpace: aSpace to: aPath
+                                      the JSON dump of ProtoBase's verifier --out
 
 Kinds: nil, bool, int (decimal text), float (C99 hexadecimal), str, bytes
 (hexadecimal), decimal, date, time, datetime, timedelta, uuid, list, tuple,
-map (pairs, in order), missing, mutable, ref ({segment, offset, type}).
+map (pairs, in order), missing, mutable, ref ({segment, offset, type}); the
+stored objects: object, opaque and collection (tests/conformance/README.md,
+'Stored objects'). The stored-object part needs the whole protobase module
+(the collection and record classes are looked up when a method runs).
 
 A datetime in an instant zone describes as ['instant', key] with the UTC
 fields; a format-3 wall-clock datetime (PBLegacyZoneDateTime) describes as
@@ -34,7 +45,12 @@ Import from: 'protobase/codec'.
 Import from: 'decimal'.
 Import from: 'calendar'.
 
-Object subclass: #PBNotation.
+Object subclass: #PBNotation classVariableNames: 'JSONModule'.
+
+PBNotation class >> _setJSON: aModule
+  JSONModule := aModule.
+
+PBNotation _setJSON: (Import from: 'json').
 
 "=== floats ==================================================================="
 
@@ -147,8 +163,9 @@ PBNotation class >> describe: v
   (v isKindOf: PBFrozenDict) ifTrue: [
     ^ self _one: 'map' value: (v associations collect: [:each |
       { self describe: each key. self describe: each value }])].
-  (v isKindOf: PBUnresolvedRef) ifTrue: [
+  ((v isKindOf: PBUnresolvedRef) or: [v isKindOf: PBAtom]) ifTrue: [
     | ref |
+    v pointer isNil ifTrue: [^ PBValidationError signal: 'PBNotation: ' , v printString , ' is not stored: it has no ref'].
     ref := Dictionary new.
     ref at: 'segment' put: v pointer segmentHex; at: 'offset' put: v pointer offset;
       at: 'type' put: (self _typeName: v tag).
@@ -161,6 +178,160 @@ PBNotation class >> _describeDateTime: v
     ifFalse: [tz := v isInstantForm ifTrue: [{ 'instant'. v zone key }] ifFalse: [self _tz: v zone]].
   ^ self _one: 'datetime' value: {
     v year. v month. v day. v hour. v minute. v second. v microsecond. v fold. tz }.
+
+"=== stored objects and databases =============================================="
+
+"The content description of a stored object (ProtoBase notation.describe_object):
+ a PBObject as {object: type, attrs} (attributes sorted by name), an opaque atom
+ as {opaque: type, attrs}, a PBList or PBSet as {collection: type, elements}, a
+ PBCountedSet as {collection: type, items: [[element, {int: count}]]}, the
+ dictionaries as {collection: type, items: [[key, value]]}, each in the
+ collection's own order, recursively; a tuple, list or map is described item by
+ item the same way, and any other value by describe: (an atom of another type is
+ its ref). A format-3 zone datetime (PBLegacyZoneDateTime) is refused with
+ PBNotSupportedError naming its zone: ProtoBase describes the UTC instant, which
+ needs the zone's rules (design spec 4.3)."
+PBNotation class >> describeObject: o
+  | d |
+  ((o isKindOf: DateTime) and: [o isLegacyZone]) ifTrue: [
+    ^ o _unsupported: 'description in ProtoBase''s database notation (its UTC instant)'].
+  (o isKindOf: PBObject) ifTrue: [^ self _content: 'object' of: o].
+  (o isKindOf: PBOpaqueAtom) ifTrue: [^ self _content: 'opaque' of: o].
+  ((o isKindOf: PBList) or: [o isKindOf: PBSet]) ifTrue: [
+    d := self _one: 'collection' value: (self _typeName: o tag).
+    d at: 'elements' put: (o elements collect: [:each | self describeObject: each]).
+    ^ d].
+  ((o isKindOf: PBCountedSet) or: [(o isKindOf: PBDictionary) or: [
+      (o isKindOf: PBHashDictionary) or: [o isKindOf: PBRepeatedKeysDictionary]]]) ifTrue: [
+    d := self _one: 'collection' value: (self _typeName: o tag).
+    d at: 'items' put: (o items collect: [:each |
+      { self describeObject: each key.
+        (o isKindOf: PBCountedSet) ifTrue: [self describe: each value] ifFalse: [self describeObject: each value] }]).
+    ^ d].
+  (o isKindOf: PBTuple) ifTrue: [^ self _one: 'tuple' value: (o asArray collect: [:each | self describeObject: each])].
+  (o isKindOf: PBFrozenList) ifTrue: [^ self _one: 'list' value: (o asArray collect: [:each | self describeObject: each])].
+  (o isKindOf: PBFrozenDict) ifTrue: [
+    ^ self _one: 'map' value: (o associations collect: [:each |
+      { self describeObject: each key. self describeObject: each value }])].
+  ^ self describe: o.
+
+PBNotation class >> _content: aKind of: anAtom
+  | d state |
+  state := anAtom state.
+  d := self _one: aKind value: (self _typeName: anAtom tag).
+  d at: 'attrs' put: (anAtom attributeNames collect: [:name | { name. self describeObject: (state at: name) }]).
+  ^ d.
+
+"The description of the database aSnapshotOrTransaction reads (ProtoBase
+ notation.describe_database): a Dictionary of roots (name order),
+ mutables (name order), indexes and origin."
+PBNotation class >> describeDatabase: aSnapshotOrTransaction
+  | d |
+  d := Dictionary new.
+  d at: 'roots' put: (self describeRoots: aSnapshotOrTransaction);
+    at: 'mutables' put: (self describeMutables: aSnapshotOrTransaction);
+    at: 'indexes' put: (self describeIndexes: aSnapshotOrTransaction);
+    at: 'origin' put: (self describeOrigin: aSnapshotOrTransaction).
+  ^ d.
+
+"[[name, description], ...] of the roots, by name."
+PBNotation class >> describeRoots: aSnapshotOrTransaction
+  ^ aSnapshotOrTransaction rootNames asArray collect: [:name |
+    { name. self describeObject: (aSnapshotOrTransaction getRootObject: name) }].
+
+"[[name, description], ...] of the mutable cells, by name."
+PBNotation class >> describeMutables: aSnapshotOrTransaction
+  ^ aSnapshotOrTransaction mutableNames asArray collect: [:name |
+    { name. self describeObject: (aSnapshotOrTransaction getMutable: name) }].
+
+"{root name: {index name: {type, member_tokens}}} of every root collection that
+ has indexes."
+PBNotation class >> describeIndexes: aSnapshotOrTransaction
+  | out |
+  out := Dictionary new.
+  aSnapshotOrTransaction rootNames do: [:name |
+    | root |
+    root := aSnapshotOrTransaction getRootObject: name.
+    ((root isKindOf: PBIndexedCollection) and: [root indexNames notEmpty]) ifTrue: [
+      | indexes |
+      indexes := Dictionary new.
+      root indexNames do: [:indexName |
+        | index entry |
+        index := root getIndex: indexName.
+        entry := Dictionary new.
+        entry at: 'type' put: (self _typeName: index tag); at: 'member_tokens' put: index hasMemberTokens.
+        indexes at: indexName put: entry].
+      out at: name put: indexes]].
+  ^ out.
+
+"The description of the database's origin (nil when it has none)."
+PBNotation class >> describeOrigin: aSnapshotOrTransaction
+  ^ self describe: aSnapshotOrTransaction _root origin.
+
+"Writes to aPath (a String or a FileReference) the JSON dump ProtoBase's
+ verifier writes with --out (proto_db/tools/verify.py): root (the root
+ record's fields), atoms (every atom reachable from the space root, each
+ counted once by pointer), collections (the collections among them),
+ opaque_types (the sorted type names of the opaque atoms among them) and
+ databases (each database's describeDatabase: of its current version). The
+ verifier's canonical-encoding and validate() checks are not made. Answers
+ the dump, a Dictionary."
+PBNotation class >> dumpSpace: aSpace to: aPath
+  | record report walk databases file |
+  record := aSpace storage readRoot.
+  report := Dictionary new.
+  record isNil ifFalse: [
+    | root |
+    root := Dictionary new.
+    root at: 'version' put: record version; at: 'segment' put: record segmentHex;
+      at: 'offset' put: record offset; at: 'epoch' put: record epoch.
+    report at: 'root' put: root].
+  walk := self _walk: aSpace _currentSpaceRoot.
+  report at: 'atoms' put: (walk at: 1); at: 'collections' put: (walk at: 2);
+    at: 'opaque_types' put: (_PBNames sorted: (walk at: 3)).
+  databases := Dictionary new.
+  aSpace listDatabases do: [:name |
+    | db |
+    db := aSpace openDatabase: name.
+    databases at: name put: (self describeDatabase: (db snapshotAt: db history first))].
+  report at: 'databases' put: databases.
+  file := aPath isString ifTrue: [aPath asFileReference] ifFalse: [aPath].
+  file contents: (JSONModule JSON stringify: report) , (String with: Character lf).
+  ^ report.
+
+"{ atoms. collections. opaque type names (a Set) } of the atoms reachable from
+ aRoot (nil: none), depth first, each decoded once by pointer."
+PBNotation class >> _walk: aRoot
+  | stack seen atoms collections opaque |
+  stack := OrderedCollection new.
+  aRoot isNil ifFalse: [stack addLast: aRoot].
+  seen := Set new.
+  atoms := 0. collections := 0.
+  opaque := Set new.
+  [stack notEmpty] whileTrue: [
+    | atom children |
+    atom := stack removeLast.
+    (atom pointer isNil or: [seen includes: atom pointer]) ifFalse: [
+      seen add: atom pointer.
+      atoms := atoms + 1.
+      (atom isKindOf: PBOpaqueAtom) ifTrue: [opaque add: atom tag].
+      (atom isKindOf: PBIndexedCollection) ifTrue: [collections := collections + 1].
+      children := OrderedCollection new.
+      atom state do: [:value | self _atomsIn: value into: children].
+      children reverseDo: [:each | stack addLast: each]]].
+  ^ { atoms. collections. opaque }.
+
+"Adds the atoms held by the canonical value v, at any depth, to anOrderedCollection."
+PBNotation class >> _atomsIn: v into: anOrderedCollection
+  | pending |
+  pending := OrderedCollection with: v.
+  [pending notEmpty] whileTrue: [
+    | x |
+    x := pending removeFirst.
+    (x isKindOf: PBAtom) ifTrue: [anOrderedCollection add: x].
+    ((x isKindOf: PBTuple) or: [x isKindOf: PBFrozenList]) ifTrue: [pending addAll: x asArray].
+    (x isKindOf: PBFrozenDict) ifTrue: [
+      x associations do: [:each | pending add: each key; add: each value]]].
 
 "The description of the tree MessagePack decodeOrdered: answers (raw msgpack
  data: atom envelopes, root records, cluster messages): the scalars as

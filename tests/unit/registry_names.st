@@ -4,13 +4,9 @@
  unknown proto_db. name is corruption, any other unknown valid name is an
  opaque atom, a bad name is refused when registered (PBValidationError) and
  when read (PBCorruptionError), and conflicting registrations are refused.
- PlaceholderDictionary stands in for PBDictionary until plan Task 12."
+ Since plan Task 12 every built-in type has its class (abstract ones included)."
 Import from: 'protobase'.
 Import from: '_check'.
-
-PBAtom subclass: #PlaceholderDictionary.
-PlaceholderDictionary class >> typeName
-  ^ 'proto_db.collections.Dictionary'.
 
 PBAtom subclass: #Invoice.
 Invoice class >> typeName
@@ -64,14 +60,15 @@ c that: 'alias 21' is: (names at: 22) equals: 'proto_db.avl.CountedKeyNode'.
 names at: 1 put: 'tampered.Name'.
 c that: 'builtinNames answers a copy' is: (PBTypeRegistry builtinNames at: 1) equals: 'proto_db.avl.KeyNode'.
 
-"A built-in type without a class yet is an explicit refusal, never corruption."
-c that: 'alias 6 before its class is registered' signals: PBNotSupportedError containing: 'proto_db.collections.Dictionary'
-  during: [PBTypeRegistry classForTag: 6].
-PBTypeRegistry register: PlaceholderDictionary.
-c that: 'alias 6' is: (PBTypeRegistry classForTag: 6) equals: PlaceholderDictionary.
-c that: 'proto_db.collections.Dictionary' is: (PBTypeRegistry classForTag: 'proto_db.collections.Dictionary') equals: PlaceholderDictionary.
-c that: 'tagFor: a built-in class is its alias' is: (PBTypeRegistry tagFor: PlaceholderDictionary) equals: 6.
-c that: 'registering the same class again is a no-op' is: (PBTypeRegistry register: PlaceholderDictionary) equals: PlaceholderDictionary.
+"Every built-in type has its class, registered under its name."
+c that: 'every built-in alias has its class' is: ((0 to: 21) asArray reject: [:alias |
+    | cls |
+    cls := PBTypeRegistry classForTag: alias.
+    cls typeName = (PBTypeRegistry builtinNames at: alias + 1) and: [(PBTypeRegistry tagFor: cls) = alias]]) equals: #().
+c that: 'alias 6' is: (PBTypeRegistry classForTag: 6) equals: PBDictionary.
+c that: 'proto_db.collections.Dictionary' is: (PBTypeRegistry classForTag: 'proto_db.collections.Dictionary') equals: PBDictionary.
+c that: 'tagFor: a built-in class is its alias' is: (PBTypeRegistry tagFor: PBDictionary) equals: 6.
+c that: 'registering the same class again is a no-op' is: (PBTypeRegistry register: PBDictionary) equals: PBDictionary.
 
 "Unknown names."
 c that: 'proto_db.nonexistent.X' signals: PBCorruptionError during: [PBTypeRegistry classForTag: 'proto_db.nonexistent.X'].

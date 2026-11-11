@@ -21,3 +21,8 @@ PBRootRecord>>_setVersion:segment:offset:epoch:
 PBAtomEnvelope>>_setTag:oid:state:
 PBSegmentReader>>_setSegment:file:header:
 PBFileStorage>>_setDirectory:
+PBHistoryEntry>>_setRoot:database:
+PBSnapshot>>_setRoot:database:
+PBObjectSpace>>_setStorage:lockTimeout:
+PBDatabase>>_setSpace:name:
+PBNotation class>>_setJSON:

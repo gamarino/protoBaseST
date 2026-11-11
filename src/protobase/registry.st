@@ -296,6 +296,28 @@ PBAtom class >> requiredFields
 PBAtom class >> persistedFields
   ^ #().
 
+"The check of a loaded record's attribute names against the behaviour names
+ of this class (format spec, 'Attribute names'): PBCorruptionError for a
+ reserved name. The names every type refuses are the envelope's check; a
+ class with behaviour names to reserve overrides this (PBObject)."
+PBAtom class >> _checkPersistedNames: aState at: aPointer
+  ^ aState.
+
+"An atom of this class that is not stored: no pointer, no storage, no oid,
+ holding aPBFrozenDict as its state (a read-side value, such as the empty
+ CountedSet a RepeatedKeysDictionary answers for an absent key). The public
+ constructors of new atoms come with the writer (plan Task 15)."
+PBAtom class >> _unsavedWithState: aPBFrozenDict
+  (aPBFrozenDict isKindOf: PBFrozenDict) ifFalse: [
+    ^ PBValidationError signal: self name , ': the state of an atom is a PBFrozenDict, not ' , aPBFrozenDict printString].
+  ^ (self basicNew _setOid: nil pointer: nil storage: nil)
+    _installState: (PBAtomEnvelope basicNew _setTag: (PBTypeRegistry tagFor: self) oid: nil state: aPBFrozenDict).
+
+PBAtom >> _installState: anEnvelope
+  "Runs once, on a fresh unsaved instance."
+  (memo value: anEnvelope ifCurrent: nil) ifFalse: [^ PBUserError signal: 'PBAtom: the state is installed once'].
+  ^ self.
+
 "An unloaded atom (a stub) of this class: its record is at aPointer in
  aStorage and is loaded on first use."
 PBAtom class >> unloadedAt: aPointer storage: aStorage
@@ -345,6 +367,7 @@ PBAtom >> _envelope
   missing isEmpty ifFalse: [
     ^ PBCorruptionError signal: 'the atom at ' , pointer printString , ' (' , (PBTypeRegistry nameOfTag: self tag)
       , ') lacks the required fields ' , missing printString].
+  self class _checkPersistedNames: envelope state at: pointer.
   (memo value: envelope ifCurrent: nil) ifTrue: [^ envelope].
   ^ memo value.
 
@@ -406,11 +429,38 @@ PBOpaqueAtom >> _absentField: aName
   ^ PBNotSupportedError signal: aName printString , ' is not a field of this ' , referencedName
     , ' atom, and that type has no class registered in this process: its behaviour is not available here'.
 
+"The value of the field aName; a field the record does not hold is
+ PBNotSupportedError naming the type (D59)."
+PBOpaqueAtom >> at: aName
+  ^ self stateAt: aName.
+
+"The names of the fields the record holds, sorted."
+PBOpaqueAtom >> attributeNames
+  ^ _PBNames sorted: self state keys.
+
+"Any message an opaque atom does not implement needs the type's behaviour:
+ PBNotSupportedError naming the type and the message (a collection message,
+ a change such as with:value: or setAt:value:, a record message such as
+ hasDefinedAttr:). Sent to the class object (K14: class objects reach instance
+ methods), it signals MessageNotUnderstood as the inherited one does: a super
+ send from here would come back to this method."
+PBOpaqueAtom >> doesNotUnderstand: aMessage
+  self isClassObject ifTrue: [
+    ^ MessageNotUnderstood new signal: 'doesNotUnderstand: ' , aMessage selector , ' (receiver class: ' , self name , ')'].
+  ^ PBNotSupportedError signal: 'this ' , referencedName , ' atom does not understand '
+    , aMessage selector printString , ': the type has no class registered in this process, so its behaviour is not available here'.
+
 PBOpaqueAtom >> printOn: aStream
   self isClassObject ifTrue: [^ aStream nextPutAll: self name].
   aStream nextPutAll: 'PBOpaqueAtom('; nextPutAll: referencedName; nextPutAll: ', '; print: pointer; nextPut: $).
 
 PBTypeRegistry _initializeRegistry.
+
+"Attribute names sorted by code point (the order key of a str)."
+Object subclass: #_PBNames.
+
+_PBNames class >> sorted: aCollection
+  ^ (Array withAll: aCollection) sorted: [:a :b | (PBKeys compare: a with: b) <= 0].
 
 "=== PBUnresolvedRef equality ==============================================="
 

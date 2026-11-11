@@ -11,7 +11,8 @@ fails by a mismatch (no error), else the PBDBError class it signals; both must m
 
 section is the manifest section ('values', 'values_decode_only',
 'values_read_not_rewritten', 'invalid', 'order', 'hashes', 'exact_tokens',
-'database', whose ids are record offsets; the
+'database', whose ids are record offsets; 'database_contents', whose ids are the
+items of database_contents.st; the
 key runners name a value 'kind body', as _keyvectors.st does). stages are the checks of the vector
 that fail, exactly (a vector that fails a stage or an error class not listed, or passes a listed
 one, is a FAIL of the runner, so the list cannot go stale):
@@ -26,6 +27,8 @@ one, is a FAIL of the runner, so the list cannot go stale):
   order      (order.st) the value does not order after every earlier one
   hash       (hashes.st) the value's hash key is not the listed one
   token      (tokens.st) the value's exact token is not the listed one
+  describe   (database_contents.st) the description of a part of the database is not
+             the manifest's contents
 
 removedBy is a plan task, or 'permanent, design 4.3' (the design spec, section
 4.3: no time-zone database)."
@@ -64,33 +67,12 @@ ExpectedDifferences class >> all
     { 'database'. '13966'. #(#('decode' 'PBNotSupportedError')).
       'the record holds a @uuid value, which needs lib/uuid.st (not in protoST 0.9.0): its envelope is refused with PBNotSupportedError'.
       'Task 5, Step 6' }.
-    { 'invalid'. 'atom-extra-key'. #(#('refusal' 'PBNotSupportedError')).
-      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
-      'Task 12' }.
-    { 'invalid'. 'atom-short-oid'. #(#('refusal' 'PBNotSupportedError')).
-      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
-      'Task 12' }.
-    { 'invalid'. 'atom-tag-float'. #(#('refusal' 'PBNotSupportedError')).
-      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
-      'Task 12' }.
-    { 'invalid'. 'atom-unknown-alias'. #(#('refusal' 'PBNotSupportedError')).
-      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
-      'Task 12' }.
-    { 'invalid'. 'atom-other-type'. #(#('refusal' 'PBNotSupportedError')).
-      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
-      'Task 12' }.
-    { 'invalid'. 'atom-missing-field'. #(#('refusal' 'PBNotSupportedError')).
-      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
-      'Task 12' }.
-    { 'invalid'. 'atom-reserved-name'. #(#('refusal' 'PBNotSupportedError')).
-      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
-      'Task 12' }.
-    { 'invalid'. 'atom-underscore-name'. #(#('refusal' 'PBNotSupportedError')).
-      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
-      'Task 12' }.
-    { 'invalid'. 'atom-bytes-name'. #(#('refusal' 'PBNotSupportedError')).
-      'the reference cannot be resolved: the built-in type has no class until Task 12 (PBTypeRegistry classForTag: signals PBNotSupportedError)'.
-      'Task 12' } }.
+    { 'database_contents'. 'database'. #(#('describe' 'PBNotSupportedError')).
+      'the root invoice holds a @uuid value, which needs lib/uuid.st (not in protoST 0.9.0): describing the whole database is refused with PBNotSupportedError'.
+      'Task 5, Step 6' }.
+    { 'database_contents'. 'root invoice'. #(#('describe' 'PBNotSupportedError')).
+      'the record holds a @uuid value, which needs lib/uuid.st (not in protoST 0.9.0): its envelope is refused with PBNotSupportedError'.
+      'Task 5, Step 6' } }.
 
 "The entries of one section, as an OrderedCollection."
 ExpectedDifferences class >> forSection: aSection

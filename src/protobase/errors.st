@@ -2,7 +2,7 @@
 
 Mirrors proto_db/errors.py at ProtoBase v2.0.0rc1 (plan call C14), with PB in place of Proto,
 so that on: PBLockingError do: means the same in Smalltalk and in Python. ProtoBase classes
-that are outside this prototype (references, pager tokens, misfiled entries, authorization,
+that are outside this prototype (pager tokens, misfiled entries, authorization,
 backlog and refused writes) have no counterpart here, and the errors carry no code or message API yet:
 they are added, additively, when a task needs them."
 
@@ -11,6 +11,9 @@ PBDBError comment: 'Root of every error protoBaseST signals. Counterpart of Prot
 
 PBDBError subclass: #PBValidationError.
 PBValidationError comment: 'An invalid argument, schema or data shape. Counterpart of ProtoBase ProtoValidationError.'.
+
+PBValidationError subclass: #PBReferenceError.
+PBReferenceError comment: 'A reference to a database version that is malformed, names no version, or names a version of another database (a client error). Counterpart of ProtoBase ProtoReferenceError.'.
 
 PBValidationError subclass: #PBClosedError.
 PBClosedError comment: 'An operation on a closed database or storage, or a read of an object whose state was not loaded before the close. Counterpart of ProtoBase ProtoClosedError.'.

@@ -30,3 +30,12 @@
   format-2 built-in name becomes its alias, an application alias the declared name. The
   `framing` vectors and the invalid `record`, `segment` and `root` vectors pass, and so do
   `ref-format2`, `ref-name-of-builtin` and `ref-alias`.
+- The read path (plan Task 12): AVL nodes and value boxes (`avl.st`); the collections with
+  ProtoBase's read API (`collections.st`); `PBObject` with the reserved behaviour names of DBObject
+  (`records.st`); `PBOpaqueAtom` reads its fields and refuses everything else naming its type;
+  the indexes, decoded and kept (`indexes.st`); `PBSpaceRoot` and `PBDatabaseRoot` (`roots.st`);
+  `PBObjectSpace`, `PBDatabase`, `PBSnapshot` and `PBHistoryEntry`, read side (`space.st`);
+  `PBReferenceError`; `PBNotation describeObject:`, `describeDatabase:` and `dumpSpace:to:`.
+  Every built-in type now has its class. The `database`, `legacy_database` and
+  `polyglot_database` contents and the invalid `atom` vectors pass; the cluster vectors are
+  visible skips (clusters are outside the prototype).

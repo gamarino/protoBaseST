@@ -105,8 +105,8 @@ refused by `register:` with `PBValidationError`. An alias may be any non-empty s
 a built-in name: old Python default names (`myapp.models.make.<locals>.Person`) are outside the
 grammar but name stored data, so a class declares them as ProtoBase does. A writer never writes
 an alias, nor a name every reader refuses (`PBTypeRegistry writerTag:`, `PBValidationError`).
-References compare equal by pointer and by the type their tags name. A built-in type whose class is not registered yet is
-`PBNotSupportedError`. `PBCodec` reads every `@ref` with the tag a writer puts: a built-in name
+References compare equal by pointer and by the type their tags name. Every built-in type has
+its class (plan Task 12). `PBCodec` reads every `@ref` with the tag a writer puts: a built-in name
 becomes its alias, an application alias the declared name.
 
 An atom read through a reference is a stub (`unloadedAt:storage:`, or
@@ -114,6 +114,51 @@ An atom read through a reference is a stub (`unloadedAt:storage:`, or
 `state`, `stateAt:` or `oid` loads the record through `storage loadAt:expecting:` and memoises the
 envelope in an `Atom` cell, checking the class's `requiredFields`. A field that an application
 record does not hold reads as nil; an opaque atom signals `PBNotSupportedError` naming its type.
+
+## Reading a space
+
+`PBObjectSpace` opens a file-storage space read-only (writing comes with the transactions). The
+names and messages are ProtoBase's (design spec 5); collection positions are 0-based, as in
+ProtoBase:
+
+```smalltalk
+PBObjectSpace registerAtomClass: Invoice.             "PBObject subclass, typeName 'acme.sales.Invoice'"
+space := PBObjectSpace storage: (PBFileStorage path: '/srv/erp').
+space listDatabases.                                  "#('erp'), sorted"
+db := space openDatabase: 'erp'.                      "an absent name is PBValidationError"
+db history.                                           "PBHistoryEntry objects, newest first"
+snap := db snapshotAt: db history first.              "a PBSnapshot of that version"
+snap rootNames.                                       "sorted"
+invoices := snap getRootObject: 'invoices'.           "nil when absent"
+(invoices getAt: 1043) at: 'total'.                   "1, 1.0 and Decimal 1.00 find one key"
+invoices keysAndValuesDo: [:number :invoice | ...].   "in key order"
+(snap getRootObject: 'lines') getAt: -1.              "a PBList: the last element"
+snap getMutable: 'counter'.
+space close.
+```
+
+- Collections (`collections.st`): `PBList`, `PBDictionary`, `PBHashDictionary`, `PBSet`,
+  `PBCountedSet` and `PBRepeatedKeysDictionary` answer `getAt:`, `getAt:default:`, `has:`, `keys`,
+  `values`, `items` (Associations), `do:`, `keysAndValuesDo:`, `count`, `size`, `countOf:`,
+  `indexNames` and `getIndex:`, each where ProtoBase has it, in ProtoBase's iteration order.
+  The AVL nodes are in `avl.st`; a large node value is unboxed from its `PBValueBox`.
+- Records (`records.st`): `PBObject` answers `at:` (nil when absent), `hasDefinedAttr:` and
+  `attributeNames`. A record holding an attribute named `with_` or `has_defined_attr` (behaviour
+  of DBObject) is refused when loaded (`PBCorruptionError`).
+- A record of a type with no class here is a `PBOpaqueAtom` (D59): `tag` is its type name, and
+  `at:` and `attributeNames` read its fields. Any other message (a change, a collection message,
+  `doesNotUnderstand:`) and its use where a built-in type is expected are `PBNotSupportedError`
+  naming the type.
+- Indexes (`indexes.st`) are decoded and kept: `name`, `keySpec`, `hasMemberTokens` (false for an
+  index written by format 3). Roots (`roots.st`): `PBSpaceRoot`, `PBDatabaseRoot`; a
+  DatabaseRoot without `mutables` (before D35) is `PBCorruptionError`, and a space root written by a
+  cluster node is `PBNotSupportedError`.
+- `snapshotAt:` checks that the version belongs to the database (its name and its `origin`):
+  `PBReferenceError` otherwise.
+- `PBNotation describeObject:` and `describeDatabase:` answer ProtoBase's database notation;
+  `PBNotation dumpSpace: aSpace to: aPath` writes the JSON of ProtoBase's verifier `--out`
+  (`python -m proto_db.tools.verify`). A format-3 zone datetime cannot be described as ProtoBase
+  describes it (its UTC instant) without the zone's rules: `PBNotSupportedError`.
 
 ## Running the tests
 

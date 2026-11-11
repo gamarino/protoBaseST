@@ -1,4 +1,4 @@
-"EXPECT: invalid atom-layer 0/9 expected 9"
+"EXPECT: invalid atom-layer 9/9"
 "Every invalid vector of the layer 'atom' (README, 'Using the vectors', 3): an
  atom record payload, loaded as a reference to the entry's type. The payloads are
  written as ATOM records into one segment of a temporary space; each is then
@@ -6,10 +6,10 @@
  pointer storage: (what PBFileStorage refTo:offset:tag: answers), then its state.
  The load must be refused with the listed class (corruption: PBCorruptionError).
  A refusal with another class is a FAIL, and so is a payload that is accepted,
- unless it is a listed expected difference (_expected_differences.st).
- Until Task 12 the built-in types have no class, so every entry is refused with
- PBNotSupportedError and is listed as an expected difference that Task 12 removes
- (plan Task 11: this runner passes at the end of Task 12)."
+ unless it is a listed expected difference (_expected_differences.st). Since
+ Task 12 every built-in type has its class, so each entry is loaded as its type
+ and refused with the listed class (atom-reserved-name by PBObject's check of the
+ behaviour names of DBObject)."
 Import from: 'protobase'.
 Import from: '_vectors'.
 | manifest entries run classes base seg w pointers storage |

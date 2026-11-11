@@ -414,6 +414,10 @@ Read ProtoBase's code before guessing a behaviour.
     `tests/conformance/_expected_differences.st`; the EXPECT line of
     `tests/conformance/database_records.st` becomes `database records 127/127` (Task 11's brief
     says `N/N`; it reads `126/127 expected 1` until this step).
+  - Remove the two `database_contents` entries (`database` and `root invoice`, added by Task 12:
+    the root `invoice` holds the `@uuid` value) from `tests/conformance/_expected_differences.st`;
+    the EXPECT line of `tests/conformance/database_contents.st` becomes
+    `database contents ok (database contents 17/17)` (it reads `15/17 expected 2` until this step).
 
 ---
 

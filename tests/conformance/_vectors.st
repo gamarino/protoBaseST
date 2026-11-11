@@ -15,22 +15,18 @@ signals Error: a vector is never edited, so no run goes on over a changed one.
 The listing is not walked for unlisted files: fetch_vectors.sh checks that at
 vendoring time.
 
-It also registers ConformanceInvoice, the application type of the vectors
-(conformance.Invoice, persisted before as conformance.LegacyInvoice; ProtoBase
-tests/conformance/model.py), as every implementation that reads them must."
+It also imports _model.st, which defines and registers ConformanceInvoice, the
+application type of the vectors (conformance.Invoice), as every implementation
+that reads them must.
+
+  Vectors copySpace: aSection  a copy of the space of a database-type section
+                              (its segment and space.root, verified first) in a
+                              fresh temporary directory, answered as a FileReference:
+                              runners open copies, never the vendored files"
 
 Import from: 'protobase'.
 Import from: '_expected_differences'.
-
-PBAtom subclass: #ConformanceInvoice.
-
-ConformanceInvoice class >> typeName
-  ^ 'conformance.Invoice'.
-
-ConformanceInvoice class >> typeAliases
-  ^ #('conformance.LegacyInvoice').
-
-PBTypeRegistry register: ConformanceInvoice.
+Import from: '_model'.
 
 Object subclass: #Vectors classVariableNames: 'Manifest JSONModule'.
 
@@ -39,11 +35,28 @@ Vectors class >> _setJSON: aModule
 
 Vectors _setJSON: (Import from: 'json').
 
+"The JSON class of protoST's json module (to print a mismatch)."
+Vectors class >> json
+  ^ JSONModule JSON.
+
 Vectors class >> pinnedDigest
   ^ '5f86eb09ed1683aa9f048051c64cca68d23b9fb753e87416cb1ecf11ed406df0'.
 
 Vectors class >> bytesOf: aPath
   ^ ('vectors/' , aPath) asFileReference binaryContents.
+
+"The space of the manifest section aSection ('database', 'legacy_database',
+ 'polyglot_database'), copied into FileSystem temp / pbst-copy-<pid>-<dir>,
+ emptied first. The files are those the manifest names, checked by manifest."
+Vectors class >> copySpace: aSection
+  | section dir |
+  section := self manifest at: aSection.
+  dir := FileSystem temp / ('pbst-copy-' , Smalltalk pid printString , '-' , (section at: 'dir')).
+  dir deleteAll.
+  dir ensureCreateDirectory.
+  { section at: 'segment'. 'space.root' } do: [:name |
+    (dir / name) binaryContents: (self bytesOf: (section at: 'dir') , '/' , name)].
+  ^ dir.
 
 Vectors class >> manifest
   Manifest isNil ifTrue: [Manifest := self _load].
