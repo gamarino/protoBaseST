@@ -1334,6 +1334,9 @@ cut in `docs/not-done.md`. A blind write never ships without its merge.
 
 **Interfaces:**
 - Consumes: Tasks 13, 16, 17; `DateTime nowUTC`.
+- Requirement (Task 13 review, round 2): `writes` and `mwrites` are `PBFrozenDict`s while
+  empty; before this task fills them they take the same persistent form as the read sets
+  (`_PBReadMap`, O(log n) per write), never a dictionary rebuilt on each write.
 - Produces (Spec §5.2 and §7):
   - `PBObjectSpace >> newDatabase: aName`. It commits version 0 with empty `objects` and
     `mutables`, `origin := ByteArray randomBytes: 16`, and `committedAt` now. An existing

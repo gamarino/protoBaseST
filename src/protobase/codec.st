@@ -623,7 +623,11 @@ PBCodec class >> _decodeMap: aBody resolver: aResolver
 
 "A key is identified by its oid: the atoms of the key k (an atom, or atoms in
  a tuple) are loaded now through a resolver that loads keys
- (_PBLoadResolver >> loadKey:, which refuses a record already being decoded)."
+ (_PBLoadResolver >> loadKey:, which refuses a record already being decoded).
+ A resolver without loadKey: (only tests that call fromWire:resolver: with a
+ plain storage) leaves the key atoms as stubs: a record whose key refers back
+ to itself is still refused with PBCorruptionError, one level later, when the
+ stub is loaded, so the recursion always ends."
 PBCodec class >> _loadKeyAtoms: k resolver: aResolver
   (aResolver isNil or: [(aResolver respondsTo: #loadKey:) not]) ifTrue: [^ self].
   (k isKindOf: PBAtom) ifTrue: [^ aResolver loadKey: k].
