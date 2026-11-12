@@ -1,0 +1,16 @@
+== moment 1: invoices created (version 1) ==
+customer:acme | ACME S.A. | 8 invoices | billed 2207.96 | paid 0.00
+customer:globex | Globex S.R.L. | 8 invoices | billed 2104.00 | paid 0.00
+customer:initech | Initech S.A. | 8 invoices | billed 2400.04 | paid 0.00
+paid invoices: none
+== moment 2: payments recorded (version 2) ==
+customer:acme | ACME S.A. | 8 invoices | billed 2207.96 | paid 540.60
+customer:globex | Globex S.R.L. | 8 invoices | billed 2104.00 | paid 836.64
+customer:initech | Initech S.A. | 8 invoices | billed 2400.04 | paid 332.68
+paid invoices: 1004 1008 1012 1016 1020 1024
+== moment 3: ACME renamed (version 3) ==
+customer:acme | ACME Argentina S.A. | 8 invoices | billed 2207.96 | paid 540.60
+customer:globex | Globex S.R.L. | 8 invoices | billed 2104.00 | paid 836.64
+customer:initech | Initech S.A. | 8 invoices | billed 2400.04 | paid 332.68
+paid invoices: 1004 1008 1012 1016 1020 1024
+tags now: 1003=disputed 1010=urgent

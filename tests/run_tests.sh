@@ -24,7 +24,9 @@
 # A path argument that does not exist, or a run that finds no test, fails.
 # Files whose name starts with "_" are helpers. The tooling scripts tests/run_tests.sh,
 # tests/interop/env.sh, tests/interop/setup_venv.sh and tests/conformance/fetch_vectors.sh (exact
-# paths) and the directories .venv, out and fixtures are never run as tests.
+# paths) and the directories .venv, out and fixtures are never run as tests. So are the step
+# scripts of the ERP demo, examples/erp/{2_payments,3_tag,4_report}.st: they take the database
+# directory as an argument and run, in order, under examples/erp/run_demo.sh (which is the test).
 set -u
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -63,7 +65,7 @@ for p in "$@"; do
         files+=("$p")
     fi
 done
-TOOLING=" tests/run_tests.sh tests/interop/env.sh tests/interop/setup_venv.sh tests/conformance/fetch_vectors.sh "
+TOOLING=" tests/run_tests.sh tests/interop/env.sh tests/interop/setup_venv.sh tests/conformance/fetch_vectors.sh examples/erp/2_payments.st examples/erp/3_tag.st examples/erp/4_report.st "
 kept=()
 for f in "${files[@]}"; do
     [[ "$TOOLING" == *" ${f#"$REPO"/} "* ]] || kept+=("$f")
