@@ -66,7 +66,7 @@ for id in $ids; do
     fi
     count=$((count + 1))
 done
-# The 13 rows of design spec 10.4, row 7 with its roles swapped (fix round 1), and the counted
-# set blind adds (plan Task 22).
-[[ "$count" -eq 15 ]] || fail "expected the 13 rows of design spec 10.4, the swapped row 7 and the counted set blind adds, ran $count"
+# The 13 rows of design spec 10.4, row 7 with its roles swapped (fix round 1), the counted set
+# blind adds and the 12 further counted set cases (plan Task 22 and its review).
+[[ "$count" -eq 27 ]] || fail "expected the 13 rows of design spec 10.4, the swapped row 7 and the 13 counted set cases, ran $count"
 echo "concurrency table: $count cases, ProtoBase's outcomes in both assignments"

@@ -237,6 +237,20 @@ _PBOpLog class >> opsOf: aLog
 _PBOpLog >> _op
   ^ op.
 
+"The order key of the element (or key) each op of anOps touches, its second item: an
+ Array parallel to anOps."
+_PBOpLog class >> orderKeysOf: anOps
+  ^ anOps collect: [:each | PBKeys orderKey: (each at: 2)].
+
+"Evaluates aBlock with each distinct key of aKeys (an Array of order keys, as
+ orderKeysOf: answers) and the index of its last occurrence, in order of last occurrence
+ (ProtoBase net_effect and counter_net_effect). O(n)."
+_PBOpLog class >> lastOccurrencesOf: aKeys do: aBlock
+  | last |
+  last := Dictionary new.
+  1 to: aKeys size do: [:i | last at: (aKeys at: i) put: i].
+  1 to: aKeys size do: [:i | (last at: (aKeys at: i)) = i ifTrue: [aBlock value: (aKeys at: i) value: i]].
+
 _PBOpLog >> _previous
   ^ previous.
 
@@ -414,17 +428,10 @@ PBIndexedCollection >> rebaseOnto: current
  the last op per key, keys compared by order key, in order of last
  occurrence. O(n) in the length of the log."
 PBIndexedCollection >> _netOps
-  | ops keys last out |
+  | ops out |
   ops := _PBOpLog opsOf: log.
-  keys := Array new: ops size.
-  last := Dictionary new.
-  1 to: ops size do: [:i |
-    | okey |
-    okey := PBKeys orderKey: ((ops at: i) at: 2).
-    keys at: i put: okey.
-    last at: okey put: i].
   out := OrderedCollection new.
-  1 to: ops size do: [:i | (last at: (keys at: i)) = i ifTrue: [out addLast: (ops at: i)]].
+  _PBOpLog lastOccurrencesOf: (_PBOpLog orderKeysOf: ops) do: [:okey :i | out addLast: (ops at: i)].
   ^ out asArray.
 
 "aTarget after one net op (a ConcurrentOptimized class answers it through
@@ -461,12 +468,17 @@ PBIndexedCollection >> _withRoot: aRoot count: aCount log: aLog complete: aBoole
 
 "A new version whose persisted fields named in aChanges (an Array of field -> value
  Associations) take those values, every other field carried over, in persistedFields
- order; its log is aLog, complete or not."
+ order; its log is aLog, complete or not. A change of a field the class does not persist
+ is PBUserError (a misspelled field would otherwise be dropped)."
 PBIndexedCollection >> _withChanges: aChanges log: aLog complete: aBoolean
   | cls shape fields values |
   cls := self class.
   shape := cls _recordShape.
   fields := shape persisted.
+  aChanges do: [:change |
+    (fields includes: change key) ifFalse: [
+      ^ PBUserError signal: cls name , ' has no persisted field ' , change key printString , ' (its fields: '
+        , (fields inject: '' into: [:acc :each | acc isEmpty ifTrue: [each] ifFalse: [acc , ', ' , each]]) , ')']].
   values := Array new: fields size.
   1 to: fields size do: [:i |
     | f change |
@@ -1161,13 +1173,12 @@ PBCountedSet >> _step: aCanonical removes: aRemoves adds: anAdds op: anOp
  compared by order key (the first element object of each is kept); an
  identity transform (0, 0) is omitted. O(n) in the length of the log."
 PBCountedSet >> _netOps
-  | ops keys last net out |
+  | ops keys net out |
   ops := _PBOpLog opsOf: log.
-  keys := Array new: ops size.
-  last := Dictionary new.
+  keys := _PBOpLog orderKeysOf: ops.
   net := Dictionary new.
   1 to: ops size do: [:i |
-    | op kind r a okey entry |
+    | op kind r a entry |
     op := ops at: i.
     kind := op at: 1.
     kind = 'add'
@@ -1179,22 +1190,18 @@ PBCountedSet >> _netOps
             kind = 'transform'
               ifTrue: [r := op at: 3. a := op at: 4]
               ifFalse: [^ PBValidationError signal: 'Unknown counter op kind ' , kind printString]]].
-    okey := PBKeys orderKey: (op at: 2).
-    keys at: i put: okey.
-    last at: okey put: i.
-    entry := net at: okey ifAbsent: [net at: okey put: { op at: 2. 0. 0 }].
+    entry := net at: (keys at: i) ifAbsent: [net at: (keys at: i) put: { op at: 2. 0. 0 }].
     (entry at: 3) >= r
       ifTrue: [entry at: 3 put: (entry at: 3) + a - r]
       ifFalse: [
         entry at: 2 put: (entry at: 2) + r - (entry at: 3).
         entry at: 3 put: a]].
   out := OrderedCollection new.
-  1 to: ops size do: [:i |
+  _PBOpLog lastOccurrencesOf: keys do: [:okey :i |
     | entry |
-    (last at: (keys at: i)) = i ifTrue: [
-      entry := net at: (keys at: i).
-      ((entry at: 2) = 0 and: [(entry at: 3) = 0]) ifFalse: [
-        out addLast: (PBTuple withAll: { 'net'. entry at: 1. entry at: 2. entry at: 3 })]]].
+    entry := net at: okey.
+    ((entry at: 2) = 0 and: [(entry at: 3) = 0]) ifFalse: [
+      out addLast: (PBTuple withAll: { 'net'. entry at: 1. entry at: 2. entry at: 3 })]].
   ^ out asArray.
 
 PBCountedSet >> _replay: anOp onto: aTarget

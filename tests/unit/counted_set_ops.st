@@ -1,4 +1,4 @@
-"EXPECT: ok 36"
+"EXPECT: ok 38"
 "PBCountedSet writes (plan Task 22; ProtoBase v2.0.0rc2 proto_db/collections/sets.py,
  CountedSet). A counted set is a keyed tree from the hash key of an element (PBKeys hashKey:)
  to a bucket, a tuple of (element, count) tuples with count >= 1 (format spec, 'Collections');
@@ -59,6 +59,13 @@ c that: 'logged all the same' is: (kinds value: same) last equals: 'remove ''abs
 c that: 'a list is not an orderable element' signals: PBValidationError during: [empty add: #(1 2)].
 c that: 'nor a NaN' signals: PBValidationError during: [empty add: Float nan].
 c that: 'remove: of a NaN' signals: PBValidationError during: [a remove: Float nan].
+
+"A new version changes only persisted fields (Task 22 review M1): a misspelled one is refused,
+ never dropped."
+c that: 'a change of a field that is not persisted' signals: PBUserError containing: 'totalCount'
+  during: [a _withChanges: { 'totalCount' -> 1 } log: nil complete: false].
+c that: 'every field named in the refusal' signals: PBUserError containing: 'root, count, total_count, indexes'
+  during: [a _withChanges: { 'total_count' -> 1. 'size' -> 2 } op: (PBTuple withAll: #('add' 1))].
 
 "The nesting limit (plan Task 17b): the (element, count) entry in its bucket tuple adds 4."
 tuples := [:n | | v | v := 1. n timesRepeat: [v := PBTuple withAll: { v }]. v].

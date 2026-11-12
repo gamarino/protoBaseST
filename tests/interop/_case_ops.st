@@ -174,10 +174,20 @@ CaseSide class >> apply: aStep to: t committed: aCommitted
   op = 'list set' ifTrue: [^ t setRootObject: (aStep at: 2) value: (t newList appendLast: (aStep at: 3))].
   op = 'set add' ifTrue: [^ t setRootObject: (aStep at: 2) value: (t newSet add: (aStep at: 3))].
   op = 'set remove' ifTrue: [^ t setRootObject: (aStep at: 2) value: (t newSet remove: (aStep at: 3))].
-  op = 'counted set add' ifTrue: [ | written |
-    written := t newCountedSet.
-    (aStep copyFrom: 3 to: aStep size) do: [:e | written := written add: e].
-    ^ t setRootObject: (aStep at: 2) value: written].
+  op = 'counted set ops' ifTrue: [ | mode written |
+    mode := aStep at: 3.
+    (#('blind' 'read' 'replace') includes: mode) ifFalse: [
+      ^ Error signal: 'CaseSide: unknown counted set mode ' , mode printString].
+    written := mode = 'read' ifTrue: [t getRootObject: (aStep at: 2)] ifFalse: [t newCountedSet].
+    4 to: aStep size by: 2 do: [:i | | kind |
+      kind := aStep at: i.
+      kind = 'add'
+        ifTrue: [written := written add: (aStep at: i + 1)]
+        ifFalse: [
+          kind = 'remove'
+            ifTrue: [written := written remove: (aStep at: i + 1)]
+            ifFalse: [^ Error signal: 'CaseSide: unknown counted set op ' , kind printString]]].
+    ^ t setRootObject: (aStep at: 2) value: written replace: mode = 'replace'].
   op = 'new mutable' ifTrue: [^ t newMutable: (aStep at: 2) value: (aStep at: 3)].
   op = 'set mutable' ifTrue: [^ t setMutable: (aStep at: 2) value: (aStep at: 3)].
   op = 'remove mutable' ifTrue: [^ t removeMutable: (aStep at: 2)].

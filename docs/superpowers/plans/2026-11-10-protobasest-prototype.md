@@ -1600,7 +1600,9 @@ decision D60). No format version change. It supersedes ruling R12 (509).
 - Produces:
   - `PBCountedSet` `add:`, `remove:` (one occurrence; an absent element is a no-op) and
     `countOf:`, with `total_count` kept;
-  - log entries `('transform' e removes adds)`;
+  - log entries `('transform' e removes adds)` for a rebase's adjustments; `add:` and `remove:`
+    log `('add' e)` and `('remove' e)`, as ProtoBase's `CountedSet` (amended at Task 22,
+    design spec 7.2);
   - net effect per element `c → max(c - removes, 0) + adds`.
   - (Task 17b) An element is refused past 1018 containers (`PBCodec check:wrapping:...` with
     4: its `(element, count)` entry in its bucket tuple adds 4), as ProtoBase's

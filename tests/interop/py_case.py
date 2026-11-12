@@ -114,11 +114,16 @@ def apply(tr, step, committed, in_setup=False):
         tr.set_root_object(args[0], tr.new_set().add(args[1]))
     elif op == "set remove":
         tr.set_root_object(args[0], tr.new_set().remove(args[1]))
-    elif op == "counted set add":
-        written = tr.new_counted_set()
-        for element in args[1:]:
-            written = written.add(element)
-        tr.set_root_object(args[0], written)
+    elif op == "counted set ops":
+        root, mode, pairs = args[0], args[1], args[2:]
+        if mode not in ("blind", "read", "replace"):
+            raise SystemExit(f"py_case.py: unknown counted set mode {mode!r}")
+        written = tr.get_root_object(root) if mode == "read" else tr.new_counted_set()
+        for kind, element in zip(pairs[::2], pairs[1::2]):
+            if kind not in ("add", "remove"):
+                raise SystemExit(f"py_case.py: unknown counted set op {kind!r}")
+            written = written.add(element) if kind == "add" else written.remove(element)
+        tr.set_root_object(root, written, replace=(mode == "replace"))
     elif op == "new mutable":
         tr.new_mutable(args[0], args[1])
     elif op == "set mutable":

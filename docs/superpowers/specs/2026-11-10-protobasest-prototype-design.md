@@ -529,9 +529,11 @@ The rules are ProtoBase's, one for one:
 `PBDictionary`, `PBHashDictionary`, `PBSet` and `PBCountedSet` are ProtoBase's
 `ConcurrentOptimized` collections. Each version carries two runtime-only fields, never
 persisted:
-- the **operation log**: an immutable `PBFrozenList` of intents, such as `('set' key value)`,
-  `('remove' key)`, `('add' element)`, and for a counted set `('transform' element removes
-  adds)`. Every mutator logs its intent, including one that changes nothing (a blind write),
+- the **operation log**: an immutable `PBFrozenList` of intents, ProtoBase's ops:
+  `('set' key value)` and `('remove' key)` for the dictionaries, `('add' element)` and
+  `('remove' element)` for a set and a counted set, and `('transform' element removes adds)`
+  for a counted set's rebase adjustments (amended at Task 22: a counted set's mutators log
+  `add` and `remove` as ProtoBase's do). Every mutator logs its intent, including one that changes nothing (a blind write),
   and answers a new version carrying the longer log;
 - **log is complete**: true for a collection built empty in this process (`tr newDictionary`,
   `PBDictionary new`) and for versions derived from it only through logged mutators. False

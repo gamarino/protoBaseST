@@ -1,8 +1,9 @@
 {
   "comment": [
     "The concurrency table of design spec 10.4, one entry per row (plan Task 21), plus row 7 with its",
-    "roles swapped (set-remove-add, Task 21 fix round 1) and the counted set blind adds (counted-set-",
-    "blind-adds, plan Task 22: the counter-transform merge, D26). Every case runs two",
+    "roles swapped (set-remove-add, Task 21 fix round 1), the counted set blind adds (counted-set-",
+    "blind-adds, plan Task 22: the counter-transform merge, D26) and 12 further counted set cases",
+    "(cs-*, Task 22 review: clamping, removes, replace, read-modify, mixed numbers). Every case runs two",
     "transactions, A and B, interleaved as plan call C12 orders them: start A, start B, commit B,",
     "commit A. A side runs its steps when it starts and commits later; its outcome is 'committed' or",
     "the class of the error its steps or its commit signalled, with protoBaseST's names (PB...).",
@@ -17,8 +18,12 @@
     "  ['list set', r, v]                   set r to a new List [v], r unread",
     "  ['set add', r, e], ['set remove', r, e]",
     "                                       set r to a new Set with e added (removed), r unread",
-    "  ['counted set add', r, e1, e2, ...]  set r to a new CountedSet with e1, e2, ... added in",
-    "                                       order, r unread (merges by the counter transform, D26)",
+    "  ['counted set ops', r, mode, op1, e1, op2, e2, ...]",
+    "                                       apply add (or remove) of e1, then op2 of e2, ..., to a",
+    "                                       CountedSet and set r to it: mode 'blind' starts from a",
+    "                                       new one, r unread (merges by the counter transform, D26);",
+    "                                       'read' from the value of r (a read-modify-write); 'replace'",
+    "                                       from a new one, written with replace: true",
     "  ['new mutable', m, v], ['set mutable', m, v], ['remove mutable', m]",
     "                                       the mutable-cell operations (set and remove blind)",
     "  ['reuse committed', r, k1, v1, k2, v2]",
@@ -111,10 +116,118 @@
       "id": "counted-set-blind-adds",
       "row": "Counted set blind adds: concurrent increments of one element, each built empty (D26)",
       "setup": [["set root", "c", {"counted set": ["e", "e", "f"]}]],
-      "a": [["counted set add", "c", "e", "e"]],
-      "b": [["counted set add", "c", "e", "g"]],
+      "a": [["counted set ops", "c", "blind", "add", "e", "add", "e"]],
+      "b": [["counted set ops", "c", "blind", "add", "e", "add", "g"]],
       "roots": ["c"], "mutables": [],
       "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{'e': 5, 'f': 1, 'g': 1}"]}
+    },
+    {
+      "id": "cs-clamp-before-adds",
+      "row": "Counted set: a blind remove x3 then add, while the other reads and adds e twice (removes clamp at 0 before the adds)",
+      "setup": [["set root", "c", {"counted set": ["e", "e", "f"]}]],
+      "a": [["counted set ops", "c", "blind", "remove", "e", "remove", "e", "remove", "e", "add", "e"]],
+      "b": [["counted set ops", "c", "read", "add", "e", "add", "e"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{'e': 2, 'f': 1}"]}
+    },
+    {
+      "id": "cs-clamp-onto-blind",
+      "row": "Counted set: a blind remove x3 then add, while the other blindly adds e",
+      "setup": [["set root", "c", {"counted set": ["e", "e", "f"]}]],
+      "a": [["counted set ops", "c", "blind", "remove", "e", "remove", "e", "remove", "e", "add", "e"]],
+      "b": [["counted set ops", "c", "blind", "add", "e"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{'e': 1, 'f': 1}"]}
+    },
+    {
+      "id": "cs-concurrent-removes",
+      "row": "Counted set: concurrent blind removes of one element, past its count",
+      "setup": [["set root", "c", {"counted set": ["e", "e", "f"]}]],
+      "a": [["counted set ops", "c", "blind", "remove", "e"]],
+      "b": [["counted set ops", "c", "blind", "remove", "e", "remove", "e"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{'f': 1}"]}
+    },
+    {
+      "id": "cs-remove-absent-vs-add",
+      "row": "Counted set: a blind remove of an absent element while the other adds it",
+      "setup": [["set root", "c", {"counted set": ["e", "e", "f"]}]],
+      "a": [["counted set ops", "c", "blind", "remove", "z"]],
+      "b": [["counted set ops", "c", "blind", "add", "z"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{'e': 2, 'f': 1}"]}
+    },
+    {
+      "id": "cs-add-vs-remove-absent",
+      "row": "Counted set: a blind add while the other removes the element, absent when it started",
+      "setup": [["set root", "c", {"counted set": ["e", "e", "f"]}]],
+      "a": [["counted set ops", "c", "blind", "add", "z"]],
+      "b": [["counted set ops", "c", "blind", "remove", "z"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{'e': 2, 'f': 1, 'z': 1}"]}
+    },
+    {
+      "id": "cs-replace-vs-blind",
+      "row": "Counted set: a write with replace: true while the other blindly adds",
+      "setup": [["set root", "c", {"counted set": ["e", "e", "f"]}]],
+      "a": [["counted set ops", "c", "replace", "add", "x"]],
+      "b": [["counted set ops", "c", "blind", "add", "e"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{'x': 1}"]}
+    },
+    {
+      "id": "cs-blind-vs-replace",
+      "row": "Counted set: a blind add while the other writes with replace: true",
+      "setup": [["set root", "c", {"counted set": ["e", "e", "f"]}]],
+      "a": [["counted set ops", "c", "blind", "add", "e"]],
+      "b": [["counted set ops", "c", "replace", "add", "x"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{'e': 1, 'x': 1}"]}
+    },
+    {
+      "id": "cs-read-vs-blind",
+      "row": "Counted set: a read-modify-write while the other blindly adds",
+      "setup": [["set root", "c", {"counted set": ["e", "e", "f"]}]],
+      "a": [["counted set ops", "c", "read", "add", "g"]],
+      "b": [["counted set ops", "c", "blind", "add", "e"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=PBConflictError B=committed", "dump": ["root c = #{'e': 3, 'f': 1}"]}
+    },
+    {
+      "id": "cs-mixed-numbers",
+      "row": "Counted set: 1, 1.0 and true as elements (one element 1, another true), an element removed below zero",
+      "setup": [["set root", "c", {"counted set": [1, 1, "f", true]}]],
+      "a": [["counted set ops", "c", "blind", "add", 1.0, "remove", 1, "add", 1, "add", "f", "remove", "f", "remove", "f"]],
+      "b": [["counted set ops", "c", "blind", "add", 1, "add", 1, "remove", "f"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{1: 5, true: 1}"]}
+    },
+    {
+      "id": "cs-identity-net",
+      "row": "Counted set: a blind add then remove of one element (identity net) while the other adds it",
+      "setup": [["set root", "c", {"counted set": ["e", "e", "f"]}]],
+      "a": [["counted set ops", "c", "blind", "add", "z", "remove", "z"]],
+      "b": [["counted set ops", "c", "blind", "add", "z"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{'e': 2, 'f': 1, 'z': 1}"]}
+    },
+    {
+      "id": "cs-remove-to-zero-then-add",
+      "row": "Counted set: a blind remove to zero then add while the other removes",
+      "setup": [["set root", "c", {"counted set": ["e", "e", "f"]}]],
+      "a": [["counted set ops", "c", "blind", "remove", "f", "remove", "f", "add", "f"]],
+      "b": [["counted set ops", "c", "blind", "remove", "f"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{'e': 2, 'f': 1}"]}
+    },
+    {
+      "id": "cs-empty-root-absent",
+      "row": "Counted set: blind writes onto an absent root",
+      "setup": [],
+      "a": [["counted set ops", "c", "blind", "add", "e", "add", "e"]],
+      "b": [["counted set ops", "c", "blind", "remove", "e", "add", "h"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{'e': 2, 'h': 1}"]}
     },
     {
       "id": "read-absent-created",
