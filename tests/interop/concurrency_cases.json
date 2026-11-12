@@ -1,0 +1,158 @@
+{
+  "comment": [
+    "The concurrency table of design spec 10.4, one entry per row (plan Task 21). Every case runs two",
+    "transactions, A and B, interleaved as plan call C12 orders them: start A, start B, commit B,",
+    "commit A. A side runs its steps when it starts and commits later; its outcome is 'committed' or",
+    "the class of the error its steps or its commit signalled, with protoBaseST's names (PB...).",
+    "setup runs in one transaction on a new database 'cc' (or, with the step ['vector database'],",
+    "on a copy of the conformance database vector, whose database is 'db'). The steps:",
+    "  ['read root', r]                     get the root r (records its token, absence included)",
+    "  ['set root', r, v]                   set the root r to v; in setup, v may be",
+    "                                       {'dict': {k: v}}, {'list': [v]} or {'set': [e]}",
+    "  ['blind dict set root', r, k, v]     set r to a new Dictionary {k: v}, r unread (merges)",
+    "  ['replace', r, k, v]                 set r to a new Dictionary {k: v} with replace: true",
+    "  ['list set', r, v]                   set r to a new List [v], r unread",
+    "  ['set add', r, e], ['set remove', r, e]",
+    "                                       set r to a new Set with e added (removed), r unread",
+    "  ['new mutable', m, v], ['set mutable', m, v], ['remove mutable', m]",
+    "                                       the mutable-cell operations (set and remove blind)",
+    "  ['reuse committed', r, k1, v1, k2, v2]",
+    "                                       before the side's transaction starts, commit r as a new",
+    "                                       Dictionary {k1: v1} (a blind write); then, in the",
+    "                                       transaction, set r to that committed value with k2 -> v2",
+    "expected holds ProtoBase's outcome (the reference) and the final contents of the roots and",
+    "cells listed in roots and mutables, in the dump notation of py_case.py and _case_ops.st:",
+    "absent, 1, 'text', {'k': v} (sorted keys), [v], #{e} (sorted), <object> for a DBObject.",
+    "protobasest, present only where protoBaseST documents a refusal (design spec 7.4), holds its",
+    "outcomes with protoST as A (st_as_a), with Python as A (py_as_a) and with two protoST actors",
+    "(actors); every other case must give the reference in all three."
+  ],
+  "cases": [
+    {
+      "id": "read-write-one-root",
+      "row": "Both read and write one root",
+      "setup": [["set root", "x", 1]],
+      "a": [["read root", "x"], ["set root", "x", "A"]],
+      "b": [["read root", "x"], ["set root", "x", "B"]],
+      "roots": ["x"], "mutables": [],
+      "expected": {"outcome": "A=PBConflictError B=committed", "dump": ["root x = 'B'"]}
+    },
+    {
+      "id": "different-roots",
+      "row": "Each writes a different root",
+      "setup": [["set root", "x", 1], ["set root", "y", 1]],
+      "a": [["set root", "x", "A"]],
+      "b": [["set root", "y", "B"]],
+      "roots": ["x", "y"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root x = 'A'", "root y = 'B'"]}
+    },
+    {
+      "id": "blind-dict-different-keys",
+      "row": "Blind writes of different keys to one Dictionary root, each built empty",
+      "setup": [["set root", "d", {"dict": {"s": 0}}]],
+      "a": [["blind dict set root", "d", "ka", 1]],
+      "b": [["blind dict set root", "d", "kb", 2]],
+      "roots": ["d"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root d = {'ka': 1, 'kb': 2, 's': 0}"]}
+    },
+    {
+      "id": "blind-dict-same-key",
+      "row": "Blind writes of the same key",
+      "setup": [["set root", "d", {"dict": {"s": 0}}]],
+      "a": [["blind dict set root", "d", "k", "A"]],
+      "b": [["blind dict set root", "d", "k", "B"]],
+      "roots": ["d"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root d = {'k': 'A', 's': 0}"]}
+    },
+    {
+      "id": "blind-replace",
+      "row": "Blind write with replace: true",
+      "setup": [["set root", "d", {"dict": {"s": 0}}]],
+      "a": [["replace", "d", "ka", 1]],
+      "b": [["blind dict set root", "d", "kb", 2]],
+      "roots": ["d"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root d = {'ka': 1}"]}
+    },
+    {
+      "id": "blind-list",
+      "row": "A blind write of a List",
+      "setup": [["set root", "l", {"list": [0]}]],
+      "a": [["list set", "l", "A"]],
+      "b": [["list set", "l", "B"]],
+      "roots": ["l"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root l = ['A']"]}
+    },
+    {
+      "id": "set-add-remove",
+      "row": "A blind Set add and a concurrent remove of the same element",
+      "setup": [["set root", "s", {"set": ["e", "f"]}]],
+      "a": [["set add", "s", "e"]],
+      "b": [["set remove", "s", "e"]],
+      "roots": ["s"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root s = #{'e', 'f'}"]}
+    },
+    {
+      "id": "read-absent-created",
+      "row": "A read of an absent root while the other creates it",
+      "setup": [],
+      "a": [["read root", "n"], ["set root", "n", "A"]],
+      "b": [["set root", "n", "B"]],
+      "roots": ["n"], "mutables": [],
+      "expected": {"outcome": "A=PBConflictError B=committed", "dump": ["root n = 'B'"]}
+    },
+    {
+      "id": "two-new-mutable",
+      "row": "Two newMutable: of one name",
+      "setup": [],
+      "a": [["new mutable", "m", "A"]],
+      "b": [["new mutable", "m", "B"]],
+      "roots": [], "mutables": ["m"],
+      "expected": {"outcome": "A=PBConflictError B=committed", "dump": ["mutable m = 'B'"]}
+    },
+    {
+      "id": "set-mutable-removed",
+      "row": "A blind setMutable: of a cell the other removed",
+      "setup": [["new mutable", "m", 0]],
+      "a": [["set mutable", "m", "A"]],
+      "b": [["remove mutable", "m"]],
+      "roots": [], "mutables": ["m"],
+      "expected": {"outcome": "A=PBConflictError B=committed", "dump": ["mutable m = absent"]}
+    },
+    {
+      "id": "remove-mutable-removed",
+      "row": "A blind removeMutable: of a cell already removed",
+      "setup": [["new mutable", "m", 0]],
+      "a": [["remove mutable", "m"]],
+      "b": [["remove mutable", "m"]],
+      "roots": [], "mutables": ["m"],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["mutable m = absent"]}
+    },
+    {
+      "id": "reuse-committed",
+      "row": "A collection committed, then reused in a later blind write (D33)",
+      "setup": [["set root", "d", {"dict": {"s": 0}}]],
+      "a": [["reuse committed", "d", "ka", 1, "kb", 2]],
+      "b": [["blind dict set root", "d", "kc", 3]],
+      "roots": ["d"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root d = {'ka': 1, 'kb': 2}"]}
+    },
+    {
+      "id": "indexed-root",
+      "row": "A blind write onto a root whose current value has indexes",
+      "setup": [["vector database"]],
+      "a": [["blind dict set root", "people", "ka", "A"]],
+      "b": [["blind dict set root", "people", "kb", "B"]],
+      "roots": ["people"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed",
+                   "dump": ["root people = {'ann': <object>, 'bob': <object>, 'cid': <object>, 'ka': 'A', 'kb': 'B'}"]},
+      "protobasest": {
+        "st_as_a": {"outcome": "A=PBNotSupportedError B=committed",
+                    "dump": ["root people = {'ann': <object>, 'bob': <object>, 'cid': <object>, 'kb': 'B'}"]},
+        "py_as_a": {"outcome": "A=committed B=PBNotSupportedError",
+                    "dump": ["root people = {'ann': <object>, 'bob': <object>, 'cid': <object>, 'ka': 'A'}"]},
+        "actors": {"outcome": "A=PBNotSupportedError B=PBNotSupportedError",
+                   "dump": ["root people = {'ann': <object>, 'bob': <object>, 'cid': <object>}"]}
+      }
+    }
+  ]
+}

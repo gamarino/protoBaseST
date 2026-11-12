@@ -252,3 +252,13 @@
   - `tests/interop/lock_timeout.sh` with `hold_lock.py`: a protoST commit with a 50 ms
     `lockTimeout` while ProtoBase holds the lock ends in `PBTimeoutError`; with the lock
     released and 30000 ms it commits.
+- The concurrency table of spec 10.4 (plan Task 21; tests only, no change to the library): the
+  13 rows in `tests/interop/concurrency_cases.json`, in a neutral step vocabulary with
+  ProtoBase's recorded outcomes and final contents. `tests/interop/concurrency.sh` runs each row
+  three times, ordered as plan call C12 (start A, start B, commit B, commit A): both transactions
+  in ProtoBase (`py_case.py both`, which must give the recorded reference), protoST as A with
+  ProtoBase as B, and ProtoBase as A with protoST as B (`_st_case.st`), and each language reads
+  the other's final space. `tests/unit/concurrency_actors.st` runs the same table with two
+  protoST actors driven step by step through Futures. Every row gives ProtoBase's outcome, except
+  the blind write onto an indexed root, where protoBaseST's documented `PBNotSupportedError`
+  (spec 7.4) is asserted in place of ProtoBase's merge.
