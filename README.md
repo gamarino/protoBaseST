@@ -2,431 +2,193 @@
 
 A perennial object database for protoST, in the tradition GemStone opened.
 
-protoBaseST is a Smalltalk implementation, on protoST, of ProtoBase (the Python package `proto_db`).
-It reads and writes the same on-disk format (format 4, frozen at ProtoBase `v2.0.0rc1`, with the
-value nesting limit of `v2.0.0rc2`), so one
-database directory can be shared by Python and Smalltalk programs.
+protoBaseST is a Smalltalk implementation, on protoST, of [ProtoBase](../ProtoBase) (the Python
+package `proto_db`). It reads and writes the **same on-disk format** (format 4, frozen at ProtoBase
+`v2.0.0rc1`, with the value nesting limit of `v2.0.0rc2`), so one database directory can be shared
+by Python and Smalltalk programs. It has ProtoBase's API translated to Smalltalk, and ProtoBase's
+transaction semantics: snapshot isolation, read sets checked at commit, merges of blind writes,
+mutable cells, retries.
 
-Status: proposal prototype for discussion at the FAST Smalltalk workshop (2026-12-03). Not a product.
+## Status
 
-Design: [docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md](docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md)
+**A proposal prototype, for discussion at the FAST Smalltalk workshop (2026-12-03). Not a product.**
+It is shown to start a conversation and to collect criticism. It is small and meant to be correct;
+it is not fast and not complete. Read [docs/not-done.md](docs/not-done.md) first: it states what
+is missing and what has not been proven.
 
-## Values and the codec
+What was checked, against ProtoBase `v2.0.0rc2`: the conformance vectors, a round trip in both
+directions (a space written by one language passes the other's reader and verifier with an
+identical dump), the shapes of AVL trees node by node, 27 concurrent-commit scenarios with both
+languages as first and second committer, and a small ERP demo. What was not: anything outside
+those scenarios, speed, long runs, and review by anyone but the people who wrote it.
 
-A value stored in a database is a *canonical value* of the format (format spec, "Canonical
-values"). `src/protobase/values.st` and `src/protobase/codec.st` hold them:
+## What it shows
 
-| Format kind | protoST class | Notes |
-|---|---|---|
-| nil, bool, int, float, str, bytes | `nil`, `true`/`false`, `Integer`, `Float`, `String`, `ByteArray` | an integer outside -2^63..2^64-1 is `{"@int": hex}`; floats keep their 64 bits |
-| decimal, date, time, datetime, timedelta | `Decimal`, `CalendarDate`, `TimeOfDay`, `DateTime`, `TimeSpan` (protoST `lib/`) | `@dec` is the to-scientific-string |
-| uuid | `UUID` (protoST `lib/uuid.st`, 0.10.0; `protobase` imports it) | `@uuid` is the 16 bytes in RFC 4122 order; `UUID new` is a version-4 UUID |
-| list, tuple, map | `PBFrozenList`, `PBTuple`, `PBFrozenDict` | immutable; `at:` is 1-based; a map keeps its insertion order |
-| missing, mutable | `PBMissing default`, `PBMutableObject name: 'cell'` | |
-| ref | `PBUnresolvedRef` (decoded without a resolver), later the atom | |
+- **Objects persist as objects**, as in GemStone: records, collections and tree nodes, reachable
+  from named roots.
+- **Values and mutable objects.** Records and collections are immutable values; every change
+  answers a new version that shares the unchanged parts. A `PBMutableObject` names a cell whose
+  value moves from version to version, by commit.
+- **Perennial history.** Every committed version stays readable (`history`, `snapshotAt:`).
+- **A polyglot disk format.** One directory, two languages, the same answers.
+- **No locks in the Smalltalk layer.** In-process synchronisation is by actors, Futures and
+  atoms only; the one lock is the operating system's `flock` on `space.lock`, the format's
+  inter-process protocol.
 
-```smalltalk
-bytes := PBCodec encode: (PBTuple withAll: { 1. 'x'. Decimal fromString: '1.20' }).
-value := PBCodec decode: bytes.                       "a PBTuple"
-PBCodec canonical: #(1 2).                            "a PBFrozenList"
-PBCodec encode: #paidInFull.                          "PBValidationError: a Symbol cannot be stored"
+> ### Every collection message answers a new version
+>
+> `add:`, `remove:`, `setAt:value:`, `removeAt:`, `appendLast:` and the rest **answer a new
+> collection and leave the receiver unchanged**. A statement that discards the answer changes
+> nothing, and nothing fails:
+>
+> ```smalltalk
+> tags := PBSet new.
+> tags add: 'urgent'.            "builds a set and throws it away: tags is still empty"
+> tags := tags add: 'urgent'.    "keep the answer"
+> ```
+>
+> Three names clash with Pharo's meaning (design spec 5.3, ruling 2). They are ProtoBase's names,
+> kept on purpose so that one document explains both languages:
+>
+> | Message | Pharo | protoBaseST |
+> |---|---|---|
+> | `Set >> add:` | adds in place, answers the **element** | answers a **new set** |
+> | `Set >> remove:` | removes in place, answers the element; signals when absent | answers a **new set**; an absent element is a no-op |
+> | `List >> removeAt:` | removes in place, answers the element | answers a **new list** |
+>
+> `CountedSet >> add:` and `remove:` and `Dictionary >> removeAt:` follow the same rule.
+> The alternatives (`copyWith:`, `copyWithout:`, `copyWithoutIndex:`) are in
+> [docs/decisions.md](docs/decisions.md). This is the first thing to argue about.
+
+> ### `PBList` positions are zero-based
+>
+> `getAt: 0` is the first element and `getAt: -1` the last. ProtoBase's `List` is zero-based and
+> the persisted tree counts are the same in both languages (design spec ruling 3). Smalltalk
+> collections are one-based, so this is a trap for Smalltalk programmers; it is the price of
+> sharing the format. A position out of range is `PBValidationError`, never `nil`. Every other
+> collection a program builds (`Array`, `PBTuple`, `PBFrozenList`) is one-based as usual.
+
+## Quick start
+
+You need protoST 0.10.0 or newer and this repository's `src/` on the module path:
+
+```sh
+export PROTOST=../protoST/build_release/protost
+STPATH=$PWD/src $PROTOST hello.st
 ```
-
-`PBCodec canonical:` refuses, with `PBValidationError` naming the class, a `Symbol`, a `Fraction`,
-a `Character`, a `Dictionary` (its order is unspecified; use `PBFrozenDict`), a `Set`, a `Bag`, an
-`Interval`, a block and any other object. A subclass of a mapped class is stored as its base value.
-`PBCodec decode:` refuses malformed bytes with `PBCorruptionError`.
-
-Time zones (design §4.3): there is no time-zone database. A zone key is valid when it is in
-`PBZoneKeys`, the committed key list of one IANA tzdata release (`PBZoneKeys release`),
-generated by `tools/gen_zone_keys.py`. The result is the same on every machine. An instant-form
-datetime is read and presented in UTC. Writing one within a day of year 1 or year 9999 is
-refused with `PBNotSupportedError`, because its wall clock in the zone may leave the calendar's
-range. A format-3 `["zone", key]` datetime is read as a `PBLegacyZoneDateTime`
-(`isLegacyZone` answers true). It is never written, and it signals `PBNotSupportedError`
-whenever an answer needs its offset: order, hash, instant, comparison with an aware value
-within 24 h of its wall clock, or a map with two keys that could conflict. Two keys could
-conflict exactly when they are equal under the format's order-key rule at every position (the
-key, or each item of a tuple key) except datetime positions (so `true`, `1`, `1.0` and
-`Decimal 1.00` are one item there), and at one of these one holds a format-3 datetime and the
-other an aware datetime whose instant is within 24 h of that wall clock, or a format-3 datetime
-of another zone within 48 h. Every offset is under 24 h, so farther keys never conflict. A
-pinned key may still be refused by a ProtoBase host whose tz database lacks it (113 backward
-links on a host without `tzdata-legacy`); protoBaseST accepts and keeps such keys, and an atom
-holding an instant within a day of year 1 or 9999 can be read but not re-written.
-
-A string holding a lone surrogate is refused (`PBValidationError`). So is a value nested deeper
-than `PBCodec maxValueDepth` = 1022 msgpack containers (`MAX_VALUE_DEPTH`, format spec
-v2.0.0rc2, "Value nesting depth"), counted from the value: a list adds 1, a tuple 2, a map 3 (2
-when empty), a tagged scalar 1 to 3 (an aware `@time` or `@dt` 3); an empty container counts like
-any other, and map keys are on the paths. The refusal names where the value was going
-(`Field 'v' of <type name>: ...`, `Attribute 'v': ...`, `PBList element: ...`). Reading data
-deeper than the limit is `PBCorruptionError`, at the same count, so a record holds at most 1024
-containers, what protoST's MessagePack reads and writes. A structure that stores a value inside
-more containers takes a shallower one, refused when the mutator is called: a `PBSet` element
-1020 (its bucket tuple adds 2), a `PBHashDictionary` key or value 1018 (`PBCodec valueDepth:`,
-`check:wrapping:holder:wrapper:`). Every walk of a value (the codec's, and the order keys, hash
-keys and map-key checks) keeps an explicit stack, so the depth does not depend on the protoST
-stack, on the main thread or an actor's worker thread. ProtoBase `v2.0.0rc2` reads and writes the
-same values at Python's default recursion limit (`tests/interop/st_deep_to_py.sh`,
-`py_deep_to_st.sh`).
-
-## Transactions
-
-A transaction reads the version that was current when it started, remembers what it read, and
-publishes its writes through the space's publisher, as ProtoBase's does (design spec 7).
 
 ```smalltalk
 Import from: 'protobase'.
-space := PBObjectSpace storage: (PBFileStorage path: '/srv/erp').
-db := space newDatabase: 'erp'.                   "or, later: space openDatabase: 'erp'"
+
+| dir space db hits |
+dir := FileSystem temp / 'protobase-hello'.
+dir deleteAll.
+space := PBObjectSpace storage: (PBFileStorage path: dir pathString).
+db := space newDatabase: 'hello'.
 db newTransactionDo: [:tr |
-  tr setRootObject: 'tags' value: ((tr newDictionary) setAt: 'urgent' value: true).
-  tr newMutable: 'customer:acme' value: (tr newObject: { 'name' -> 'ACME S.A.' })].
-tx := db newTransaction.
-(tx getRootObject: 'tags') count.                 "recorded in the read set"
-(PBMutableObject name: 'customer:acme') get: tx.  "a mutable cell, recorded too"
-tx rootNames.                                     "records nothing"
-tx setRootObject: 'tags' value: ((tx getRootObject: 'tags') setAt: 'paid' value: false).
-tx commit.                                        "afterwards, every message is PBUserError"
+    tr setRootObject: 'hits' value: 0.
+    tr setRootObject: 'tags' value: (tr newDictionary setAt: 'first' value: true)].
+db run: [:tr | tr setRootObject: 'hits' value: (tr getRootObject: 'hits') + 1].
+hits := db newTransaction getRootObject: 'hits'.
+hits.                                          "=> 1"
+db history size.                               "=> 3"
 space close.
 ```
 
-- **Reads.** The first read of a name records its token: an atom's storage pointer, a plain
-  value's exact token (so `1` and `1.0` differ), or `#absent`. A transaction reads its own
-  writes first.
-- **Writes.** `setRootObject:value:` (and `replace:`), `removeRootObject:`, `newMutable:value:`
-  (answers the `PBMutableObject`), `setMutable:value:`, `removeMutable:` and
-  `PBMutableObject >> set:value:`. A value passes `PBCodec canonical:for:` at once, with the
-  holder `Root 'name'` or `Mutable 'name'` in the refusal. A root name starting with `__` is
-  reserved for the format (`PBValidationError`). The factories `newList`, `newDictionary`,
-  `newHashDictionary`, `newSet`, `newCountedSet` and `newObject:` answer new values built in
-  this process.
-- **Commit** sends the transaction to the space's publisher (`publisher.st`, one actor per
-  space) and waits for it. Under the root lock the publisher reads `space.root`, validates
-  every read token and every blindly set cell against it (`PBConflictError`), builds the new
-  version from the *current* roots, saves and syncs it, and publishes it. A root written but
-  neither read nor replaced is merged when the value is a collection with a complete log (its
-  operations are replayed onto the current value, `rebaseOnto:`); otherwise the last writer
-  wins. Mutable cells are never merged. `committedAt` is `max(now, previous committedAt)` in
-  UTC. After success, every written collection is marked consumed (D33).
-- A commit with no writes publishes nothing. A failed commit leaves the transaction aborted.
-  The publisher never waits: an attempt that finds the root lock held answers at once, and the
-  committing caller tries again from 1 ms, doubling up to 50 ms, until the space's
-  `lockTimeout` (`PBTimeoutError`). The atoms written as roots or cells are saved before the
-  root lock is taken, once, as ProtoBase saves them. When a publish fails, the publisher reads `space.root` again under the
-  lock: its own root means success; the root it built on means nothing was published (the
-  original error); another root, which only a writer ignoring the lock can publish, is
-  `PBConflictError` (ProtoBase's `_publish`); a root it cannot read is
-  `PBOutcomeUnknownError`.
-- `newTransactionDo:` commits when the block ends, also by a non-local return (`^`, as Python's
-  `return` inside `with`), and answers its value; it aborts when an exception ends the block
-  (ProtoBase's `__exit__` aborts on any exception) and lets the exception go on. A resumable
-  exception (a `Warning`, a `Notification`, a `ZeroDivide`) that an enclosing handler resumes
-  does not end the block (it asks those handlers with `Exception>>outer`), so its writes are
-  committed; one they end with `return:`, `retry` or by falling off aborts. An exception that
-  is not resumable (every `Error` except `ZeroDivide`) aborts at once. It never retries.
-- `run:`, `run:retries:` and `run:retries:backoff:` (ProtoBase `Database.run`; defaults 10 retries,
-  `#(1 200)` milliseconds) run the block as `newTransactionDo:` does and answer its value. A
-  `PBConflictError` (from the commit, a merge or the block) aborts the attempt, waits
-  `(Future after: d) wait` with `d = min(high, low * 2^attempt) * (0.5 + random / 2)` rounded to
-  whole milliseconds (`PBDatabase class >> backoffFor:low:high:random:`), and retries with a fresh
-  transaction; after the last retry the conflict is signalled again. Any other error aborts and
-  propagates; `PBOutcomeUnknownError` is never retried, since the commit may have been applied.
-- The bookkeeping is one immutable `PBTxState` in an `Atom`, replaced with `swap:`; its maps
-  are persistent (one write or first read costs O(log n)). The protoST layer takes no lock.
+A fuller walk-through, with the reasoning behind each design choice, is
+[docs/tutorial.md](docs/tutorial.md).
 
-`tests/interop/st_commit_to_py.sh` checks that ProtoBase's verifier accepts what the publisher
-writes, that ProtoBase reads it, and that blind merges compose across the two languages.
+## The API, mapped from ProtoBase
 
-## Framing and type names
+Names are ProtoBase's public names at `v2.0.0rc2`, prefixed `PB` in place of a namespace, in
+Smalltalk camelCase. Python keyword arguments become keyword parts. Timeouts and backoffs are
+SmallInteger milliseconds, not float seconds.
 
-`src/protobase/framing.st` holds the byte frames of the format (format spec, "Segments and
-records", "Root records", "Atom records"). Integers are little-endian and every checksum is
-zlib's CRC-32. Readers accept format versions 2, 3 and 4; writers write 4. An integrity failure
-is `PBCorruptionError`, another version `PBNotSupportedError`.
+### Classes
 
-| Class | Reads | Writes |
-|---|---|---|
-| `PBSegmentHeader` | `decode: bytes` → `version`, `segment` (16 bytes) | `encodeSegment: aUUID` → 26 bytes |
-| `PBRecordHeader` | `decode: bytes` → `kind`, `length`, `payloadCrc`; `payloadIn:at:` / `payloadOfRecord:` check the payload | `encodeKind: k payload: bytes` → header and payload |
-| `PBRootRecord` | `decode: bytes` → `version`, `segment`, `offset`, `epoch`, `pointer`; extra keys ignored | `(PBRootRecord segment: s offset: o epoch: e) encode` |
-| `PBAtomEnvelope` | `decode: payload expecting: aTag` → `tag`, `oid`, `state` (a `PBFrozenDict` in record order) | `(PBAtomEnvelope tag: t oid: o state: aDict) encode` |
+| ProtoBase (`proto_db`) | protoBaseST |
+|---|---|
+| `ObjectSpace`, `FileStorage`, `Database` | `PBObjectSpace`, `PBFileStorage`, `PBDatabase` |
+| `Transaction`, `Snapshot`, `HistoryEntry` | `PBTransaction`, `PBSnapshot`, `PBHistoryEntry` |
+| `DBObject`, `MutableObject` | `PBObject`, `PBMutableObject` |
+| `List`, `Dictionary`, `HashDictionary` | `PBList`, `PBDictionary`, `PBHashDictionary` |
+| `Set`, `CountedSet`, `RepeatedKeysDictionary` | `PBSet`, `PBCountedSet`, `PBRepeatedKeysDictionary` |
+| `EqualityIndex`, `RangeIndex`, `VectorIndex` | `PBEqualityIndex`, `PBRangeIndex`, `PBVectorIndex` (read only) |
+| `FrozenList`, `FrozenDict`, `MISSING`, a Python tuple | `PBFrozenList`, `PBFrozenDict`, `PBMissing`, `PBTuple` |
+| `OpaqueAtom` | `PBOpaqueAtom` |
+| `ProtoValidationError`, `ProtoCorruptionError`, `ProtoNotSupportedError`, `ProtoConflictError`, `ProtoTimeoutError`, `ProtoOutcomeUnknownError`, `ProtoUserError`, `ProtoClosedError` | `PBValidationError`, `PBCorruptionError`, `PBNotSupportedError`, `PBConflictError`, `PBTimeoutError`, `PBOutcomeUnknownError`, `PBUserError`, `PBClosedError` |
 
-`src/protobase/registry.st` holds `PBTypeRegistry`, which maps type tags to classes, and
-`PBAtom`, the base class of persistent objects. A type name is two or more dotted ASCII
-identifiers (`acme.sales.Order`). A class declares it, and the names it was stored under before,
-on its class side:
+### Messages
 
-```smalltalk
-PBAtom subclass: #Invoice.
+| ProtoBase | protoBaseST |
+|---|---|
+| `FileStorage(path)` | `PBFileStorage path: '/srv/erp'` (durability is always `fsync`) |
+| `ObjectSpace(storage, lock_timeout=s)` | `PBObjectSpace storage: aStorage`, `storage:lockTimeout:` (milliseconds) |
+| `register_atom_class(cls)` | `PBObjectSpace registerAtomClass: aClass` |
+| `space.new_database(n)`, `open_database(n)`, `list_databases()`, `close()` | `newDatabase:`, `openDatabase:`, `listDatabases`, `close` |
+| `db.name`, `db.new_transaction()`, `db.history()`, `db.snapshot_at(ref)` | `name`, `newTransaction`, `history`, `snapshotAt:` |
+| `db.run(fn, retries=10, backoff=(0.001, 0.2))` | `run:`, `run:retries:`, `run:retries:backoff:` |
+| `with db.new_transaction() as tr:` | `newTransactionDo: aBlock` (commits at the end, aborts on an exception) |
+| `tr.get_root_object(n)`, `set_root_object(n, v, replace=)`, `remove_root_object(n)`, `root_names()` | `getRootObject:`, `setRootObject:value:`, `setRootObject:value:replace:`, `removeRootObject:`, `rootNames` |
+| `tr.new_mutable(n, v)`, `get_mutable(n)`, `set_mutable(n, v)`, `remove_mutable(n)`, `mutable_names()` | `newMutable:value:`, `getMutable:`, `setMutable:value:`, `removeMutable:`, `mutableNames` |
+| `tr.new_list()`, `new_dictionary()`, `new_hash_dictionary()`, `new_set()`, `new_counted_set()` | `newList`, `newDictionary`, `newHashDictionary`, `newSet`, `newCountedSet` |
+| `tr.new_object(**attrs)` | `newObject: { 'name' -> 'Ada'. 'born' -> 1815 }` |
+| `tr.commit()`, `abort()`, `is_active` | `commit`, `abort`, `isActive` |
+| `Snapshot.version`, `committed_at`, `root_names`, `get_root_object(n)`, `mutable_names`, `get_mutable(n)` | `version`, `committedAt`, `rootNames`, `getRootObject:`, `mutableNames`, `getMutable:` |
+| `MutableObject(name)`, `.name`, `.get(tr)`, `.set(tr, v)` | `PBMutableObject name: 'customer:acme'`, `name`, `get: tr`, `set: tr value: v` |
+| `DBObject.with_(**changes)`, `has_defined_attr(n)`, attribute read | `with: 'field' value: v`, `withAll: { 'a' -> 1 }`, `hasDefinedAttr:`, `at:` (absent: `nil`) |
+| `Application(**attrs)` | `Invoice withAll: { 'number' -> 1043. ... }` |
+| `List.get_at(i)`, `set_at`, `insert_at`, `remove_at` | `getAt:`, `setAt:value:`, `insertAt:value:`, `removeAt:` |
+| `List.append_first`, `append_last`, `extend`, `slice(a, b)`, `head(n)`, `tail(n)` | `appendFirst:`, `appendLast:`, `extend:`, `sliceFrom:to:`, `head:`, `tail:` |
+| `Dictionary` / `HashDictionary` `.get_at(k, default)`, `has(k)`, `set_at`, `remove_at`, `keys()`, `values()`, `items()` | `getAt:`, `getAt:default:`, `has:`, `setAt:value:`, `removeAt:`, `keys`, `values`, `items` |
+| `Set.add`, `remove`, `has`, `union`, `intersection`, `difference` | `add:`, `remove:`, `has:`, `union:`, `intersection:`, `difference:` |
+| `CountedSet.add`, `remove`, `count_of(e)` | `add:`, `remove:`, `countOf:` |
+| `IndexedCollection.index_names()`, `get_index(n)` | `indexNames`, `getIndex:` |
+| iteration (`for x in coll`) | `do:`; `keysAndValuesDo:` on the dictionaries |
 
-Invoice class >> typeName
-  ^ 'acme.sales.Invoice'.
+The complete list of what exists is [docs/reference.md](docs/reference.md). There is no `asOf:`
+because ProtoBase has none; the tutorial shows the three-line helper.
 
-Invoice class >> typeAliases
-  ^ #('acme.sales.LegacyInvoice').
+## What it refuses
 
-PBTypeRegistry register: Invoice.
+If a value, type, version or operation cannot be stored or done exactly, protoBaseST signals an
+error naming it. It does not store something else in its place. A `Symbol` longer than six bytes,
+a protoST `Dictionary` (its order is unspecified), a `Fraction`, a write to an indexed collection,
+a wall clock in an IANA zone: each is refused, and each refusal protects a specific property of
+the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cost of each.
 
-PBTypeRegistry classForTag: 'acme.sales.LegacyInvoice'.   "Invoice"
-PBTypeRegistry tagFor: Invoice.                           "'acme.sales.Invoice'"
-PBTypeRegistry classForTag: 'polyglot.st.Order'.          "PBOpaqueAtom: a type another language owns"
-PBTypeRegistry classForTag: 'proto_db.nonexistent.X'.     "PBCorruptionError"
-```
+## Documentation
 
-A built-in type is written as its alias, its index in `PBTypeRegistry builtinNames` (the table
-of the format spec). Its name, as format 2 wrote it, is read too. A name or alias already taken by
-another class, a declared name outside the grammar, and a `proto_db.` name outside the table are
-refused by `register:` with `PBValidationError`. An alias may be any non-empty string that is not
-a built-in name: old Python default names (`myapp.models.make.<locals>.Person`) are outside the
-grammar but name stored data, so a class declares them as ProtoBase does. A writer never writes
-an alias, nor a name every reader refuses (`PBTypeRegistry writerTag:`, `PBValidationError`).
-References compare equal by pointer and by the type their tags name. Every built-in type has
-its class (plan Task 12). `PBCodec` reads every `@ref` with the tag a writer puts: a built-in name
-becomes its alias, an application alias the declared name.
-
-An atom read through a reference is a stub (`unloadedAt:storage:`, or
-`PBTypeRegistry unloadedAtomFor:at:storage:`, which also builds a `PBOpaqueAtom`). Its first
-`state`, `stateAt:` or `oid` loads the record through `storage loadAt:expecting:` and memoises the
-envelope in an `Atom` cell, checking the class's `requiredFields`. A field that an application
-record does not hold reads as nil; an opaque atom signals `PBNotSupportedError` naming its type.
-
-An oid is identity, not storage (ProtoBase D21). A stored atom's oid is its record's; an atom
-that is not stored draws a version-4 UUID in memory on its first need (`oid`, `=`, `hash`, or
-use as a key), published by compare-and-swap so two first readers agree on one oid. Atoms are
-`=` when they are one object or share an oid, and hash by it, so an atom not yet saved is a map
-key and a lookup probe like any other. A record whose state needs the record itself to be
-decoded (a map key referring back to it) is `PBCorruptionError` naming its pointer: ProtoBase
-saves every dependent before the record that refers to it, so such a record is damaged data or
-the work of a writer that breaks that invariant. The loads in progress are passed explicitly,
-never signalled, so an `on: Exception do:` around a read never changes what it answers.
-
-## Reading a space
-
-`PBObjectSpace` opens a file-storage space read-only (writing comes with the transactions). The
-names and messages are ProtoBase's (design spec 5); collection positions are 0-based, as in
-ProtoBase:
-
-```smalltalk
-PBObjectSpace registerAtomClass: Invoice.             "PBObject subclass, typeName 'acme.sales.Invoice'"
-space := PBObjectSpace storage: (PBFileStorage path: '/srv/erp').
-space listDatabases.                                  "#('erp'), sorted"
-db := space openDatabase: 'erp'.                      "an absent name is PBValidationError"
-db history.                                           "PBHistoryEntry objects, newest first"
-snap := db snapshotAt: db history first.              "a PBSnapshot of that version"
-snap rootNames.                                       "sorted"
-invoices := snap getRootObject: 'invoices'.           "nil when absent"
-(invoices getAt: 1043) at: 'total'.                   "1, 1.0 and Decimal 1.00 find one key"
-invoices keysAndValuesDo: [:number :invoice | ...].   "in key order"
-(snap getRootObject: 'lines') getAt: -1.              "a PBList: the last element"
-snap getMutable: 'counter'.
-space close.
-```
-
-- Collections (`collections.st`): `PBList`, `PBDictionary`, `PBHashDictionary`, `PBSet`,
-  `PBCountedSet` and `PBRepeatedKeysDictionary` answer `getAt:`, `getAt:default:`, `has:`, `keys`,
-  `values`, `items` (Associations), `do:`, `keysAndValuesDo:`, `count`, `size`, `countOf:`,
-  `indexNames` and `getIndex:`, each where ProtoBase has it, in ProtoBase's iteration order.
-  The AVL nodes are in `avl.st`; a large node value is unboxed from its `PBValueBox`.
-- Records (`records.st`): `PBObject` answers `at:` (nil when absent), `hasDefinedAttr:` and
-  `attributeNames`. A record holding an attribute named `with_` or `has_defined_attr` (behaviour
-  of DBObject) is refused when loaded (`PBCorruptionError`).
-- A record of a type with no class here is a `PBOpaqueAtom` (D59): `typeName` (and `tag`) is its type name, and
-  `at:` and `attributeNames` read its fields. Any other message (a change, a collection message,
-  `doesNotUnderstand:`) and its use where a built-in type is expected are `PBNotSupportedError`
-  naming the type.
-- Indexes (`indexes.st`) are decoded and kept: `name`, `keySpec`, `hasMemberTokens` (false for an
-  index written by format 3). Roots (`roots.st`): `PBSpaceRoot`, `PBDatabaseRoot`; a
-  DatabaseRoot without `mutables` (before D35) is `PBCorruptionError`, and a space root written by a
-  cluster node is `PBNotSupportedError`.
-- `snapshotAt:` checks that the version belongs to the database (its name and its `origin`):
-  `PBReferenceError` otherwise.
-- `PBNotation describeObject:` and `describeDatabase:` answer ProtoBase's database notation;
-  `PBNotation dumpSpace: aSpace to: aPath` writes the JSON of ProtoBase's verifier `--out`
-  (`python -m proto_db.tools.verify`). A format-3 zone datetime cannot be described as ProtoBase
-  describes it (its UTC instant) without the zone's rules: `PBNotSupportedError`.
-
-## Writing a space: the file storage
-
-`PBFileStorage` writes as the format spec's "minimal external writer" does, so ProtoBase
-processes share the directory (`tests/interop/st_write_to_py.sh`: ProtoBase's verifier accepts
-what protoST writes, across several segments, each commits on top of the other, and the root
-lock excludes both ways; `tests/interop/crash_states_to_py.sh`: both readers recover from the
-states a crash leaves). These are the publisher's operations (`publisher.st`); applications
-commit through transactions:
-
-```smalltalk
-st := PBFileStorage path: '/srv/erp'.
-start := st readRoot.              "the root the commit is built on (nil: a new space)"
-ptr := st save: aSpaceRoot.        "dependents first, into the segments this storage owns"
-st flushSegment.                   "sync: the records are durable"
-st tryLockRoot.                    "true, or false while another process holds space.lock"
-st replaceRoot: (PBRootRecord segment: ptr segmentBytes offset: ptr offset
-  epoch: (start isNil ifTrue: [1] ifFalse: [start epoch + 1])).
-                                   "PBConflictError when the root moved since start"
-st unlockRoot.                     "best effort: a failure is logged to stderr, never signalled"
-```
-
-The epoch is the epoch of the root the commit was validated against and built on, plus one.
-This raw writer builds without validating, so it takes the root read before its changes; a root
-read again under the lock would pass the check and overwrite a newer commit. The publisher reads
-the root under the lock and validates every read against it before it builds, as ProtoBase's
-`_standalone_round` does, so it publishes that root's epoch plus one.
-
-- A storage writes only into segments it created: `<uuid4 hex>.seg`, made `#create
-  #exclusive` (a clash is `PBUnexpectedError`, never an append to another writer's file), with
-  the header synced and the directory synced once. A segment rolls over before it exceeds
-  `segmentMaxBytes` (ProtoBase's 256 MiB by default; `PBFileStorage path:segmentMaxBytes:`).
-  Appended bytes are never truncated: a pointer `pushAtom:` answers stays valid for the
-  storage's life, and an unpublished record is a harmless orphan (tools that scan by oid
-  consider only records reachable from a root).
-- `replaceRoot:` needs the root lock (`PBUserError`), syncs every segment written since its
-  last sync, checks that the pointer is a valid SpaceRoot record (`PBCorruptionError`) and that
-  the epoch is the current one plus one (`PBConflictError`), refuses a cluster node's space
-  (`cluster/`, or a SpaceRoot with a `cluster_term`: `PBNotSupportedError`), then writes
-  `space.root.tmp`, syncs it, renames it over `space.root` and syncs the directory.
-- A failure of the file system while writing is `PBUnexpectedError` and ends writing through
-  that storage (`isFailed`); reads keep working. One write at a time: a write that starts while
-  another is in progress on the same storage is `PBUserError`. `close` never waits and never
-  releases the root lock under a publish: during a write it is completed by that write when it
-  ends; `unlockRoot` during a write is refused (logged).
-
-## New versions: lists, dictionaries and records
-
-Every collection message and every record change answers a new version, a new atom with its
-own oid; the receiver never changes (design spec 4.1). The names are ProtoBase's, so `add:`,
-`remove:` and `removeAt:` do not mean what Pharo's do (design spec 5.3): a statement that
-discards the result changes nothing.
-
-```smalltalk
-lines := PBList new.                                   "an empty list, positions 0-based"
-lines := (lines appendLast: 'a') appendLast: 'c'.
-lines := lines insertAt: 1 value: 'b'.                 "insertAt: count appends"
-(lines getAt: -1).                                     "'c': a negative position counts from the end"
-(lines sliceFrom: 1 to: nil) elements.                 "#('b' 'c'): Python slice rules"
-lines appendLast: 'd'.                                 "changes nothing: the new list is discarded"
-lines := lines extend: #('d' 'e').                     "#('a' 'b' 'c' 'd' 'e')"
-
-totals := (PBDictionary new setAt: 1043 value: 12) setAt: 1043.0 value: 13.   "one key"
-totals := totals removeAt: 9999.                       "absent: a new version, same content"
-
-PBObjectSpace registerAtomClass: Invoice.              "needed to save, not to build"
-inv := Invoice withAll: { 'number' -> 1043. 'total' -> (Decimal fromString: '12.50') }.
-paid := inv with: 'paidOn' value: (CalendarDate year: 2026 month: 11 day: 11).
-inv = paid.                                            "false: two atoms, two oids"
-```
-
-- `PBList` (`collections.st`): `new`, `setAt:value:`, `insertAt:value:`, `removeAt:`,
-  `appendFirst:`, `appendLast:`, `extend:`, `sliceFrom:to:`, `head:`, `tail:`. A position out
-  of range or that is not an Integer is `PBValidationError`, exactly where ProtoBase's `List`
-  raises (`tests/unit/list_positions.st` holds ProtoBase's answers, recorded by
-  `tests/interop/py_list_positions.py`). `extend:` of nothing answers the receiver, as
-  ProtoBase's. `PBDictionary` and `PBHashDictionary`: `new`, `setAt:value:`, `removeAt:`.
-  `PBSet`: `new`, `add:`, `remove:`, `union:`, `intersection:`, `difference:` (see
-  "Operation logs and merges" below). `PBCountedSet`: `new`, `add:` (one occurrence more),
-  `remove:` (one occurrence fewer; the last one takes the element out, and an absent element
-  answers a new version with the same content), with `countOf:`, `count` (distinct elements)
-  and `totalCount` (all occurrences) kept as ProtoBase's `CountedSet` keeps them.
-- Values, keys and elements pass through `PBCodec canonical:` at once; a key or element that is
-  not orderable (a NaN, a list, a map) is `PBValidationError`. The trees are built as ProtoBase
-  builds them: `tests/interop/avl_ops_identical.sh` replays 1000 seeded `PBList` operations in
-  ProtoBase and compares every node, byte for byte.
-- A collection that has an index refuses every change with `PBNotSupportedError` naming its
-  indexes: ProtoBase updates the indexes in the same step, which protoBaseST cannot do.
-  `extend:` of nothing still answers the receiver, as ProtoBase's.
-- Two intended deviations from ProtoBase's `List`, both refusals with `PBValidationError`:
-  - a slice bound that is neither an Integer nor nil (`sliceFrom: true to: nil`). ProtoBase
-    hands its bounds to Python's `slice.indices`, which takes `True` as 1; in Smalltalk a
-    Boolean is not a number, and ProtoBase's own positions refuse `bool`. `list_positions.st`
-    records ProtoBase's answers next to protoBaseST's.
-  - `extend:` of a String. Python's `extend("abc")` appends three one-character strings; in
-    Smalltalk a String's elements are Characters, which no format stores, so the String is
-    refused up front (use `appendLast:` for one string value).
-- `PBObject withAll:` (and `Invoice withAll:`), `with:value:` and `withAll:` on a record: the
-  attributes keep the order given, a change keeps an attribute's place. Attribute names follow
-  the format spec's "Atom records" rule (no leading `_`, not `oid`, `atom_pointer` or `context`,
-  not `with_`, `has_defined_attr` or a name the class reserves): `PBValidationError`.
-- The save (`PBAtom >> _saveInto: aStorage`, ProtoBase's `_save`; `PBFileStorage >> save:`, see
-  "Writing a space"; the publisher comes later) writes every dependent before the record that refers to it, so a
-  record only refers to earlier records; it persists the oid the atom drew in memory, and
-  records the atom's place, so a second save writes nothing. A class not registered under its
-  `typeName` is refused when saved, before anything beneath it is written. Two saves of one
-  atom that race end the same way whatever the interleaving: into one storage both answer the
-  first pointer published, into two storages the later one is `PBValidationError`. `PBAtom >> _decodedTwin` (ProtoBase `_decoded_twin`)
-  answers the atom a load of a saved atom's record would produce.
-
-## Operation logs and merges
-
-`PBDictionary`, `PBHashDictionary` and `PBSet` are ProtoBase's `ConcurrentOptimized`
-collections: each version remembers the intents that derived it, so a commit can replay them
-onto a version another transaction committed meanwhile instead of replacing it (ProtoBase D33;
-the publisher does so for a root written but not read).
-
-```smalltalk
-mine := (PBDictionary new setAt: 'a' value: 1) removeAt: 'z'.
-mine opLog.            "PBFrozenList(PBTuple('set', 'a', 1), PBTuple('remove', 'z'))"
-mine isMergeable.      "true: built by new and derived only by logged mutators"
-theirs := PBDictionary new setAt: 'b' value: 2.
-(mine rebaseOnto: theirs) items.          "{'a'->1. 'b'->2}"
-
-s := ((PBSet new add: 1) add: 2) intersection: #(2).   "logs add 1, add 2, remove 1"
-s := s union: (PBSet new add: 3).
-
-bag := ((PBCountedSet new add: 'x') add: 'x') remove: 'x'.   "logs add, add, remove: net (0, 1)"
-(bag rebaseOnto: current) countOf: 'x'.   "one more than current's: concurrent adds all kept"
-```
-
-- `opLog` is a `PBFrozenList` of `PBTuple`s with ProtoBase's op names: `('set' k v)` and
-  `('remove' k)` for the dictionaries, `('add' e)` and `('remove' e)` for a set and a counted
-  set, and `('transform' e removes adds)` for a counted set's rebase. Every mutator
-  call logs its intent, a blind write that changes nothing included. A `PBDictionary` logs a
-  large value as the `PBValueBox` its node holds, so a replay reuses it.
-- `logComplete` (and `isMergeable`, which answers it) is true for a version built by `new`
-  and derived only by logged mutators; false for a loaded version and everything derived
-  from it. A `PBList` has no log and is never mergeable. `PBRepeatedKeysDictionary` is
-  `ConcurrentOptimized` too but has no writes (they are a non-goal; its log stays empty): a new
-  empty one is mergeable, and its rebase answers `current` unchanged, as ProtoBase's.
-- `rebaseOnto: current` replays the net effect of the log onto `current` through the public
-  mutators: the last intent per key (element), keys compared by order key, in order of last
-  occurrence, so a set then a remove of one key nets to a remove. A `PBCountedSet` composes
-  instead (D26): per element, its ops become one counter transform `(removes, adds)`, applied
-  to `current`'s count `c` as `max(c - removes, 0) + adds` and logged as
-  `('transform' e removes adds)`; replaying the ops one by one would give the same count, so
-  concurrent increments are all kept. `current` must be of the
-  receiver's class (`PBValidationError`); a `current` with an index is `PBNotSupportedError`.
-  The answer's log is `current`'s extended by the replay, as ProtoBase's: a rebase onto a
-  loaded version is not mergeable again.
-- `markConsumed` (called by the publisher after a commit) sets the version's `consumed` cell:
-  the version, and every version derived from it afterwards, are no longer mergeable, so a
-  value reused in a later transaction replaces instead of replaying the same operations again
-  (D33). A version derived before the mark keeps its own state.
-- `union:`, `intersection:` and `difference:` are ProtoBase's folds of `add:` and `remove:`,
-  so the log records each element's intent; the operand is a set or anything answering `do:`
-  except a String.
-- A hash dictionary or set files an entry under `_bucketHash:` of its key, the hash key unless
-  a subclass overrides it (ProtoBase's `_bucket_hash`, the seam for forcing collisions in
-  tests). `tests/interop/bucket_collisions_identical.sh` builds multi-entry buckets on both
-  sides and requires the same bucket bytes.
-- The invalid vectors of the `log` layer (framed log files) are justified skips of
-  `tests/conformance/cluster.st`, like the cluster's: ProtoBase reads such files only in its
-  cluster and tiered storage, outside the prototype. The runner shows every `SKIP:` line a
-  passing test prints under its `PASS` line.
+| | |
+|---|---|
+| [docs/tutorial.md](docs/tutorial.md) | A guided build of a small ERP, with the reasoning at each step. Every snippet is run by the tests. |
+| [docs/reference.md](docs/reference.md) | Every public class and message. |
+| [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from ProtoBase. |
+| [docs/not-done.md](docs/not-done.md) | What is not done, and what is not proven. |
+| [docs/decisions.md](docs/decisions.md) | The choices, with what each costs if it is wrong. |
+| [examples/erp/](examples/erp/README.md) | A demo in which Python and protoST work on one directory. |
+| [docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md](docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md) | The design. |
+| [CHANGELOG.md](CHANGELOG.md) | What changed, task by task. |
 
 ## Running the tests
 
-The tests need a protoST binary 0.10.0 or newer (run from a protoST checkout on the branch that
-provides `lib/decimal.st`, `lib/calendar.st` and `lib/uuid.st`). Point `PROTOST` at it:
+The tests need a protoST binary 0.10.0 or newer (a checkout on the branch that provides
+`lib/decimal.st`, `lib/calendar.st` and `lib/uuid.st`). Point `PROTOST` at it:
 
 ```sh
 export PROTOST=../protoST/build_release/protost      # default: protost from PATH
 tests/conformance/fetch_vectors.sh                    # vendors the format-4 vectors; run once, checks digests
 PYTHON=python3.14 tests/interop/setup_venv.sh         # Python side of the interop tests (needs ../ProtoBase)
 tests/run_tests.sh                                    # everything under tests/ and examples/
-tests/run_tests.sh tests/unit tests/week0             # or chosen paths
+tests/run_tests.sh tests/unit tests/docs              # or chosen paths
 ```
 
 The runner prints `PASS`, `FAIL` or `SKIP` per test and ends with `passed N, failed N, skipped N`.
 A `.st` test starts with an `"EXPECT: <last line>"` or `"EXPECT-ERROR: <text>"` directive; a
 `.sh` test passes with exit 0 and is skipped with exit 77. `PROTOBASE_REPO` (default `../ProtoBase`)
-names the ProtoBase checkout used by the two setup scripts.
+names the ProtoBase checkout used by the two setup scripts. `tests/docs/` checks the snippets of
+the README and the tutorial against the code.
+
+## License
+
+MIT. Copyright (c) 2026 Gustavo Marino.
