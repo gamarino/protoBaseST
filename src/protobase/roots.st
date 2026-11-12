@@ -41,6 +41,13 @@ PBSpaceRoot class >> persistedFields
 PBSpaceRoot >> databases
   ^ _PBTree required: (self stateAt: 'databases') kind: PBDictionary field: 'databases' in: self.
 
+"A new, unsaved space root over aDictionary (database name -> PBDatabaseRoot),
+ as ProtoBase's SpaceRoot(databases=...) outside a cluster: no cluster field."
+PBSpaceRoot class >> databases: aDictionary
+  (aDictionary isKindOf: PBDictionary) ifFalse: [
+    ^ PBValidationError signal: 'PBSpaceRoot databases: a PBDictionary was expected, not ' , aDictionary printString].
+  ^ self _unsavedWithState: (PBFrozenDict withAssociations: { 'databases' -> aDictionary }).
+
 "The term of the cluster lease the root was committed under, or nil."
 PBSpaceRoot >> clusterTerm
   ^ self stateAt: 'cluster_term'.
@@ -61,6 +68,38 @@ PBDatabaseRoot class >> requiredFields
 
 PBDatabaseRoot class >> persistedFields
   ^ #('objects' 'mutables' 'version' 'committed_at' 'origin' 'previous').
+
+"A new, unsaved database version (ProtoBase DatabaseRoot(...)): the fields in
+ the order ProtoBase writes them (persistedFields); origin nil (a database
+ created before D56) is left out, as ProtoBase leaves it out; previous nil for
+ version 0."
+PBDatabaseRoot class >> objects: anObjects mutables: aMutables version: anInteger committedAt: aDateTime
+    origin: anOrigin previous: aPrevious
+  | fields |
+  ((anObjects isKindOf: PBDictionary) and: [aMutables isKindOf: PBDictionary]) ifFalse: [
+    ^ PBValidationError signal: 'PBDatabaseRoot: objects and mutables are PBDictionaries, not '
+      , { anObjects. aMutables } printString].
+  (aPrevious isNil or: [aPrevious isKindOf: PBDatabaseRoot]) ifFalse: [
+    ^ PBValidationError signal: 'PBDatabaseRoot: previous is a PBDatabaseRoot or nil, not ' , aPrevious printString].
+  fields := OrderedCollection new.
+  fields addLast: 'objects' -> anObjects; addLast: 'mutables' -> aMutables; addLast: 'version' -> anInteger;
+    addLast: 'committed_at' -> aDateTime.
+  anOrigin isNil ifFalse: [fields addLast: 'origin' -> anOrigin].
+  fields addLast: 'previous' -> aPrevious.
+  ^ self _unsavedWithState: (PBFrozenDict withAssociations: fields asArray).
+
+"The committed_at of a version that follows one committed at aDateTime: now,
+ or aDateTime when the clock reads earlier, so history times never go back
+ (ProtoBase max(_utc_now(), previous committed_at)); always in UTC (ZoneOffset
+ utc). A previous committed_at that is not an aware DateTime is
+ PBCorruptionError, where ProtoBase's max would fail on it."
+PBDatabaseRoot class >> committedAfter: aDateTime
+  | now |
+  ((aDateTime isKindOf: DateTime) and: [aDateTime isNaive not]) ifFalse: [
+    ^ PBCorruptionError signal: 'PBDatabaseRoot: committed_at is not an aware datetime: ' , aDateTime printString].
+  now := DateTime nowUTC.
+  aDateTime utcOrdinalMicroseconds <= now utcOrdinalMicroseconds ifTrue: [^ now].
+  ^ DateTime utcOrdinalMicroseconds: aDateTime utcOrdinalMicroseconds zone: ZoneOffset utc.
 
 "The PBDictionary from root name to the root's value."
 PBDatabaseRoot >> objects

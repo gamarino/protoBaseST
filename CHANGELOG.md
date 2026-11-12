@@ -172,3 +172,25 @@
   `v2.0.0rc2` with msgpack 1.2.4; `env.sh` fails when the venv holds another commit. The
   recursion-limit workaround of `st_deep_to_py.sh` and its `NOTE:` line are gone; the deep
   cross tests run at 1022 both ways and check the refusals of 1023 both ways.
+- Transactions write side and the publisher (plan Task 18): `PBObjectSpace >> newDatabase:`
+  (version 0, empty objects and mutables, a 16-byte random origin, `committedAt` now in UTC);
+  `PBTransaction >> setRootObject:value:`, `setRootObject:value:replace:` (a `__` name is
+  `PBValidationError`), `removeRootObject:`, `newMutable:value:`, `setMutable:value:` and
+  `removeMutable:` with the D35 rules, the factories `newList`, `newDictionary`,
+  `newHashDictionary`, `newSet`, `newCountedSet` and `newObject:`, `commit` (a commit with no
+  writes publishes nothing; a failed commit aborts) and the write side of `abort`;
+  `PBDatabase >> newTransactionDo:`; `PBMutableObject >> set:value:`. A written value passes
+  `PBCodec canonical:for:` with the holder `Root 'name'` or `Mutable 'name'`. The writes and the
+  sets of a transaction are persistent maps (`_PBWriteMap`, O(log n) per write), like its read
+  sets. `PBPublisher` (`publisher.st`), one actor per space, runs design spec 7.3: the root lock
+  retried from 1 ms doubling to 50 ms until `lockTimeout` (`PBTimeoutError`), validation against
+  the root read under the lock (`PBConflictError`), the merge of blind writes (`rebaseOnto:`)
+  or last writer wins, save and sync, publish with that root's epoch plus one, consumed marks
+  (D33) and the space's last-known root, and the outcome of a failed publish decided by reading
+  `space.root` again (`PBOutcomeUnknownError` when it cannot be read). `PBObjectSpace >> close`
+  closes the storage through the publisher, between commits. `PBSpaceRoot databases:`,
+  `PBDatabaseRoot objects:mutables:version:committedAt:origin:previous:` and `committedAfter:`.
+  New tests: `tx_commit_basic`, `tx_conflict_read`, `tx_blind_merge`, `tx_replace`,
+  `tx_mutables`, `tx_after_end`, `tx_refusals`, `tx_outcome`, `tx_new_database`, and
+  `tests/interop/st_commit_to_py.sh` (ProtoBase verifies and reads the publisher's records,
+  whose fields are in ProtoBase's order, and blind merges compose across the two languages).

@@ -71,28 +71,59 @@ stack, on the main thread or an actor's worker thread. ProtoBase `v2.0.0rc2` rea
 same values at Python's default recursion limit (`tests/interop/st_deep_to_py.sh`,
 `py_deep_to_st.sh`).
 
-## Transactions (read side)
+## Transactions
 
-A transaction reads the version that was current when it started, and remembers what it read,
-as ProtoBase's does (design spec 7.1). The writes and `commit` come later in the plan.
+A transaction reads the version that was current when it started, remembers what it read, and
+publishes its writes through the space's publisher, as ProtoBase's does (design spec 7).
 
 ```smalltalk
 Import from: 'protobase'.
 space := PBObjectSpace storage: (PBFileStorage path: '/srv/erp').
-tx := (space openDatabase: 'erp') newTransaction.
-(tx getRootObject: 'invoices') count.            "recorded in the read set"
+db := space newDatabase: 'erp'.                   "or, later: space openDatabase: 'erp'"
+db newTransactionDo: [:tr |
+  tr setRootObject: 'tags' value: ((tr newDictionary) setAt: 'urgent' value: true).
+  tr newMutable: 'customer:acme' value: (tr newObject: { 'name' -> 'ACME S.A.' })].
+tx := db newTransaction.
+(tx getRootObject: 'tags') count.                 "recorded in the read set"
 (PBMutableObject name: 'customer:acme') get: tx.  "a mutable cell, recorded too"
 tx rootNames.                                     "records nothing"
-tx abort.                                         "afterwards, every message is PBUserError"
+tx setRootObject: 'tags' value: ((tx getRootObject: 'tags') setAt: 'paid' value: false).
+tx commit.                                        "afterwards, every message is PBUserError"
 space close.
 ```
 
-The first read of a name records its token: an atom's storage pointer, a plain value's exact
-token (so `1` and `1.0` differ), or `#absent`. The bookkeeping is one immutable `PBTxState` in an
-`Atom`, replaced with `swap:`; the protoST layer takes no lock.
+- **Reads.** The first read of a name records its token: an atom's storage pointer, a plain
+  value's exact token (so `1` and `1.0` differ), or `#absent`. A transaction reads its own
+  writes first.
+- **Writes.** `setRootObject:value:` (and `replace:`), `removeRootObject:`, `newMutable:value:`
+  (answers the `PBMutableObject`), `setMutable:value:`, `removeMutable:` and
+  `PBMutableObject >> set:value:`. A value passes `PBCodec canonical:for:` at once, with the
+  holder `Root 'name'` or `Mutable 'name'` in the refusal. A root name starting with `__` is
+  reserved for the format (`PBValidationError`). The factories `newList`, `newDictionary`,
+  `newHashDictionary`, `newSet`, `newCountedSet` and `newObject:` answer new values built in
+  this process.
+- **Commit** sends the transaction to the space's publisher (`publisher.st`, one actor per
+  space) and waits for it. Under the root lock the publisher reads `space.root`, validates
+  every read token and every blindly set cell against it (`PBConflictError`), builds the new
+  version from the *current* roots, saves and syncs it, and publishes it. A root written but
+  neither read nor replaced is merged when the value is a collection with a complete log (its
+  operations are replayed onto the current value, `rebaseOnto:`); otherwise the last writer
+  wins. Mutable cells are never merged. `committedAt` is `max(now, previous committedAt)` in
+  UTC. After success, every written collection is marked consumed (D33).
+- A commit with no writes publishes nothing. A failed commit leaves the transaction aborted.
+  The root lock is retried from 1 ms, doubling up to 50 ms, until the space's `lockTimeout`
+  (`PBTimeoutError`). When a publish fails, the publisher reads `space.root` again under the
+  lock: its own root means success; the root it built on means nothing was published (the
+  original error); another root, which only a writer ignoring the lock can publish, is
+  `PBConflictError` (ProtoBase's `_publish`); a root it cannot read is
+  `PBOutcomeUnknownError`.
+- `newTransactionDo:` commits when the block ends and answers its value; it aborts when the
+  block raises and lets the exception go on. It never retries.
+- The bookkeeping is one immutable `PBTxState` in an `Atom`, replaced with `swap:`; its maps
+  are persistent (one write or first read costs O(log n)). The protoST layer takes no lock.
 
-Until the order keys exist (plan Task 10), the keys of a `PBFrozenDict` and the items of a list
-compare with `=` within one class: `1` and `1.0` are different keys there.
+`tests/interop/st_commit_to_py.sh` checks that ProtoBase's verifier accepts what the publisher
+writes, that ProtoBase reads it, and that blind merges compose across the two languages.
 
 ## Framing and type names
 
@@ -208,7 +239,7 @@ space close.
 processes share the directory (`tests/interop/st_write_to_py.sh`: ProtoBase's verifier accepts
 what protoST writes, across several segments, each commits on top of the other, and the root
 lock excludes both ways; `tests/interop/crash_states_to_py.sh`: both readers recover from the
-states a crash leaves). These are the publisher's operations (plan Task 18); applications
+states a crash leaves). These are the publisher's operations (`publisher.st`); applications
 commit through transactions:
 
 ```smalltalk
@@ -310,7 +341,7 @@ inv = paid.                                            "false: two atoms, two oi
 `PBDictionary`, `PBHashDictionary` and `PBSet` are ProtoBase's `ConcurrentOptimized`
 collections: each version remembers the intents that derived it, so a commit can replay them
 onto a version another transaction committed meanwhile instead of replacing it (ProtoBase D33;
-the publisher that does so comes later in the plan).
+the publisher does so for a root written but not read).
 
 ```smalltalk
 mine := (PBDictionary new setAt: 'a' value: 1) removeAt: 'z'.

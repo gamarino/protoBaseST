@@ -7,8 +7,12 @@ ProtoBase's ObjectSpace, Database, Snapshot and HistoryEntry
   PBObjectSpace storage: aStorage           a space over aStorage (it owns it:
                                             close closes it); lockTimeout 30000 ms
   PBObjectSpace storage: s lockTimeout: ms  ms, a positive SmallInteger (the root
-                                            lock wait of a commit, plan Task 18)
+                                            lock wait of a commit)
   aSpace listDatabases                      the database names, sorted
+  aSpace newDatabase: aName                 creates the database (version 0)
+                                            through the space's publisher and
+                                            answers it; an existing name is
+                                            PBValidationError
   aSpace openDatabase: aName                the PBDatabase; an absent name is
                                             PBValidationError
   aSpace close                              idempotent; later calls: PBClosedError
@@ -38,6 +42,7 @@ Import from: 'protobase/avl'.
 Import from: 'protobase/collections'.
 Import from: 'protobase/records'.
 Import from: 'protobase/roots'.
+Import from: 'protobase/publisher'.
 
 Object subclass: #_PBNameCheck.
 
@@ -48,7 +53,7 @@ _PBNameCheck class >> check: aName what: aWhat
 
 "=== PBObjectSpace ============================================================"
 
-Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed'.
+Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed publisher lastRoot'.
 
 PBObjectSpace class >> registerAtomClass: aClass
   ^ PBTypeRegistry register: aClass.
@@ -73,6 +78,8 @@ PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds
   storage := aStorage.
   lockTimeout := milliseconds.
   closed := Atom on: false.
+  lastRoot := Atom on: nil.
+  publisher := (PBPublisher space: self) asActor.
   ^ self.
 
 PBObjectSpace >> storage
@@ -84,6 +91,21 @@ PBObjectSpace >> lockTimeout
 
 PBObjectSpace >> isClosed
   ^ closed value.
+
+"The actor proxy of the space's publisher (publisher.st): every commit of the
+ space goes through it."
+PBObjectSpace >> _publisher
+  ^ publisher.
+
+"The root record this space's publisher published last, or nil before its
+ first publish (design spec 7.3 step 7)."
+PBObjectSpace >> _lastKnownRoot
+  ^ lastRoot value.
+
+"Records aRootRecord, just published, as the last-known root, unless a later
+ epoch is recorded already."
+PBObjectSpace >> _noteRoot: aRootRecord
+  lastRoot swap: [:known | (known isNil or: [known epoch < aRootRecord epoch]) ifTrue: [aRootRecord] ifFalse: [known]].
 
 PBObjectSpace >> _checkOpen
   closed value ifTrue: [^ PBClosedError signal: 'PBObjectSpace is closed'].
@@ -131,15 +153,26 @@ PBObjectSpace >> listDatabases
   root isNil ifTrue: [^ #()].
   ^ _PBNames sorted: root databases keys.
 
+"Creates the database aName and answers it (ProtoBase new_database): the
+ publisher commits its version 0 (PBPublisher >> createDatabase:). An existing
+ name is PBValidationError."
+PBObjectSpace >> newDatabase: aName
+  _PBNameCheck check: aName what: 'database'.
+  self _checkOpen.
+  (publisher createDatabase: aName) wait.
+  ^ PBDatabase basicNew _setSpace: self name: aName.
+
 PBObjectSpace >> openDatabase: aName
   _PBNameCheck check: aName what: 'database'.
   (self _databaseRootNamed: aName) isNil ifTrue: [
     ^ PBValidationError signal: 'Database ' , aName printString , ' does not exist'].
   ^ PBDatabase basicNew _setSpace: self name: aName.
 
-"Closes the space and its storage. Idempotent."
+"Closes the space and its storage. Idempotent. The storage is closed by the
+ publisher, after the commits sent to it before (store.st: a close never
+ interrupts a publish)."
 PBObjectSpace >> close
-  (closed value: true ifCurrent: false) ifTrue: [storage close].
+  (closed value: true ifCurrent: false) ifTrue: [publisher closeStorage wait].
 
 PBObjectSpace >> printOn: aStream
   aStream nextPutAll: 'PBObjectSpace('; print: storage; nextPut: $).

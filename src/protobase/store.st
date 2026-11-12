@@ -113,10 +113,10 @@ pushAtom:, flushSegment and replaceRoot: is PBUnexpectedError, so no later
 root can reference a record whose write was lost (reads keep working; open a
 new storage to write again). After a failure in the rename or in the
 directory sync that follows it, the outcome of that publish is unknown until
-space.root is read again (the publisher's step 8, plan Task 18).
+space.root is read again (the publisher's step 8, publisher.st).
 
 One writer at a time. The write operations (pushAtom:, flushSegment,
-replaceRoot:) are made by one actor, the space's publisher (plan Task 18),
+replaceRoot:) are made by one actor, the space's publisher (publisher.st),
 one at a time; the storage takes no lock to serialise them. A write operation
 that starts while another is in progress on the same storage is refused at
 once with PBUserError and writes nothing (the storage state, an Atom changed

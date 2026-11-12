@@ -620,7 +620,7 @@ PBAtom >> printOn: aStream
  aStorage is what a record is written to: it answers pushAtom: aPBAtomEnvelope
  with the PBAtomPointer of the ATOM record it appended (ProtoBase's
  storage.push_atom). PBFileStorage answers it by appending to the segment it
- owns (store.st); saves run on the space's publisher (plan Task 18), one at a
+ owns (store.st); saves run on the space's publisher (publisher.st), one at a
  time."
 
 "A saved atom's place: its pointer and the storage it was written to (an

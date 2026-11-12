@@ -18,5 +18,6 @@ Import from: 'protobase/collections'.
 Import from: 'protobase/records'.
 Import from: 'protobase/indexes'.
 Import from: 'protobase/roots'.
+Import from: 'protobase/publisher'.
 Import from: 'protobase/space'.
 Import from: 'protobase/transactions'.

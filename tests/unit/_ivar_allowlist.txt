@@ -40,8 +40,9 @@ PBTransaction>>_setDatabase:record:spaceRoot:root:
 PBTxState class>>_initializeMarks
 PBOrderKey class>>_initializeInfinities
 _PBLoadResolver>>_setStorage:chain:
-_PBReadMap>>_setEntries:
+_PBNameMap>>_setEntries:
 PBKeyNode>>_setOid:pointer:storage:
 _PBPlace>>_setPointer:storage:
 PBIndexedCollection>>_setLog:complete:
 _PBOpLog>>_setPrevious:op:
+PBPublisher>>_setSpace:
