@@ -754,6 +754,55 @@ PBDatabase >> newTransactionDo: aBlock
        e resume: answer]]
     ensure: [tr isActive ifTrue: [inFlight ifTrue: [tr abort] ifFalse: [tr commit]]].
 
+"The milliseconds to wait after the failed attempt number anAttempt (from 0) of run:retries:backoff:
+ (ProtoBase Database.run: uniform(d/2, d) seconds with d = min(high, low * 2^attempt)): d * (0.5 + r / 2)
+ for r in [0, 1) drawn from aRandom, rounded to a whole number of milliseconds (a SmallInteger). The
+ random source is a parameter so that the bounds are tested with a seeded Random, never by timing."
+PBDatabase class >> backoffFor: anAttempt low: aLow high: aHigh random: aRandom
+  | d |
+  d := aHigh min: aLow * (2 raisedTo: anAttempt).
+  ^ (d * (0.5 + (aRandom next / 2))) rounded.
+
+"Runs aBlock with a new transaction and answers its value: run: aBlock retries: 10 backoff: #(1 200)."
+PBDatabase >> run: aBlock
+  ^ self run: aBlock retries: 10 backoff: #(1 200).
+
+"run: aBlock retries: n backoff: #(1 200)."
+PBDatabase >> run: aBlock retries: aCount
+  ^ self run: aBlock retries: aCount backoff: #(1 200).
+
+"Runs aBlock with a new transaction, as newTransactionDo: does, and answers its value (ProtoBase
+ Database.run). A PBConflictError, signalled by the commit, by a merge or by aBlock itself, aborts the
+ attempt (newTransactionDo: aborts whenever an exception unwinds the block) and the block runs again with a
+ fresh transaction, at most aCount more times, after waiting backoffFor:low:high:random: milliseconds
+ ((Future after: d) wait; aBackoff is #(low high) in milliseconds, ProtoBase's seconds pair scaled). After
+ the last retry the conflict is signalled again. Any other exception aborts the attempt and goes on
+ unretried; notably PBOutcomeUnknownError, because the commit may have been applied. A block that ends its
+ transaction itself is not committed again (newTransactionDo: commits only an active one). The checks of
+ ProtoBase run first: aCount a non-negative Integer, aBackoff a pair of numbers 0 <= low <= high
+ (PBValidationError)."
+PBDatabase >> run: aBlock retries: aCount backoff: aBackoff
+  | low high random |
+  (aCount isInteger and: [aCount >= 0]) ifFalse: [
+    ^ PBValidationError signal: 'run: retries must be a non-negative Integer, not ' , aCount printString].
+  ((aBackoff isKindOf: Array) and: [aBackoff size = 2]) ifFalse: [
+    ^ PBValidationError signal: 'run: backoff must be a (low, high) pair of milliseconds, not '
+      , aBackoff printString].
+  low := aBackoff first.
+  high := aBackoff last.
+  ((low isNumber and: [high isNumber]) and: [low >= 0 and: [high >= low]]) ifFalse: [
+    ^ PBValidationError signal: 'run: backoff must satisfy 0 <= low <= high, not ' , aBackoff printString].
+  random := Random new.
+  0 to: aCount do: [:attempt | | failed value |
+    failed := false.
+    value := [self newTransactionDo: aBlock] on: PBConflictError do: [:conflict |
+      attempt = aCount ifTrue: [conflict pass].
+      failed := true.
+      nil].
+    failed ifFalse: [^ value].
+    (Future after: (PBDatabase backoffFor: attempt low: low high: high random: random)) wait].
+  ^ PBUnexpectedError signal: 'run: the retry loop always answers or signals'.
+
 "Sets this cell to aValue in aTransaction (ProtoBase MutableObject.set):
  aTransaction setMutable: name value: aValue."
 PBMutableObject >> set: aTransaction value: aValue

@@ -126,6 +126,13 @@ space close.
   does not end the block (it asks those handlers with `Exception>>outer`), so its writes are
   committed; one they end with `return:`, `retry` or by falling off aborts. An exception that
   is not resumable (every `Error` except `ZeroDivide`) aborts at once. It never retries.
+- `run:`, `run:retries:` and `run:retries:backoff:` (ProtoBase `Database.run`; defaults 10 retries,
+  `#(1 200)` milliseconds) run the block as `newTransactionDo:` does and answer its value. A
+  `PBConflictError` (from the commit, a merge or the block) aborts the attempt, waits
+  `(Future after: d) wait` with `d = min(high, low * 2^attempt) * (0.5 + random / 2)` rounded to
+  whole milliseconds (`PBDatabase class >> backoffFor:low:high:random:`), and retries with a fresh
+  transaction; after the last retry the conflict is signalled again. Any other error aborts and
+  propagates; `PBOutcomeUnknownError` is never retried, since the commit may have been applied.
 - The bookkeeping is one immutable `PBTxState` in an `Atom`, replaced with `swap:`; its maps
   are persistent (one write or first read costs O(log n)). The protoST layer takes no lock.
 
