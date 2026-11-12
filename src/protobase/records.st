@@ -133,7 +133,7 @@ PBObject class >> _state: anArrayOfAssociations with: aChanges
 "aValue canonical, a PBValidationError of the codec naming the field aName
  (ProtoBase: Field 'name' of <type name>: ...)."
 PBObject class >> _canonical: aValue field: aName
-  ^ PBCodec canonical: aValue for: 'Field ' , aName printString , ' of ' , self typeName.
+  ^ PBCodec canonical: aValue for: 'Field ' , (PBCodec repr: aName) , ' of ' , self typeName.
 
 "aName, when it may be a persisted attribute of this class; PBValidationError
  naming the rule it breaks otherwise (format spec 'Atom records')."

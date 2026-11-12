@@ -97,9 +97,10 @@ segment written since its last sync is synced first (data reaches the disk stric
 references it); the record at the new root's pointer must be a SpaceRoot
 that passes its checks; the current space.root is read and checked (a version
 the reader does not know is an error, never a reason to overwrite); the new
-epoch, the epoch of the root the commit was built on plus one (1 for a space
-that had none), must be the current one plus one, PBConflictError otherwise
-(a commit built on a root that moved since is stale); a space that belongs to a cluster (a cluster/
+epoch, the epoch of the root the commit was validated against and built on
+plus one (1 for a space that had none; replaceRoot: says which root that is),
+must be the current one plus one, PBConflictError otherwise (a commit built on
+a root that moved since is stale); a space that belongs to a cluster (a cluster/
 directory, or a current SpaceRoot with a cluster_term) is PBNotSupportedError,
 since such a space is written only through the cluster and clusters are
 outside the prototype (design spec 10.5). Then space.root.tmp is written and
@@ -658,11 +659,15 @@ PBFileStorage class >> spaceRootTag
 
 "Publishes aPBRootRecord as the space's root and answers it (see the module
  comment for the order of the steps). Its epoch is the epoch of the root the
- commit was built on (read when the transaction started) plus one, 1 for a
- space that had none: the check against the current root is what refuses a
- commit made on a root that moved since (format spec, minimal writer, step 5);
- an epoch computed from a root read under the lock would always pass and
- overwrite a newer commit. Needs the root lock (PBUserError). Refused, with
+ commit was validated against and built on, plus one (1 for a space that had
+ none). The publisher (publisher.st) reads that root under the root lock and
+ validates every read against it, as ProtoBase's _standalone_round, so a root
+ that moved since the transaction started is validated, never overwritten. A
+ writer that publishes without such a validation must take the epoch of the
+ root it built on, read before its changes, and never a root read again under
+ the lock, which would pass this check and overwrite a newer commit. Under the
+ lock this check only catches a writer that ignores the lock (format spec,
+ minimal writer, step 5). Needs the root lock (PBUserError). Refused, with
  nothing written: a pointer that is not a valid SpaceRoot record
  (PBCorruptionError), an epoch other than the current one plus one
  (PBConflictError), a cluster node's space (PBNotSupportedError)."

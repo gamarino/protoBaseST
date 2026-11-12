@@ -187,7 +187,7 @@ _PBNameMap subclass: #_PBReadMap.
 "A map that also maps aName (absent here) to aToken, last in order."
 _PBReadMap >> with: aName token: aToken
   (entries includesKey: aName) ifTrue: [
-    ^ PBUserError signal: '_PBReadMap: ' , aName printString , ' is recorded already'].
+    ^ PBUserError signal: '_PBReadMap: ' , (PBCodec repr: aName) , ' is recorded already'].
   ^ self _with: aName value: aToken.
 
 "The writes of a transaction: name -> the value written (or PBTxState removed),
@@ -339,7 +339,7 @@ PBTransaction class >> _on: aDatabase
   spaceRoot := space _spaceRootAt: record.
   dbRoot := space _databaseRootNamed: aDatabase name in: spaceRoot.
   dbRoot isNil ifTrue: [
-    ^ PBValidationError signal: 'Database ' , aDatabase name printString , ' does not exist'].
+    ^ PBValidationError signal: 'Database ' , (PBCodec repr: aDatabase name) , ' does not exist'].
   ^ self basicNew _setDatabase: aDatabase record: record spaceRoot: spaceRoot root: dbRoot.
 
 PBTransaction >> _setDatabase: aDatabase record: aRootRecord spaceRoot: aSpaceRoot root: aDatabaseRoot
@@ -442,10 +442,10 @@ PBTransaction >> setRootObject: aName value: aValue replace: aBoolean
   | value |
   _PBNameCheck check: aName what: 'root'.
   (aName beginsWith: '__') ifTrue: [
-    ^ PBValidationError signal: 'Root names starting with ''__'' are reserved for the format, not ' , aName printString].
+    ^ PBValidationError signal: 'Root names starting with ''__'' are reserved for the format, not ' , (PBCodec repr: aName)].
   (aBoolean == true or: [aBoolean == false]) ifFalse: [
     ^ PBValidationError signal: 'replace must be a Boolean, not ' , aBoolean printString].
-  value := PBCodec canonical: aValue for: 'Root ' , aName printString.
+  value := PBCodec canonical: aValue for: 'Root ' , (PBCodec repr: aName).
   bookkeeping swap: [:st | st checkActive withWrite: aName value: value replace: aBoolean].
 
 "Removes the root aName at commit (a no-op if it is absent then); a later set
@@ -462,7 +462,7 @@ PBTransaction >> removeRootObject: aName
 PBTransaction >> newMutable: aName value: aValue
   | value exists |
   _PBNameCheck check: aName what: 'mutable'.
-  value := PBCodec canonical: aValue for: 'Mutable ' , aName printString.
+  value := PBCodec canonical: aValue for: 'Mutable ' , (PBCodec repr: aName).
   bookkeeping swap: [:st |
     | current view |
     current := st checkActive.
@@ -471,7 +471,7 @@ PBTransaction >> newMutable: aName value: aValue
       current := current withMutableRead: aName token: (self _tokenOf: view)].
     exists := view ~~ PBTxState missing.
     exists ifTrue: [current] ifFalse: [current withMutableWrite: aName value: value expected: false]].
-  exists ifTrue: [^ PBValidationError signal: 'Mutable ' , aName printString , ' already exists'].
+  exists ifTrue: [^ PBValidationError signal: 'Mutable ' , (PBCodec repr: aName) , ' already exists'].
   ^ PBMutableObject name: aName.
 
 "Sets the existing mutable cell aName to aValue at commit (ProtoBase
@@ -482,7 +482,7 @@ PBTransaction >> newMutable: aName value: aValue
 PBTransaction >> setMutable: aName value: aValue
   | value absent |
   _PBNameCheck check: aName what: 'mutable'.
-  value := PBCodec canonical: aValue for: 'Mutable ' , aName printString.
+  value := PBCodec canonical: aValue for: 'Mutable ' , (PBCodec repr: aName).
   bookkeeping swap: [:st |
     | current |
     current := st checkActive.
@@ -491,7 +491,7 @@ PBTransaction >> setMutable: aName value: aValue
       ifTrue: [current]
       ifFalse: [current withMutableWrite: aName value: value expected: (current mwrites includesKey: aName) not]].
   absent ifTrue: [
-    ^ PBValidationError signal: 'Mutable ' , aName printString , ' does not exist; create it with newMutable:value:'].
+    ^ PBValidationError signal: 'Mutable ' , (PBCodec repr: aName) , ' does not exist; create it with newMutable:value:'].
 
 "Removes the existing mutable cell aName at commit (ProtoBase remove_mutable);
  an absent cell is PBValidationError. A cell removed meanwhile by a concurrent
@@ -504,7 +504,7 @@ PBTransaction >> removeMutable: aName
     current := st checkActive.
     absent := (self _mutableView: aName in: current) == PBTxState missing.
     absent ifTrue: [current] ifFalse: [current withMutableWrite: aName value: PBTxState removed expected: false]].
-  absent ifTrue: [^ PBValidationError signal: 'Mutable ' , aName printString , ' does not exist'].
+  absent ifTrue: [^ PBValidationError signal: 'Mutable ' , (PBCodec repr: aName) , ' does not exist'].
 
 "=== factories ================================================================"
 
@@ -544,18 +544,22 @@ PBTransaction >> abort
   bookkeeping swap: [:st | st checkActive withState: #aborted].
 
 "Commits the writes (design spec 7.3): the space's publisher validates the
- reads against the newest root, merges, saves and publishes, and this call
- waits for it (inside an actor the wait suspends that actor). A transaction
- with no writes publishes nothing (plan call C16). PBConflictError when a root
- or cell it read changed, or a merge conflicts; PBTimeoutError when the root
- lock is not taken within the space's lockTimeout; PBOutcomeUnknownError when
- the publish failed and its outcome could not be decided. The transaction ends
- either way: committed, or aborted after a failure (ProtoBase commit)."
+ reads against the newest root, merges, saves and publishes. This call sends
+ it attempts and waits for each (PBObjectSpace >> _untilPublished:): while the
+ root lock is held by another holder, it waits and tries again, the publisher
+ never does (ruling R19). Inside an actor these waits are nested in ensure:,
+ so they block the actor's worker, which helps other actors meanwhile; they do
+ not suspend the actor. A transaction with no writes publishes nothing (plan
+ call C16). PBConflictError when a root or cell it read changed, or a merge
+ conflicts; PBTimeoutError when the root lock is not taken within the space's
+ lockTimeout; PBOutcomeUnknownError when the publish failed and its outcome
+ could not be decided. The transaction ends either way: committed, or aborted
+ after a failure (ProtoBase commit)."
 PBTransaction >> commit
   | st committed |
   bookkeeping swap: [:current | st := current checkActive. current withState: #committing].
   committed := false.
-  [st hasNoWrites ifFalse: [(database space _publisher commit: self) wait].
+  [st hasNoWrites ifFalse: [database space _untilPublished: [:publisher | publisher commit: self]].
    committed := true]
     ensure: [bookkeeping swap: [:current | current withState: (committed ifTrue: [#committed] ifFalse: [#aborted])]].
 
@@ -580,7 +584,7 @@ PBTransaction >> _buildOn: aRootRecord
     ifFalse: [
       current := space _spaceRootAt: aRootRecord.
       root := space _databaseRootNamed: database name in: current.
-      root isNil ifTrue: [^ PBConflictError signal: 'Database ' , database name printString , ' no longer exists'].
+      root isNil ifTrue: [^ PBConflictError signal: 'Database ' , (PBCodec repr: database name) , ' no longer exists'].
       self _checkReads: st reads in: root objects what: 'Root'.
       (st mreads isEmpty and: [st mexpected isEmpty]) ifFalse: [self _checkMutables: root mutables in: st]].
   currentObjects := root objects.
@@ -606,7 +610,7 @@ PBTransaction >> _buildOn: aRootRecord
 PBTransaction >> _checkReads: aReadMap in: aDictionary what: aKind
   aReadMap keysAndValuesDo: [:name :token |
     (self _sameToken: token as: (self _tokenOf: (aDictionary getAt: name default: PBTxState missing))) ifFalse: [
-      ^ PBConflictError signal: aKind , ' ' , name printString , ' of database ' , database name printString
+      ^ PBConflictError signal: aKind , ' ' , (PBCodec repr: name) , ' of database ' , (PBCodec repr: database name)
         , ' was changed by a concurrent commit']].
 
 "ProtoBase _check_mutables: a read cell that changed, or a blindly set cell
@@ -615,7 +619,7 @@ PBTransaction >> _checkMutables: aDictionary in: aState
   self _checkReads: aState mreads in: aDictionary what: 'Mutable'.
   aState mexpected keysAndValuesDo: [:name :ignored |
     (aDictionary has: name) ifFalse: [
-      ^ PBConflictError signal: 'Mutable ' , name printString , ' of database ' , database name printString
+      ^ PBConflictError signal: 'Mutable ' , (PBCodec repr: name) , ' of database ' , (PBCodec repr: database name)
         , ' was removed by a concurrent commit']].
 
 PBTransaction >> _sameToken: aToken as: anotherToken
@@ -632,6 +636,17 @@ PBTransaction >> _merged: aValue onto: aCurrent
   ((aValue isKindOf: PBIndexedCollection) and: [aValue isMergeable and: [aCurrent class == aValue class]])
     ifFalse: [^ aValue].
   ^ aValue rebaseOnto: aCurrent.
+
+"The atoms written as roots or cells, which the publisher saves before it
+ takes the root lock (ProtoBase _commit saves each written Atom before
+ _commit_root); atoms nested in a plain value are saved with the new root."
+PBTransaction >> _writtenAtoms
+  | st out |
+  st := bookkeeping value.
+  out := OrderedCollection new.
+  { st writes. st mwrites } do: [:map |
+    map keysAndValuesDo: [:name :value | (value isKindOf: PBAtom) ifTrue: [out addLast: value]]].
+  ^ out asArray.
 
 "After a successful publish: every collection this transaction wrote has had
  its log replayed, so it and the versions derived from it are no longer
@@ -707,20 +722,19 @@ PBMutableObject >> get: aTransaction
   ^ aTransaction getMutable: self name.
 
 "Runs aBlock with a new transaction and answers its value (ProtoBase's
- 'with db.new_transaction() as tr:'): when the block ends, the transaction is
- committed if it is still active; when the block raises, it is aborted if
- still active and the exception goes on unchanged. There is no retry (run:
- retries). A block that leaves by a non-local return (^) leaves nothing to
- commit: the transaction is aborted."
+ 'with db.new_transaction() as tr:'). When the block ends, normally or by a
+ non-local return (^, Python's return inside the with block), the transaction
+ is committed if it is still active; a failure of that commit is signalled.
+ When the block signals an Error, the transaction is aborted if still active
+ and the exception goes on unchanged. There is no retry (run: retries)."
 PBDatabase >> newTransactionDo: aBlock
   | tr result |
   tr := self newTransaction.
   ^ [result := [aBlock value: tr] on: Error do: [:e |
        tr isActive ifTrue: [tr abort].
        e pass].
-     tr isActive ifTrue: [tr commit].
      result]
-    ensure: [tr isActive ifTrue: [tr abort]].
+    ensure: [tr isActive ifTrue: [tr commit]].
 
 "Sets this cell to aValue in aTransaction (ProtoBase MutableObject.set):
  aTransaction setMutable: name value: aValue."

@@ -156,6 +156,38 @@ PBCodec class >> canonical: aValue
       stack isEmpty ifTrue: [result := r] ifFalse: [stack last add: r]]].
   ^ result.
 
+"Python's repr of the String aString, for the texts that quote a name as
+ ProtoBase's messages do (a holder such as Root 'name', Python f'{name!r}'):
+ single quotes, or double quotes when aString holds a single quote and no
+ double one; a backslash and the chosen quote escaped; tab, newline and
+ carriage return as \t, \n and \r; the other code points below U+0100
+ that Python does not print (C0 and C1 controls, DEL, U+00A0 and U+00AD) as
+ \xhh. Code points from U+0100 up are kept as they are: Python also escapes
+ the ones its unicodedata calls non-printable (separators, format characters,
+ private use, unassigned), a table protoST does not carry, so only those
+ differ."
+PBCodec class >> repr: aString
+  | quote out |
+  quote := ((aString includes: $') and: [(aString includes: $") not]) ifTrue: [$"] ifFalse: [$'].
+  out := WriteStream on: String new.
+  out nextPut: quote.
+  aString do: [:ch |
+    | cp hex |
+    cp := ch asInteger.
+    (ch = quote or: [ch = $\])
+      ifTrue: [out nextPut: $\; nextPut: ch]
+      ifFalse: [
+        cp = 9 ifTrue: [out nextPutAll: '\t'] ifFalse: [
+        cp = 10 ifTrue: [out nextPutAll: '\n'] ifFalse: [
+        cp = 13 ifTrue: [out nextPutAll: '\r'] ifFalse: [
+        ((cp < 32 or: [cp between: 127 and: 160]) or: [cp = 173])
+          ifTrue: [
+            hex := (cp printString: 16) asLowercase.
+            out nextPutAll: '\x'; nextPutAll: (hex size = 1 ifTrue: ['0' , hex] ifFalse: [hex])]
+          ifFalse: [out nextPut: ch]]]]]].
+  out nextPut: quote.
+  ^ out contents.
+
 "As canonical:, with a PBValidationError of the codec's own (not of a subclass)
  signalled again with aHolder in front: the field, root, mutable cell or
  collection element the value was going to (ProtoBase canonical_for)."

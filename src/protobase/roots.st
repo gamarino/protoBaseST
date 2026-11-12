@@ -25,6 +25,7 @@ Import from: 'protobase/values'.
 Import from: 'protobase/registry'.
 Import from: 'protobase/avl'.
 Import from: 'protobase/collections'.
+Import from: 'calendar'.
 
 PBAtom subclass: #PBSpaceRoot.
 

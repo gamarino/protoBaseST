@@ -38,6 +38,7 @@ as bytes). PBDatabase >> newTransaction is in transactions.st."
 Import from: 'protobase/errors'.
 Import from: 'protobase/values'.
 Import from: 'protobase/registry'.
+Import from: 'protobase/codec'.
 Import from: 'protobase/avl'.
 Import from: 'protobase/collections'.
 Import from: 'protobase/records'.
@@ -53,7 +54,7 @@ _PBNameCheck class >> check: aName what: aWhat
 
 "=== PBObjectSpace ============================================================"
 
-Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed publisher lastRoot'.
+Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed publisher'.
 
 PBObjectSpace class >> registerAtomClass: aClass
   ^ PBTypeRegistry register: aClass.
@@ -78,7 +79,6 @@ PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds
   storage := aStorage.
   lockTimeout := milliseconds.
   closed := Atom on: false.
-  lastRoot := Atom on: nil.
   publisher := (PBPublisher space: self) asActor.
   ^ self.
 
@@ -92,20 +92,36 @@ PBObjectSpace >> lockTimeout
 PBObjectSpace >> isClosed
   ^ closed value.
 
-"The actor proxy of the space's publisher (publisher.st): every commit of the
- space goes through it."
-PBObjectSpace >> _publisher
-  ^ publisher.
+"The first wait between two attempts to take the root lock, and the longest,
+ in milliseconds (ProtoBase FileStorage._acquire_process_lock: 0.001 s
+ doubling up to 0.05 s)."
+PBObjectSpace class >> firstLockDelay
+  ^ 1.
 
-"The root record this space's publisher published last, or nil before its
- first publish (design spec 7.3 step 7)."
-PBObjectSpace >> _lastKnownRoot
-  ^ lastRoot value.
+PBObjectSpace class >> longestLockDelay
+  ^ 50.
 
-"Records aRootRecord, just published, as the last-known root, unless a later
- epoch is recorded already."
-PBObjectSpace >> _noteRoot: aRootRecord
-  lastRoot swap: [:known | (known isNil or: [known epoch < aRootRecord epoch]) ifTrue: [aRootRecord] ifFalse: [known]].
+"Sends one publish attempt to the publisher (aBlock: the publisher proxy -> a
+ Future of true when published, false when the root lock is held) until one
+ publishes. Between attempts the caller waits, never the publisher (ruling
+ R19; publisher.st): (Future after: d) wait, d from firstLockDelay doubling up
+ to longestLockDelay, until lockTimeout milliseconds have passed on the
+ monotonic clock, then PBTimeoutError (ProtoBase's message, in milliseconds).
+ An error of an attempt ends the loop. Inside an actor these waits are nested
+ in blocks, so they block the caller's worker, which helps other actors
+ meanwhile; the publisher is never buried under them, because it never
+ waits."
+PBObjectSpace >> _untilPublished: aBlock
+  | deadline delay remaining |
+  deadline := Time millisecondClockValue + lockTimeout.
+  delay := PBObjectSpace firstLockDelay.
+  [(aBlock value: publisher) wait] whileFalse: [
+    remaining := deadline - Time millisecondClockValue.
+    remaining <= 0 ifTrue: [
+      ^ PBTimeoutError signal: 'Could not acquire the root lock within ' , lockTimeout printString
+        , ' ms (held by another process or storage)'].
+    (Future after: (delay min: remaining)) wait.
+    delay := delay * 2 min: PBObjectSpace longestLockDelay].
 
 PBObjectSpace >> _checkOpen
   closed value ifTrue: [^ PBClosedError signal: 'PBObjectSpace is closed'].
@@ -159,13 +175,13 @@ PBObjectSpace >> listDatabases
 PBObjectSpace >> newDatabase: aName
   _PBNameCheck check: aName what: 'database'.
   self _checkOpen.
-  (publisher createDatabase: aName) wait.
+  self _untilPublished: [:p | p createDatabase: aName].
   ^ PBDatabase basicNew _setSpace: self name: aName.
 
 PBObjectSpace >> openDatabase: aName
   _PBNameCheck check: aName what: 'database'.
   (self _databaseRootNamed: aName) isNil ifTrue: [
-    ^ PBValidationError signal: 'Database ' , aName printString , ' does not exist'].
+    ^ PBValidationError signal: 'Database ' , (PBCodec repr: aName) , ' does not exist'].
   ^ PBDatabase basicNew _setSpace: self name: aName.
 
 "Closes the space and its storage. Idempotent. The storage is closed by the
@@ -200,7 +216,7 @@ PBDatabase >> name
 PBDatabase >> _currentRoot
   | root |
   root := space _databaseRootNamed: dbName.
-  root isNil ifTrue: [^ PBValidationError signal: 'Database ' , dbName printString , ' does not exist'].
+  root isNil ifTrue: [^ PBValidationError signal: 'Database ' , (PBCodec repr: dbName) , ' does not exist'].
   ^ root.
 
 "The committed versions, newest first, as PBHistoryEntry objects."
@@ -226,9 +242,9 @@ PBDatabase >> snapshotAt: aReference
   root := aReference _root.
   recordedName = dbName ifFalse: [
     ^ PBReferenceError signal: 'The reference names the database ' , recordedName printString , ', not '
-      , dbName printString].
+      , (PBCodec repr: dbName)].
   root origin = self _currentRoot origin ifFalse: [
-    ^ PBReferenceError signal: 'The reference names a version of another database, not of ' , dbName printString
+    ^ PBReferenceError signal: 'The reference names a version of another database, not of ' , (PBCodec repr: dbName)
       , ' (another incarnation of the name, or another space)'].
   ^ PBSnapshot basicNew _setRoot: root database: self.
 

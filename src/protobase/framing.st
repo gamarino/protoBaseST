@@ -325,7 +325,7 @@ PBAtomEnvelope class >> tag: aTag oid: anOid state: aState
     why := self _nameProblem: name.
     why isNil ifFalse: [^ PBValidationError signal: 'PBAtomEnvelope: ' , why]].
   canonicalState := PBFrozenDict withAssociations: (aState associations collect: [:each |
-    each key -> (PBCodec canonical: each value for: 'Attribute ' , each key printString)]).
+    each key -> (PBCodec canonical: each value for: 'Attribute ' , (PBCodec repr: each key))]).
   ^ self basicNew _setTag: (PBTypeRegistry writerTag: aTag) oid: bytes state: canonicalState.
 
 "Why aName cannot be a persisted attribute name, or nil."
@@ -455,6 +455,6 @@ PBAtomEnvelope >> slots
 PBAtomEnvelope >> encode
   | wireState |
   wireState := MessagePackMap withAll: (state associations collect: [:each |
-    each key -> (PBCodec toWire: each value atomRef: PBCodec pointerRef for: 'Attribute ' , each key printString)]).
+    each key -> (PBCodec toWire: each value atomRef: PBCodec pointerRef for: 'Attribute ' , (PBCodec repr: each key))]).
   ^ MessagePack encode: (MessagePackMap withAll: {
     't' -> (PBTypeRegistry writerTag: tag). 'oid' -> oid. 's' -> wireState }).

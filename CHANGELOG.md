@@ -186,7 +186,7 @@
   retried from 1 ms doubling to 50 ms until `lockTimeout` (`PBTimeoutError`), validation against
   the root read under the lock (`PBConflictError`), the merge of blind writes (`rebaseOnto:`)
   or last writer wins, save and sync, publish with that root's epoch plus one, consumed marks
-  (D33) and the space's last-known root, and the outcome of a failed publish decided by reading
+  (D33), and the outcome of a failed publish decided by reading
   `space.root` again (`PBOutcomeUnknownError` when it cannot be read). `PBObjectSpace >> close`
   closes the storage through the publisher, between commits. `PBSpaceRoot databases:`,
   `PBDatabaseRoot objects:mutables:version:committedAt:origin:previous:` and `committedAfter:`.
@@ -194,3 +194,24 @@
   `tx_mutables`, `tx_after_end`, `tx_refusals`, `tx_outcome`, `tx_new_database`, and
   `tests/interop/st_commit_to_py.sh` (ProtoBase verifies and reads the publisher's records,
   whose fields are in ProtoBase's order, and blind merges compose across the two languages).
+- Task 18 review fix round 1:
+  - **The publisher never waits** (ruling R19, review C1). An attempt that finds the root lock
+    held answers `false` at once, and the committing caller owns the backoff
+    (`PBObjectSpace >> _untilPublished:`, used by `commit` and `newDatabase:`). Before, a
+    publisher waiting in its backoff inside a helping worker made other commits fail with
+    protoST's `deadlock:` Error and lose their writes. New test: `tx_lock_contention.st`.
+  - **Written atoms are saved before the root lock**, once, as ProtoBase's `_commit` does.
+  - **`newTransactionDo:` commits on a non-local return** (`^`), as Python's `return` inside
+    `with` does.
+  - **Origin.** A new database's origin is the bytes of a version-4 UUID (`UUID new`), as
+    ProtoBase's `uuid4().bytes`.
+  - **Python's repr in messages.** Error texts quote names as Python's `repr` does
+    (`PBCodec repr:`): the `Root`, `Mutable`, `Field` and `Attribute` holders, and the
+    database messages.
+  - **Unused state removed.** The space's last-known root had no reader in the spec or in
+    ProtoBase outside a cluster.
+  - **Comments.** The `replaceRoot:` comment and the README state the epoch rule the
+    publisher follows.
+  - **Interop.** New test `tests/interop/st_py_interleaved.sh`: a Python commit between a
+    protoST transaction's start and its commit, and the reverse, give a conflict for the read
+    root and a merge for the blind write.

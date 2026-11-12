@@ -1,4 +1,4 @@
-"EXPECT: ok 29"
+"EXPECT: ok 28"
 "PBObjectSpace >> newDatabase: (plan Task 18, design spec 5.2; ProtoBase
  ObjectSpace.new_database): through the publisher, it commits version 0 of the database
  with empty objects and mutables, previous nil, a 16-byte random origin and committedAt
@@ -32,7 +32,6 @@ c that: 'in UTC' is: root committedAt isNaive equals: false.
 c that: 'committedAt is now' isTrue: (before <= root committedAt and: [root committedAt <= after]).
 c that: 'history: one version' is: (db history collect: [:e | e version]) asArray equals: #(0).
 c that: 'a transaction reads it' is: (db newTransaction rootNames) asArray equals: #().
-c that: 'the last-known root is the published one' is: space _lastKnownRoot encode equals: space storage readRoot encode.
 
 "A second database: the next epoch, the first database kept as it was."
 db2 := space newDatabase: 'audit'.

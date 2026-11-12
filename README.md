@@ -111,14 +111,17 @@ space close.
   wins. Mutable cells are never merged. `committedAt` is `max(now, previous committedAt)` in
   UTC. After success, every written collection is marked consumed (D33).
 - A commit with no writes publishes nothing. A failed commit leaves the transaction aborted.
-  The root lock is retried from 1 ms, doubling up to 50 ms, until the space's `lockTimeout`
-  (`PBTimeoutError`). When a publish fails, the publisher reads `space.root` again under the
+  The publisher never waits: an attempt that finds the root lock held answers at once, and the
+  committing caller tries again from 1 ms, doubling up to 50 ms, until the space's
+  `lockTimeout` (`PBTimeoutError`). The atoms written as roots or cells are saved before the
+  root lock is taken, once, as ProtoBase saves them. When a publish fails, the publisher reads `space.root` again under the
   lock: its own root means success; the root it built on means nothing was published (the
   original error); another root, which only a writer ignoring the lock can publish, is
   `PBConflictError` (ProtoBase's `_publish`); a root it cannot read is
   `PBOutcomeUnknownError`.
-- `newTransactionDo:` commits when the block ends and answers its value; it aborts when the
-  block raises and lets the exception go on. It never retries.
+- `newTransactionDo:` commits when the block ends, also by a non-local return (`^`, as Python's
+  `return` inside `with`), and answers its value; it aborts when the block signals an `Error`
+  and lets the exception go on. It never retries.
 - The bookkeeping is one immutable `PBTxState` in an `Atom`, replaced with `swap:`; its maps
   are persistent (one write or first read costs O(log n)). The protoST layer takes no lock.
 
@@ -254,8 +257,11 @@ st replaceRoot: (PBRootRecord segment: ptr segmentBytes offset: ptr offset
 st unlockRoot.                     "best effort: a failure is logged to stderr, never signalled"
 ```
 
-The epoch is the epoch of the root the commit was built on, plus one; never one computed from
-a root read under the lock, which would always pass and overwrite a newer commit.
+The epoch is the epoch of the root the commit was validated against and built on, plus one.
+This raw writer builds without validating, so it takes the root read before its changes; a root
+read again under the lock would pass the check and overwrite a newer commit. The publisher reads
+the root under the lock and validates every read against it before it builds, as ProtoBase's
+`_standalone_round` does, so it publishes that root's epoch plus one.
 
 - A storage writes only into segments it created: `<uuid4 hex>.seg`, made `#create
   #exclusive` (a clash is `PBUnexpectedError`, never an append to another writer's file), with

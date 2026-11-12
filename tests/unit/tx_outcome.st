@@ -1,4 +1,4 @@
-"EXPECT: ok 22"
+"EXPECT: ok 21"
 "The outcome of a commit whose publish fails (plan Task 18 and call C17, design spec 7.3
  step 8; ProtoBase _publish): the publisher re-reads space.root under the root lock.
  Three test-only subclasses of PBFileStorage fail the rename seam of replaceRoot: once
@@ -94,7 +94,6 @@ c that: 'the storage failed' is: storage isFailed equals: true.
 c that: 'the version is published' is: (versions value: dir) equals: #(1 0).
 c that: 'the success after a failure is logged' isTrue: (storage logged last includesSubstring: 'the commit succeeded').
 c that: 'with the value' is: (db newTransaction getRootObject: 'x') equals: 1.
-c that: 'the last-known root is the commit''s' is: space _lastKnownRoot encode equals: storage readRoot encode.
 c that: 'the root lock is released' is: (other value: dir) equals: true.
 tx := db newTransaction.
 tx setRootObject: 'x' value: 2.

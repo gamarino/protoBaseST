@@ -1,4 +1,4 @@
-"EXPECT: ok 24"
+"EXPECT: ok 27"
 "Refusals of the write side (plan Task 18, design spec 7.1 and 10.5; ProtoBase
  set_root_object, new_mutable, set_mutable and canonical_for): a root name starting with
  '__' is reserved for the format (PBValidationError); a Symbol (a long one: a short Symbol
@@ -32,6 +32,16 @@ c that: 'an empty root name' signals: PBValidationError during: [tx setRootObjec
 c that: 'a Symbol root name' signals: PBValidationError during: [tx setRootObject: #foobarbaz value: 1].
 c that: 'an empty cell name' signals: PBValidationError during: [tx newMutable: '' value: 1].
 c that: 'a removal: an empty name' signals: PBValidationError during: [tx removeRootObject: ''].
+
+"The holder quotes the name as Python's repr does (ProtoBase f'{name!r}')."
+c that: 'a name with a single quote: double quotes' signals: PBValidationError containing: 'Root "it''s": ' during: [
+  tx setRootObject: 'it''s' value: #foobarbaz].
+c that: 'a name with both quotes: the single one escaped' signals: PBValidationError
+  containing: 'Mutable ''a"b\''c'': ' during: [tx newMutable: 'a"b''c' value: #foobarbaz].
+c that: 'repr: a backslash, controls, Latin-1 non-printables, the rest kept' is: (PBCodec repr: (String withAll: {
+  $x. $\. $y. Character value: 10. Character value: 9. Character value: 1. Character value: 127.
+  Character value: 160. Character value: 173. Character value: 233 }))
+  equals: '''x\\y\n\t\x01\x7f\xa0\xad' , (String with: (Character value: 233)) , ''''.
 
 "Deeper than MAX_VALUE_DEPTH (1022): refused naming where the value was going."
 deep := 1.

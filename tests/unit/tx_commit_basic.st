@@ -1,18 +1,34 @@
-"EXPECT: ok 49"
+"EXPECT: ok 52"
 "The write side of a transaction and its commit (plan Task 18, design spec 7.1 and 7.3;
  ProtoBase Transaction.set_root_object, remove_root_object, the factories, commit and
  _build_root): a commit publishes version n + 1 with the written roots, the removed ones
  gone and the others kept; previous is the version before; committedAt never goes back
  and is in UTC; origin is carried. A transaction reads its own writes, rootNames shows
  them. The values written are read back by a new transaction, through a new storage too.
- newTransactionDo: commits when the block ends and answers its value, aborts when it
- raises and re-signals the exception, and never retries. A commit on a closed space is
+ newTransactionDo: commits when the block ends, also by a non-local return (as Python's
+ return inside with; a commit failing then is signalled), and answers its value; it aborts
+ when the block raises and re-signals the exception, and never retries. A commit on a closed space is
  PBClosedError. A commit that cannot take the
  root lock within lockTimeout is PBTimeoutError (the lock is held by another storage and
  never released while the commit waits, so the outcome holds for any duration), and the
  transaction is aborted."
 Import from: 'protobase'.
 Import from: '_check'.
+
+"Non-local returns out of newTransactionDo: (Python's return inside a with block)."
+Object subclass: #Early.
+Early >> writeAndReturn: db
+  db newTransactionDo: [:t | t setRootObject: 'nlr' value: 'kept'. ^ 5].
+  ^ 0.
+"Reads 'x', lets another transaction change it, writes it and returns: the commit on the way
+ out conflicts."
+Early >> conflictAndReturn: db
+  db newTransactionDo: [:t |
+    t getRootObject: 'x'.
+    db newTransactionDo: [:other | other setRootObject: 'x' value: 'other'].
+    t setRootObject: 'x' value: 'mine'.
+    ^ 7].
+  ^ 0.
 
 | c base space db tx v0 v1 v2 list obj dict other otherSpace holder slow tx2 r counter |
 c := Check new.
@@ -52,7 +68,6 @@ c that: 'committedAt does not go back' isTrue: v0 committedAt <= v1 committedAt.
 c that: 'in UTC' is: v1 committedAt isNaive equals: false.
 c that: 'history, newest first' is: (db history collect: [:e | e version]) asArray equals: #(1 0).
 c that: 'the space root epoch' is: space storage readRoot epoch equals: 2.
-c that: 'the last-known root' is: space _lastKnownRoot encode equals: space storage readRoot encode.
 c that: 'D33: a committed collection is consumed' is: dict isMergeable equals: false.
 
 tx := db newTransaction.
@@ -95,6 +110,12 @@ c that: 'a block that ends the transaction itself is not committed again' is: (d
   tx2 := t. t setRootObject: 'z' value: 1. t abort. 'done']) equals: 'done'.
 c that: 'so nothing was published' is: (db newTransaction getRootObject: 'z') equals: nil.
 
+c that: 'a non-local return answers the method''s value' is: (Early new writeAndReturn: db) equals: 5.
+c that: 'and commits, as Python''s return inside with' is: (db newTransaction getRootObject: 'nlr') equals: 'kept'.
+c that: 'a commit that fails on the way out is signalled' signals: PBConflictError during: [Early new conflictAndReturn: db].
+c that: 'and the other transaction''s value stays' is: (db newTransaction getRootObject: 'x') equals: 'other'.
+db newTransactionDo: [:t | t setRootObject: 'x' value: 2].
+
 "The root lock held by another storage: PBTimeoutError, the transaction aborted."
 holder := PBFileStorage path: base pathString.
 c that: 'another storage takes the root lock' is: holder tryLockRoot equals: true.
@@ -120,7 +141,7 @@ other := otherSpace openDatabase: 'db'.
 tx := other newTransaction.
 c that: 'through a new storage' is: { tx getRootObject: 'x'. ((tx getRootObject: 'dict') getAt: 'a'). tx getMutable: 'counter' }
   equals: #(2 1 5).
-c that: 'the history through a new storage' is: (other history collect: [:e | e version]) asArray equals: #(5 4 3 2 1 0).
+c that: 'the history through a new storage' is: (other history collect: [:e | e version]) asArray equals: #(8 7 6 5 4 3 2 1 0).
 otherSpace close.
 base deleteAll.
 c report displayNl.
