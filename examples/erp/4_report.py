@@ -4,7 +4,9 @@ Usage: python 4_report.py <directory>
 
 Three moments, each the committedAt of a commit made by an earlier step (version 1: created,
 2: paid, 3: renamed), never a clock reading. as_of finds the newest version committed at or
-before a moment (design spec 6.5), and the report reads that version only.
+before a moment (design spec 6.5), and the report reads that version only. Two commits with
+the same timestamp would resolve to the newer one, so the script refuses to run unless the
+three moments are strictly increasing, and it checks that as_of found the version it meant.
 """
 import sys
 
@@ -44,8 +46,14 @@ def main(directory):
     try:
         db = space.open_database("erp")
         committed_at = {entry.version: entry.committed_at for entry in db.history()}
+        moments = [committed_at[version] for version, _ in MOMENTS]
+        if not moments[0] < moments[1] < moments[2]:
+            raise SystemExit("two demo commits share a timestamp: the moments cannot be told apart")
         for version, title in MOMENTS:
-            report(as_of(db, committed_at[version]), f"moment {version}: {title}")
+            snapshot = as_of(db, committed_at[version])
+            if snapshot.version != version:
+                raise SystemExit(f"as_of found version {snapshot.version}, not {version}")
+            report(snapshot, f"moment {version}: {title}")
         tags = db.snapshot_at(db.history()[0]).get_root_object("tags")
         print("tags now: " + " ".join(f"{number}={tag}" for number, tag in tags.items()))
     finally:

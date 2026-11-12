@@ -1,8 +1,7 @@
 # The ERP demo: Python and protoST on one database directory
 
 protoBaseST is a Smalltalk (protoST) port of the Python object database
-ProtoBase. Both read and write the same on-disk
-format, so the two languages can work on one directory. This demo is a small ERP, three
+ProtoBase. Both read and write the same on-disk format, so the two languages can work on one directory. This demo is a small ERP, three
 customers and 24 invoices, that passes through both of them. It is a proposal prototype, shown
 to collect criticism, not a finished product.
 
@@ -34,11 +33,14 @@ database's history, never from a clock. A small helper finds the newest version 
 before a moment, and the report reads only that snapshot:
 
 ```smalltalk
-asOf := [:moment |
-    entry := db history detect: [:each | each committedAt <= moment]
+asOf := [:aMoment |
+    | entry |
+    entry := db history detect: [:each | each committedAt <= aMoment]
         ifNone: [PBUserError signal: 'the database did not exist yet'].
     db snapshotAt: entry].
 ```
+
+(A script has no class to hold helpers, so they are blocks bound to temporaries.)
 
 ```python
 def as_of(db, moment):
@@ -46,8 +48,21 @@ def as_of(db, moment):
     return db.snapshot_at(entry)
 ```
 
+If two commits ever carried the same timestamp, the moment of the older one would resolve to
+the newer version, which is the right as-of answer but would blur the demo. Both reports
+therefore refuse to run unless the three moments are strictly increasing (the steps run as
+separate processes, so they are), and they check that each moment found the version it names.
+
 At moment 1 no invoice is paid; at moment 2 six are; at moment 3 ACME has its new name, while
 the invoices still show the payments. The last line lists the tags as they are now.
+
+## Running a step alone
+
+`run_demo.sh` sets everything up. To run `3_tag.st` by itself, `STPATH` must contain
+`<repo>/src` (the peer script is found from it, whatever the working directory), and `PY` should
+name a Python that can import ProtoBase (the interop venv, `tests/interop/env.sh`; `python3`
+when `PY` is unset). The other steps need only `STPATH` or `PYTHONPATH` and the directory
+argument.
 
 ## API mapping
 
