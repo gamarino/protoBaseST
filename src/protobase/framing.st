@@ -44,7 +44,9 @@ _PBFrame class >> u32: anInteger on: aStream
 
 "msgpack data decoded in order, map keys of any type kept; malformed bytes
  are PBCorruptionError naming aWhat, and data deeper than protoST's
- MessagePack reads (1024 containers) is PBCodec tooDeepData: aWhat."
+ MessagePack reads (1024 containers) is PBCodec tooDeepData: aWhat. For data
+ that holds attribute values (an atom payload); a root record has its own
+ refusal (PBRootRecord decode:)."
 _PBFrame class >> decodeMsgpack: aByteArray what: aWhat
   ^ self decodeMsgpack: aByteArray what: aWhat strictKeys: false.
 
@@ -240,8 +242,13 @@ PBRootRecord class >> decode: aByteArray
   body crc32 = (aByteArray unsignedLongAt: 1 bigEndian: false) ifFalse: [
     ^ PBCorruptionError signal: 'PBRootRecord: CRC mismatch in root record'].
   "Strict keys, as msgpack-python's default in ProtoBase decode_root: a map key that
-   is not a string (or bin) is corruption."
-  fields := _PBFrame decodeMsgpack: body what: 'PBRootRecord' strictKeys: true.
+   is not a string (or bin) is corruption. A body MessagePack cannot read, malformed
+   or nested deeper than 1024 containers, is decode_root's refusal word for word: a
+   root record holds no value, so MAX_VALUE_DEPTH is not its reason."
+  fields := [MessagePack decodeOrdered: body strictKeys: true]
+    on: Error do: [:e |
+      (e isKindOf: MessageNotUnderstood) ifTrue: [e pass].
+      PBCorruptionError signal: 'Undecodable root record'].
   (fields isKindOf: MessagePackMap) ifFalse: [^ PBCorruptionError signal: 'PBRootRecord: the body is not a map'].
   get := [:key | fields at: key ifAbsent: [^ PBCorruptionError signal: 'PBRootRecord: malformed root record: no ' , key]].
   version := get value: 'version'.

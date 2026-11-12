@@ -1,4 +1,4 @@
-"EXPECT: ok 72"
+"EXPECT: ok 74"
 "The checks of framing.st beyond the vectors: the atom envelope rules of the
  format spec ('Atom records', 'How a reader resolves a reference'), the field
  types of a root record, record and segment refusals, and PBAtom's lazy load
@@ -33,7 +33,7 @@ OnePayloadStorage >> loadAt: aPointer expecting: aTag
 OnePayloadStorage >> loadAt: aPointer expecting: aTag within: aChain
   ^ self loadAt: aPointer expecting: aTag.
 
-| c oid map payload env seg ptr wire root rootBytes record storage stub ref opaque refBytes |
+| c oid map payload env seg ptr wire root rootBytes record storage stub ref opaque refBytes rootRaw |
 c := Check new.
 PBTypeRegistry register: Invoice; register: Ledger.
 oid := ByteArray withAll: (1 to: 16) asArray.
@@ -154,6 +154,18 @@ c that: 'a short segment' signals: PBCorruptionError during: [
   PBRootRecord decode: (rootBytes value: { 'version' -> 4. 'segment' -> #[1 2]. 'offset' -> 26. 'epoch' -> 7 })].
 c that: 'a malformed version-5 root is corruption first' signals: PBCorruptionError during: [
   PBRootRecord decode: (rootBytes value: { 'version' -> 5. 'segment' -> #[1]. 'offset' -> 26. 'epoch' -> 7 })].
+"A root body MessagePack cannot read, too deep (1025 containers) or malformed, is
+ ProtoBase's decode_root refusal word for word: a root record holds no value, so it never
+ gets the MAX_VALUE_DEPTH sentence of an atom record."
+rootRaw := [:body | | w |
+  w := WriteStream on: ByteArray new.
+  w nextPutUnsigned: body crc32 width: 4 bigEndian: false; nextPutAll: body.
+  w contents].
+c that: 'a root body 1025 containers deep' is: ([PBRootRecord decode: (rootRaw value: (ByteArray fromHex: '81a178')
+    , (ByteArray withAll: ((1 to: 1024) asArray collect: [:i | 16r91])) , #[1]). 'read']
+  on: PBCorruptionError do: [:e | e messageText]) equals: 'Undecodable root record'.
+c that: 'a malformed root body' is: ([PBRootRecord decode: (rootRaw value: #[193]). 'read']
+  on: PBCorruptionError do: [:e | e messageText]) equals: 'Undecodable root record'.
 c that: 'extra keys are ignored' is: (PBRootRecord decode: (rootBytes value: { 'version' -> 3. 'segment' -> seg. 'offset' -> 26. 'epoch' -> 7. 'x' -> 'y' })) epoch equals: 7.
 
 "References: equal whatever spelling was read; written in the canonical spelling."
