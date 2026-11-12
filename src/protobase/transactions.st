@@ -730,20 +730,22 @@ PBMutableObject >> get: aTransaction
  It is aborted when an exception ends the block (ProtoBase's __exit__ aborts
  on any exception), and the exception goes on unchanged. There is no retry
  (run: retries).
- An Error, or an exception that is not resumable, aborts at once and is
- passed. Any other exception is handed to the enclosing handlers with outer
- while inFlight is true: if they resume it, the block goes on from the signal
- with their value and nothing ends (an unhandled Warning or Notification
- resumes with nil); if they end it (return:, retry, falling off, ^), the
- unwind passes through here with inFlight still true and the ensure: block
- aborts. So the ensure: block commits exactly when no exception is unwinding
- the block, including a ^ taken after a resumed exception."
+ An exception that is not resumable can only end the block: it aborts at once
+ and is passed. A resumable one, an Error such as ZeroDivide included (ruling
+ R20b), is handed to the enclosing handlers with outer while inFlight is true:
+ if they resume it, the block goes on from the signal with their value and
+ nothing ends (an unhandled Warning or Notification resumes with nil); if they
+ end it (return:, retry, falling off, ^) or it is unhandled and its default
+ action ends the activation, the unwind passes through here with inFlight
+ still true and the ensure: block aborts. So the transaction is aborted
+ exactly when an exception unwinds the block, and committed otherwise,
+ including a ^ taken after a resumed exception."
 PBDatabase >> newTransactionDo: aBlock
   | tr inFlight |
   tr := self newTransaction.
   inFlight := false.
   ^ [[aBlock value: tr] on: Exception do: [:e | | answer |
-       ((e isKindOf: Error) or: [e isResumable not]) ifTrue: [
+       e isResumable ifFalse: [
          tr isActive ifTrue: [tr abort].
          e pass].
        inFlight := true.

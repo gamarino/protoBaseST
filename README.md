@@ -121,10 +121,11 @@ space close.
   `PBOutcomeUnknownError`.
 - `newTransactionDo:` commits when the block ends, also by a non-local return (`^`, as Python's
   `return` inside `with`), and answers its value; it aborts when an exception ends the block
-  (ProtoBase's `__exit__` aborts on any exception) and lets the exception go on. A `Warning` or
-  `Notification` that an enclosing handler resumes does not end the block (it asks those
-  handlers with `Exception>>outer`); one they end with `return:`, `retry` or by falling off
-  aborts. An `Error`, or an exception that is not resumable, aborts at once. It never retries.
+  (ProtoBase's `__exit__` aborts on any exception) and lets the exception go on. A resumable
+  exception (a `Warning`, a `Notification`, a `ZeroDivide`) that an enclosing handler resumes
+  does not end the block (it asks those handlers with `Exception>>outer`), so its writes are
+  committed; one they end with `return:`, `retry` or by falling off aborts. An exception that
+  is not resumable (every `Error` except `ZeroDivide`) aborts at once. It never retries.
 - The bookkeeping is one immutable `PBTxState` in an `Atom`, replaced with `swap:`; its maps
   are persistent (one write or first read costs O(log n)). The protoST layer takes no lock.
 

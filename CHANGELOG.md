@@ -223,3 +223,12 @@
     goes on from the signal and the block may still commit; an exception they end unwinds the
     block and aborts. An `Error`, or an exception that is not resumable, aborts at once and is
     passed. A `^` commits, also after a resumed exception. New test: `tx_do_exceptions.st`.
+- Task 18 review fix round 3 (ruling R20b, re-review N3):
+  - **A resumed `Error` no longer discards the block's writes.** Round 2 aborted at once on any
+    `Error`, so a resumable one (`ZeroDivide`) that an enclosing handler resumed left the block
+    running on an aborted transaction. Its writes were lost, or its next transaction message
+    signalled `PBUserError`. Now the transaction is aborted exactly when an exception unwinds
+    the block: a resumable `Error` goes through `outer` like any resumable exception. Only an
+    exception that is not resumable aborts at once and is passed. `tx_do_exceptions.st` checks
+    a resumed `ZeroDivide` (committed with its write), one the handler returns from (aborted)
+    and a plain `Error` (aborted).

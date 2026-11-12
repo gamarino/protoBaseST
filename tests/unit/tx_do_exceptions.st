@@ -1,11 +1,12 @@
-"EXPECT: ok 21"
+"EXPECT: ok 26"
 "newTransactionDo: and exceptions (plan Task 18, fix round 2, ruling R20; review N1): the
  transaction is committed when the block ends, normally or by a non-local return (Python's
  return inside with), and aborted when an exception ends the block (ProtoBase's __exit__
  aborts on any exception). A resumable exception that an enclosing handler resumes does not
  end the block: the block goes on and its writes are committed. One that an enclosing
- handler ends (return:, falling off its end) unwinds the block: aborted. An Error, or an
- exception that is not resumable, aborts the transaction at once and goes on unchanged."
+ handler ends (return:, falling off its end) unwinds the block: aborted. Errors follow the
+ same rule (a resumed ZeroDivide commits; ruling R20b). An exception that is not resumable
+ can only end the block: it aborts the transaction at once and goes on unchanged."
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -63,15 +64,27 @@ r := [Early new notifyThenReturnIn: db name: 'nlr2'] on: Notification do: [:e | 
 c that: 'a ^ after a resumed Notification answers the method''s value' is: r equals: 9.
 c that: 'and commits (no exception is in flight then)' is: (read value: 'nlr2') equals: 'resumed'.
 
-"An Error aborts and is signalled again."
-c that: 'an Error is signalled again' signals: ZeroDivide during: [
+"An Error that ends the block aborts and is signalled again: a non-resumable one (Error),
+ aborted at once, and a resumable one (ZeroDivide) that the outer handler ends."
+c that: 'a non-resumable Error is signalled again' signals: Error during: [
+  db newTransactionDo: [:t | tx := t. t setRootObject: 'e0' value: 1. Error signal: 'fault']].
+c that: 'the transaction was aborted' is: tx isActive equals: false.
+c that: 'nothing is committed' is: (read value: 'e0') equals: nil.
+c that: 'a ZeroDivide is signalled again' signals: ZeroDivide during: [
   db newTransactionDo: [:t | tx := t. t setRootObject: 'e1' value: 1. 1 / 0]].
 c that: 'the transaction was aborted' is: tx isActive equals: false.
 c that: 'nothing is committed' is: (read value: 'e1') equals: nil.
-r := [db newTransactionDo: [:t | tx := t. t setRootObject: 'e2' value: 1. (1 / 0) + 1]]
+r := [db newTransactionDo: [:t | t setRootObject: 'e3' value: 1. (1 / 0) + 1]]
+  on: ZeroDivide do: [:e | e return: 'returned'].
+c that: 'a ZeroDivide the outer handler returns from' is: { r. read value: 'e3' } equals: { 'returned'. nil }.
+
+"A resumable Error that the outer handler resumes does not end the block: committed with
+ its writes (ruling R20b; before, the writes were silently discarded)."
+r := [db newTransactionDo: [:t | tx := t. t setRootObject: 'e2' value: (1 / 0) + 1. 'end']]
   on: ZeroDivide do: [:e | e resume: 1].
-c that: 'a resumable Error resumed by the caller: the transaction is aborted all the same' is: tx isActive equals: false.
-c that: 'so nothing is committed' is: (read value: 'e2') equals: nil.
+c that: 'a resumed ZeroDivide: the block''s value' is: r equals: 'end'.
+c that: 'and its write is committed' is: (read value: 'e2') equals: 2.
+c that: 'the transaction is committed' is: tx isActive equals: false.
 
 "A non-resumable exception that is not an Error aborts."
 r := [db newTransactionDo: [:t | tx := t. t setRootObject: 's1' value: 1. Stop new signal: 'stop'. 'end']]
