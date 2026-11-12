@@ -2,6 +2,9 @@
 
 ## 0.1.0 (unreleased)
 
+The entries are chronological, and later entries supersede earlier ones (vectors and format
+`v2.0.0rc1` became `v2.0.0rc2`; the nesting limit of 511 containers became 1022).
+
 - Repository skeleton: error hierarchy mirroring ProtoBase, test runner, vendored
   conformance vectors (ProtoBase `v2.0.0rc1`), Python interop venv and week-0 checks.
 - Values and the canonical codec: `PBFrozenList`, `PBTuple`, `PBFrozenDict`, `PBMissing`,

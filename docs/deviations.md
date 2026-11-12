@@ -14,7 +14,7 @@ Contents:
 [Time and time zones](#time-and-time-zones) |
 [Collections and records](#collections-and-records) |
 [Transactions and storage](#transactions-and-storage) |
-[Shapes protoBaseST cannot write](#shapes-protobaseST-cannot-write) |
+[Shapes protoBaseST cannot write](#shapes-protobasest-cannot-write) |
 [Reading](#reading) |
 [Conformance vectors](#conformance-vectors) |
 [Errors and messages](#errors-and-messages) |
@@ -83,8 +83,8 @@ explicit.
   names of IANA tzdata 2026e (`tools/gen_zone_keys.py`, committed). The same on every machine.
   A key outside the list is `PBCorruptionError` when read and `PBValidationError` when written;
   a key newer than the release is refused until the list is regenerated. *Cost:* ProtoBase checks
-  against its host's tz database. On a host without `tzdata-legacy`, ProtoBase refuses 113 of the
-  597 pinned keys (the backward links, such as `US/Eastern`). protoBaseST neither refuses nor
+  against its host's tz database. On a host that lacks the backward-link names
+  (a host without `tzdata-legacy`; `US/Eastern` is one), ProtoBase refuses those pinned keys. protoBaseST neither refuses nor
   rewrites such keys, because refusing them on write would make it unable to re-save an atom that
   ProtoBase wrote legitimately. Cross-implementation tests use canonical Zone names only.
 - **`["zone", key]` inside a `@time`** is a wall clock without a date, fully supported.
@@ -136,7 +136,8 @@ explicit.
   waits (ruling R19): an attempt that finds the root lock held answers at once, and the
   committing caller waits 1 ms, doubling to 50 ms, until `lockTimeout`. That wait sits in a
   `whileFalse:` block, so it blocks the caller's worker thread instead of suspending the actor
-  (protoST candidate K23). It is bounded and only happens while another *process* holds the lock.
+  (protoST candidate K23, an open question, see below). It is bounded and only happens while
+  another *process* holds the lock; while it waits, the worker still serves other actors.
 - **Group commit** (ProtoBase D52) is not implemented: every publish is a group of one.
 - **One storage failure ends writing through that storage** (`isFailed`), as ProtoBase's; reopen
   the space. Reads keep working.
@@ -215,23 +216,45 @@ visible skips, printed under the `PASS` line of `tests/conformance/cluster.st`.
 
 ## Performance
 
-The prototype need not be fast, and it is not. The AVL structures are roughly 20 to 120 times slower than
-ProtoBase's on the benchmark of `bench/run_avl.sh` (descents about 30 times, writes about 20
-to 30 times, `check:` about 120 times in the last interleaved measurement; the figures differ
-by binary). A record field read costs 0.83 microseconds. The remaining cost is protoST's interpreter
-and node building, not the format. No claim of speed is made, and the numbers have not been
-re-measured under concurrent load.
+The prototype need not be fast, and it is not. This is the only place in the documentation that
+states figures; the other documents link here.
+
+Measured 2026-11-12 on protoST 0.10.0 (branch `feat/protobase-support`, commit `58f1834`) and
+protoBaseST commit `1564bce` (the source is unchanged since `5d09adf`), with
+`bench/run_avl.sh` (`RUNS=3`), against ProtoBase `v2.0.0rc2`, at a load average of about 3.5, so
+the figures are indicative only:
+
+| Operation | Ratio to ProtoBase |
+|---|---|
+| `posAppend` | 19x |
+| `keyPut`, new key / replacing a key | 14x / 17x |
+| `posAt` / `keyAt` | 17x / 16x |
+| `check:` of a positional / of a keyed tree | 52x / 54x |
+
+So the AVL structures are roughly 14 to 54 times slower; `check:` is the slowest. protoST
+interpreter work is ongoing and its branches are not merged yet, so these numbers will move.
+Re-run the script on your binary before quoting any of them. No claim of speed is made, nothing
+was measured under heavy concurrent load, and the remaining cost is mostly protoST's interpreter
+and node building, not the format.
 
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded
 in its `KNOWN_ISSUES.md` (K14 class and instance methods sharing a slot, K15 deep nesting, K16
-subnormal float literals, K17 JSON `\u` escapes, K20 and others). Three observations are still
-open, none yet recorded there, and affect this prototype:
+subnormal float literals, K17 JSON `\u` escapes, K20 and others). Four observations are
+**candidates, not yet filed** in protoST's `KNOWN_ISSUES.md`; the numbers are the controller's
+working labels and protoST assigns the real ones:
 
-- **K21 (to be filed):** a method in a program's main file cannot reference an instance variable
-  of an imported class. `PBObject` subclasses defined in a script therefore use `at:` accessors,
-  which is also the design.
-- **K23 (candidate):** the caller's lock backoff blocks its worker, see above.
+- **K21 (candidate):** a method defined in a program's main file cannot reference an instance
+  variable of a class imported by that program (S20 fixed kernel classes only). `PBObject`
+  subclasses defined in a script therefore use `at:` accessors, which is also the design.
+- **K22 (candidate):** an `Atom` subclass's `#value` override is not reached, so a test seam
+  cannot intercept an `Atom` read.
+- **K23 (candidate, an open question):** an actor that blocks its worker in a `Future` wait can
+  raise `deadlock:` while another actor on that worker waits for it. Whether the detection is a
+  false positive is not settled. The pattern that raised it here was a publisher backing off
+  inside its actor (now removed, ruling R19). What remains is the caller's lock backoff, which is
+  bounded and only runs while another process holds the lock; while it waits, its worker still
+  serves other actors.
 - **K24 (candidate):** module resolution searches the working directory before the library, so a
   stray `calendar.st` shadows the kernel's calendar module.

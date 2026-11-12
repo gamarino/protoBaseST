@@ -7,7 +7,7 @@ Import from: '../unit/_check'.
 | c |
 c := Check new.
 | dir space db hits |
-dir := FileSystem temp / 'protobase-hello'.
+dir := FileSystem temp / ('protobase-hello-' , Smalltalk pid printString).
 dir deleteAll.
 space := PBObjectSpace storage: (PBFileStorage path: dir pathString).
 db := space newDatabase: 'hello'.

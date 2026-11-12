@@ -2,7 +2,7 @@
 
 A perennial object database for protoST, in the tradition GemStone opened.
 
-protoBaseST is a Smalltalk implementation, on protoST, of [ProtoBase](../ProtoBase) (the Python
+protoBaseST is a Smalltalk implementation, on protoST, of [ProtoBase](https://github.com/gamarino/ProtoDB) (the Python
 package `proto_db`). It reads and writes the **same on-disk format** (format 4, frozen at ProtoBase
 `v2.0.0rc1`, with the value nesting limit of `v2.0.0rc2`), so one database directory can be shared
 by Python and Smalltalk programs. It has ProtoBase's API translated to Smalltalk, and ProtoBase's
@@ -24,8 +24,8 @@ those scenarios, speed, long runs, and review by anyone but the people who wrote
 
 ## What it shows
 
-- **Objects persist as objects**, as in GemStone: records, collections and tree nodes, reachable
-  from named roots.
+- **Objects persist as objects reachable from named roots**, the part of GemStone's model this
+  takes: records, collections and tree nodes. Record classes are registered by type name.
 - **Values and mutable objects.** Records and collections are immutable values; every change
   answers a new version that shares the unchanged parts. A `PBMutableObject` names a cell whose
   value moves from version to version, by commit.
@@ -70,7 +70,9 @@ those scenarios, speed, long runs, and review by anyone but the people who wrote
 
 ## Quick start
 
-You need protoST 0.10.0 or newer and this repository's `src/` on the module path:
+You need protoST 0.10.0, which is **not released yet**: build it from the branch
+`feat/protobase-support` of the protoST repository (commit `58f1834` at the time of writing). You
+also need this repository's `src/` on the module path:
 
 ```sh
 export PROTOST=../protoST/build_release/protost
@@ -81,7 +83,7 @@ STPATH=$PWD/src $PROTOST hello.st
 Import from: 'protobase'.
 
 | dir space db hits |
-dir := FileSystem temp / 'protobase-hello'.
+dir := FileSystem temp / ('protobase-hello-' , Smalltalk pid printString).
 dir deleteAll.
 space := PBObjectSpace storage: (PBFileStorage path: dir pathString).
 db := space newDatabase: 'hello'.
@@ -172,8 +174,8 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 
 ## Running the tests
 
-The tests need a protoST binary 0.10.0 or newer (a checkout on the branch that provides
-`lib/decimal.st`, `lib/calendar.st` and `lib/uuid.st`). Point `PROTOST` at it:
+The tests need a protoST binary 0.10.0 or newer, unreleased: build the branch
+`feat/protobase-support` (it provides `lib/decimal.st`, `lib/calendar.st` and `lib/uuid.st`). Point `PROTOST` at it:
 
 ```sh
 export PROTOST=../protoST/build_release/protost      # default: protost from PATH

@@ -5,9 +5,11 @@ why it was made. It is written for the FAST Smalltalk workshop (2026-12-03), whe
 shown as a **proposal prototype**, to be criticised. Read it as an argument as much as a manual.
 
 Every Smalltalk block in this file is run by `tests/docs/tutorial_snippets.st`, in order, in one
-session, and `tests/docs/tutorial_sync.sh` fails when a block here is not in that test. A line
-ending in `"=> value"` states what the expression answers, and the test asserts it. Blocks of
-other languages (`sh`, `python`, `text`) are not run.
+session. A line ending in `"=> value"` states what the expression answers, and the test asserts
+it. `tests/docs/tutorial_sync.sh` fails when a block or a `=> value` here differs from the test.
+That guard covers the code blocks and their `=>` lines, **not the prose** around them: a number
+or a claim in the text is checked only by whoever edits it. Blocks of other languages (`sh`,
+`python`, `text`) are not run.
 
 Contents:
 
@@ -29,7 +31,8 @@ Contents:
 
 ## 1. Before you start
 
-You need a protoST binary, version 0.10.0 or newer (the release that adds `Decimal`,
+You need a protoST binary, version 0.10.0, which is **not released yet**: build it from the
+branch `feat/protobase-support` of the protoST repository. It is the version that adds `Decimal`,
 `CalendarDate`, `UUID`, random bytes and the UTC clock), and this repository's `src/` on the
 module path:
 
@@ -125,7 +128,7 @@ A *space* is a directory. It holds any number of named *databases*. Opening the 
 it if needed.
 
 ```smalltalk
-dir := FileSystem temp / 'erp-tutorial'.
+dir := FileSystem temp / ('erp-tutorial-' , Smalltalk pid printString).
 dir deleteAll.
 space := PBObjectSpace storage: (PBFileStorage path: dir pathString).
 space listDatabases.                          "=> #()"
@@ -441,8 +444,13 @@ The point of keeping ProtoBase's format is that the files are shared. ProtoBase'
 accepts what protoBaseST writes:
 
 ```sh
-python -m proto_db.tools.verify /tmp/erp-tutorial
+python -m proto_db.tools.verify DIR
 ```
+
+Its prerequisites: ProtoBase `v2.0.0rc2` importable (`tests/interop/setup_venv.sh` builds a venv
+with it), `msgpack` 1.2.0 or newer, and `DIR` the path the script's `dir` holds
+(`dir pathString`, under `FileSystem temp`). Run it **before the last block of section 15**: that
+block closes the space and deletes the directory.
 
 The verifier is outside this repository (it is ProtoBase's). What is checked here, in
 `tests/interop/`, is that spaces written by protoST pass it with an identical dump, spaces written
@@ -453,8 +461,8 @@ and renames a customer, a blind write from each language merges, and both print 
 report. See [examples/erp/README.md](../examples/erp/README.md).
 
 Not proven: anything outside those scenarios, any ProtoBase release other than `v2.0.0rc2`, and
-behaviour under load (the prototype has not been measured for speed; the AVL structures are many
-times slower than ProtoBase's, `bench/`).
+behaviour under load (the AVL structures are many times slower than ProtoBase's; the dated figures
+are in [deviations.md](deviations.md#performance)).
 
 ## 15. Where to go next
 

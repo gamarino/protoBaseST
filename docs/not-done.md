@@ -51,8 +51,8 @@ Not tested, or not proven:
 - **Anything outside those scenarios.** No fuzzing of the codec against ProtoBase beyond the
   vectors, the seeded sequences and a few dozen hand-picked edge values.
 - **Other ProtoBase releases.** The reference is `v2.0.0rc2`. A newer release may differ.
-- **Speed.** The AVL workload is roughly 20 to 120 times slower than ProtoBase's. The figures come
-  from an interleaved benchmark on one machine, and are not a claim about anything else.
+- **Speed.** The AVL workload is many times slower than ProtoBase's. The dated figures, and how
+  they were measured, are in [deviations.md](deviations.md#performance); they are indicative only.
 - **Memory and long runs.** A segment rolls over at 256 MiB as ProtoBase's does; nothing was run
   near that size.
 - **Heavy contention.** The lock backoff blocks the caller's worker, see

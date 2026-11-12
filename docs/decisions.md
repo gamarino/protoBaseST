@@ -74,7 +74,8 @@ Cost if wrong, in brief (C1 and C2 were renumbered by rulings R1 and R10, below)
 ## 3. Execution rulings
 
 Rulings R1 to R22 were taken while the tasks ran, by the controller of the build, recorded in
-`progress.md` of the build log with the same what, why and cost. Unnumbered rulings follow them.
+the build ledger, which is not part of this repository; the text of each is here, with its what,
+why and cost. Unnumbered rulings follow them.
 A "task" is a task of the implementation plan (`docs/superpowers/plans/`).
 
 | # | What was decided | Why | Cost if wrong |
@@ -107,11 +108,16 @@ Unnumbered rulings, in task order:
 
 | Task | What was decided | Why | Cost if wrong |
 |---|---|---|---|
-| 7 | Time-zone keys come from a **pinned list** (`PBZoneKeys`, tzdata 2026e), not from the host's zoneinfo. | A key valid on one machine and invalid on another makes a database unreadable by location. | A ProtoBase host without the backward-link names refuses 113 of the 597 pinned keys. |
+| 7 | Time-zone keys come from a **pinned list** (`PBZoneKeys`, tzdata 2026e), not from the host's zoneinfo. | A key valid on one machine and invalid on another makes a database unreadable by location. | A ProtoBase host without the backward-link names refuses those pinned keys. |
 | 7 | A format-4 `["instant", key]` datetime is read as its UTC instant plus the key (D58); the vector `value-instant-wall-out-of-range` is accepted. Writing within one day of years 1 or 9999 is refused. | The format spec lets a reader without a database present the instant in UTC; refusing would call valid data corrupt. | A `datetime.max`-style sentinel in an IANA zone cannot be written. |
 | 7 | A format-3 `["zone", key]` datetime is read lazily as `PBLegacyZoneDateTime`, never given an offset, never written. | Old atoms whose other attributes are fine stay readable, and untouched atoms are kept byte for byte. | The vector `datetime-zone-format3` differs from ProtoBase on purpose. |
 | 8 | The expected differences from the manifest are a tracked table, not a workspace note. | A difference that is not tracked can go stale. | None. |
 | 13 | ProtoBase's save-dependents-first invariant is honoured; the reader keeps a defensive `PBCorruptionError` for a record that needs itself (ask B13 withdrawn). | The invariant is by construction in ProtoBase. | A foreign writer that breaks it gets an error instead of a recursion. |
+| 15 | `PBList sliceFrom:to:` refuses a bound that is not an Integer or `nil` (a Boolean included); `extend:` of a String is refused. | Python's `slice.indices` takes `True` as 1, and ProtoBase's own positions refuse `bool`; a String's elements are Characters, which no format stores. | A caller used to Python's slice rules gets an error. Recorded next to ProtoBase's answers in `list_positions.st`. |
+| 16 | A rebased version keeps the completeness of the version it was rebased onto. | The brief and ProtoBase's docstring say rebased versions are not mergeable, but ProtoBase's code gives the target's completeness; Python is the tie-breaker. | A rebased version in a commit is always incomplete anyway (the target is loaded). |
+| 16 | The test runner prints every `SKIP:` line a passing test emits under its `PASS` line. | A skip must stay visible where the run is read. | Longer output. |
+| 17 | `replaceRoot:` is stricter than ProtoBase's: the lock must be held, the pointer must be a SpaceRoot record, the epoch must be current + 1. | An unchecked publish could overwrite a newer commit. | A raw caller that ProtoBase would accept gets an error. |
+| 17 | The storage's failure policy is wider than ProtoBase's: any file-system failure while writing ends writing through that storage (`isFailed`). | After a failed write the on-disk state of the segment is unknown. | The space must be reopened. |
 | 17b | The root-record refusal drops protoST's MessagePack detail and keeps ProtoBase's sentence word for word. | ProtoBase keeps the detail only as `__cause__`; protoST has no exception chaining. Exact text parity wins. | A corrupt root is harder to diagnose (a cause slot could be added to `PBDBError`). |
 | 18 | Atoms are serialised and saved before the root lock, once, and kept across lock retries (never re-saved). | Shorter lock hold; ProtoBase parity. | A crash between save and publish leaves unreachable atoms, which ProtoBase accepts too. |
 | 18 | Design spec 7.3 step 7 is amended: the last-known root is read only in a cluster; the single-process prototype keeps none. | It had no reader outside a cluster. | None. |
@@ -128,4 +134,4 @@ Unnumbered rulings, in task order:
   one-based view should be added over the same tree.
 - Whether refusing a `Dictionary` (rather than storing it as a map of unspecified order) costs
   more convenience than it protects.
-- The three protoST observations in [deviations.md](deviations.md): K21, K23, K24.
+- The four protoST candidates (K21 to K24, not yet filed) in [deviations.md](deviations.md#known-protost-limits).

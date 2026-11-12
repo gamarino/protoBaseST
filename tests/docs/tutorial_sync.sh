@@ -2,11 +2,13 @@
 # The tutorial and its test must agree: every non-blank line of every ```smalltalk block of
 # docs/tutorial.md must appear, in order, in tests/docs/tutorial_snippets.st (which adds its own
 # assertion lines between them). A tutorial edited without the test, or the reverse, fails here.
-# Also: every "=> value" line of the tutorial must be followed in the test by an assertion line.
+# Also: every "=> value" line must be followed in the test by an assertion that contains that value.
+# Scope: code blocks and their => lines only, not prose. docs/reference.md and the README's API
+# table are guarded by reference_selectors.sh.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-command -v python3 >/dev/null 2>&1 || { echo "python3 not found"; exit 77; }
+command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found, the documentation guard cannot run"; exit 1; }
 check() {
 python3 -I - "$1" "$2" <<'PY'
 import sys
@@ -28,8 +30,11 @@ for block in blocks:
         except ValueError:
             bad.append("%s:%d is not in the test (in order): %s" % (doc, n, line.strip()))
             continue
-        if "\"=> " in line and not lines[i + 1].startswith("c that:"):
-            bad.append("%s:%d has a => value but the test asserts nothing after it" % (doc, n))
+        if "\"=> " in line:
+            value = line.split("\"=> ", 1)[1].rsplit("\"", 1)[0]
+            nxt = lines[i + 1]
+            if not (nxt.startswith("c that:") and (value in nxt or value.replace("'", "''") in nxt)):
+                bad.append("%s:%d states => %s but the assertion after it does not" % (doc, n, value))
         pos = i + 1
         checked += 1
 if not blocks:

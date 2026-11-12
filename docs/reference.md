@@ -357,5 +357,5 @@ For tests, tools and readers of the format. An application does not need them.
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
 `notation`, `framing`, `store`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
-`space` and `transactions` (`zonekeys` and `uuid` are imported by the codec) (`src/protobase.st`, `src/protobase/*.st`). The
-protoST libraries it uses are `decimal`, `calendar` and `uuid`.
+`space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`); the codec itself imports
+`zonekeys`. The protoST libraries it uses are `decimal`, `calendar` and `uuid`.
