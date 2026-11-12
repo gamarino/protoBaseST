@@ -66,11 +66,14 @@ codec._too_deep_data), without the 'PBCodec: ' prefix of the codec's other
 messages, so one database refuses one value with one sentence in both
 languages; only a holder naming a collection class differs ('PBList element',
 where ProtoBase says 'List element'). A record deeper than 1024 is refused by
-protoST's MessagePack before the codec sees it (PBCorruptionError, 'malformed
-msgpack'): its depth refusal carries no kind of its own to tell it from other
-malformed data, so it cannot yet name MAX_VALUE_DEPTH as ProtoBase's
-storage.format.undecodable_atom does (Task 17b fix round 1, M1).
+protoST's MessagePack (MessagePackDepthExceeded) before the codec sees it:
+PBCorruptionError with ProtoBase's storage.format.undecodable_atom sentence,
+'Undecodable atom at AtomPointer(...): it nests deeper than 1024 MessagePack
+containers, so a value in it nests deeper than MAX_VALUE_DEPTH = 1022 ...'
+(tooDeepData:).
 
+  PBCodec tooDeepData: aWhat                  the PBCorruptionError of a record
+                                              deeper than 1024 containers
   PBCodec canonical: aValue for: aHolder      canonical:, a PBValidationError
                                               of its own naming aHolder
   PBCodec check: v wrapping: n holder: h wrapper: w
@@ -209,6 +212,17 @@ PBCodec class >> _tooDeep
   ^ PBValidationError signal: 'The value nests deeper than MAX_VALUE_DEPTH = '
     , self maxValueDepth printString
     , ' MessagePack containers, the most the storage format allows (format spec, "Value nesting depth")'.
+
+"The PBCorruptionError of msgpack data deeper than a record may nest
+ (protoST's MessagePack refuses it with MessagePackDepthExceeded), after
+ aWhat, in the words of ProtoBase's storage.format.undecodable_atom: an atom
+ payload nests two containers (its envelope and its state map) above its
+ attribute values, so a record deeper than 1024 holds a value deeper than
+ MAX_VALUE_DEPTH. For an atom record aWhat is 'Undecodable atom at
+ <PBAtomPointer pythonText>', ProtoBase's whole sentence."
+PBCodec class >> tooDeepData: aWhat
+  ^ PBCorruptionError signal: aWhat , ': it nests deeper than 1024 MessagePack containers, so a value in it nests deeper than MAX_VALUE_DEPTH = '
+    , self maxValueDepth printString , ' (format spec, "Value nesting depth")'.
 
 PBCodec class >> _tooDeepData
   ^ PBCorruptionError signal: 'The encoded value nests deeper than MAX_VALUE_DEPTH = '
@@ -572,6 +586,7 @@ PBCodec class >> decode: aByteArray
   tree := [MessagePack decodeOrdered: aByteArray strictKeys: false]
     on: Error do: [:e |
       (e isKindOf: MessageNotUnderstood) ifTrue: [e pass].
+      (e isKindOf: MessagePackDepthExceeded) ifTrue: [self tooDeepData: 'PBCodec'].
       PBCorruptionError signal: 'PBCodec: malformed msgpack: ' , e messageText].
   ^ self fromWire: tree resolver: nil.
 

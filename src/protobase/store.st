@@ -483,7 +483,8 @@ PBFileStorage >> loadAt: aPointer expecting: aTag within: aChain
   record := self recordAt: aPointer.
   (record at: 1) isAtom ifFalse: [
     ^ PBCorruptionError signal: 'PBFileStorage: the record at ' , aPointer printString , ' is a BLOB, not an ATOM'].
-  ^ PBAtomEnvelope decode: (record at: 2) expecting: aTag resolver: (_PBLoadResolver storage: self chain: aChain).
+  ^ PBAtomEnvelope decode: (record at: 2) at: aPointer expecting: aTag
+    resolver: (_PBLoadResolver storage: self chain: aChain).
 
 "The resolver of PBCodec fromWire:resolver: (Task 7): the reference to the
  record at offset anOffset of the segment aSegmentBytes, of the type aTag, is an

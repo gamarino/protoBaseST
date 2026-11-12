@@ -43,7 +43,8 @@ _PBFrame class >> u32: anInteger on: aStream
   aStream nextPutUnsigned: anInteger width: 4 bigEndian: false.
 
 "msgpack data decoded in order, map keys of any type kept; malformed bytes
- are PBCorruptionError naming aWhat."
+ are PBCorruptionError naming aWhat, and data deeper than protoST's
+ MessagePack reads (1024 containers) is PBCodec tooDeepData: aWhat."
 _PBFrame class >> decodeMsgpack: aByteArray what: aWhat
   ^ self decodeMsgpack: aByteArray what: aWhat strictKeys: false.
 
@@ -53,6 +54,7 @@ _PBFrame class >> decodeMsgpack: aByteArray what: aWhat strictKeys: aBoolean
   ^ [MessagePack decodeOrdered: aByteArray strictKeys: aBoolean]
     on: Error do: [:e |
       (e isKindOf: MessageNotUnderstood) ifTrue: [e pass].
+      (e isKindOf: MessagePackDepthExceeded) ifTrue: [PBCodec tooDeepData: aWhat].
       PBCorruptionError signal: aWhat , ': malformed msgpack: ' , e messageText].
 
 "=== PBSegmentHeader ========================================================"
@@ -340,10 +342,18 @@ PBAtomEnvelope class >> decode: aByteArray expecting: aTypeTag
  leading _, not oid, atom_pointer or context, no name twice), or a value is
  not a canonical value."
 PBAtomEnvelope class >> decode: aByteArray expecting: aTypeTag resolver: aResolver
+  ^ self decode: aByteArray at: nil expecting: aTypeTag resolver: aResolver.
+
+"As decode:expecting:resolver:, for the payload of the ATOM record at
+ aPointer (nil when not known): a payload deeper than MessagePack reads is
+ refused naming the record as ProtoBase does, 'Undecodable atom at
+ AtomPointer(...): it nests deeper than 1024 MessagePack containers, ...'."
+PBAtomEnvelope class >> decode: aByteArray at: aPointer expecting: aTypeTag resolver: aResolver
   | map t oid s keys names pairs values shape shared fieldNames |
   (aByteArray isKindOf: ByteArray) ifFalse: [
     ^ PBValidationError signal: 'PBAtomEnvelope decode: a ByteArray was expected, not ' , aByteArray class name].
-  map := _PBFrame decodeMsgpack: aByteArray what: 'PBAtomEnvelope'.
+  map := _PBFrame decodeMsgpack: aByteArray
+    what: (aPointer isNil ifTrue: ['PBAtomEnvelope'] ifFalse: ['Undecodable atom at ' , aPointer pythonText]).
   (map isKindOf: MessagePackMap) ifFalse: [^ self _corrupt: 'the payload is not a map'].
   keys := map associations collect: [:each | each key].
   (keys size = 3 and: [#('t' 'oid' 's') allSatisfy: [:k | keys includes: k]]) ifFalse: [

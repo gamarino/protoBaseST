@@ -5,7 +5,8 @@
 # List, a Dictionary, a Set and a HashDictionary at their effective limits), checking first that
 # its writer refuses one container more; ProtoBase's verifier accepts the space (exit 0), and
 # ProtoBase reads every value back with Python's default recursion limit, refuses a record
-# holding 1023 (ProtoCorruptionError) and refuses to write 1023 (ProtoValidationError)
+# holding 1023 (ProtoCorruptionError, with the very sentence protoST refuses it with:
+# _st_over_text.st) and refuses to write 1023 (ProtoValidationError)
 # (py_read_deep.py). Exit 77 without the interop venv.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,4 +21,10 @@ fail() { echo "FAIL: $*"; exit 1; }
 (cd "$HERE" && "$PROTOST" _st_deep_space.st "$TMP") || fail "_st_deep_space.st exited $?"
 "$PY" -m proto_db.tools.verify "$TMP/space" --out "$TMP/py.json" || fail "ProtoBase's verifier exited $? on protoST's space"
 "$PY" "$HERE/py_read_deep.py" "$TMP" || fail "py_read_deep.py"
+# The record 1025 containers deep: both readers refuse it with the same sentence.
+ST_TEXT="$(cd "$HERE" && "$PROTOST" _st_over_text.st "$TMP/over")" || fail "_st_over_text.st exited $?"
+PY_TEXT="$(cat "$TMP/over/over.py.txt")" || fail "py_read_deep.py wrote no refusal text"
+[ "$ST_TEXT" = "$PY_TEXT" ] || fail "the refusals of the record 1025 deep differ:
+  ProtoBase: $PY_TEXT
+  protoST:   $ST_TEXT"
 echo "values at the nesting limit read back by ProtoBase"

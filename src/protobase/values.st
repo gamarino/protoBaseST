@@ -362,6 +362,16 @@ PBAtomPointer >> = anObject
 PBAtomPointer >> hash
   ^ (segmentBytes hash bitXor: offset hash) \\ 1073741824.
 
+"The pointer as ProtoBase prints it (the repr of its AtomPointer dataclass),
+ for the messages that quote it word for word:
+ AtomPointer(segment=UUID('00010203-0405-0607-0809-0a0b0c0d0e0f'), offset=26)."
+PBAtomPointer >> pythonText
+  | h |
+  h := self segmentHex.
+  ^ 'AtomPointer(segment=UUID(''' , (h copyFrom: 1 to: 8) , '-' , (h copyFrom: 9 to: 12) , '-'
+    , (h copyFrom: 13 to: 16) , '-' , (h copyFrom: 17 to: 20) , '-' , (h copyFrom: 21 to: 32)
+    , '''), offset=' , offset printString , ')'.
+
 PBAtomPointer >> printOn: aStream
   aStream nextPutAll: 'PBAtomPointer('; nextPutAll: self segmentHex;
     nextPutAll: ', '; print: offset; nextPut: $).

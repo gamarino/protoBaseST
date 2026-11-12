@@ -10,8 +10,9 @@ MAX_VALUE_DEPTH = 1022 MessagePack containers per attribute value):
   record; the collections hold their elements, and every record of the space is at most
   1022 deep in each attribute (the stored node values of the Set and the HashDictionary
   are exactly 1022);
-- over/: the root 'over' holds a value of 1023 lists (raw bytes): reading it raises
-  ProtoCorruptionError;
+- over/: the root 'over' holds a value of 1023 lists (raw bytes, a record 1025 containers
+  deep): reading it raises ProtoCorruptionError with storage.format.undecodable_atom's sentence,
+  which is written to <directory>/over/over.py.txt for st_deep_to_py.sh to compare with protoST's;
 - ProtoBase's writer refuses a value one container deeper than each limit with
   ProtoValidationError naming MAX_VALUE_DEPTH, as protoST's does, and with the very text
   protoST's unit tests expect (SAME_TEXT).
@@ -82,8 +83,12 @@ def read_over(directory):
         tx = space.open_database("db").new_transaction()
         try:
             value = tx.get_root_object("over").v
-        except ProtoCorruptionError:
-            pass
+        except ProtoCorruptionError as e:
+            text = str(e)
+            if not text.startswith("Undecodable atom at AtomPointer(") or "MAX_VALUE_DEPTH = 1022" not in text:
+                FAILURES.append(f"over: refused with another sentence: {text}")
+            with open(f"{directory}/over.py.txt", "w", encoding="utf-8") as out:
+                out.write(text + "\n")
         else:
             FAILURES.append(f"over: a value 1023 deep was read ({value_depth(value)} containers)")
         tx.abort()

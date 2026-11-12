@@ -1,12 +1,13 @@
-"EXPECT: ok 13"
+"EXPECT: ok 15"
 "The depth of a stored attribute value (format spec v2.0.0rc2, 'Value nesting depth'; plan
  Tasks 13 and 17b): an attribute value nests at most MAX_VALUE_DEPTH = 1022 msgpack
  containers, counted from the value, and the atom payload {t, oid, s: {name: value}} adds
  two, so a record holds at most 1024. An attribute of 1022 nested lists is written and read
  back through a transaction; one of 1023 is refused with PBValidationError naming the
  attribute before any byte is written, never with protoST's raw msgpack Error. A record
- holding a 1023-deep value (raw bytes: no writer produces them) is refused when read with
- PBCorruptionError. ProtoBase's side of both is tests/interop/st_deep_to_py.sh."
+ holding a 1023-deep value (raw bytes: no writer produces them, 1025 containers) is refused
+ when read with PBCorruptionError and ProtoBase's sentence (storage.format.undecodable_atom),
+ naming the record's pointer as ProtoBase prints it. ProtoBase's side of both is tests/interop/st_deep_to_py.sh."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_spaces'.
@@ -53,8 +54,13 @@ c that: 'read back by a transaction' is: (depthOf value: value) equals: 1022.
 c that: 'the innermost value' is: ((1 to: 1022) inject: value into: [:x :i | x at: 1]) equals: 1.
 c that: 'its token is the record''s pointer' is: (tx readSet at: 'deep') equals: ref pointer.
 c that: 'its bytes re-encode to the record''s' is: (PBCodec encode: value) equals: (PBCodec encode: deep).
-c that: 'a record holding 1023 lists is refused when read' signals: PBCorruptionError containing: 'nesting deeper' during: [
-  (tx getRootObject: 'over') at: 'v'].
+c that: 'a record holding 1023 lists is refused when read, in ProtoBase''s words' signals: PBCorruptionError
+  containing: 'Undecodable atom at ' , over pointer pythonText , ': it nests deeper than 1024 MessagePack containers, so a value in it nests deeper than MAX_VALUE_DEPTH = 1022 (format spec, "Value nesting depth")'
+  during: [(tx getRootObject: 'over') at: 'v'].
+c that: 'the pointer as ProtoBase prints it' is: (PBAtomPointer segment: (ByteArray withAll: (0 to: 15) asArray) offset: 26) pythonText
+  equals: 'AtomPointer(segment=UUID(''00010203-0405-0607-0809-0a0b0c0d0e0f''), offset=26)'.
+c that: 'the envelope alone, without a pointer' signals: PBCorruptionError
+  containing: 'PBAtomEnvelope: it nests deeper than 1024 MessagePack containers' during: [PBAtomEnvelope decode: payload expecting: 19].
 tx abort.
 space close.
 base deleteAll.

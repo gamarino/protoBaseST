@@ -97,8 +97,9 @@ c that: 'and read as corruption' signals: PBCorruptionError containing: readRefu
   PBCodec decode: (raw value: (lists value: 2 value: (MessagePackMap withAll: { '@map' -> {
     { nest value: 509 value: 1 value: [:v | MessagePackMap withAll: { '@tup' -> { v } }]. 'v' } } })))].
 
-"A payload deeper than protoST's MessagePack reads (1024): malformed msgpack, PBCorruptionError."
-c that: '1025 nested arrays' signals: PBCorruptionError containing: 'malformed msgpack' during: [
+"Data deeper than protoST's MessagePack reads (1024): PBCorruptionError with the sentence of
+ ProtoBase's storage.format.undecodable_atom after the subject (here PBCodec)."
+c that: '1025 nested arrays' signals: PBCorruptionError containing: 'PBCodec: it nests deeper than 1024 MessagePack containers, so a value in it nests deeper than MAX_VALUE_DEPTH = 1022 (format spec, "Value nesting depth")' during: [
   PBCodec decode: (ByteArray withAll: (((1 to: 1025) asArray collect: [:i | 16r91]) , #(1)))].
 
 "valueDepth: counts as the spec does."
