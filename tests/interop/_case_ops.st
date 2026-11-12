@@ -1,10 +1,18 @@
 "_case_ops.st: protoST's side of the concurrency table, shared by tests/interop/_st_case.st and
  tests/unit/concurrency_actors.st (design spec 10.4, plan Task 21; a helper module, imported as
- '../interop/_case_ops' from either directory). The cases, their steps and the dump notation are
- in concurrency_cases.json; py_case.py is the same interpreter in ProtoBase.
+ '../tests/interop/_case_ops', which resolves against $STPATH = <repo>/src from any working
+ directory). The cases, their steps and the dump notation are
+ in concurrency_cases.json; py_case.py is the same interpreter in ProtoBase. The JSON and the
+ database vector are found from the repository's root ($STPATH, see repo), not from the working
+ directory.
 
   CaseTable load                    the cases (protoST Dictionaries parsed from the JSON)
   CaseTable case: anId              one case
+  CaseTable recordedFor: aCase variant: aString
+                                    the outcome and dump the JSON records for the variant
+                                    ('st_as_a', 'py_as_a' or 'actors'): the case's
+                                    'protobasest' entry, allowed only on the indexed-root case
+                                    with PBNotSupportedError in its outcome, else the reference
   CaseTable databaseOf: aCase       'db' for a case on the database vector, 'cc' otherwise
   CaseTable setup: aCase in: aDir   creates the case's space in protoST (the vector is copied)
   CaseTable dump: aCase in: aDb     the dump lines (an Array of Strings), read in a new
@@ -20,18 +28,47 @@ Import from: 'protobase'.
 
 Object subclass: #CaseTable.
 
+"The repository's root: the parent of the $STPATH directory that holds protobase.st (every
+ run of protoBaseST sets STPATH to <repo>/src). The files below are found from it, whatever
+ the working directory."
+CaseTable class >> repo
+  | stpath |
+  stpath := (Smalltalk getenv: 'STPATH') ifNil: [''].
+  (stpath subStrings: ':') do: [:each |
+    (each asFileReference / 'protobase.st') exists ifTrue: [^ each asFileReference parent]].
+  ^ Error signal: 'CaseTable: no directory of STPATH (' , stpath printString , ') holds protobase.st'.
+
 CaseTable class >> path
-  ^ '../interop/concurrency_cases.json'.
+  ^ self repo / 'tests' / 'interop' / 'concurrency_cases.json'.
 
 CaseTable class >> vector
-  ^ '../conformance/vectors/database' asFileReference.
+  ^ self repo / 'tests' / 'conformance' / 'vectors' / 'database'.
 
 CaseTable class >> load
-  ^ (((Import from: 'json') JSON parse: self path asFileReference contents) at: 'cases').
+  ^ (((Import from: 'json') JSON parse: self path contents) at: 'cases').
 
 CaseTable class >> case: anId
   ^ self load detect: [:each | (each at: 'id') = anId]
     ifNone: [Error signal: 'CaseTable: no case ' , anId printString].
+
+"The ids that may record protoBaseST's documented refusal in place of ProtoBase's outcome
+ (design spec 7.4)."
+CaseTable class >> refusalIds
+  ^ #('indexed-root').
+
+CaseTable class >> recordedFor: aCase variant: aString
+  | entry |
+  (#('st_as_a' 'py_as_a' 'actors') includes: aString) ifFalse: [
+    ^ Error signal: 'CaseTable: unknown variant ' , aString printString].
+  (aCase includesKey: 'protobasest') ifFalse: [^ aCase at: 'expected'].
+  (self refusalIds includes: (aCase at: 'id')) ifFalse: [
+    ^ Error signal: 'CaseTable: only ' , self refusalIds printString , ' may record protoBaseST''s refusal, not '
+      , (aCase at: 'id') printString].
+  entry := (aCase at: 'protobasest') at: aString.
+  ((entry at: 'outcome') includesSubstring: 'PBNotSupportedError') ifFalse: [
+    ^ Error signal: 'CaseTable: the refusal recorded for ' , (aCase at: 'id') printString , ' ' , aString
+      , ' is not PBNotSupportedError: ' , (entry at: 'outcome')].
+  ^ entry.
 
 CaseTable class >> usesVector: aCase
   ^ (aCase at: 'setup') anySatisfy: [:step | step first = 'vector database'].

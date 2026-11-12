@@ -18,7 +18,8 @@ b      one-shot: starts B and commits it; prints 'B=<outcome>'
 dump   prints the dump of the case's roots and cells, read in a new transaction
 expected  prints the outcome line and the dump the JSON records for the variant 'reference'
        (ProtoBase's outcome), or 'st_as_a', 'py_as_a' or 'actors': protoBaseST's documented
-       outcome where the case has one (its 'protobasest' entry), the reference otherwise
+       outcome where the case has one (its 'protobasest' entry, allowed only on the ids of
+       REFUSAL_IDS and only with PBNotSupportedError in each outcome), the reference otherwise
 
 Exit 0 when the mode ran, whatever the outcomes; any other failure exits non-zero.
 """
@@ -35,6 +36,9 @@ from proto_db.errors import ProtoDBError
 HERE = Path(__file__).resolve().parent
 CASES = HERE / "concurrency_cases.json"
 VECTOR = HERE.parent / "conformance" / "vectors" / "database"
+# The ids that may record protoBaseST's documented refusal in place of ProtoBase's outcome
+# (design spec 7.4); the refusal must be PBNotSupportedError.
+REFUSAL_IDS = ("indexed-root",)
 
 
 def load_case(case_id):
@@ -218,8 +222,8 @@ def as_a(case, directory):
         a = Side(db, case["a"])
         run = subprocess.run([os.environ["PROTOST"], "_st_case.st", "b", case["id"], directory],
                              cwd=HERE, capture_output=True, text=True)
-        line = run.stdout.strip().splitlines()[-1] if run.stdout.strip() else ""
-        if run.returncode != 0 or not line.startswith("B="):
+        line = run.stdout.strip()
+        if run.returncode != 0 or not line.startswith("B=") or "\n" in line:
             raise SystemExit(f"py_case.py: protoST's B failed (exit {run.returncode}): {run.stdout}{run.stderr}")
         report(db, case, a.commit(), line[len("B="):])
     finally:
@@ -247,8 +251,15 @@ def expected(case, variant):
     if variant not in ("reference", "st_as_a", "py_as_a", "actors"):
         raise SystemExit(f"py_case.py: unknown variant {variant!r}")
     recorded = case["expected"]
-    if variant != "reference":
-        recorded = case.get("protobasest", {}).get(variant, recorded)
+    if "protobasest" in case:
+        if case["id"] not in REFUSAL_IDS:
+            raise SystemExit(f"py_case.py: only {REFUSAL_IDS} may record protoBaseST's refusal, not {case['id']!r}")
+        for name, entry in case["protobasest"].items():
+            if "PBNotSupportedError" not in entry["outcome"]:
+                raise SystemExit(f"py_case.py: the refusal recorded for {case['id']!r} {name} is not "
+                                 f"PBNotSupportedError: {entry['outcome']}")
+        if variant != "reference":
+            recorded = case["protobasest"][variant]
     print(recorded["outcome"])
     for line in recorded["dump"]:
         print(line)

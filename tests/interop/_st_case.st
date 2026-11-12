@@ -8,9 +8,10 @@
                                         prints 'B=<outcome>'
   protost _st_case.st dump <case> <dir>  prints the dump, read by protoBaseST
 
-The space must exist (py_case.py setup). The steps and the dump are those of _case_ops.st."
+The space must exist (py_case.py setup). The steps and the dump are those of _case_ops.st,
+imported through $STPATH (<repo>/src), so the script runs from any working directory."
 Import from: 'protobase'.
-Import from: '_case_ops'.
+Import from: '../tests/interop/_case_ops'.
 
 | args mode case dir space db a b run line |
 args := Smalltalk arguments.
@@ -21,7 +22,7 @@ space := PBObjectSpace storage: (PBFileStorage path: dir).
 db := space openDatabase: (CaseTable databaseOf: case).
 mode = 'a' ifTrue: [
   a := CaseSide new start: (case at: 'a') in: db.
-  run := OSProcess run: (Smalltalk getenv: 'PY') arguments: { 'py_case.py'. 'b'. case at: 'id'. dir }.
+  run := OSProcess run: (Smalltalk getenv: 'PY') arguments: { (CaseTable repo / 'tests' / 'interop' / 'py_case.py') pathString. 'b'. case at: 'id'. dir }.
   line := run output trimBoth.
   (run exitCode = 0 and: [line beginsWith: 'B=']) ifFalse: [
     ^ Error signal: 'ProtoBase''s B failed (exit ' , run exitCode printString , '): ' , line].

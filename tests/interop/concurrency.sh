@@ -9,7 +9,8 @@
 #      protoST's dump of the space must equal the one Python printed.
 # Runs 2 and 3 must print the reference too, except where the case records protoBaseST's
 # documented refusal (its 'protobasest' entry: a blind write onto an indexed root, design spec
-# 7.4), whose difference is asserted exactly and printed as a NOTE. Every step is a process run to
+# 7.4), whose difference is asserted exactly and printed as a NOTE. py_case.py expected refuses a
+# 'protobasest' entry on any other case, or one whose outcomes are not PBNotSupportedError. Every step is a process run to
 # completion, so nothing depends on timing. Exit 77 without the interop venv.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -65,5 +66,6 @@ for id in $ids; do
     fi
     count=$((count + 1))
 done
-[[ "$count" -eq 13 ]] || fail "expected the 13 rows of design spec 10.4, ran $count"
+# The 13 rows of design spec 10.4, and row 7 with its roles swapped (fix round 1).
+[[ "$count" -eq 14 ]] || fail "expected the 13 rows of design spec 10.4 and the swapped row 7, ran $count"
 echo "concurrency table: $count cases, ProtoBase's outcomes in both assignments"

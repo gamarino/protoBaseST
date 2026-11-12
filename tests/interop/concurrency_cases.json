@@ -1,6 +1,7 @@
 {
   "comment": [
-    "The concurrency table of design spec 10.4, one entry per row (plan Task 21). Every case runs two",
+    "The concurrency table of design spec 10.4, one entry per row (plan Task 21), plus row 7 with its",
+    "roles swapped (set-remove-add, Task 21 fix round 1). Every case runs two",
     "transactions, A and B, interleaved as plan call C12 orders them: start A, start B, commit B,",
     "commit A. A side runs its steps when it starts and commits later; its outcome is 'committed' or",
     "the class of the error its steps or its commit signalled, with protoBaseST's names (PB...).",
@@ -23,8 +24,9 @@
     "expected holds ProtoBase's outcome (the reference) and the final contents of the roots and",
     "cells listed in roots and mutables, in the dump notation of py_case.py and _case_ops.st:",
     "absent, 1, 'text', {'k': v} (sorted keys), [v], #{e} (sorted), <object> for a DBObject.",
-    "protobasest, present only where protoBaseST documents a refusal (design spec 7.4), holds its",
-    "outcomes with protoST as A (st_as_a), with Python as A (py_as_a) and with two protoST actors",
+    "protobasest, allowed only on the case indexed-root and only with PBNotSupportedError in each",
+    "outcome (both runners check it), records protoBaseST's documented refusal (design spec 7.4):",
+    "the outcomes with protoST as A (st_as_a), with Python as A (py_as_a) and with two protoST actors",
     "(actors); every other case must give the reference in all three."
   ],
   "cases": [
@@ -90,6 +92,15 @@
       "b": [["set remove", "s", "e"]],
       "roots": ["s"], "mutables": [],
       "expected": {"outcome": "A=committed B=committed", "dump": ["root s = #{'e', 'f'}"]}
+    },
+    {
+      "id": "set-remove-add",
+      "row": "A blind Set add and a concurrent remove of the same element (the roles swapped: an unlogged remove would leave e)",
+      "setup": [["set root", "s", {"set": ["e", "f"]}]],
+      "a": [["set remove", "s", "e"]],
+      "b": [["set add", "s", "e"]],
+      "roots": ["s"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root s = #{'f'}"]}
     },
     {
       "id": "read-absent-created",
