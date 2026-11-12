@@ -82,3 +82,6 @@ argument.
   stored attribute.
 - The run is deterministic: no sleeps, no wall-clock readings. Step 3 orders its two commits
   by running Python's one-shot script while protoST's transaction is open.
+- `check_guards.sh` (also run as a test) writes two spaces with scripted commit times and checks
+  that both reports refuse them with their messages: two moments with the same `committedAt`,
+  and a moment that resolves to a later version.
