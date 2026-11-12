@@ -1613,7 +1613,9 @@ decision D60). No format version change. It supersedes ruling R12 (509).
   count of 5 gives 6; removes below zero clamp at 0 before the adds.
 - [ ] **Step 2:** run. Expected: FAIL.
 - [ ] **Step 3:** implement, after reading `CountedSet` in `sets.py` at the tag.
-- [ ] **Step 4:** run, with the concurrency row. Expected: PASS.
+- [ ] **Step 4:** run, with the concurrency row. Expected: PASS. (Task 20 review I2) Also extend
+  `tests/interop/_st_write_shapes.st` and `tests/interop/_st_random_ops.st` to `PBCountedSet`, and
+  run `tests/interop`.
 - [ ] **Step 5:** commit `CountedSet writes with the D26 counter-transform merge`.
 
 If this task is cut, `docs/not-done.md` says so, and any `PBCountedSet` mutator signals
@@ -1695,6 +1697,11 @@ If this task is cut, `docs/not-done.md` says so, and any `PBCountedSet` mutator 
 - [ ] **Step 4:** run a whole-branch review per repository with superpowers:requesting-code-review,
   and fix every finding, cheap "can stay" items included (maintainer rule). Then re-run Steps
   1-3.
+- [ ] **Step 4b (Task 20 review I1):** `docs/deviations.md` and `docs/not-done.md` record the §10.2/§10.3
+  shapes protoBaseST cannot write: indexed collections (index maintenance is out of scope, design §7.4),
+  `PBRepeatedKeysDictionary` writes (a non-goal), `PBCountedSet` writes if Task 22 is cut, and
+  Python-only types such as `demo.erp.AuditNote` (preserved as opaque atoms); hence the round trip
+  compares with `compare_dumps --exact`.
 - [ ] **Step 5:** write `tasks/protobasest-prototype-report-<date>.md` in the workspace. It
   records the gates passed, the cuts, the protoST defects found (with their K-numbers), and
   what remains unproven.
