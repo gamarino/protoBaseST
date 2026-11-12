@@ -236,3 +236,19 @@
   exponential backoff with jitter (plan Task 19; `PBDatabase class >> backoffFor:low:high:random:`).
   Retries only `PBConflictError`; `PBOutcomeUnknownError` and every other error abort and propagate.
   New tests: `run_retries.st`, `run_backoff_bounds.st`, `run_no_retry.st`. A conflict-free wait is clamped to `high`; `backoff` is any two-element sequenceable collection.
+- Round trip and write-side proofs (plan Task 20; tests only, no change to the library):
+  - `tests/interop/st_to_py.sh`: protoST writes the shapes of spec 10.2 (three versions, every
+    collection it can write, records, a mutable cell, the integer boundaries and the boxing
+    threshold by code points) and ProtoBase's verifier accepts them with an identical dump; a
+    ProtoBase reader asserts the boundary keys and which strings are boxed. The helper is
+    `_st_write_shapes.st`, because `_st_write_space.st` already serves the file storage tests.
+  - `tests/interop/st_random_ops.sh`: seeded random operations on `PBList`, `PBDictionary`,
+    `PBHashDictionary` and `PBSet` over 20 commits, `PBAvl check:` and a model comparison after
+    each, then ProtoBase's verifier over the whole space. `PBCountedSet` and
+    `PBRepeatedKeysDictionary` writes are plan Task 22.
+  - `tests/conformance/polyglot_rewrite.st`: rewriting the record that references the opaque
+    atoms keeps them byte for byte at their original pointers; the commit writes no record of
+    their types.
+  - `tests/interop/lock_timeout.sh` with `hold_lock.py`: a protoST commit with a 50 ms
+    `lockTimeout` while ProtoBase holds the lock ends in `PBTimeoutError`; with the lock
+    released and 30000 ms it commits.

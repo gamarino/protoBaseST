@@ -8,7 +8,7 @@
  (its atom and collection counts on this space are 22 and 5). Then with a class registered under polyglot.st.Order, declaring
  the alias polyglot.st.SalesOrder: a space opened afterwards reads both records as
  that class, the older one through the declared alias. Keeping the record byte for
- byte when the record that references it is rewritten needs the writer (plan Task 20)."
+ byte when the record that references it is rewritten is polyglot_rewrite.st."
 Import from: 'protobase'.
 Import from: '_vectors'.
 Object subclass: #Check instanceVariableNames: 'failures count'.
