@@ -1,4 +1,4 @@
-"EXPECT: ok 12"
+"EXPECT: ok 15"
 "Database run:retries: (plan Task 19; ProtoBase Database.run): a PBConflictError, raised by the commit,
  aborts the attempt and retries with a fresh transaction. The conflicts are driven from inside the block
  (a nested competing commit on the attempts listed in a script-held Atom), never by timing. After the last
@@ -47,9 +47,16 @@ attempts swap: [:v | 0].
 competeOn swap: [:v | #()].
 c that: 'run: answers the block''s value' is: (db run: work) equals: 'done 1'.
 
+"A real wait: two conflicts with #(2 2) (2 ms each), an OrderedCollection pair; time is not asserted."
+attempts swap: [:v | 0].
+competeOn swap: [:v | #(1 2)].
+c that: 'a two-element OrderedCollection is a backoff pair' is: (db run: work retries: 3 backoff: (OrderedCollection with: 2 with: 2)) equals: 'done 3'.
+c that: 'and the real wait ran between the attempts' is: attempts value equals: 3.
+c that: 'a three-element backoff is refused' signals: PBValidationError during: [db run: work retries: 1 backoff: #(1 2 3)].
+
 "Validation, as ProtoBase's."
 c that: 'a negative retries count is refused' signals: PBValidationError during: [db run: work retries: -1 backoff: #(1 2)].
 c that: 'an inverted backoff is refused' signals: PBValidationError during: [db run: work retries: 1 backoff: #(5 2)].
 space close.
 base deleteAll.
-'ok 12' displayNl.
+'ok 15' displayNl.

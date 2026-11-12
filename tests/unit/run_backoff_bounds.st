@@ -1,4 +1,4 @@
-"EXPECT: ok 3"
+"EXPECT: ok 4"
 "PBDatabase class >> backoffFor:low:high:random: (plan Task 19; ProtoBase Database.run): the wait of attempt a is
  uniform(d/2, d) with d = min(high, low * 2^a), here as a whole number of milliseconds. Seeded, so deterministic."
 Import from: 'protobase'.
@@ -21,4 +21,6 @@ c that: 'never above the high bound' is: (values allSatisfy: [:w | w <= 200]) eq
 limit := (1 to: 200) collect: [:i | PBDatabase backoffFor: 20 low: 1 high: 200 random: r].
 c that: 'a capped attempt stays within [100, 200] and varies' is:
   ((limit allSatisfy: [:w | w >= 100 and: [w <= 200]]) and: [limit asSet size > 10]) equals: true.
-'ok 3' displayNl.
+c that: 'a fractional high bound is never exceeded by rounding' is:
+  (((1 to: 100) collect: [:i | PBDatabase backoffFor: 5 low: 1 high: 2.5 random: r]) allSatisfy: [:w | w <= 2 and: [w isKindOf: SmallInteger]]) equals: true.
+'ok 4' displayNl.

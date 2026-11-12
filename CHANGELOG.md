@@ -223,10 +223,6 @@
     goes on from the signal and the block may still commit; an exception they end unwinds the
     block and aborts. An `Error`, or an exception that is not resumable, aborts at once and is
     passed. A `^` commits, also after a resumed exception. New test: `tx_do_exceptions.st`.
-- `PBDatabase >> run:`, `run:retries:` and `run:retries:backoff:` with ProtoBase's bounded
-  exponential backoff with jitter (plan Task 19; `PBDatabase class >> backoffFor:low:high:random:`).
-  Retries only `PBConflictError`; `PBOutcomeUnknownError` and every other error abort and propagate.
-  New tests: `run_retries.st`, `run_backoff_bounds.st`, `run_no_retry.st`.
 - Task 18 review fix round 3 (ruling R20b, re-review N3):
   - **A resumed `Error` no longer discards the block's writes.** Round 2 aborted at once on any
     `Error`, so a resumable one (`ZeroDivide`) that an enclosing handler resumed left the block
@@ -236,3 +232,7 @@
     exception that is not resumable aborts at once and is passed. `tx_do_exceptions.st` checks
     a resumed `ZeroDivide` (committed with its write), one the handler returns from (aborted)
     and a plain `Error` (aborted).
+- `PBDatabase >> run:`, `run:retries:` and `run:retries:backoff:` with ProtoBase's bounded
+  exponential backoff with jitter (plan Task 19; `PBDatabase class >> backoffFor:low:high:random:`).
+  Retries only `PBConflictError`; `PBOutcomeUnknownError` and every other error abort and propagate.
+  New tests: `run_retries.st`, `run_backoff_bounds.st`, `run_no_retry.st`. A conflict-free wait is clamped to `high`; `backoff` is any two-element sequenceable collection.

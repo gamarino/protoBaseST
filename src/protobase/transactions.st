@@ -756,12 +756,12 @@ PBDatabase >> newTransactionDo: aBlock
 
 "The milliseconds to wait after the failed attempt number anAttempt (from 0) of run:retries:backoff:
  (ProtoBase Database.run: uniform(d/2, d) seconds with d = min(high, low * 2^attempt)): d * (0.5 + r / 2)
- for r in [0, 1) drawn from aRandom, rounded to a whole number of milliseconds (a SmallInteger). The
+ for r in [0, 1) drawn from aRandom, rounded to a whole number of milliseconds (a SmallInteger), never above the whole milliseconds of aHigh (so a fractional bound is not exceeded by rounding). The
  random source is a parameter so that the bounds are tested with a seeded Random, never by timing."
 PBDatabase class >> backoffFor: anAttempt low: aLow high: aHigh random: aRandom
   | d |
   d := aHigh min: aLow * (2 raisedTo: anAttempt).
-  ^ (d * (0.5 + (aRandom next / 2))) rounded.
+  ^ (d * (0.5 + (aRandom next / 2))) rounded min: aHigh floor.
 
 "Runs aBlock with a new transaction and answers its value: run: aBlock retries: 10 backoff: #(1 200)."
 PBDatabase >> run: aBlock
@@ -775,7 +775,7 @@ PBDatabase >> run: aBlock retries: aCount
  Database.run). A PBConflictError, signalled by the commit, by a merge or by aBlock itself, aborts the
  attempt (newTransactionDo: aborts whenever an exception unwinds the block) and the block runs again with a
  fresh transaction, at most aCount more times, after waiting backoffFor:low:high:random: milliseconds
- ((Future after: d) wait; aBackoff is #(low high) in milliseconds, ProtoBase's seconds pair scaled). After
+ ((Future after: d) wait; aBackoff is any two-element sequenceable collection (low high) in milliseconds, ProtoBase's seconds pair scaled). After
  the last retry the conflict is signalled again. Any other exception aborts the attempt and goes on
  unretried; notably PBOutcomeUnknownError, because the commit may have been applied. A block that ends its
  transaction itself is not committed again (newTransactionDo: commits only an active one). The checks of
@@ -785,7 +785,7 @@ PBDatabase >> run: aBlock retries: aCount backoff: aBackoff
   | low high random |
   (aCount isInteger and: [aCount >= 0]) ifFalse: [
     ^ PBValidationError signal: 'run: retries must be a non-negative Integer, not ' , aCount printString].
-  ((aBackoff isKindOf: Array) and: [aBackoff size = 2]) ifFalse: [
+  ((aBackoff isKindOf: SequenceableCollection) and: [aBackoff size = 2]) ifFalse: [
     ^ PBValidationError signal: 'run: backoff must be a (low, high) pair of milliseconds, not '
       , aBackoff printString].
   low := aBackoff first.
