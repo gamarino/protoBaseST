@@ -27,13 +27,13 @@ Check >> report
   failures do: [:each | ('FAIL ' , each) displayNl].
   ^ failures isEmpty ifTrue: ['ok ' , count printString] ifFalse: ['failed'].
 
-"The type names of the atom records of segment aSegment (a UUID text), in file order."
-| c dir section space db holder0 order0 older0 original originalBytes payloads types fresh holder1 db1 verify |
+| c dir section space db holder0 order0 older0 original originalBytes payloads typesOf types fresh holder1 verify |
 c := Check new.
 section := Vectors manifest at: 'polyglot_database'.
 dir := Vectors copySpace: 'polyglot_database'.
 original := dir / (section at: 'segment').
 originalBytes := original binaryContents.
+"typesOf value: aStorage value: aSegment: the type names of the atom records of segment aSegment (a UUID text), in file order."
 typesOf := [:aStorage :aSegment |
   ((aStorage recordsOfSegment: aSegment) select: [:each | (each at: 2) isAtom]) collect: [:each |
     (PBTypeRegistry nameOfTag: ((MessagePack decodeOrdered: (each at: 3) strictKeys: true) at: 't' ifAbsent: [nil]))]].

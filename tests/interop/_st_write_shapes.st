@@ -17,7 +17,7 @@
      mutable cell, and a second cell 'sequence'.
 
  Not written, because protoBaseST cannot yet or never will: an indexed collection, a
- CountedSet or RepeatedKeysDictionary (their writes are plan Task 22) and demo.erp.AuditNote
+ CountedSet (its writes are plan Task 22) or RepeatedKeysDictionary (its writes are a non-goal) and demo.erp.AuditNote
  (a type only Python knows: an opaque atom is never rewritten). Writes PBNotation
  dumpSpace:to: of the space to <out.json> and prints 'written'."
 Import from: 'protobase'.

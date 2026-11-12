@@ -244,8 +244,8 @@
     `_st_write_shapes.st`, because `_st_write_space.st` already serves the file storage tests.
   - `tests/interop/st_random_ops.sh`: seeded random operations on `PBList`, `PBDictionary`,
     `PBHashDictionary` and `PBSet` over 20 commits, `PBAvl check:` and a model comparison after
-    each, then ProtoBase's verifier over the whole space. `PBCountedSet` and
-    `PBRepeatedKeysDictionary` writes are plan Task 22.
+    each, then ProtoBase's verifier over the whole space. `PBCountedSet` writes are plan Task 22;
+    `PBRepeatedKeysDictionary` writes are a non-goal of the prototype.
   - `tests/conformance/polyglot_rewrite.st`: rewriting the record that references the opaque
     atoms keeps them byte for byte at their original pointers; the commit writes no record of
     their types.
