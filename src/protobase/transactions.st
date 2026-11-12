@@ -67,8 +67,10 @@ Ending:
   aTransaction abort              ends the transaction; nothing is published
   aDatabase newTransactionDo: aBlock
                                   aBlock with a new transaction, committed when
-                                  the block ends (if still active), aborted
-                                  when it raises (the exception goes on); no
+                                  the block ends, normally or by ^ (if still
+                                  active), aborted when an exception ends it
+                                  (the exception goes on; one resumed by an
+                                  enclosing handler does not end it); no
                                   retry; answers the block's value
 
 After the end, every message but isActive, database, readSet and
@@ -722,19 +724,33 @@ PBMutableObject >> get: aTransaction
   ^ aTransaction getMutable: self name.
 
 "Runs aBlock with a new transaction and answers its value (ProtoBase's
- 'with db.new_transaction() as tr:'). When the block ends, normally or by a
- non-local return (^, Python's return inside the with block), the transaction
- is committed if it is still active; a failure of that commit is signalled.
- When the block signals an Error, the transaction is aborted if still active
- and the exception goes on unchanged. There is no retry (run: retries)."
+ 'with db.new_transaction() as tr:'). The transaction is committed when the
+ block ends, normally or by a non-local return (^, Python's return inside the
+ with block), if it is still active; a failure of that commit is signalled.
+ It is aborted when an exception ends the block (ProtoBase's __exit__ aborts
+ on any exception), and the exception goes on unchanged. There is no retry
+ (run: retries).
+ An Error, or an exception that is not resumable, aborts at once and is
+ passed. Any other exception is handed to the enclosing handlers with outer
+ while inFlight is true: if they resume it, the block goes on from the signal
+ with their value and nothing ends (an unhandled Warning or Notification
+ resumes with nil); if they end it (return:, retry, falling off, ^), the
+ unwind passes through here with inFlight still true and the ensure: block
+ aborts. So the ensure: block commits exactly when no exception is unwinding
+ the block, including a ^ taken after a resumed exception."
 PBDatabase >> newTransactionDo: aBlock
-  | tr result |
+  | tr inFlight |
   tr := self newTransaction.
-  ^ [result := [aBlock value: tr] on: Error do: [:e |
-       tr isActive ifTrue: [tr abort].
-       e pass].
-     result]
-    ensure: [tr isActive ifTrue: [tr commit]].
+  inFlight := false.
+  ^ [[aBlock value: tr] on: Exception do: [:e | | answer |
+       ((e isKindOf: Error) or: [e isResumable not]) ifTrue: [
+         tr isActive ifTrue: [tr abort].
+         e pass].
+       inFlight := true.
+       answer := e outer.
+       inFlight := false.
+       e resume: answer]]
+    ensure: [tr isActive ifTrue: [inFlight ifTrue: [tr abort] ifFalse: [tr commit]]].
 
 "Sets this cell to aValue in aTransaction (ProtoBase MutableObject.set):
  aTransaction setMutable: name value: aValue."

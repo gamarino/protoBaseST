@@ -215,3 +215,11 @@
   - **Interop.** New test `tests/interop/st_py_interleaved.sh`: a Python commit between a
     protoST transaction's start and its commit, and the reverse, give a conflict for the read
     root and a merge for the blind write.
+- Task 18 review fix round 2 (ruling R20, review N1):
+  - **`newTransactionDo:` aborts on any exception that ends the block**, as ProtoBase's
+    `__exit__`. Before, only an `Error` aborted, so a `Warning` or `Notification` ended by an
+    enclosing handler (`return:`, falling off) committed the block's partial writes. The block
+    now asks the enclosing handlers with `Exception>>outer` (protoST 58f1834): a resumption
+    goes on from the signal and the block may still commit; an exception they end unwinds the
+    block and aborts. An `Error`, or an exception that is not resumable, aborts at once and is
+    passed. A `^` commits, also after a resumed exception. New test: `tx_do_exceptions.st`.
