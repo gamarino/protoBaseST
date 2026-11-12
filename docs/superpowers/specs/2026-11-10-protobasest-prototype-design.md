@@ -598,8 +598,12 @@ For each commit, the publisher:
    `space.root.tmp` with `epoch` + 1, `sync`s it, `replace:with:` over `space.root`, and
    `syncDirectory:`. It then releases the lock, best effort: a failure there is logged, never
    raised.
-7. **After success** it sets the *consumed* cell of every written collection (§7.2) and
-   updates the space's last-known root (an `Atom`).
+7. **After success** it sets the *consumed* cell of every written collection (§7.2).
+   ProtoBase keeps a last-known root only in a cluster: there, the coordinator's committed
+   root may be ahead of the persisted one, and `committed_epoch` reads it. Outside a cluster,
+   `committed_epoch` reads the storage's root. This prototype runs one process per space
+   without a cluster, so it keeps no last-known root: nothing would read it (ruling N2, Task 18
+   review).
 8. **When publishing fails**, the outcome may be unknown. Because the root lock excludes every
    writer, the publisher re-reads `space.root`. If the root is its own, the commit succeeded.
    If it can prove the root is not its own, the commit failed and nothing was published.
