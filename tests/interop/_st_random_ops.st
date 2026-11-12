@@ -7,12 +7,14 @@
   dict   PBDictionary    seed 20261111   setAt:value: and removeAt: (nextKeyOp)
   hash   PBHashDictionary seed 20261112  setAt:value: and removeAt: (nextKeyOp)
   set    PBSet           seed 20261113   add: and remove: (the keys of nextKeyOp)
+  bag    PBCountedSet    seed 20261114   add: and remove: (the keys of nextKeyOp): one occurrence
+                                         more or fewer
 
  Each commit applies 12 operations to each collection in one transaction (the first commit
  starts from new collections). After each commit a new transaction reads every collection
  from storage and checks it: PBAvl check: of its tree (every node loaded, as ProtoBase's
  check_invariants), and its contents against a model kept beside it (an OrderedCollection, or
- a Dictionary by order key). A mismatch is an Error naming the seed, the commit and the
+ a Dictionary by order key; for the bag, of element -> count, and its total count). A mismatch is an Error naming the seed, the commit and the
  operation. Then the space is dumped with PBNotation dumpSpace:to:, for ProtoBase's verifier
  (the last step of the shell script). Prints 'written <counts>'."
 Import from: 'protobase'.
@@ -54,6 +56,7 @@ Sequence >> applyKeyed: anOp to: aCollection
   | key value orderKey |
   key := AvlOps valueOf: (anOp at: 2).
   orderKey := PBKeys orderKey: key.
+  name = 'bag' ifTrue: [^ self applyCounted: anOp key: key orderKey: orderKey to: aCollection].
   (anOp at: 1) = #delete ifTrue: [
     model removeKey: orderKey ifAbsent: [nil].
     ^ name = 'set' ifTrue: [aCollection remove: key] ifFalse: [aCollection removeAt: key]].
@@ -63,6 +66,20 @@ Sequence >> applyKeyed: anOp to: aCollection
     ^ aCollection add: key].
   model at: orderKey put: key -> value.
   ^ aCollection setAt: key value: value.
+
+"The bag's step: a delete is remove: (one occurrence fewer, the element gone at zero, an absent
+ one unchanged), any other op add: (one more; a present element keeps its first object)."
+Sequence >> applyCounted: anOp key: key orderKey: orderKey to: aCollection
+  | entry |
+  entry := model at: orderKey ifAbsent: [nil].
+  (anOp at: 1) = #delete ifTrue: [
+    entry isNil ifFalse: [
+      entry value = 1
+        ifTrue: [model removeKey: orderKey]
+        ifFalse: [model at: orderKey put: entry key -> (entry value - 1)]].
+    ^ aCollection remove: key].
+  model at: orderKey put: (entry isNil ifTrue: [key -> 1] ifFalse: [entry key -> (entry value + 1)]).
+  ^ aCollection add: key.
 
 "The model's list after anOp, as list_ops.st (a negative position counts from the end, a
  slice bound is clamped, 'nil' is no bound)."
@@ -97,6 +114,15 @@ Sequence >> compare: aCollection
     model keysAndValuesDo: [:orderKey :key |
       (aCollection has: key) ifFalse: [^ 'missing element ' , key printString]].
     ^ nil].
+  name = 'bag' ifTrue: [ | total |
+    total := 0.
+    model keysAndValuesDo: [:orderKey :pair |
+      total := total + pair value.
+      (aCollection countOf: pair key) = pair value ifFalse: [
+        ^ 'count of ' , pair key printString , ': ' , (aCollection countOf: pair key) printString
+          , ' against ' , pair value printString]].
+    ^ aCollection totalCount = total ifTrue: [nil] ifFalse: [
+      'total count ' , aCollection totalCount printString , ' against ' , total printString]].
   model keysAndValuesDo: [:orderKey :pair |
     (aCollection getAt: pair key) = pair value ifFalse: [^ 'wrong value at ' , pair key printString]].
   ^ nil.
@@ -111,7 +137,8 @@ sequences
   add: (Sequence name: 'list' seed: 20261110);
   add: (Sequence name: 'dict' seed: 20261111);
   add: (Sequence name: 'hash' seed: 20261112);
-  add: (Sequence name: 'set' seed: 20261113).
+  add: (Sequence name: 'set' seed: 20261113);
+  add: (Sequence name: 'bag' seed: 20261114).
 space := PBObjectSpace storage: (PBFileStorage path: (args at: 1)).
 db := space newDatabase: 'structures'.
 1 to: 20 do: [:commit |
@@ -121,7 +148,8 @@ db := space newDatabase: 'structures'.
       collection isNil ifTrue: [
         collection := each name = 'list' ifTrue: [t newList] ifFalse: [
           each name = 'dict' ifTrue: [t newDictionary] ifFalse: [
-            each name = 'hash' ifTrue: [t newHashDictionary] ifFalse: [t newSet]]]].
+            each name = 'hash' ifTrue: [t newHashDictionary] ifFalse: [
+              each name = 'set' ifTrue: [t newSet] ifFalse: [t newCountedSet]]]]].
       12 timesRepeat: [collection := each step: collection].
       t setRootObject: each name value: collection]].
   db newTransactionDo: [:t |

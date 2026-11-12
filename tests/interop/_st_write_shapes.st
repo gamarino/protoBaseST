@@ -7,18 +7,21 @@
      number to demo.erp.Invoice, whose customer is a PBMutableObject) and 'settings' (a plain
      PBObject);
   2. every collection protoBaseST can write: 'tags' (PBList), 'rates' (PBDictionary of
-     Decimal), 'hash' (PBHashDictionary), 'set' (PBSet), and the two review-focus cases:
+     Decimal), 'hash' (PBHashDictionary), 'set' (PBSet), 'bag' (PBCountedSet: 1 twice, as 1
+     and 1.0, 'a' once, 'b' added and removed), and the two review-focus cases:
      'bounds' (a PBDictionary keyed by the integer boundaries 2^63-1, 2^63, 2^64-1, 2^64,
      -2^63, -2^63-1 and 2^64+1, valued by their names) with 'bound_values' (a PBList of the
      same integers), and 'strings' (a PBList of strings of 254, 255, 256 and 300 code points:
      U+00E9 is two bytes in UTF-8, so the 255 and 254 are not boxed by the code point
      threshold although they hold more than 256 bytes, and 256 and 300 are boxed);
   3. invoice 1001 paid (a new version made with with:value:), the customer renamed through its
-     mutable cell, and a second cell 'sequence'.
+     mutable cell, a second cell 'sequence', and a blind write of 'bag' (a new PBCountedSet
+     adding 'a' and 2, the root unread), which the commit merges by the counter transform
+     (D26): 'bag' ends with 1 twice, 'a' twice and 2 once.
 
- Not written, because protoBaseST cannot yet or never will: an indexed collection, a
- CountedSet (its writes are plan Task 22) or RepeatedKeysDictionary (its writes are a non-goal) and demo.erp.AuditNote
- (a type only Python knows: an opaque atom is never rewritten). Writes PBNotation
+ Not written, because protoBaseST never will: an indexed collection (design spec 7.4), a
+ RepeatedKeysDictionary (its writes are a non-goal) and demo.erp.AuditNote (a type only Python
+ knows: an opaque atom is never rewritten). Writes PBNotation
  dumpSpace:to: of the space to <out.json> and prints 'written'."
 Import from: 'protobase'.
 Import from: 'erp_model'.
@@ -53,6 +56,7 @@ db newTransactionDo: [:t | | bounds boundValues keys |
     setAt: 'k' value: 'v')
     setAt: 2 value: (CalendarDate year: 2026 month: 1 day: 1)).
   t setRootObject: 'set' value: (((t newSet add: 1) add: 'a') add: (PBTuple withAll: { 1. 2 })).
+  t setRootObject: 'bag' value: (((((t newCountedSet add: 1) add: 1.0) add: 'a') add: 'b') remove: 'b').
   keys := { p63 - 1. p63. p64 - 1. p64. p63 negated. p63 negated - 1. p64 + 1 }.
   bounds := t newDictionary.
   keys do: [:k | bounds := bounds setAt: k value: k printString].
@@ -69,7 +73,8 @@ db newTransactionDo: [:t | | invoices paid customer |
   t setRootObject: 'invoices' value: (invoices setAt: 1001 value: paid).
   customer := PBMutableObject name: 'customer:acme'.
   customer set: t value: ((customer get: t) with: 'name' value: 'ACME Argentina S.A.').
-  t newMutable: 'sequence' value: 1003].
+  t newMutable: 'sequence' value: 1003.
+  t setRootObject: 'bag' value: ((t newCountedSet add: 'a') add: 2)].
 
 space close.
 space := PBObjectSpace storage: (PBFileStorage path: (args at: 1)).

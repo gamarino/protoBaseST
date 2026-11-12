@@ -6,6 +6,8 @@ Reads database 'erp' as written by _st_write_shapes.st and asserts, with ProtoBa
 
 * the three versions, the records (demo.erp.Invoice and Customer), the mutable cells, and
   the paid invoice and renamed customer of version 3;
+* the CountedSet 'bag' at version 2 and after the blind adds of version 3, merged by the
+  counter transform (D26), with the element object written first kept;
 * plan Review Focus 4: the integer boundaries 2^63-1, 2^63, 2^64-1, 2^64, -2^63, -2^63-1
   (and 2^64+1) survive as values and as Dictionary keys, are found by their value, are
   ordered as numbers, and 1.8446744073709552e19 (2^64 exactly) finds the key 2^64;
@@ -64,6 +66,12 @@ def main(directory):
               {"ARS": Decimal("1.00"), "USD": Decimal("1450.25")})
         check("hash", dict(tx.get_root_object("hash").items()), {"k": "v", 2: __import__("datetime").date(2026, 1, 1)})
         check("set", {e for e in tx.get_root_object("set").elements()}, {1, "a", (1, 2)})
+        bag = tx.get_root_object("bag")
+        check("bag (version 2, then the blind adds of version 3 merged, D26)",
+              (sorted(bag.items(), key=repr), bag.count, bag.total_count), ([("a", 2), (1, 2), (2, 1)], 3, 5))
+        check("bag's stored element 1 is the int written first", [type(e) for e, _ in bag.items() if e == 1], [int])
+        bag2 = db.snapshot_at(db.history()[1]).get_root_object("bag")
+        check("bag at version 2", (sorted(bag2.items(), key=repr), bag2.count, bag2.total_count), ([("a", 1), (1, 2)], 2, 3))
 
         # Review Focus 4.
         boundaries = [-2**63 - 1, -2**63, 2**63 - 1, 2**63, 2**64 - 1, 2**64, 2**64 + 1]

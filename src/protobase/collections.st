@@ -62,6 +62,11 @@ values (and keys and elements) pass through PBCodec canonical: at once:
                                with the same content, as ProtoBase's
   PBSet >> add: e, remove: e   the same for a present element's add: and an
                                absent element's remove:
+  PBCountedSet >> add: e, remove: e
+                               one occurrence more or fewer (the last one takes the
+                               element out; an absent element's remove: answers a new
+                               version with the same content), count and totalCount
+                               kept, as ProtoBase's CountedSet
   PBSet >> union: c, intersection: c, difference: c
                                ProtoBase's folds of add: and remove: (c is a
                                set or anything answering do:, not a String):
@@ -72,13 +77,15 @@ values (and keys and elements) pass through PBCodec canonical: at once:
                                order; always a new version
 
 Operation logs (ProtoBase ConcurrentOptimized, D33; design spec 7.2). A
-PBDictionary, a PBHashDictionary and a PBSet are ConcurrentOptimized: every
-version carries two runtime-only fields, never persisted, and a cell:
+PBDictionary, a PBHashDictionary, a PBSet and a PBCountedSet are
+ConcurrentOptimized: every version carries two runtime-only fields, never
+persisted, and a cell:
 
   opLog          a PBFrozenList of PBTuples, the intents of the mutator calls
                  that derived the version, ProtoBase's ops: ('set' k v) and
                  ('remove' k) for the dictionaries, ('add' e) and ('remove' e)
-                 for a set. Every call logs, a blind write (one that changes
+                 for a set and a counted set, ('transform' e removes adds) for a
+                 counted set's rebase. Every call logs, a blind write (one that changes
                  nothing) included; a PBDictionary logs a large value in its
                  stored form, the PBValueBox its node holds, so a replay reuses
                  the box (ProtoBase D51)
@@ -98,7 +105,9 @@ version carries two runtime-only fields, never persisted, and a cell:
                                effect of the log replayed through the public
                                mutators. The net effect is the last op per key
                                (element), keys compared by order key, in order
-                               of last occurrence. current must be of the
+                               of last occurrence; for a PBCountedSet, the
+                               composed counter transform per element (D26,
+                               see _netOps). current must be of the
                                receiver's exact class (PBValidationError
                                otherwise), and a current with an index is
                                PBNotSupportedError (design spec 7.4). The
@@ -112,12 +121,10 @@ The log is a persistent chain (_PBOpLog): a mutator adds one link in O(1),
 and opLog builds the PBFrozenList on request. A PBList has no log (ProtoBase's
 List is not ConcurrentOptimized): it is never mergeable, rebaseOnto: is
 PBNotSupportedError, and markConsumed changes nothing that matters.
-PBCountedSet and PBRepeatedKeysDictionary are ConcurrentOptimized too: they
-have no mutators here, so their log is always empty, a new one is mergeable,
-and its rebase answers current unchanged, as ProtoBase's. PBCountedSet's
-writes, with their counter merge (ops ('transform' e removes adds)), come
-with plan Task 22; PBRepeatedKeysDictionary's writes are a non-goal (design
-spec, 'Non-goals').
+PBRepeatedKeysDictionary is ConcurrentOptimized too, but it has no mutators
+here (its writes are a non-goal, design spec 'Non-goals'), so its log is
+always empty, a new one is mergeable, and its rebase answers current
+unchanged, as ProtoBase's.
 
 The trees are built by PBAvl, as ProtoBase's avl.py builds them, so one
 sequence of operations gives the same nodes in both implementations. A hash
@@ -126,7 +133,8 @@ the hash key (PBKeys hashKey:) unless a subclass overrides it (ProtoBase's
 _bucket_hash, the seam its tests use to force collisions; it must stay a pure
 function of the value, since persisted trees are ordered by it),
 in a bucket, a tuple of the entries of that hash in insertion order (a hash
-dictionary's entries are (key, value) tuples); a bucket emptied by a removal
+dictionary's entries are (key, value) tuples, a counted set's (element, count)
+tuples); a bucket emptied by a removal
 leaves the tree. A
 collection with an index refuses every change with PBNotSupportedError naming
 the indexes (design spec 7.4): ProtoBase maintains the indexes in the same
@@ -334,7 +342,7 @@ PBIndexedCollection class >> _emptyValueOf: aField
 
 "Whether the class is ConcurrentOptimized in ProtoBase: PBDictionary,
  PBHashDictionary, PBSet, PBCountedSet and PBRepeatedKeysDictionary (the
- last two have no mutators here: their log stays empty)."
+ last has no mutators here: its log stays empty)."
 PBIndexedCollection class >> _logsOperations
   ^ false.
 
@@ -437,24 +445,34 @@ PBIndexedCollection >> _withRoot: aRoot count: aCount
 "A new version with root and count as given and anOp (a PBTuple) logged: as
  complete as the receiver."
 PBIndexedCollection >> _withRoot: aRoot count: aCount op: anOp
-  ^ self _withRoot: aRoot count: aCount log: (_PBOpLog after: log op: anOp) complete: self logComplete.
+  ^ self _withChanges: { 'root' -> aRoot. 'count' -> aCount } op: anOp.
+
+"A new version with the fields of aChanges (field -> value Associations) changed and anOp
+ logged: as complete as the receiver."
+PBIndexedCollection >> _withChanges: aChanges op: anOp
+  ^ self _withChanges: aChanges log: (_PBOpLog after: log op: anOp) complete: self logComplete.
 
 "A new version with the receiver's content and log (ProtoBase _with())."
 PBIndexedCollection >> _newVersion
   ^ self _withRoot: (self stateAt: 'root') count: (self stateAt: 'count') log: log complete: self logComplete.
 
 PBIndexedCollection >> _withRoot: aRoot count: aCount log: aLog complete: aBoolean
+  ^ self _withChanges: { 'root' -> aRoot. 'count' -> aCount } log: aLog complete: aBoolean.
+
+"A new version whose persisted fields named in aChanges (an Array of field -> value
+ Associations) take those values, every other field carried over, in persistedFields
+ order; its log is aLog, complete or not."
+PBIndexedCollection >> _withChanges: aChanges log: aLog complete: aBoolean
   | cls shape fields values |
   cls := self class.
   shape := cls _recordShape.
   fields := shape persisted.
   values := Array new: fields size.
   1 to: fields size do: [:i |
-    | f |
+    | f change |
     f := fields at: i.
-    values at: i put: (f = 'root'
-      ifTrue: [aRoot]
-      ifFalse: [f = 'count' ifTrue: [aCount] ifFalse: [self stateAt: f]])].
+    change := aChanges detect: [:each | each key = f] ifNone: [nil].
+    values at: i put: (change isNil ifTrue: [self stateAt: f] ifFalse: [change value])].
   ^ cls _unsavedWithState: (PBFrozenDict _keys: fields index: shape persistedIndex values: values) tag: nil
     log: aLog complete: aBoolean.
 
@@ -1006,7 +1024,7 @@ PBSet >> _replay: anOp onto: aTarget
   ^ super _replay: anOp onto: aTarget.
 
 PBHashBuckets subclass: #PBCountedSet.
-PBCountedSet comment: 'Every message answers a new version; the receiver never changes. ProtoBase''s CountedSet (proto_db.collections.CountedSet): a hash set whose bucket entries are (element, count) pairs; count is the number of distinct elements and totalCount the sum of the counts. Its writes (add:, remove:, answering the new set) come with plan Task 22.'.
+PBCountedSet comment: 'Every message answers a new version; the receiver never changes. ProtoBase''s CountedSet (proto_db.collections.CountedSet): a hash set whose bucket entries are (element, count) pairs; count is the number of distinct elements and totalCount the sum of the counts. add: adds one occurrence and remove: removes one (an absent element: a new version with the same content), each answering the new set (unlike Pharo''s add: and remove:, which change the collection in place and answer the element); a statement that discards the result changes nothing. Each version logs its intents (opLog) for rebaseOnto:, which applies their composed counter transform per element (D26).'.
 
 PBCountedSet class >> typeName
   ^ 'proto_db.collections.CountedSet'.
@@ -1024,8 +1042,7 @@ PBCountedSet class >> _emptyValueOf: aField
 PBCountedSet >> _pairs
   ^ true.
 
-"ConcurrentOptimized, as ProtoBase's CountedSet; its log stays empty until
- its writes (plan Task 22)."
+"ConcurrentOptimized, as ProtoBase's CountedSet."
 PBCountedSet class >> _logsOperations
   ^ true.
 
@@ -1049,6 +1066,141 @@ PBCountedSet >> items
   out := OrderedCollection new.
   self keysAndValuesDo: [:e :n | out add: e -> n].
   ^ out asArray.
+
+"--- writes (ProtoBase CountedSet add, remove, _transform; D26) ---"
+
+"The MessagePack containers a bucket node value adds around an element: the
+ bucket tuple and the entry (element, count), two @tup (ProtoBase
+ CountedSet.ELEMENT_WRAPPING)."
+PBCountedSet class >> elementWrapping
+  ^ 4.
+
+PBCountedSet class >> wrapper
+  ^ 'its bucket entry (element, count) in its bucket tuple'.
+
+"The counter transform (removes, adds) applied to aCount (ProtoBase
+ counter_transform): removes clamp at 0 before the adds."
+PBCountedSet class >> transform: aCount removes: aRemoves adds: anAdds
+  ^ ((aCount - aRemoves) max: 0) + anAdds.
+
+"A counted set with one more occurrence of anElement. The element must be
+ orderable (PBValidationError otherwise); a present one keeps its stored
+ element object and its place in the bucket."
+PBCountedSet >> add: anElement
+  | element |
+  self _checkWritable: 'add:'.
+  element := self _canonical: anElement as: 'element' wrapping: self class elementWrapping by: self class wrapper.
+  ^ self _step: element removes: 0 adds: 1 op: (PBTuple withAll: { 'add'. element }).
+
+"A counted set with one occurrence fewer of anElement (the last one takes
+ the element out); when it is absent, a new version with the same content
+ (unlike Pharo's remove:, which signals). As ProtoBase's remove, the element
+ is made canonical but its wrapping is not checked: it is never stored."
+PBCountedSet >> remove: anElement
+  | element |
+  self _checkWritable: 'remove:'.
+  element := self _canonical: anElement as: 'element'.
+  ^ self _step: element removes: 1 adds: 0 op: (PBTuple withAll: { 'remove'. element }).
+
+"The counter transform (removes, adds) applied to anElement as one
+ adjustment, logged as ('transform' element removes adds) so that a rebased
+ version can itself be rebased (ProtoBase CountedSet._transform). Only
+ rebaseOnto: sends it."
+PBCountedSet >> _transform: anElement removes: aRemoves adds: anAdds
+  | element |
+  self _checkWritable: 'rebaseOnto:'.
+  element := self _canonical: anElement as: 'element' wrapping: self class elementWrapping by: self class wrapper.
+  ^ self _step: element removes: aRemoves adds: anAdds
+    op: (PBTuple withAll: { 'transform'. element. aRemoves. anAdds }).
+
+"The version where aCanonical occurs as often as the counter transform
+ (removes, adds) makes it, with anOp logged (ProtoBase CountedSet._step and
+ _retarget_at): an unchanged count keeps the content, a count that stays
+ positive replaces the entry in place, a new element is appended to its
+ bucket, and a count that drops to 0 takes the entry out (and an emptied
+ bucket leaves the tree)."
+PBCountedSet >> _step: aCanonical removes: aRemoves adds: anAdds op: anOp
+  | root found entries position n final total |
+  root := self stateAt: 'root'.
+  found := _PBBuckets find: aCanonical in: root pairs: true owner: self.
+  entries := found at: 2.
+  position := found at: 3.
+  n := position = 0
+    ifTrue: [0]
+    ifFalse: [_PBTree integer: ((entries at: position) at: 2) field: 'count of an element' of: self].
+  final := self class transform: n removes: aRemoves adds: anAdds.
+  final = n ifTrue: [^ self _withRoot: root count: self count op: anOp].
+  total := self totalCount + final - n.
+  (n > 0 and: [final > 0]) ifTrue: [
+    entries := entries copy.
+    entries at: position put: (PBTuple withAll: { (entries at: position) at: 1. final }).
+    ^ self _withChanges: {
+        'root' -> ((PBAvl keyPut: root key: (found at: 1) value: (PBTuple withAll: entries) nodeClass: PBKeyNode) at: 1).
+        'total_count' -> total }
+      op: anOp].
+  final > 0 ifTrue: [
+    ^ self _withChanges: {
+        'root' -> ((PBAvl keyPut: root key: (found at: 1)
+          value: (PBTuple withAll: (entries copyWith: (PBTuple withAll: { aCanonical. final }))) nodeClass: PBKeyNode) at: 1).
+        'count' -> (self count + 1).
+        'total_count' -> total }
+      op: anOp].
+  ^ self _withChanges: {
+      'root' -> (_PBBuckets without: found in: root).
+      'count' -> (self count - 1).
+      'total_count' -> total }
+    op: anOp.
+
+"The ops rebaseOnto: replays (ProtoBase CountedSet._net_ops and
+ counter_net_effect, D26): per element, the composition of its ops as one
+ counter transform (removes, adds). add is (0, 1), remove is (1, 0),
+ transform its own pair, and (r1, a1) followed by (r2, a2) is
+ (r1, a1 - r2 + a2) when a1 >= r2, otherwise (r1 + r2 - a1, a2), so applying
+ the result to any count equals applying the ops one by one. Answers
+ ('net' element removes adds) tuples in order of last occurrence, elements
+ compared by order key (the first element object of each is kept); an
+ identity transform (0, 0) is omitted. O(n) in the length of the log."
+PBCountedSet >> _netOps
+  | ops keys last net out |
+  ops := _PBOpLog opsOf: log.
+  keys := Array new: ops size.
+  last := Dictionary new.
+  net := Dictionary new.
+  1 to: ops size do: [:i |
+    | op kind r a okey entry |
+    op := ops at: i.
+    kind := op at: 1.
+    kind = 'add'
+      ifTrue: [r := 0. a := 1]
+      ifFalse: [
+        kind = 'remove'
+          ifTrue: [r := 1. a := 0]
+          ifFalse: [
+            kind = 'transform'
+              ifTrue: [r := op at: 3. a := op at: 4]
+              ifFalse: [^ PBValidationError signal: 'Unknown counter op kind ' , kind printString]]].
+    okey := PBKeys orderKey: (op at: 2).
+    keys at: i put: okey.
+    last at: okey put: i.
+    entry := net at: okey ifAbsent: [net at: okey put: { op at: 2. 0. 0 }].
+    (entry at: 3) >= r
+      ifTrue: [entry at: 3 put: (entry at: 3) + a - r]
+      ifFalse: [
+        entry at: 2 put: (entry at: 2) + r - (entry at: 3).
+        entry at: 3 put: a]].
+  out := OrderedCollection new.
+  1 to: ops size do: [:i |
+    | entry |
+    (last at: (keys at: i)) = i ifTrue: [
+      entry := net at: (keys at: i).
+      ((entry at: 2) = 0 and: [(entry at: 3) = 0]) ifFalse: [
+        out addLast: (PBTuple withAll: { 'net'. entry at: 1. entry at: 2. entry at: 3 })]]].
+  ^ out asArray.
+
+PBCountedSet >> _replay: anOp onto: aTarget
+  (anOp at: 1) = 'net' ifFalse: [
+    ^ PBValidationError signal: 'Unknown ' , self class name , ' net op ' , anOp printString].
+  ^ aTarget _transform: (anOp at: 2) removes: (anOp at: 3) adds: (anOp at: 4).
 
 "=== PBRepeatedKeysDictionary ================================================="
 

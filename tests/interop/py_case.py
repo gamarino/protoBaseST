@@ -30,7 +30,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from proto_db import DBObject, Dictionary, FileStorage, List, ObjectSpace, Set
+from proto_db import CountedSet, DBObject, Dictionary, FileStorage, List, ObjectSpace, Set
 from proto_db.errors import ProtoDBError
 
 HERE = Path(__file__).resolve().parent
@@ -78,6 +78,8 @@ def setup_value(value):
             return List.from_iterable(content)
         if kind == "set":
             return Set.from_iterable(content)
+        if kind == "counted set":
+            return CountedSet.from_iterable(content)
         raise SystemExit(f"py_case.py: unknown setup value {value!r}")
     return value
 
@@ -112,6 +114,11 @@ def apply(tr, step, committed, in_setup=False):
         tr.set_root_object(args[0], tr.new_set().add(args[1]))
     elif op == "set remove":
         tr.set_root_object(args[0], tr.new_set().remove(args[1]))
+    elif op == "counted set add":
+        written = tr.new_counted_set()
+        for element in args[1:]:
+            written = written.add(element)
+        tr.set_root_object(args[0], written)
     elif op == "new mutable":
         tr.new_mutable(args[0], args[1])
     elif op == "set mutable":
@@ -167,6 +174,8 @@ def render(value):
         return "[" + ", ".join(render(v) for v in value) + "]"
     if isinstance(value, Set):
         return "#{" + ", ".join(sorted(render(e) for e in value)) + "}"
+    if isinstance(value, CountedSet):
+        return "#{" + ", ".join(sorted(f"{render(e)}: {n}" for e, n in value.items())) + "}"
     if isinstance(value, DBObject):
         return "<object>"
     raise SystemExit(f"py_case.py: no dump notation for {type(value).__name__}")

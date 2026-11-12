@@ -324,7 +324,10 @@ inv = paid.                                            "false: two atoms, two oi
   `tests/interop/py_list_positions.py`). `extend:` of nothing answers the receiver, as
   ProtoBase's. `PBDictionary` and `PBHashDictionary`: `new`, `setAt:value:`, `removeAt:`.
   `PBSet`: `new`, `add:`, `remove:`, `union:`, `intersection:`, `difference:` (see
-  "Operation logs and merges" below).
+  "Operation logs and merges" below). `PBCountedSet`: `new`, `add:` (one occurrence more),
+  `remove:` (one occurrence fewer; the last one takes the element out, and an absent element
+  answers a new version with the same content), with `countOf:`, `count` (distinct elements)
+  and `totalCount` (all occurrences) kept as ProtoBase's `CountedSet` keeps them.
 - Values, keys and elements pass through `PBCodec canonical:` at once; a key or element that is
   not orderable (a NaN, a list, a map) is `PBValidationError`. The trees are built as ProtoBase
   builds them: `tests/interop/avl_ops_identical.sh` replays 1000 seeded `PBList` operations in
@@ -369,22 +372,28 @@ theirs := PBDictionary new setAt: 'b' value: 2.
 
 s := ((PBSet new add: 1) add: 2) intersection: #(2).   "logs add 1, add 2, remove 1"
 s := s union: (PBSet new add: 3).
+
+bag := ((PBCountedSet new add: 'x') add: 'x') remove: 'x'.   "logs add, add, remove: net (0, 1)"
+(bag rebaseOnto: current) countOf: 'x'.   "one more than current's: concurrent adds all kept"
 ```
 
 - `opLog` is a `PBFrozenList` of `PBTuple`s with ProtoBase's op names: `('set' k v)` and
-  `('remove' k)` for the dictionaries, `('add' e)` and `('remove' e)` for a set. Every mutator
+  `('remove' k)` for the dictionaries, `('add' e)` and `('remove' e)` for a set and a counted
+  set, and `('transform' e removes adds)` for a counted set's rebase. Every mutator
   call logs its intent, a blind write that changes nothing included. A `PBDictionary` logs a
   large value as the `PBValueBox` its node holds, so a replay reuses it.
 - `logComplete` (and `isMergeable`, which answers it) is true for a version built by `new`
   and derived only by logged mutators; false for a loaded version and everything derived
-  from it. A `PBList` has no log and is never mergeable. `PBCountedSet` and
-  `PBRepeatedKeysDictionary` are `ConcurrentOptimized` too but have no writes yet (their log
-  stays empty): a new empty one is mergeable, and its rebase answers `current` unchanged, as
-  ProtoBase's. `PBCountedSet`'s writes and counter merge come later in the plan;
-  `PBRepeatedKeysDictionary`'s writes are a non-goal.
+  from it. A `PBList` has no log and is never mergeable. `PBRepeatedKeysDictionary` is
+  `ConcurrentOptimized` too but has no writes (they are a non-goal; its log stays empty): a new
+  empty one is mergeable, and its rebase answers `current` unchanged, as ProtoBase's.
 - `rebaseOnto: current` replays the net effect of the log onto `current` through the public
   mutators: the last intent per key (element), keys compared by order key, in order of last
-  occurrence, so a set then a remove of one key nets to a remove. `current` must be of the
+  occurrence, so a set then a remove of one key nets to a remove. A `PBCountedSet` composes
+  instead (D26): per element, its ops become one counter transform `(removes, adds)`, applied
+  to `current`'s count `c` as `max(c - removes, 0) + adds` and logged as
+  `('transform' e removes adds)`; replaying the ops one by one would give the same count, so
+  concurrent increments are all kept. `current` must be of the
   receiver's class (`PBValidationError`); a `current` with an index is `PBNotSupportedError`.
   The answer's log is `current`'s extended by the replay, as ProtoBase's: a rebase onto a
   loaded version is not mergeable again.

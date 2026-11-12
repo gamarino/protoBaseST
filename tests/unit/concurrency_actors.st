@@ -1,4 +1,4 @@
-"EXPECT: ok 43"
+"EXPECT: ok 46"
 "The concurrency table with two protoST actors in one process (design spec 10.4, last line;
  plan Task 21). For every case of tests/interop/concurrency_cases.json, on a new space set up
  by protoST: the actor A starts its transaction and runs its steps, then the actor B does,
@@ -8,7 +8,8 @@
  only on the publisher (known issue K23). The outcomes and the final contents must be ProtoBase's
  reference, as the JSON records it, except for the blind write onto an indexed root, where
  both commits end in protoBaseST's documented PBNotSupportedError (design spec 7.4; the JSON's
- 'protobasest' entry). The table also holds the swapped variant of row 7 (fix round 1), so it has 14 cases. Only the
+ 'protobasest' entry). The table also holds the swapped variant of row 7 (fix round 1) and the counted set blind
+ adds (plan Task 22), so it has 15 cases. Only the
  indexed-root case may record a refusal, and only PBNotSupportedError (CaseTable
  recordedFor:variant:). The same steps and dump as the cross-language runs (_case_ops.st)."
 Import from: 'protobase'.
@@ -19,7 +20,7 @@ Import from: '_check'.
 c := Check new.
 base := FileSystem temp / ('pbst-concurrency-actors-' , Smalltalk pid printString).
 cases := CaseTable load.
-c that: 'the 13 rows of design spec 10.4 and the swapped row 7' is: cases size equals: 14.
+c that: 'the 13 rows of design spec 10.4, the swapped row 7 and the counted set blind adds' is: cases size equals: 15.
 [base deleteAll.
  cases do: [:case | | id dir space db a b outcomeA outcomeB recorded |
    id := case at: 'id'.

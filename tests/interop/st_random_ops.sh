@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Design spec 10.6, plan Task 20: seeded random operations on every collection protoBaseST can
-# write (PBList, PBDictionary, PBHashDictionary, PBSet; the seeds are recorded in
+# write (PBList, PBDictionary, PBHashDictionary, PBSet, PBCountedSet; the seeds are recorded in
 # _st_random_ops.st), 20 commits, each followed by PBAvl check: and a comparison with a model.
 # At the end ProtoBase's verifier runs over the whole space (exit 0: every record decoded,
 # canonical and valid, every tree's invariants checked), and its dump must equal protoST's.

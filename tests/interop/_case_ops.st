@@ -76,8 +76,8 @@ CaseTable class >> usesVector: aCase
 CaseTable class >> databaseOf: aCase
   ^ (self usesVector: aCase) ifTrue: ['db'] ifFalse: ['cc'].
 
-"A setup value: {'dict': {k: v}}, {'list': [v]} or {'set': [e]} build a collection; any other
- value is itself."
+"A setup value: {'dict': {k: v}}, {'list': [v]}, {'set': [e]} or {'counted set': [e]} build a
+ collection; any other value is itself."
 CaseTable class >> setupValue: aValue
   | kind content result |
   (aValue isKindOf: Dictionary) ifFalse: [^ aValue].
@@ -93,6 +93,10 @@ CaseTable class >> setupValue: aValue
     ^ result].
   kind = 'set' ifTrue: [
     result := PBSet new.
+    content do: [:e | result := result add: e].
+    ^ result].
+  kind = 'counted set' ifTrue: [
+    result := PBCountedSet new.
     content do: [:e | result := result add: e].
     ^ result].
   ^ Error signal: 'CaseTable: unknown setup value ' , aValue printString.
@@ -127,6 +131,10 @@ CaseTable class >> render: aValue
   (aValue isKindOf: PBList) ifTrue: [^ '[' , (self join: (aValue elements collect: [:v | self render: v])) , ']'].
   (aValue isKindOf: PBSet) ifTrue: [
     parts := (aValue elements collect: [:e | self render: e]) asSortedCollection: [:x :y | x <= y].
+    ^ '#{' , (self join: parts asArray) , '}'].
+  (aValue isKindOf: PBCountedSet) ifTrue: [
+    parts := (aValue items collect: [:each | (self render: each key) , ': ' , each value printString])
+      asSortedCollection: [:x :y | x <= y].
     ^ '#{' , (self join: parts asArray) , '}'].
   (aValue isKindOf: PBObject) ifTrue: [^ '<object>'].
   ^ Error signal: 'CaseTable: no dump notation for ' , aValue class name.
@@ -166,6 +174,10 @@ CaseSide class >> apply: aStep to: t committed: aCommitted
   op = 'list set' ifTrue: [^ t setRootObject: (aStep at: 2) value: (t newList appendLast: (aStep at: 3))].
   op = 'set add' ifTrue: [^ t setRootObject: (aStep at: 2) value: (t newSet add: (aStep at: 3))].
   op = 'set remove' ifTrue: [^ t setRootObject: (aStep at: 2) value: (t newSet remove: (aStep at: 3))].
+  op = 'counted set add' ifTrue: [ | written |
+    written := t newCountedSet.
+    (aStep copyFrom: 3 to: aStep size) do: [:e | written := written add: e].
+    ^ t setRootObject: (aStep at: 2) value: written].
   op = 'new mutable' ifTrue: [^ t newMutable: (aStep at: 2) value: (aStep at: 3)].
   op = 'set mutable' ifTrue: [^ t setMutable: (aStep at: 2) value: (aStep at: 3)].
   op = 'remove mutable' ifTrue: [^ t removeMutable: (aStep at: 2)].

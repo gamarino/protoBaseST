@@ -1,7 +1,8 @@
 {
   "comment": [
     "The concurrency table of design spec 10.4, one entry per row (plan Task 21), plus row 7 with its",
-    "roles swapped (set-remove-add, Task 21 fix round 1). Every case runs two",
+    "roles swapped (set-remove-add, Task 21 fix round 1) and the counted set blind adds (counted-set-",
+    "blind-adds, plan Task 22: the counter-transform merge, D26). Every case runs two",
     "transactions, A and B, interleaved as plan call C12 orders them: start A, start B, commit B,",
     "commit A. A side runs its steps when it starts and commits later; its outcome is 'committed' or",
     "the class of the error its steps or its commit signalled, with protoBaseST's names (PB...).",
@@ -9,12 +10,15 @@
     "on a copy of the conformance database vector, whose database is 'db'). The steps:",
     "  ['read root', r]                     get the root r (records its token, absence included)",
     "  ['set root', r, v]                   set the root r to v; in setup, v may be",
-    "                                       {'dict': {k: v}}, {'list': [v]} or {'set': [e]}",
+    "                                       {'dict': {k: v}}, {'list': [v]}, {'set': [e]} or",
+    "                                       {'counted set': [e]}",
     "  ['blind dict set root', r, k, v]     set r to a new Dictionary {k: v}, r unread (merges)",
     "  ['replace', r, k, v]                 set r to a new Dictionary {k: v} with replace: true",
     "  ['list set', r, v]                   set r to a new List [v], r unread",
     "  ['set add', r, e], ['set remove', r, e]",
     "                                       set r to a new Set with e added (removed), r unread",
+    "  ['counted set add', r, e1, e2, ...]  set r to a new CountedSet with e1, e2, ... added in",
+    "                                       order, r unread (merges by the counter transform, D26)",
     "  ['new mutable', m, v], ['set mutable', m, v], ['remove mutable', m]",
     "                                       the mutable-cell operations (set and remove blind)",
     "  ['reuse committed', r, k1, v1, k2, v2]",
@@ -23,7 +27,8 @@
     "                                       transaction, set r to that committed value with k2 -> v2",
     "expected holds ProtoBase's outcome (the reference) and the final contents of the roots and",
     "cells listed in roots and mutables, in the dump notation of py_case.py and _case_ops.st:",
-    "absent, 1, 'text', {'k': v} (sorted keys), [v], #{e} (sorted), <object> for a DBObject.",
+    "absent, 1, 'text', {'k': v} (sorted keys), [v], #{e} (sorted), #{e: n} for a CountedSet (element",
+    "and count, sorted), <object> for a DBObject.",
     "protobasest, allowed only on the case indexed-root and only with PBNotSupportedError in each",
     "outcome (both runners check it), records protoBaseST's documented refusal (design spec 7.4):",
     "the outcomes with protoST as A (st_as_a), with Python as A (py_as_a) and with two protoST actors",
@@ -101,6 +106,15 @@
       "b": [["set add", "s", "e"]],
       "roots": ["s"], "mutables": [],
       "expected": {"outcome": "A=committed B=committed", "dump": ["root s = #{'f'}"]}
+    },
+    {
+      "id": "counted-set-blind-adds",
+      "row": "Counted set blind adds: concurrent increments of one element, each built empty (D26)",
+      "setup": [["set root", "c", {"counted set": ["e", "e", "f"]}]],
+      "a": [["counted set add", "c", "e", "e"]],
+      "b": [["counted set add", "c", "e", "g"]],
+      "roots": ["c"], "mutables": [],
+      "expected": {"outcome": "A=committed B=committed", "dump": ["root c = #{'e': 5, 'f': 1, 'g': 1}"]}
     },
     {
       "id": "read-absent-created",

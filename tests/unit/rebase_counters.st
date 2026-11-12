@@ -5,8 +5,9 @@
  value answers that current value unchanged, as ProtoBase's rebase_onto of an empty log
  (CountedSet().log_is_complete and RepeatedKeysDictionary().log_is_complete are True in
  v2.0.0rc1). A fresh empty one written as an unread root therefore keeps the committed
- content instead of replacing it. Their writes are not here: PBCountedSet's come with plan
- Task 22 (with the counter merge), PBRepeatedKeysDictionary's are a non-goal. The currents
+ content instead of replacing it. Their writes are not here: PBCountedSet's (with the counter
+ merge, plan Task 22) are in counted_set_ops.st and rebase_counted_set.st,
+ PBRepeatedKeysDictionary's are a non-goal. The currents
  are the roots 'bag' (a CountedSet) and 'multi' (a RepeatedKeysDictionary) of the database
  vector."
 Import from: 'protobase'.
