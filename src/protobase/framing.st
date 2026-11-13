@@ -394,7 +394,7 @@ PBAtomEnvelope class >> decode: aByteArray at: aPointer expecting: aTypeTag reso
     names isNil ifFalse: [
       (names includes: each key) ifTrue: [^ self _corrupt: 'the attribute ' , each key printString , ' appears twice'].
       names add: each key].
-    PBCodec fromWire: each value resolver: aResolver].
+    PBCodec fromWireValue: each value resolver: aResolver].
   shared ifTrue: [
     ^ self basicNew _setTag: t oid: oid state: (PBFrozenDict _keys: shape persisted index: shape persistedIndex values: values)].
   ^ self basicNew _setTag: t oid: oid state: (PBFrozenDict withAssociations:
@@ -461,9 +461,10 @@ PBAtomEnvelope >> slots
  deep (so at most 1024 in all). The state is canonical already (every
  constructor makes it so, or decoded it), so it is not made canonical again."
 PBAtomEnvelope >> encode
-  | wireState ref |
+  | wireState ref ks |
   ref := PBCodec pointerRef.
-  wireState := MessagePackMap withAll: (state associations collect: [:each |
-    each key -> (PBCodec wireOfCanonical: each value atomRef: ref)]).
+  ks := state keys.
+  wireState := MessagePackMap withAll: ((1 to: ks size) asArray collect: [:i |
+    (ks at: i) -> (PBCodec wireOfCanonical: (state _valueAt: i) atomRef: ref)]).
   ^ MessagePack encode: (MessagePackMap withAll: {
     't' -> (PBTypeRegistry writerTag: tag). 'oid' -> oid. 's' -> wireState }).

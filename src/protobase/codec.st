@@ -514,6 +514,15 @@ PBCodec class >> toWire: aValue atomRef: aBlock for: aHolder
  envelope: PBAtomEnvelope makes it canonical when it is built, and a decoded
  one is canonical by the format), without a second canonical: pass."
 PBCodec class >> wireOfCanonical: aValue atomRef: aBlock
+  "The values most records hold are answered first, as _wireOpen: and
+   _wireLeaf: answer them (same order of tests, same results): nil, a string,
+   an integer msgpack holds, a float, a Boolean, a reference."
+  aValue isNil ifTrue: [^ aValue].
+  (aValue isString and: [aValue isSymbol not]) ifTrue: [^ aValue].
+  (aValue isInteger and: [aValue between: self _intMin and: self _intMax]) ifTrue: [^ aValue].
+  aValue isFloat ifTrue: [^ aValue].
+  (aValue == true or: [aValue == false]) ifTrue: [^ aValue].
+  ((aValue isKindOf: PBAtom) and: [aValue isPBReference == true]) ifTrue: [^ aBlock value: aValue].
   ^ self _wire: aValue ref: aBlock.
 
 "The block that writes a reference as its pointer: {'@ref': [segment, offset,
@@ -637,6 +646,17 @@ PBCodec class >> decode: aByteArray
  containers is PBCorruptionError. The walk keeps an explicit stack, and meets
  references and map keys in the order of the data: a key is checked, and its
  atoms loaded, before its value is read."
+"As fromWire:resolver:, answering first the wire data that is its own value,
+ as _fromWireOpen:depth:resolver:on: answers it (same order of tests): nil, an
+ integer, a string, a float, a Boolean. The attribute values of a record."
+PBCodec class >> fromWireValue: aTree resolver: aResolver
+  aTree isNil ifTrue: [^ aTree].
+  aTree isInteger ifTrue: [^ aTree].
+  (aTree isString and: [aTree isSymbol not]) ifTrue: [^ aTree].
+  aTree isFloat ifTrue: [^ aTree].
+  (aTree == true or: [aTree == false]) ifTrue: [^ aTree].
+  ^ self fromWire: aTree resolver: aResolver.
+
 PBCodec class >> fromWire: aTree resolver: aResolver
   | stack result |
   result := self _fromWireOpen: aTree depth: 0 resolver: aResolver on: nil.
