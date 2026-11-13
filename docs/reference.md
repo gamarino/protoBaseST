@@ -316,6 +316,7 @@ means the same in both languages. `PBTimeoutError` is not protoST's `TimeoutErro
 | `PBClosedError` (under `PBValidationError`) | The space or storage is closed |
 | `PBUserError` | Misuse: a transaction used after its end, a lock not held |
 | `PBCorruptionError` | Stored data is damaged or malformed |
+| `PBClusterProtocolError` (under `PBCorruptionError`) | Bytes received on a cluster connection are not a valid protocol-13 message |
 | `PBNotSupportedError` | Valid, but outside what the prototype handles |
 | `PBUnexpectedError` | The file system failed |
 | `PBOutcomeUnknownError` (under `PBUnexpectedError`) | The commit may or may not have been applied; never retried |
@@ -362,6 +363,21 @@ For tests, tools and readers of the format. An application does not need them.
   by `PBLabeledRoot key` and applies no corruption rule), the only comparison of roots.
   An unknown root is `nil` and orders below every known one; two different roots with equal
   label and epoch are `PBCorruptionError`.
+- **Wire messages** (`cluster/protocol.st`): `PBClusterMessage`, the 22 message types of
+  `proto_db`'s cluster protocol 13 (`protocol.py`). Class side: `protocolVersion` (13), `schema`
+  (a fresh `Dictionary` from each type to its `name -> kind` Associations in the order of the
+  format spec's table; kinds `#int #number #str #bool #root #records #uuid #optBytes #optStr
+  #ranges #strs #after`), `type:from:fields:` (a message to send: exactly the fields of the type,
+  as `name -> wire value`; anything else is `PBValidationError`), `decode:` (the body of one
+  frame), `rootFrom:` / `rootValue:` (a wire root and a `PBLabeledRoot` or `nil`: `[0, nil, nil,
+  label]` is the empty space, the 3-item form reads with label 0 and is never written),
+  `rangesFrom:` / `rangesValue:` (`nil` or `{ segment bytes. start. end }` triples, start <=
+  end) and `afterFrom:` (`nil` or `{ seq. holder }`). A message answers `type`, `from`, `at:`
+  (a fresh copy of a field's wire value) and `encode` (the msgpack map `v type from` then the
+  fields in table order). `decode:` signals `PBClusterProtocolError` (a `PBCorruptionError`) for
+  bytes that are not one msgpack map, a map key that is not a str or bin, a missing `v`, `type`
+  or `from`, another version, an unknown type, a missing or ill-typed field; extra fields are
+  ignored and never re-encoded. The frame around a message is not here.
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.
@@ -381,6 +397,6 @@ For tests, tools and readers of the format. An application does not need them.
 ## The module and its files
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
-`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
+`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
 `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar` and `uuid`.

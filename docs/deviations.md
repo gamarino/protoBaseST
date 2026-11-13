@@ -200,8 +200,9 @@ design 4.3` (no time-zone database):
 | `values_read_not_rewritten` | `map-zone-key-format3` | Re-encoding is refused, as listed; the decoded keys are format-3 wall clocks, not instants. |
 | `invalid` | `value-instant-wall-out-of-range` | **Accepted** and presented in UTC. The wall-clock range needs the zone's rules; the format spec ("Known gaps") lets a reader without a database present the instant in UTC. Refusing would call valid data corrupt. |
 
-The cluster section and the invalid vectors of the `log`, `roots_log` and `message` layers are
-visible skips, printed under the `PASS` line of `tests/conformance/cluster.st`.
+The acceptor log of the cluster section, the invalid vectors of the `roots_log` layer and the
+invalid `message-oversized` vector (a frame length, the frame layer's refusal) are visible skips,
+printed under the `PASS` line of `tests/conformance/cluster.st`.
 
 ## Errors and messages
 

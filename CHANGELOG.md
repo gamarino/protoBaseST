@@ -2,6 +2,13 @@
 
 ## 0.2.0 (unreleased)
 
+- The wire messages of cluster protocol 13 (`src/protobase/cluster/protocol.st`):
+  `PBClusterMessage`, the 22 types of `proto_db`'s `protocol.py` with its field table and
+  validation (`decode:`, `encode`, `type:from:fields:`), the wire roots of CC17 (`rootFrom:`,
+  `rootValue:`), `rangesFrom:`/`rangesValue:` and `afterFrom:`; `PBClusterProtocolError`, a
+  `PBCorruptionError`. The 23 message frames and the invalid `message` vectors are verified by
+  `tests/conformance/messages.st` and no longer skipped, except `message-oversized` (the frame
+  layer, cluster Task 6).
 - Cluster membership values (`src/protobase/cluster/members.st`): `PBPeer` and `PBMembership`
   (ranks in code point order, the voter set of `proto_db`'s `_voter_set`, `majority`, the
   voter-set fingerprint, `ballotAfter:rank:`); the root order (`src/protobase/cluster/rootlog.st`):

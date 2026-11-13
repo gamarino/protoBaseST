@@ -53,3 +53,5 @@ PBFramedLog>>_setPath:file:payloads:
 PBPeer>>_setNodeId:host:port:
 PBMembership>>_setPeers:ids:voters:
 PBLabeledRoot>>_setLabel:record:
+PBClusterMessage>>_setType:from:values:
+PBClusterMessage class>>_initializeSchema
