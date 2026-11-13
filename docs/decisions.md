@@ -141,4 +141,11 @@ Unnumbered rulings, in task order:
   one-based view should be added over the same tree.
 - Whether refusing a `Dictionary` (rather than storing it as a map of unspecified order) costs
   more convenience than it protects.
+- **`nextBytes:` on a socket, as observed (cluster plan Task 1, 2026-11-13, protoST 0.10.0;
+  `tests/week0/socket_short_reads.st`).** Mid-stream it did not answer short: a reader in
+  `nextBytes: 10` that got 4 bytes, then 6 more 200 ms later, answered all 10. At the end of the
+  stream it answers what is left (4 bytes of the 10 asked for, the peer having closed), and the
+  next `nextBytes:` answers `nil`. LANGUAGE.md §12.11.1 does not promise the mid-stream
+  behaviour, so the cluster's `_readExactly:from:` (Task 19) still loops until it has `n` bytes
+  and treats `nil` (or an empty answer) as the end of the stream.
 - The open protoST question K23 (not yet filed), the fixed issues S37 to S40 and the documented working-directory module resolution, in [deviations.md](deviations.md#known-protost-limits).

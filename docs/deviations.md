@@ -296,7 +296,12 @@ requires; one question is still open and one observation was not a bug:
   the detection is a false positive is not settled. The pattern that raised it here was a
   publisher backing off inside its actor (now removed, ruling R19). What remains is the caller's
   lock backoff, which is bounded and only runs while another process holds the lock; while it
-  waits, its worker still serves other actors.
+  waits, its worker still serves other actors. **Not reproduced with Futures settled by network
+  events** (Task 1 of the cluster plan, 2026-11-13, protoST 0.10.0 on protoCore 3.6.0):
+  `tests/week0/k23_network_settled_futures.st` has 64 actors waiting nested (blocking their
+  worker) and 64 waiting at the top level of their method on Futures a hub actor hands out and a
+  socket reader actor settles; all 128 answer and no `deadlock:` is raised, also with
+  `PROTOST_WORKERS=1`. The question stays open for the pattern that first raised it.
 - **Module resolution is documented protoST behaviour, not a bug.** The working directory is
   searched before the library, as in Python, so a stray `calendar.st` in the current directory
   shadows the library's calendar module. **Security note:** an untrusted working directory's
