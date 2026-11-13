@@ -1,5 +1,5 @@
 .superpowers/
-tests/interop/.venv/
+tests/interop/.venv
 *.tmp
 tests/**/out/
 __pycache__/
