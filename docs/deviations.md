@@ -136,7 +136,7 @@ explicit.
   waits (ruling R19): an attempt that finds the root lock held answers at once, and the
   committing caller waits 1 ms, doubling to 50 ms, until `lockTimeout`. That wait sits in a
   `whileFalse:` block, so it blocks the caller's worker thread instead of suspending the actor
-  (protoST candidate K23, an open question, see below). It is bounded and only happens while
+  (see the protoST limits below). It is bounded and only happens while
   another *process* holds the lock; while it waits, the worker still serves other actors.
 - **Group commit** (ProtoBase D52) is not implemented: every publish is a group of one.
 - **One storage failure ends writing through that storage** (`isFailed`), as ProtoBase's; reopen
@@ -240,21 +240,27 @@ and node building, not the format.
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded
-in its `KNOWN_ISSUES.md` (K14 class and instance methods sharing a slot, K15 deep nesting, K16
-subnormal float literals, K17 JSON `\u` escapes, K20 and others). Four observations are
-**candidates, not yet filed** in protoST's `KNOWN_ISSUES.md`; the numbers are the controller's
-working labels and protoST assigns the real ones:
+in its issue ledger (K14 class and instance methods sharing a slot, K15 deep nesting, K16
+subnormal float literals, K17 JSON `\u` escapes, K20 and others). Four more observations were
+filed in protoST as S37 to S40 and are fixed in protoST 0.10.0, the version this repository
+requires; one observation was not a bug:
 
-- **K21 (candidate):** a method defined in a program's main file cannot reference an instance
-  variable of a class imported by that program (S20 fixed kernel classes only). `PBObject`
-  subclasses defined in a script therefore use `at:` accessors, which is also the design.
-- **K22 (candidate):** an `Atom` subclass's `#value` override is not reached, so a test seam
-  cannot intercept an `Atom` read.
-- **K23 (candidate, an open question):** an actor that blocks its worker in a `Future` wait can
-  raise `deadlock:` while another actor on that worker waits for it. Whether the detection is a
-  false positive is not settled. The pattern that raised it here was a publisher backing off
-  inside its actor (now removed, ruling R19). What remains is the caller's lock backoff, which is
-  bounded and only runs while another process holds the lock; while it waits, its worker still
-  serves other actors.
-- **K24 (candidate):** module resolution searches the working directory before the library, so a
-  stray `calendar.st` shadows the kernel's calendar module.
+- **protoST S37, fixed in protoST 0.10.0:** the instance variables a class inherits from an
+  imported superclass were not declared when a method of a program's main file was compiled, so
+  such a method could not reference them. `PBObject` subclasses defined in a script still use
+  `at:` accessors, because that is the design, not because of this defect.
+- **protoST S38, fixed in protoST 0.10.0:** `Atom on:` ignored the receiver class, and `swap:`
+  bypassed an `Atom` subclass's `#value` override, so a test seam could not intercept an `Atom`
+  read.
+- **protoST S39, fixed in protoST 0.10.0:** `Atom new swap:` spun forever.
+- **protoST S40, fixed in protoST 0.10.0:** nested `Future` waits beyond a depth of 16 hung
+  silently. This is the wait pattern behind the former candidate K23: an actor blocking its worker
+  in a `Future` wait. The caller's lock backoff described above is bounded and only runs while
+  another process holds the lock; while it waits, its worker still serves other actors. The
+  tests still keep every wait out of the actors, which is a design choice (ruling R19), not a
+  workaround.
+- **Module resolution is documented protoST behaviour, not a bug.** The working directory is
+  searched before the library, as in Python, so a stray `calendar.st` in the current directory
+  shadows the library's calendar module. **Security note:** an untrusted working directory's
+  `.st` files replace library modules of the same name. Run protoBaseST programs and tests from a
+  trusted directory.
