@@ -68,11 +68,25 @@ those scenarios, speed, long runs, and review by anyone but the people who wrote
 > sharing the format. A position out of range is `PBValidationError`, never `nil`. Every other
 > collection a program builds (`Array`, `PBTuple`, `PBFrozenList`) is one-based as usual.
 
+## Requirements
+
+| Component | Version | Source |
+|---|---|---|
+| protoCore | v3.6.0 | https://github.com/numaes/protoCore |
+| protoIO | v0.5.0 | https://github.com/gamarino/protoIO |
+| protoST | v0.10.0 | https://github.com/gamarino/protoST |
+
+Build protoST 0.10.0 against protoCore 3.6.0 and protoIO 0.5.0 (see its own README); it provides
+`lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st` and the fixes for protoST issues S37 to S40
+that this code relies on. The Python interop tests and the ERP demo also need a checkout of
+[ProtoBase](https://github.com/gamarino/ProtoDB) (default `../ProtoBase`, or set
+`PROTOBASE_REPO`) and Python 3.14.
+
 ## Quick start
 
-You need protoST 0.10.0, which is **not released yet**: build it from the branch
-`feat/protobase-support` of the protoST repository (commit `58f1834` at the time of writing). You
-also need this repository's `src/` on the module path:
+You also need this repository's `src/` on the module path. Run from a trusted directory: protoST
+searches the working directory before its library, so an untrusted directory's `.st` files can
+replace library modules (see [docs/deviations.md](docs/deviations.md#known-protost-limits)).
 
 ```sh
 export PROTOST=../protoST/build_release/protost
@@ -174,8 +188,7 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 
 ## Running the tests
 
-The tests need a protoST binary 0.10.0 or newer, unreleased: build the branch
-`feat/protobase-support` (it provides `lib/decimal.st`, `lib/calendar.st` and `lib/uuid.st`). Point `PROTOST` at it:
+The tests need protoST 0.10.0 or newer (see Requirements). Point `PROTOST` at the binary:
 
 ```sh
 export PROTOST=../protoST/build_release/protost      # default: protost from PATH

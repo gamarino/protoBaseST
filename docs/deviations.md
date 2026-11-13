@@ -136,7 +136,7 @@ explicit.
   waits (ruling R19): an attempt that finds the root lock held answers at once, and the
   committing caller waits 1 ms, doubling to 50 ms, until `lockTimeout`. That wait sits in a
   `whileFalse:` block, so it blocks the caller's worker thread instead of suspending the actor
-  (see the protoST limits below). It is bounded and only happens while
+  (protoST question K23, open, see below). It is bounded and only happens while
   another *process* holds the lock; while it waits, the worker still serves other actors.
 - **Group commit** (ProtoBase D52) is not implemented: every publish is a group of one.
 - **One storage failure ends writing through that storage** (`isFailed`), as ProtoBase's; reopen
@@ -219,7 +219,7 @@ visible skips, printed under the `PASS` line of `tests/conformance/cluster.st`.
 The prototype need not be fast, and it is not. This is the only place in the documentation that
 states figures; the other documents link here.
 
-Measured 2026-11-12 on protoST 0.10.0 (branch `feat/protobase-support`, commit `58f1834`) and
+Measured 2026-11-12 on a pre-release build of protoST 0.10.0 (commit `58f1834`) and
 protoBaseST commit `1564bce` (the source is unchanged since `5d09adf`), with
 `bench/run_avl.sh` (`RUNS=3`), against ProtoBase `v2.0.0rc2`, at a load average of about 3.5, so
 the figures are indicative only:
@@ -243,7 +243,7 @@ Defects found in protoST while building this were fixed in protoST, with a test,
 in its issue ledger (K14 class and instance methods sharing a slot, K15 deep nesting, K16
 subnormal float literals, K17 JSON `\u` escapes, K20 and others). Four more observations were
 filed in protoST as S37 to S40 and are fixed in protoST 0.10.0, the version this repository
-requires; one observation was not a bug:
+requires; one question is still open and one observation was not a bug:
 
 - **protoST S37, fixed in protoST 0.10.0:** the instance variables a class inherits from an
   imported superclass were not declared when a method of a program's main file was compiled, so
@@ -253,12 +253,16 @@ requires; one observation was not a bug:
   bypassed an `Atom` subclass's `#value` override, so a test seam could not intercept an `Atom`
   read.
 - **protoST S39, fixed in protoST 0.10.0:** `Atom new swap:` spun forever.
-- **protoST S40, fixed in protoST 0.10.0:** nested `Future` waits beyond a depth of 16 hung
-  silently. This is the wait pattern behind the former candidate K23: an actor blocking its worker
-  in a `Future` wait. The caller's lock backoff described above is bounded and only runs while
-  another process holds the lock; while it waits, its worker still serves other actors. The
-  tests still keep every wait out of the actors, which is a design choice (ruling R19), not a
-  workaround.
+- **protoST S40, fixed in protoST 0.10.0:** a silent hang past the helping cap of 16 nested
+  `Future` waits. protoST now grows its worker pool and raises `deadlock: too many nested waits`
+  only on provable pool-wide quiescence. protoBaseST's design (ruling R19: no waits inside
+  actors) never exercised it.
+- **K23 (open question for protoST, not yet filed):** an actor that blocks its worker in a
+  `Future` wait can raise `deadlock:` while another actor on that worker waits for it. Whether
+  the detection is a false positive is not settled. The pattern that raised it here was a
+  publisher backing off inside its actor (now removed, ruling R19). What remains is the caller's
+  lock backoff, which is bounded and only runs while another process holds the lock; while it
+  waits, its worker still serves other actors.
 - **Module resolution is documented protoST behaviour, not a bug.** The working directory is
   searched before the library, as in Python, so a stray `calendar.st` in the current directory
   shadows the library's calendar module. **Security note:** an untrusted working directory's

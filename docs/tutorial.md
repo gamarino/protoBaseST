@@ -31,10 +31,9 @@ Contents:
 
 ## 1. Before you start
 
-You need a protoST binary, version 0.10.0, which is **not released yet**: build it from the
-branch `feat/protobase-support` of the protoST repository. It is the version that adds `Decimal`,
-`CalendarDate`, `UUID`, random bytes and the UTC clock), and this repository's `src/` on the
-module path:
+You need a protoST binary, version 0.10.0 or newer
+([release](https://github.com/gamarino/protoST); it adds `Decimal`, `CalendarDate`, `UUID`, random
+bytes and the UTC clock), and this repository's `src/` on the module path:
 
 ```sh
 export PROTOST=../protoST/build_release/protost

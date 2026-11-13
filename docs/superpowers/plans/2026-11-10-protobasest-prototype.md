@@ -39,7 +39,7 @@ Read ProtoBase's code before guessing a behaviour.
 
 ## Global Constraints
 
-- **Repositories and branches**, all siblings under `/home/gamarino/Documentos/proyectos/`:
+- **Repositories and branches**, all siblings in one parent directory:
   - `protoIO` on branch `feat/random-clock`;
   - `protoST` on branch `feat/protobase-support`;
   - `protoBaseST` on branch `feat/prototype`;

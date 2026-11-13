@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-13)
 
 The entries are chronological, and later entries supersede earlier ones (vectors and format
 `v2.0.0rc1` became `v2.0.0rc2`; the nesting limit of 511 containers became 1022).
