@@ -358,7 +358,8 @@ For tests, tools and readers of the format. An application does not need them.
   `refoundStep` (2^44).
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
-  `PBRootOrder` (`compare:with:`, `max:with:`, `compareKey:with:`), the only comparison of roots.
+  `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered
+  by `PBLabeledRoot key` and applies no corruption rule), the only comparison of roots.
   An unknown root is `nil` and orders below every known one; two different roots with equal
   label and epoch are `PBCorruptionError`.
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and

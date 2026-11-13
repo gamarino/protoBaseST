@@ -1,11 +1,15 @@
-"EXPECT: ok 13"
+"EXPECT: ok 20"
 "PBPeer and PBMembership (cluster/members.st): the values every member of a cluster computes
  like the others (format spec, 'Values a member must compute'; proto_db cluster/coordinator.py
  _voter_set, ballot_after, the fingerprint). Ranks are indices in the ids sorted in code point
  order; the default voters are the first three ids (every member of a smaller cluster); an
  explicit voter set of a cluster of three or more is odd and has at least three members; the
  fingerprint is the CRC-32 of the UTF-8 of the sorted voter ids joined with ','. The 200 floors
- of the last check come from a seeded generator, so the run is the same every time."
+ of the ballot check come from a seeded generator, so the run is the same every time. The
+ fingerprints 3456220713 ('B,a,z') and 3464710033 (voters z, U+00E9, U+1F600 of the members a,
+ z, U+00E9, U+FFFF, U+1F600) are those proto_db's _voter_set and zlib.crc32 give. protoST has no
+ Symbol distinct from String ('n0' asSymbol is the String 'n0'), so a Symbol voter id is the
+ String id: given twice under both spellings it is a duplicate."
 Import from: 'protobase'.
 Import from: '_check'.
 | c peers members five rng distinct |
@@ -38,4 +42,18 @@ distinct := (1 to: 200) allSatisfy: [:i |
   (ranks first = ranks last) or: [ballots first ~= ballots last
     and: [(ballots allSatisfy: [:b | b > floor]) and: [(ballots collect: [:b | b \\ 4096]) = ranks]]]].
 c that: 'two ranks never produce the same ballot' isTrue: distinct.
+c that: 'rankOf: an unknown id is refused' signals: PBValidationError during: [members rankOf: 'q'].
+c that: 'peerNamed: an unknown id is refused' signals: PBValidationError during: [members peerNamed: 'q'].
+c that: 'an empty peer list is refused' signals: PBValidationError during: [PBMembership peers: #() voters: nil].
+c that: 'refoundStep is 2^44' is: PBMembership refoundStep equals: (2 raisedTo: 44).
+c that: 'the fingerprint of B,a,z' is: (PBMembership peers: (peers value: #('z' 'a' 'B')) voters: nil) fingerprint equals: 3456220713.
+c that: 'code point order and fingerprint beyond ASCII' is: [| e ffff emoji m |
+  e := String with: (Character value: 16rE9).
+  ffff := String with: (Character value: 16rFFFF).
+  emoji := String with: (Character value: 16r1F600).
+  m := PBMembership peers: (peers value: { emoji. 'z'. ffff. e. 'a' }) voters: { 'z'. e. emoji }.
+  { m ids = { 'a'. 'z'. e. ffff. emoji }. m voters = { 'z'. e. emoji }. m fingerprint }] value
+  equals: #(true true 3464710033).
+c that: 'a voter given as Symbol and String is a duplicate' signals: PBValidationError containing: 'distinct'
+  during: [PBMembership peers: (peers value: #('n0' 'n1' 'n2')) voters: { 'n0' asSymbol. 'n0'. 'n1' }].
 c report displayNl.

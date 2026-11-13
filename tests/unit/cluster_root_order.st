@@ -1,11 +1,13 @@
-"EXPECT: ok 7"
+"EXPECT: ok 8"
 "PBLabeledRoot and PBRootOrder (cluster/rootlog.st): the order of roots of proto_db
  cluster/rootlog.py root_key and compare_roots, on the key (label, epoch, segment bytes,
  offset); the empty space (a known root with no record) has epoch 0 and 16 zero segment bytes,
  and an unknown root (nil) orders below every known one. Two different roots that share
  (label, epoch) are a protocol violation: PBCorruptionError, never a tie. Segment bytes and
  offset only decide between keys of equal (label, epoch), so their order is checked on the
- keys (compareKey:with:, the comparison compare:with: applies)."
+ keys (compareKey:with:, the comparison compare:with: applies). A record of epoch 0 is refused:
+ epoch 0 is the empty space's, so the 16 zero bytes of its key never stand for a real root
+ (the reason the key matches proto_db's b'' in every reachable comparison)."
 Import from: 'protobase'.
 Import from: '_check'.
 | c seg root empty a b |
@@ -30,4 +32,6 @@ a := root value: 5 value: 1 value: 0 value: 26.
 b := root value: 6 value: 1 value: 0 value: 26.
 c that: 'max:with: is symmetric' isTrue: ((PBRootOrder max: a with: b) == b and: [(PBRootOrder max: b with: a) == b
   and: [(PBRootOrder max: nil with: a) == a and: [(PBRootOrder max: a with: nil) == a]]]).
+c that: 'a record of epoch 0 is refused' signals: PBValidationError
+  during: [PBLabeledRoot label: 1 record: (PBRootRecord segment: (seg value: 0) offset: 0 epoch: 0)].
 c report displayNl.

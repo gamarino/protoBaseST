@@ -87,9 +87,11 @@ PBRootOrder class >> compare: a with: b
 PBRootOrder class >> max: a with: b
   ^ (self compare: a with: b) < 0 ifTrue: [b] ifFalse: [a].
 
-"-1, 0 or 1 as the key ka orders before, equal to or after the key kb (two PBLabeledRoot keys):
- label, then epoch, then the segment bytes (unsigned, byte by byte), then the offset, as
- Python compares the tuples root_key answers."
+"-1, 0 or 1 as the key ka orders before, equal to or after the key kb: label, then epoch, then
+ the segment bytes (unsigned, byte by byte), then the offset, as Python compares the tuples
+ root_key answers. ka and kb are only keys answered by PBLabeledRoot >> key (four elements,
+ 16 segment bytes); nothing else is checked. It does not apply the (label, epoch) corruption
+ rule: compare:with: does, and is the comparison of roots."
 PBRootOrder class >> compareKey: ka with: kb
   | segA segB |
   1 to: 2 do: [:i | (ka at: i) = (kb at: i) ifFalse: [^ (ka at: i) < (kb at: i) ifTrue: [-1] ifFalse: [1]]].
