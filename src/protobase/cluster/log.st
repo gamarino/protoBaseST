@@ -73,13 +73,14 @@ PBFramedLog class >> crcDirect
 
 "The 14 header bytes of a log of aKind (a String of 4 ASCII characters: 'ROOT', 'RANG' or 'SEGS')."
 PBFramedLog class >> header: aKind
-  | w |
-  (aKind isString and: [aKind size = 4]) ifFalse: [
+  | w kindBytes |
+  kindBytes := (aKind isString and: [aKind allSatisfy: [:c | c value < 128]]) ifTrue: [aKind utf8Encoded] ifFalse: [nil].
+  (kindBytes notNil and: [kindBytes size = 4]) ifFalse: [
     ^ PBValidationError signal: 'PBFramedLog: a log kind is a String of 4 ASCII characters, not ' , aKind printString].
   w := WriteStream on: ByteArray new.
   w nextPutAll: #[80 68 66 50 76 79 71 0].
   w nextPutUnsigned: 2 width: 2 bigEndian: false.
-  w nextPutAll: aKind utf8Encoded.
+  w nextPutAll: kindBytes.
   ^ w contents.
 
 "The CRC-32 of aByteArray from offset start up to offset end (end excluded, offsets from 0).
@@ -176,16 +177,16 @@ PBFramedLog class >> scan: aByteArray kind: aKind path: aString
     keep := 0.
     [keep < (size min: 14) and: [(aByteArray at: keep + 1) = (expected at: keep + 1)]] whileTrue: [keep := keep + 1].
     (self _isZeroFrom: keep + 1 in: aByteArray) ifTrue: [^ PBLogScan payloads: #() validEnd: 0 torn: size > 0].
-    size >= 14 ifTrue: [
+    "Bytes are compared before anything is decoded: a foreign file is never an encoding error."
+    (size >= 14 and: [(aByteArray copyFrom: 1 to: 8) = (expected copyFrom: 1 to: 8)]) ifTrue: [
       version := aByteArray unsignedShortAt: 9 bigEndian: false.
-      found := (aByteArray copyFrom: 11 to: 14) utf8Decoded.
-      (aByteArray copyFrom: 1 to: 8) = (expected copyFrom: 1 to: 8) ifTrue: [
-        version = 2 ifFalse: [
-          ^ PBNotSupportedError signal: 'The log ' , aString , ' has format version ' , version printString
-            , '; this version reads 2'].
-        found = aKind ifFalse: [
-          ^ PBCorruptionError signal: 'The log ' , aString , ' is a ' , found printString , ' log, not a '
-            , aKind printString , ' log']]].
+      version = 2 ifFalse: [
+        ^ PBNotSupportedError signal: 'The log ' , aString , ' has format version ' , version printString
+          , '; this version reads 2'].
+      found := aByteArray copyFrom: 11 to: 14.
+      found = (expected copyFrom: 11 to: 14) ifFalse: [
+        ^ PBCorruptionError signal: 'The log ' , aString , ' is a log of kind (hex) ' , found hex
+          , ', not a ' , aKind printString , ' log']].
     ^ PBCorruptionError signal: 'The log ' , aString , ' does not start with a valid ' , aKind printString
       , ' log header but holds other data'].
   frames := OrderedCollection new.
@@ -221,10 +222,15 @@ PBFramedLog class >> read: aPath kind: aKind
     ^ PBUnexpectedError signal: 'PBFramedLog: cannot read ' , ref pathString , ': ' , e messageText].
   ^ self scan: bytes kind: aKind path: ref pathString.
 
+"aString on stderr; never signals (as PBFileStorage >> _log:, the convention for a recoverable
+ event). A seam: tests capture it."
+PBFramedLog class >> _warn: aString
+  [Stdio stderr nextPutAll: 'PBFramedLog: ' , aString; lf; flush] on: Error do: [:e | nil].
+
 "Opens the log at aPath of aKind for appends: creates the file (and its directory) with its
  header when absent, truncates a torn tail to the last valid frame, and syncs the file (and,
  for a new file, its directory and the parent directory) before answering, so an append never
- lands after torn bytes. The payloads found are those the log held at open. The file is closed
+ lands after torn bytes (a trimmed tail is reported on stderr: the byte count and the offset). The payloads found are those the log held at open. The file is closed
  on any refusal."
 PBFramedLog class >> openAppend: aPath kind: aKind
   | ref directory createdDir existed handle ok scan |
@@ -237,6 +243,8 @@ PBFramedLog class >> openAppend: aPath kind: aKind
   ok := false.
   [scan := self scan: (handle readAt: 0 size: handle size) kind: aKind path: ref pathString.
    scan isTorn ifTrue: [
+     self _warn: 'The log ' , ref pathString , ' ends in a torn tail of ' , (handle size - scan validEnd) printString
+       , ' bytes (an interrupted append); truncated to its last valid entry at offset ' , scan validEnd printString.
      handle truncateTo: scan validEnd.
      handle sync].
    scan validEnd = 0 ifTrue: [

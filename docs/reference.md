@@ -342,7 +342,7 @@ For tests, tools and readers of the format. An application does not need them.
 - **Framed logs** (`cluster/log.st`): `PBFramedLog`, the append-only log file of `proto_db`'s
   `logfile.py`. Class side: `header:` (kinds `'ROOT'`, `'RANG'`, `'SEGS'`), `frame:`,
   `scan:kind:path:`, `read:kind:` (never writes; a missing file is an empty log),
-  `openAppend:kind:` (creates the file with its header, truncates a torn tail, syncs). An
+  `openAppend:kind:` (creates the file with its header, truncates a torn tail and reports it on stderr, syncs). Any other failure to read a file is `PBUnexpectedError`, where `proto_db` lets `OSError` propagate. An
   open log answers `payloads`, `append:sync:`, `close`, `isClosed`, `path`. A scan is a
   `PBLogScan` (`payloads`, `validEnd`, `isTorn`). A torn tail is dropped; a damaged frame
   followed by a valid one is `PBCorruptionError` ("mid-log"); another format version is
@@ -366,5 +366,5 @@ For tests, tools and readers of the format. An application does not need them.
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
 `notation`, `framing`, `store`, `cluster/log`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
-`space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`); the codec itself imports
+`space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar` and `uuid`.

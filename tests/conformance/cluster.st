@@ -16,11 +16,11 @@ Import from: '_vectors'.
 manifest := Vectors manifest.
 cluster := manifest at: 'cluster'.
 #('segment' 'roots_log') do: [:item |
-  ('SKIP: cluster ' , item , ' (' , ((cluster at: item) at: 'file') , '): clusters are outside the prototype') displayNl].
+  ('SKIP: cluster ' , item , ' (' , ((cluster at: item) at: 'file') , '): pending, the acceptor log and its entries are cluster Task 4') displayNl].
 (cluster at: 'messages') do: [:message |
-  ('SKIP: cluster message ' , (message at: 'id') , ' (' , (message at: 'file') , '): clusters are outside the prototype') displayNl].
+  ('SKIP: cluster message ' , (message at: 'id') , ' (' , (message at: 'file') , '): pending, the wire messages are cluster Task 5') displayNl].
 ((manifest at: 'invalid') select: [:e | #('roots_log' 'message') includes: (e at: 'layer')]) do: [:e |
-  ('SKIP: invalid ' , (e at: 'layer') , ' ' , (e at: 'id') , ': clusters are outside the prototype') displayNl].
+  ('SKIP: invalid ' , (e at: 'layer') , ' ' , (e at: 'id') , ((e at: 'layer') = 'roots_log' ifTrue: [': pending, the acceptor log is cluster Task 4'] ifFalse: [': pending, the wire messages are cluster Task 5'])) displayNl].
 "The section must hold exactly the items skipped above."
 (cluster keys asSortedCollection asArray = #('messages' 'ranges_log' 'roots_log' 'roots_log_torn' 'segment' 'segments_log'))
   ifFalse: [('FAIL the cluster section holds ' , cluster keys asSortedCollection asArray printString) displayNl. Smalltalk exit: 1].

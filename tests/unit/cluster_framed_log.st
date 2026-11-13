@@ -1,12 +1,14 @@
-"EXPECT: ok 11"
+"EXPECT: ok 15"
 "PBFramedLog (cluster/log.st): the framed log of proto_db's logfile.py, byte for byte, and its
  linear torn-tail search. The frame of a 3-byte payload is also checked against the bytes
  CPython's struct and zlib make (c1f7 | 03000000 | crc32 | crc32 of the ten bytes | payload)."
 Import from: 'protobase'.
-| failures count tests check bigSize base header frame3 payloads file counter bigSize expectCorruption big w log scan |
+| failures tests check bigSize base header frame3 payloads file expectCorruption big w log scan blockHeader block blocks bodyLength fitting bound expectRefusal junk |
 failures := OrderedCollection new.
 tests := Set new.
 check := [:name :ok | ok ifFalse: [failures add: name]].
+expectRefusal := [:name :bytes :errorClass |
+  check value: name value: ([PBFramedLog scan: bytes kind: 'ROOT' path: 'x.log'. false] on: Error do: [:e | e class == errorClass])].
 expectCorruption := [:name :bytes :needle |
   | text |
   text := [PBFramedLog scan: bytes kind: 'ROOT' path: 'x.log'. nil] on: PBCorruptionError do: [:e | e messageText].
@@ -62,7 +64,9 @@ check value: 'zero-length payload refused' value:
   ([PBFramedLog frame: ByteArray new. false] on: PBValidationError do: [:e | true]).
 
 tests add: 9.
-"9. linearity: one valid frame, then C1 F7 repeated with random bytes between, 1 MiB"
+"9. linearity of the header-CRC cost: the random bytes never form a valid frame header (a header
+ CRC matches by chance with probability 2^-32), so this case bounds only the 10-byte header CRC
+ paid per candidate. Case 13 bounds the payload checks. One valid frame, then C1 F7 repeated with random bytes between, 1 MiB"
 PBFramedLog subclass: #CountingFramedLog instanceVariableNames: '' classVariableNames: 'Counter'.
 CountingFramedLog class >> _setCounter: anAtom
   Counter := anAtom.
@@ -73,6 +77,14 @@ CountingFramedLog class >> crcOf: aByteArray from: start to: end
   [n := Counter value. Counter value: n + (end - start) ifCurrent: n] whileFalse: [nil].
   ^ super crcOf: aByteArray from: start to: end.
 CountingFramedLog _setCounter: (Atom on: 0).
+PBFramedLog subclass: #WarnFramedLog instanceVariableNames: '' classVariableNames: 'Seen'.
+WarnFramedLog class >> _setSeen: anAtom
+  Seen := anAtom.
+WarnFramedLog class >> seen
+  ^ Seen.
+WarnFramedLog class >> _warn: aString
+  Seen value: aString ifCurrent: Seen value.
+WarnFramedLog _setSeen: (Atom on: nil).
 big := WriteStream on: ByteArray new.
 bigSize := 31.
 big nextPutAll: header; nextPutAll: (frame3 value: 1).
@@ -103,6 +115,53 @@ log := PBFramedLog openAppend: base / 'b' / 'c' / 'new.log' kind: 'SEGS'.
 check value: 'reopen reads payloads' value: (log payloads asArray = { (ByteArray withAll: #(7 7)). (ByteArray withAll: #(8)) } and: [log isClosed not]).
 log close.
 check value: 'read: never writes' value: ((PBFramedLog read: base / 'b' / 'c' / 'new.log' kind: 'SEGS') payloads size = 2).
+tests add: 12.
+"12. a foreign header is a classified refusal, never an encoding error (bytes are compared)"
+expectRefusal value: 'non-UTF-8 kind' value: (ByteArray withAll: #(80 68 66 50 76 79 71 0 2 0 255 254 253 252)) value: PBCorruptionError.
+expectRefusal value: 'foreign binary file' value: (ByteArray withAll: #(1 2 3 4 5 6 7 8 9 10 255 254 253 252 0 0)) value: PBCorruptionError.
+expectRefusal value: 'another version with a non-UTF-8 kind' value: (ByteArray withAll: #(80 68 66 50 76 79 71 0 3 0 255 254 253 252)) value: PBNotSupportedError.
+expectRefusal value: 'foreign magic, valid-looking kind' value: (ByteArray withAll: #(1 2 3 4 5 6 7 8 2 0 82 79 79 84 9)) value: PBCorruptionError.
+expectRefusal value: 'short foreign header' value: (ByteArray withAll: #(255 1 2)) value: PBCorruptionError.
+
+tests add: 13.
+"13. linearity of the payload checks: after one invalid byte, 25,000 header-valid candidates (one
+ every 16 bytes) each claim a 100,000-byte payload that fits for most of them. Direct CRCs would
+ cost fitting x 100,000 bytes, quadratic in the file (R14); the prefix checksums cost at most two
+ partial checkpoints (2 x 4096) per candidate, plus one pass over the file."
+bodyLength := 100000.
+blocks := 25000.
+w := WriteStream on: ByteArray new.
+w nextPutAll: (ByteArray withAll: #(193 247)).
+w nextPutUnsigned: bodyLength width: 4 bigEndian: false.
+w nextPutUnsigned: 12345 width: 4 bigEndian: false.
+blockHeader := w contents.
+w nextPutUnsigned: blockHeader crc32 width: 4 bigEndian: false.
+w nextPutAll: (ByteArray withAll: #(0 0)).
+block := w contents.
+w := WriteStream on: ByteArray new.
+w nextPutAll: header; nextPutAll: (frame3 value: 1); nextPutAll: (ByteArray withAll: #(0)).
+1 to: blocks do: [:k | w nextPutAll: block].
+big := w contents.
+fitting := ((16 * blocks) - 14 - bodyLength) // 16 + 1.
+bound := big size + (blocks * 10) + (fitting * 2 * 4096).
+check value: 'the bound separates the prefix path from a direct CRC' value: bound * 5 < (fitting * bodyLength).
+CountingFramedLog counter value: 0 ifCurrent: CountingFramedLog counter value.
+scan := CountingFramedLog scan: big kind: 'ROOT' path: 'big.log'.
+check value: 'linear payload checks' value: (scan isTorn and: [scan payloads size = 1 and: [CountingFramedLog counter value <= bound]]).
+
+tests add: 14.
+"14. a trimmed torn tail is reported, with its byte count and the offset it was cut at"
+(base / 'd') ensureCreateDirectory.
+(base / 'd' / 'torn.log') binaryContents: (file copyFrom: 1 to: file size - 4).
+log := WarnFramedLog openAppend: base / 'd' / 'torn.log' kind: 'ROOT'.
+log close.
+check value: 'torn tail reported' value: (WarnFramedLog seen value notNil
+  and: [(WarnFramedLog seen value includesSubstring: '13 bytes') and: [WarnFramedLog seen value includesSubstring: 'offset 48']]).
+
+tests add: 15.
+"15. a log kind is 4 ASCII bytes"
+check value: 'kind of 3 characters' value: ([PBFramedLog header: 'ROO'. false] on: PBValidationError do: [:e | true]).
+check value: 'non-ASCII kind' value: ([PBFramedLog header: 'RO' , (String with: (Character value: 233)) , 'T'. false] on: PBValidationError do: [:e | true]).
 base deleteAll.
 failures isEmpty ifFalse: [failures do: [:f | ('FAIL ' , f) displayNl]. Smalltalk exit: 1].
 'ok ' , tests size printString

@@ -65,8 +65,9 @@ Not tested, or not proven:
 | Item | State | Why | Cost |
 |---|---|---|---|
 | `CountedSet` | **Done** (ruling R22), first a stretch goal | Time allowed, and cutting it would have left `PBCountedSet` mutators refusing. | None. |
-| Framed log reader (`PBFramedLog`) | Written, removed (ruling R14), **re-ported** with the linear search in cluster Task A1 (`cluster/log.st`) | The spec lists framed logs as a non-goal and nothing in protoBaseST reads them; an uncalled reader is debt. Its worst case was quadratic. | If cluster or tiered storage enters scope, the reader must be re-ported with `proto_db`'s linear prefix-checksum search. |
+| Framed log reader (`PBFramedLog`) | Written, removed (ruling R14), **re-ported** with the linear search in cluster Task A1 (`cluster/log.st`) | The spec lists framed logs as a non-goal and nothing in protoBaseST reads them; an uncalled reader is debt. Its worst case was quadratic. | Done in cluster Task A1 (linear prefix-checksum search). |
 | `asOf:` | Not added | `proto_db` has none. | A three-line helper in each program. |
+| **Open: hard-link check of framed logs** | Not implemented | `proto_db`'s `open_log` refuses a log file with more than one hard link (`ProtoLockingError`) before reading or repairing it (`logfile.py:283-290`), because the path-named `.lock` file only excludes a second opener when a log has exactly one name. protoST has no link-count API (its file stat has no `nlink`). | Must be resolved before Task 4's `PBAcceptorLog` lands, pending a maintainer decision on adding a link count to protoST's file stat. |
 | Cluster held retries | Not ported | No cluster mode. | |
 | Index maintenance | Not done | Out of scope (design 7.4). Refused explicitly rather than done partly. | A database with indexes can be read, not changed in its indexed collections. |
 

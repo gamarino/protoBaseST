@@ -10,7 +10,7 @@
    invalid log-*   signal the manifest's error, with the listed kind"
 Import from: 'protobase'.
 Import from: '_vectors'.
-| manifest cluster failures scan entry expected w classes |
+| logEntries manifest cluster failures scan entry expected w classes |
 manifest := Vectors manifest.
 cluster := manifest at: 'cluster'.
 failures := OrderedCollection new.
@@ -56,7 +56,9 @@ expected := (entry at: 'entries') collect: [:e |
 "invalid vectors of layer log"
 classes := Dictionary new.
 classes at: 'corruption' put: PBCorruptionError; at: 'not_supported' put: PBNotSupportedError.
-((manifest at: 'invalid') select: [:e | (e at: 'layer') = 'log']) do: [:e |
+logEntries := (manifest at: 'invalid') select: [:e | (e at: 'layer') = 'log'].
+logEntries size = 3 ifFalse: [failures add: 'the manifest lists ' , logEntries size printString , ' invalid log vectors, not 3'].
+logEntries do: [:e |
   | outcome cls |
   cls := classes at: (e at: 'error').
   outcome := [PBFramedLog scan: (Vectors bytesOf: (e at: 'file')) kind: (e at: 'kind') path: (e at: 'file'). nil]
