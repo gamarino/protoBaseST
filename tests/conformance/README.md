@@ -1,10 +1,10 @@
 # Conformance vectors of the ProtoDB storage format
 
-These files are the contract between ProtoBase and any other implementation of its storage
+These files are the contract between `proto_db` and any other implementation of its storage
 format, protoBaseST first (rulings R83, R83a; decision D57). The specification is
 `docs/source/format-spec.rst`; the vectors show its bytes. Every byte here was produced by
-ProtoBase's own encoders (`generate.py`) and is checked byte for byte against the code by
-`test_conformance.py`, so a vector never disagrees with what ProtoBase reads and writes.
+`proto_db`'s own encoders (`generate.py`) and is checked byte for byte against the code by
+`test_conformance.py`, so a vector never disagrees with what `proto_db` reads and writes.
 
 ## Files
 
@@ -17,7 +17,7 @@ ProtoBase's own encoders (`generate.py`) and is checked byte for byte against th
 | `vectors/framing/` | Segment headers (formats 4, 3 and 2), an ATOM and a BLOB record, root records (file, formats 3 and 2, cloud, tiered) |
 | `vectors/database/` | A complete format-4 file-storage space: `space.root` and one segment, written through the public API (trained ivf_flat and hnsw vector indexes included) |
 | `vectors/legacy/` | A format-3 space: a DatabaseRoot without `origin`, a key-group index (tokens of every kind) and a vector index written with format-3 member tokens and plain KeyNode trees, zone datetimes in the wall-clock form, maps with format-3 key forms (zone datetimes, NaNs twice), collections that format 3 misfiled by writing a `(str, Enum)` member through `str()`, an application record and reference spelled by an alias |
-| `vectors/polyglot/` | A format-4 space holding a record of `polyglot.st.Order`, a type no Python class implements (an opaque atom, D59), which references a ProtoBase record and is referenced from a root, plus an older record of that type written as `polyglot.st.SalesOrder` (its previous name) and referenced under the declared name |
+| `vectors/polyglot/` | A format-4 space holding a record of `polyglot.st.Order`, a type no Python class implements (an opaque atom, D59), which references a `proto_db` record and is referenced from a root, plus an older record of that type written as `polyglot.st.SalesOrder` (its previous name) and referenced under the declared name |
 | `vectors.sha256` | The SHA-256 of every vector file and of `manifest.json`, sorted by path; `format-spec.rst` states this file's own digest |
 | `vectors/cluster/<uuid>.seg` | The segment of one cluster commit: a `SpaceRoot` with its lease term, epoch and predecessor |
 | `vectors/cluster/roots.log` | An acceptor log holding every entry kind (1 to 6), each listed field by field |
@@ -123,8 +123,8 @@ A reader passes when, for every entry of `manifest.json`:
     many languages allows by default.
 
 For the cross-implementation round trip (R83a), also run the reverse: write a database with
-your implementation, open it with ProtoBase (`ObjectSpace(FileStorage(path))`), and compare; `python -m proto_db.tools.verify <path>`
-does the ProtoBase side in one command (exit 0, and the content dumped in this notation).
+your implementation, open it with `proto_db` (`ObjectSpace(FileStorage(path))`), and compare; `python -m proto_db.tools.verify <path>`
+does the `proto_db` side in one command (exit 0, and the content dumped in this notation).
 
 ## Regenerating
 

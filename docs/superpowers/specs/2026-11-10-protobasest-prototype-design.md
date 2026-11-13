@@ -3,14 +3,14 @@
 Status: **approved 2026-11-10 and implemented by this prototype.** Author: Gustavo Marino, with Claude.
 This document is kept as the design the prototype was built from. Where
 [docs/decisions.md](../../decisions.md) differs, `docs/decisions.md` supersedes it: notably the
-move to ProtoBase `v2.0.0rc2` (ruling R18: value nesting limit 1022, a new vectors digest), R14
+move to `proto_db` at `v2.0.0rc2` (ruling R18: value nesting limit 1022, a new vectors digest), R14
 (log layers) and R19 (the publisher never waits). The `v2.0.0rc1` pin, commit and vectors digest
 below are historical; the current pin is in `tests/conformance/fetch_vectors.sh`.
 
 Revision 2 applies the maintainer's answers to the six questions of revision 1, and one rule:
-**when in doubt, ProtoBase v2.0.0rc1 is the reference**, for semantics, API shape and names.
+**when in doubt, `proto_db` v2.0.0rc1 is the reference**, for semantics, API shape and names.
 
-Normative source: ProtoBase `docs/source/format-spec.rst` at tag `v2.0.0rc1` (commit
+Normative source: `proto_db` `docs/source/format-spec.rst` at tag `v2.0.0rc1` (commit
 `c48f73e`). The conformance vectors are pinned by the SHA-256 of
 `tests/conformance/vectors.sha256`:
 `5f86eb09ed1683aa9f048051c64cca68d23b9fb753e87416cb1ecf11ed406df0`. The transaction semantics
@@ -25,14 +25,14 @@ follow `docs/source/concurrency-model.rst` and `proto_db/transactions.py` at the
 | 1 | Where the code lives | A new repository, `protoBaseST`. `Decimal`, the calendar values and `UUID` go to protoST's `lib/` (§8) |
 | 2 | Symbols | For the prototype, a `Symbol` is refused and strings are strings. When `@sym` lands, protoST gets an explicit wrapper; STATUS D35 stays (§4.4) |
 | 3 | Immutability of stored values | By convention: built once, never assigned afterwards. No frozen instances (§4.1) |
-| 4 | Names | ProtoBase's names with the `PB` prefix, the camelCase translation of the real API at the tag (§5) |
-| 5 | Conflict granularity | **The same as ProtoBase**: per-root and per-cell read sets, the replace and merge rules, and the mutable-cell rules of D35 (§7) |
+| 4 | Names | `proto_db`'s names with the `PB` prefix, the camelCase translation of the real API at the tag (§5) |
+| 5 | Conflict granularity | **The same as `proto_db`**: per-root and per-cell read sets, the replace and merge rules, and the mutable-cell rules of D35 (§7) |
 | 6 | Early primitives | Approved: protoIO 0.5.0 and protoST 0.10.0 (ruling R10) with `randomBytes:` and a microsecond clock, in weeks 0-1 (§9) |
 
 ## 1. Intent
 
 protoBaseST is a perennial object database for protoST, in the tradition GemStone opened.
-It is a Smalltalk implementation of ProtoBase (the Python package `proto_db`). It reads and
+It is a Smalltalk implementation of `proto_db` (the Python package `proto_db`). It reads and
 writes the **same files**: one directory, opened by a Python process and by a protoST process,
 holds one database. It has the same API, translated to Smalltalk, and the same transaction
 semantics.
@@ -42,11 +42,11 @@ This prototype is a **proposal**, not a product. It is shown at the FAST Smallta
 correct; it need not be fast or complete. About three weeks of work.
 
 **Acceptance: a cross-implementation round trip, in both directions.**
-- A space written by ProtoBase is read by protoBaseST, and the contents agree.
+- A space written by `proto_db` is read by protoBaseST, and the contents agree.
 - A space written by protoBaseST passes `python -m proto_db.tools.verify <dir>` (exit 0), and
   the contents it prints agree.
 - Both directions run on the conformance vectors and on a small ERP example.
-- Concurrent commits from both languages to one directory get ProtoBase's outcomes: the same
+- Concurrent commits from both languages to one directory get `proto_db`'s outcomes: the same
   conflicts, the same merges.
 
 What the prototype shows the audience:
@@ -63,14 +63,14 @@ What the prototype shows the audience:
 **Goals**
 - A Reader and a Writer at the conformance levels of spec §"Status, versions and
   conformance", for file storage. It reads formats 2, 3 and 4 and writes format 4.
-- ProtoBase's transaction model: snapshot isolation, read sets checked at commit, the merge
+- `proto_db`'s transaction model: snapshot isolation, read sets checked at commit, the merge
   of blind writes to the collections that support it, the mutable-cell rules, `run:` with
   retries, and outcome-unknown reporting.
 - Core collections read and written: `List`, `Dictionary`, `HashDictionary`, `Set`,
   `CountedSet` (a stretch goal, §10), `DBObject` records, application record types, mutable
   cells.
 - `RepeatedKeysDictionary` and every index type are read; they are not changed.
-- A Smalltalk API that mirrors ProtoBase's, so that one document explains both languages.
+- A Smalltalk API that mirrors `proto_db`'s, so that one document explains both languages.
 
 **Non-goals for 2026-12-03** (stated openly in the talk)
 - The cluster: framed logs, the wire protocol, leases. Mixed Python/protoST clusters stay
@@ -93,8 +93,8 @@ What the prototype shows the audience:
   format's inter-process protocol; only the publisher actor takes it (§7.3).
 - A value stored under a kind it does not have (a symbol as a string, a `Fraction` as a
   float, a `Dictionary` of unspecified order as a map). Refuse instead.
-- A semantic divergence from ProtoBase hidden behind the same name. In particular, never
-  replace a value where ProtoBase would merge it (§7.4).
+- A semantic divergence from `proto_db` hidden behind the same name. In particular, never
+  replace a value where `proto_db` would merge it (§7.4).
 - Silent failure. A value, type, version or operation the prototype cannot handle raises an
   explicit error naming it.
 - Business rules in the database core: no constraints, schema checks or `ondelete` rules.
@@ -110,24 +110,24 @@ What the prototype shows the audience:
   (`src/primitives/`) and adds classes in `lib/`.
 - Synchronisation only through actors, Futures and `Atom`.
 - Tests never depend on timing.
-- The ProtoBase repository is read and never modified. The Python side of the tests installs
-  ProtoBase from `git archive v2.0.0rc1` into a private venv.
+- The protoBase repository is read and never modified. The Python side of the tests installs
+  `proto_db` from `git archive v2.0.0rc1` into a private venv.
 
 ## 4. The model in protoST
 
 ### 4.1 Values, atoms and mutable objects
 
-ProtoBase's model, kept as is:
+`proto_db`'s model, kept as is:
 - **values**: scalars, frozen lists, tuples and frozen maps;
 - **atoms**: records, collections and tree nodes. An atom is immutable. A change answers a new
   atom with a new `oid`, which shares every unchanged subtree by pointer;
 - **mutable objects**: a `PBMutableObject` is an immutable handle naming a cell of the
   database's mutable table (`@mut`). The cell's value changes only by commit;
-- **the transaction** is a unit of work, not a value. As in ProtoBase, it is an explicit
+- **the transaction** is a unit of work, not a value. As in `proto_db`, it is an explicit
   object whose state moves from active to committed or aborted; it records reads and writes.
   The values it reads and writes stay immutable.
 
-Collection operations keep ProtoBase's names (`setAt:value:`, `appendLast:`, `add:`), and
+Collection operations keep `proto_db`'s names (`setAt:value:`, `appendLast:`, `add:`), and
 each one **answers a new version**; the receiver is unchanged. §5.3 notes the three names
 that clash with Pharo's meaning.
 
@@ -136,7 +136,7 @@ constructor or a transaction factory, and none of its methods assigns an instanc
 afterwards. protoST does not enforce this at run time (LANGUAGE.md §4.5). Two runtime-only
 fields are exceptions, and neither is persisted: the memo of a lazy load (§6.3) and the
 consumed mark of a collection's operation log (§7.2). Both are `Atom` cells, and both mirror
-what ProtoBase does with `object.__setattr__`.
+what `proto_db` does with `object.__setattr__`.
 
 ### 4.2 Value kinds and protoST classes
 
@@ -156,10 +156,10 @@ The canonical values of spec §"Canonical values", and what each becomes:
 | datetime | `{"@dt": [..., fold, tz]}` | `DateTime` (new) | `DateTime` | naive, fixed offset, or `["instant", key]` (§4.3) |
 | timedelta | `{"@td": [d, s, us]}` | `TimeSpan` (new) | `TimeSpan` | normalized, in microseconds (the kernel `Duration` counts milliseconds) |
 | uuid | `{"@uuid": 16 bytes}` | `UUID` (new) | `UUID` | Pharo's name and meaning |
-| list | msgpack array | `PBFrozenList` | `PBFrozenList`, `Array`, `OrderedCollection` (copied at once) | ProtoBase's `FrozenList`; not orderable |
+| list | msgpack array | `PBFrozenList` | `PBFrozenList`, `Array`, `OrderedCollection` (copied at once) | `proto_db`'s `FrozenList`; not orderable |
 | tuple | `{"@tup": [...]}` | `PBTuple` | `PBTuple` | orderable when its items are |
-| map | `{"@map": [[k, v], ...]}` | `PBFrozenDict` | `PBFrozenDict` only | ProtoBase's `FrozenDict`; insertion order kept. A protoST `Dictionary` is **refused**: its order is unspecified, and the order is part of the exact token |
-| missing | `{"@missing": 0}` | `PBMissing` (ProtoBase's `MISSING`) | — | only in index keys |
+| map | `{"@map": [[k, v], ...]}` | `PBFrozenDict` | `PBFrozenDict` only | `proto_db`'s `FrozenDict`; insertion order kept. A protoST `Dictionary` is **refused**: its order is unspecified, and the order is part of the exact token |
+| missing | `{"@missing": 0}` | `PBMissing` (`proto_db`'s `MISSING`) | — | only in index keys |
 | mutable | `{"@mut": name}` | `PBMutableObject` | `PBMutableObject` | |
 | ref | `{"@ref": [seg, off, tag]}` | the atom, loaded on access (§6.3) | any atom | |
 | opaque atom | a record of a type with no class | `PBOpaqueAtom` | as a reference only | never re-written (D59) |
@@ -186,15 +186,15 @@ protoST has no IANA database (readiness §3). The rules, all explicit:
     the reader's database, and this list is protoBaseST's database of keys.
   - A key newer than the pinned release is refused explicitly until the list is regenerated,
     which is a deliberate commit.
-  - **Cost: a pinned key may be refused by a ProtoBase host** (decided at the Task 7
-    re-review). ProtoBase checks a key against the host's own tz database, so a host without
+  - **Cost: a pinned key may be refused by a `proto_db` host** (decided at the Task 7
+    re-review). `proto_db` checks a key against the host's own tz database, so a host without
     some of the pinned names refuses them when it reads. On the reference host (no
-    `tzdata-legacy` and no `tzdata` Python package), ProtoBase refuses 113 of the 597 pinned
+    `tzdata-legacy` and no `tzdata` Python package), `proto_db` refuses 113 of the 597 pinned
     keys, the backward links such as `US/Eastern` and `America/Buenos_Aires`, with
-    `ProtoCorruptionError "Malformed @time value"`. ProtoBase on a host that has those links
+    `ProtoCorruptionError "Malformed @time value"`. `proto_db` on a host that has those links
     writes the same keys. The format makes key validity relative to the reader's database
     (Known gaps), so protoBaseST neither refuses nor rewrites such keys: refusing them on
-    write would make protoBaseST unable to re-save an atom that ProtoBase wrote legitimately,
+    write would make protoBaseST unable to re-save an atom that `proto_db` wrote legitimately,
     and the reader must accept them in any case. Cross-implementation tests (§10.2, §10.3)
     use canonical Zone names only.
 - A format-4 `["instant", key]` datetime is read as its UTC instant **plus the zone key**. It
@@ -208,10 +208,10 @@ protoST has no IANA database (readiness §3). The rules, all explicit:
     is valid). The conformance vector `invalid/value-instant-wall-out-of-range` is therefore
     accepted: a permanent expected difference (plan Task 8).
   - **Writing.** An instant within one day of year 1 or year 9999 is refused with
-    `PBNotSupportedError`, because ProtoBase refuses to read such a value back when its wall
+    `PBNotSupportedError`, because `proto_db` refuses to read such a value back when its wall
     clock leaves the range. The cost: a `datetime.max`-style sentinel in an IANA zone cannot
     be written from protoST, and an atom that holds such an in-band instant written by
-    ProtoBase can be read but not modified (re-written) by protoBaseST.
+    `proto_db` can be read but not modified (re-written) by protoBaseST.
 - Building a zoned datetime from a wall clock is refused (`TimeZoneUnavailable`, call C7). The
   application stores a UTC or fixed-offset datetime, or a naive datetime plus the zone name.
 - **A format-3 `["zone", key]` datetime** (legacy data) is read *lazily*. This supersedes the
@@ -245,7 +245,7 @@ protoST has no IANA database (readiness §3). The rules, all explicit:
     their wall clocks are equal. The spring-forward 02:30 and 03:30 are two keys.
 
   Why lazily: old atoms whose other attributes are fine stay readable, and atoms that are
-  never changed are kept byte for byte, as the spec requires. ProtoBase re-encodes such a
+  never changed are kept byte for byte, as the spec requires. `proto_db` re-encodes such a
   value as its instant, which needs a database, so the vector
   `values_decode_only/datetime-zone-format3` is a permanent expected difference (plan Task 8).
 - `["zone", key]` inside a `@time` is a wall clock without a date. It orders as the naive
@@ -267,14 +267,14 @@ protoST has no IANA database (readiness §3). The rules, all explicit:
 
 ### 4.5 Application record types
 
-As in ProtoBase, an application type subclasses `PBObject` (ProtoBase's `DBObject`). It
+As in `proto_db`, an application type subclasses `PBObject` (`proto_db`'s `DBObject`). It
 declares its language-neutral name (`__type_name__` in Python) and its former names
 (`__type_aliases__`), and is registered with `registerAtomClass:`. The same name and aliases
 must be declared in every implementation (D57).
 
 Accessors only answer the stored value (A4: an accessor is not behaviour). Behaviour methods
 must not share a name with a persisted attribute, in any implementation of the type. There
-are no generated setters: a change goes through `with:value:`, which is ProtoBase's `with_()`.
+are no generated setters: a change goes through `with:value:`, which is `proto_db`'s `with_()`.
 
 ```smalltalk
 PBObject subclass: #Invoice.
@@ -293,13 +293,13 @@ Invoice >> isPaid     ^ self paidOn notNil.
 PBObjectSpace registerAtomClass: Invoice.
 ```
 
-The registry is process-wide, as ProtoBase's is (`register_atom_class`). It is held in an
+The registry is process-wide, as `proto_db`'s is (`register_atom_class`). It is held in an
 `Atom` over an immutable map. A record whose type has no registered class reads as a
 `PBOpaqueAtom` (D59). The per-database, module-composed registry is excluded (§2).
 
-## 5. Names: ProtoBase's API, translated
+## 5. Names: `proto_db`'s API, translated
 
-**Decided** (decision 4): ProtoBase's public names at `v2.0.0rc1`, with the prefix `PB` in
+**Decided** (decision 4): `proto_db`'s public names at `v2.0.0rc1`, with the prefix `PB` in
 place of a namespace (protoST has none) and Smalltalk camelCase. Python keyword arguments
 become keyword parts named after the parameter. Every name below was checked against the
 tag (`proto_db/__init__.py`, `transactions.py`, `collections/*.py`, `core/dbobject.py`,
@@ -307,7 +307,7 @@ tag (`proto_db/__init__.py`, `transactions.py`, `collections/*.py`, `core/dbobje
 
 ### 5.1 Classes
 
-| ProtoBase (`proto_db`) | protoBaseST |
+| `proto_db` | protoBaseST |
 |---|---|
 | `ObjectSpace` | `PBObjectSpace` |
 | `FileStorage` | `PBFileStorage` |
@@ -327,7 +327,7 @@ tag (`proto_db/__init__.py`, `transactions.py`, `collections/*.py`, `core/dbobje
 
 ### 5.2 Messages
 
-| ProtoBase | protoBaseST |
+| `proto_db` | protoBaseST |
 |---|---|
 | `FileStorage(path, durability="fsync")` | `PBFileStorage path: '/srv/erp'` (durability is always `fsync`) |
 | `ObjectSpace(storage, lock_timeout=s)` | `PBObjectSpace storage: aStorage`, `storage:lockTimeout:` (milliseconds) |
@@ -342,7 +342,7 @@ tag (`proto_db/__init__.py`, `transactions.py`, `collections/*.py`, `core/dbobje
 | `tr.new_object(**attrs)` | `newObject: { 'name' -> 'Ada'. 'born' -> 1815 }` |
 | `tr.commit()`, `abort()`, `is_active` | `commit`, `abort`, `isActive` |
 | `Snapshot.version`, `committed_at`, `root_names`, `get_root_object(n)`, `mutable_names`, `get_mutable(n)` | `version`, `committedAt`, `rootNames`, `getRootObject:`, `mutableNames`, `getMutable:` |
-| `HistoryEntry.version`, `committed_at`, `root_names`, `mutable_names`, `get_mutable(n)` | `version`, `committedAt`, `rootNames`, `mutableNames`, `getMutable:` (no `getRootObject:`, as in ProtoBase: open the version with `snapshotAt:`) |
+| `HistoryEntry.version`, `committed_at`, `root_names`, `mutable_names`, `get_mutable(n)` | `version`, `committedAt`, `rootNames`, `mutableNames`, `getMutable:` (no `getRootObject:`, as in `proto_db`: open the version with `snapshotAt:`) |
 | `MutableObject(name)`, `.name`, `.get(tr)`, `.set(tr, v)` | `PBMutableObject name: 'customer:acme'`, `name`, `get: tr`, `set: tr value: v` |
 | `DBObject.with_(**changes)`, `has_defined_attr(n)`, attribute read | `with: 'field' value: v`, `withAll: { 'a' -> 1. 'b' -> 2 }`, `hasDefinedAttr:`, `at:` (absent: `nil`) |
 | `Application(**attrs)` (construction) | `Invoice withAll: { 'number' -> 1043. ... }` |
@@ -356,19 +356,19 @@ tag (`proto_db/__init__.py`, `transactions.py`, `collections/*.py`, `core/dbobje
 | `count` (a persisted field) | `count`; `size` as the Smalltalk synonym |
 | iteration (`for x in coll`) | `do:`; `keysAndValuesDo:` on the dictionaries |
 
-- **Zero-based indexes.** `List` positions are 0-based in ProtoBase, and in protoBaseST they
-  are too, because the name is ProtoBase's and the persisted `PosNode` counts are the same.
+- **Zero-based indexes.** `List` positions are 0-based in `proto_db`, and in protoBaseST they
+  are too, because the name is `proto_db`'s and the persisted `PosNode` counts are the same.
   Smalltalk collections are 1-based. This is noted in the class comment and in the talk.
 - **Units.** Timeouts and backoffs are SmallInteger milliseconds, the protoST convention of
   STATUS D48, not Python's float seconds.
-- **No `asOf:`.** ProtoBase has none. As-of is the three-line helper of the ERP tutorial,
+- **No `asOf:`.** `proto_db` has none. As-of is the three-line helper of the ERP tutorial,
   which is shown in §6.5.
 
 ### 5.3 Note for the maintainer: three names that clash with Pharo's meaning
 
 These are kept as decided. They are listed so that the decision is made knowingly.
 
-| Name | Pharo meaning | ProtoBase/protoBaseST meaning | The risk | Alternative, if ever wanted |
+| Name | Pharo meaning | `proto_db`/protoBaseST meaning | The risk | Alternative, if ever wanted |
 |---|---|---|---|---|
 | `Set >> add:`, `CountedSet >> add:` | adds in place and answers the **element** | answers a **new set** | `s add: 3.` with the result discarded changes nothing, and nothing fails | `copyWith:` (Pharo's own non-mutating name, same meaning for `Set`) |
 | `Set >> remove:`, `CountedSet >> remove:` | removes in place and answers the element; signals when absent | answers a new set; an absent element is a no-op | the same discarded result | `copyWithout:` for `Set`; no Pharo name for one occurrence of a `CountedSet` |
@@ -419,7 +419,7 @@ ends and aborts if it raises; the exception then propagates. There is **no retry
 concurrent change to `invoices` makes `commit` signal `PBConflictError`, because the root was
 read.
 
-The explicit form is ProtoBase's:
+The explicit form is `proto_db`'s:
 
 ```smalltalk
 tr := db newTransaction.
@@ -439,13 +439,13 @@ db run: [:tr |
 `run:` mirrors `Database.run`:
 - it runs the block in a fresh transaction and commits it;
 - on `PBConflictError` it aborts and retries with a fresh transaction, up to `retries`
-  (default 10), with ProtoBase's bounded exponential backoff with jitter (`Future after:`,
+  (default 10), with `proto_db`'s bounded exponential backoff with jitter (`Future after:`,
   never a blocked worker);
 - any other exception aborts and propagates. `PBOutcomeUnknownError` is never retried,
   because the commit may have been applied;
 - the block may therefore run more than once, so it must be free of outside side effects.
 
-### 6.4 Blind writes merge, as in ProtoBase
+### 6.4 Blind writes merge, as in `proto_db`
 
 ```smalltalk
 "Two processes add different keys to 'tags' without reading it: both survive."
@@ -483,7 +483,7 @@ asOf := [:moment |
 
 Nothing is ever deleted, so every version stays readable.
 
-## 7. Transactions and concurrency: the same as ProtoBase
+## 7. Transactions and concurrency: the same as `proto_db`
 
 This section specifies decision 5. Source: CM §"Snapshot isolation" to §"Free-threading",
 and `Transaction._build_root`, `_merged`, `_check_mutables` and `Database.run` at the tag.
@@ -494,7 +494,7 @@ A `PBTransaction` holds:
 - its database;
 - its snapshot: the root record (epoch and pointer), the `SpaceRoot` and the
   `DatabaseRoot`, read once when it starts;
-- its bookkeeping, the same maps as ProtoBase's:
+- its bookkeeping, the same maps as `proto_db`'s:
   - `reads`: root name to token;
   - `writes`: root name to a value or *removed*;
   - `replaced`: root names written with `replace: true`, or removed;
@@ -505,11 +505,11 @@ A `PBTransaction` holds:
   signals `PBUserError`.
 
 The bookkeeping is one immutable record held in an **`Atom`**, updated with `swap:`. That
-replaces ProtoBase's `RLock`: a transaction is meant for one thread at a time, and if it is
+replaces `proto_db`'s `RLock`: a transaction is meant for one thread at a time, and if it is
 misused from two actors, each call still happens entirely before or after the others. The
 protoST layer has no lock.
 
-The rules are ProtoBase's, one for one:
+The rules are `proto_db`'s, one for one:
 - **Snapshot reads.** `getRootObject:` answers the transaction's own write if there is one.
   Otherwise it reads the snapshot and records `(name, token)` on the first read. Absence is a
   token too. `rootNames` records nothing.
@@ -530,20 +530,20 @@ The rules are ProtoBase's, one for one:
 
 ### 7.2 Operation logs (what makes a merge possible)
 
-`PBDictionary`, `PBHashDictionary`, `PBSet` and `PBCountedSet` are ProtoBase's
+`PBDictionary`, `PBHashDictionary`, `PBSet` and `PBCountedSet` are `proto_db`'s
 `ConcurrentOptimized` collections. Each version carries two runtime-only fields, never
 persisted:
-- the **operation log**: an immutable `PBFrozenList` of intents, ProtoBase's ops:
+- the **operation log**: an immutable `PBFrozenList` of intents, `proto_db`'s ops:
   `('set' key value)` and `('remove' key)` for the dictionaries, `('add' element)` and
   `('remove' element)` for a set and a counted set, and `('transform' element removes adds)`
   for a counted set's rebase adjustments (amended at Task 22: a counted set's mutators log
-  `add` and `remove` as ProtoBase's do). Every mutator logs its intent, including one that changes nothing (a blind write),
+  `add` and `remove` as `proto_db`'s do). Every mutator logs its intent, including one that changes nothing (a blind write),
   and answers a new version carrying the longer log;
 - **log is complete**: true for a collection built empty in this process (`tr newDictionary`,
   `PBDictionary new`) and for versions derived from it only through logged mutators. False
   for loaded, bulk-built and rebased versions, and for everything derived from them.
 
-**D33, a log is replayed once.** ProtoBase marks a committed value's log incomplete after the
+**D33, a log is replayed once.** `proto_db` marks a committed value's log incomplete after the
 commit (`object.__setattr__`), so that reusing the value in a later transaction replaces
 instead of replaying the same operations twice. protoBaseST gives each version a *consumed*
 cell, an `Atom` holding `false`. The publisher sets it to `true` on every value it committed.
@@ -551,7 +551,7 @@ A version derived later reads its parent's cell at derivation time, as Python co
 `_log_complete` in `_with`. The outcome is the same: a version derived from a committed value
 has an incomplete log, and an earlier sibling keeps its own.
 
-`rebaseOnto: current` is ProtoBase's `rebase_onto`. It reduces the log to its **net effect**:
+`rebaseOnto: current` is `proto_db`'s `rebase_onto`. It reduces the log to its **net effect**:
 - the last intent per key, compared by order key, in order of last occurrence;
 - for `PBCountedSet`, the composed counter transform per element (D26):
   `c -> max(c - removes, 0) + adds`.
@@ -564,7 +564,7 @@ operations never occur, because the prototype does not add indexes.
 The space has **one actor per process**, the publisher. It owns the segment and the publish
 protocol, and it never runs application code. `tr commit` sends the transaction to the
 publisher and waits on the Future; inside an actor the wait suspends that actor (D37). The
-publisher handles one commit at a time. That is ProtoBase's protocol with a group of one,
+publisher handles one commit at a time. That is `proto_db`'s protocol with a group of one,
 since group commit (D52) is implementation-specific and excluded.
 
 For each commit, the publisher:
@@ -605,7 +605,7 @@ For each commit, the publisher:
    `syncDirectory:`. It then releases the lock, best effort: a failure there is logged, never
    raised.
 7. **After success** it sets the *consumed* cell of every written collection (§7.2).
-   ProtoBase keeps a last-known root only in a cluster: there, the coordinator's committed
+   `proto_db` keeps a last-known root only in a cluster: there, the coordinator's committed
    root may be ahead of the persisted one, and `committed_epoch` reads it. Outside a cluster,
    `committed_epoch` reads the storage's root. This prototype runs one process per space
    without a cluster, so it keeps no last-known root: nothing would read it (ruling N2, Task 18
@@ -632,10 +632,10 @@ what makes the round trip transactional and not only a file exchange.
 | `run:` with retries and backoff; `PBOutcomeUnknownError` resolution by re-reading the root | **In** |
 | `PBCountedSet` writes and the counter-transform merge (D26) | **Stretch**, cut first (§10) |
 | `RepeatedKeysDictionary` writes and merges; index-definition merges | **Out** |
-| A merge onto a current value that has indexes | **Out, and refused.** ProtoBase replays through mutators that maintain the current value's indexes. protoBaseST cannot maintain indexes, so it signals `PBNotSupportedError`. Replacing instead would silently diverge from ProtoBase |
+| A merge onto a current value that has indexes | **Out, and refused.** `proto_db` replays through mutators that maintain the current value's indexes. protoBaseST cannot maintain indexes, so it signals `PBNotSupportedError`. Replacing instead would silently diverge from `proto_db` |
 | Group commit (D52), cluster leases | **Out** (implementation-specific, or outside acceptance) |
 
-The rule behind the table: protoBaseST either does what ProtoBase does, or refuses with an
+The rule behind the table: protoBaseST either does what `proto_db` does, or refuses with an
 explicit error. It never does something else under the same name.
 
 ## 8. Layering and where the code lives
@@ -674,7 +674,7 @@ From the bottom up. Each layer depends only on the layers below it.
 **Structures (layer 5).**
 - A reference decodes to an unloaded atom (a pointer plus its storage) that loads its record
   when a message needs its state. The loaded state is memoised in an `Atom`. Two concurrent
-  loads give equal values, so the race is harmless. This is ProtoBase's lazy loading, which
+  loads give equal values, so the race is harmless. This is `proto_db`'s lazy loading, which
   the spec calls implementation-specific.
 - New versions are built in memory by path copying. AVL insert and remove keep the invariants
   of spec §"AVL nodes": height, count, balance, key order and `weight`.
@@ -752,7 +752,7 @@ by step by the test script.
 | `polyglot_database` | the opaque record is readable, and is kept byte for byte after the record that references it is changed and committed |
 | `cluster` | skipped visibly (`SKIP:`) |
 
-**10.2 Python to protoST.** A pinned-venv Python script writes a space through ProtoBase's
+**10.2 Python to protoST.** A pinned-venv Python script writes a space through `proto_db`'s
 API:
 - every non-indexed collection, `DBObject`, `demo.erp.Invoice`, a mutable cell;
 - three versions;
@@ -766,14 +766,14 @@ equal.
 `python -m proto_db.tools.verify <dir> --out` must exit 0, and its JSON must equal
 protoBaseST's own dump.
 
-**10.4 Concurrency: the same outcomes as ProtoBase.** Each case runs twice:
-1. both transactions in Python, to record ProtoBase's outcome;
+**10.4 Concurrency: the same outcomes as `proto_db`.** Each case runs twice:
+1. both transactions in Python, to record `proto_db`'s outcome;
 2. one transaction in protoST and one in Python, interleaved at the same points (start A,
    start B, commit B, commit A).
 
 The two outcomes must be identical: which commit conflicts, and the final contents.
 
-| Case | Expected (ProtoBase) |
+| Case | Expected (`proto_db`) |
 |---|---|
 | Both read and write one root | the second commit: `PBConflictError` |
 | Each writes a different root | both commit |
@@ -787,7 +787,7 @@ The two outcomes must be identical: which commit conflicts, and the final conten
 | A blind `setMutable:` of a cell the other removed | conflict |
 | A blind `removeMutable:` of a cell already removed | both commit (no-op) |
 | A collection committed, then reused in a later blind write (D33) | replaces; it does not replay twice |
-| A blind write onto a root whose current value has indexes | ProtoBase merges; protoBaseST signals `PBNotSupportedError` (the documented refusal) |
+| A blind write onto a root whose current value has indexes | `proto_db` merges; protoBaseST signals `PBNotSupportedError` (the documented refusal) |
 
 Within one process, the same table runs with two protoST actors.
 
@@ -842,7 +842,7 @@ work out explicitly.
 3. Nothing further. The minimum shown is `PBList`, `PBDictionary` with its merge, records,
    mutable cells, and the full validation.
 
-A blind write is never shipped without its merge: that would replace where ProtoBase merges.
+A blind write is never shipped without its merge: that would replace where `proto_db` merges.
 
 ## 12. Risks
 
@@ -855,7 +855,7 @@ A blind write is never shipped without its merge: that would replace where Proto
    on it. *Residual risk*: a late release cuts week 3.
 3. **Numeric exactness.** Cross-kind equality, hash residues and tokens: wrong values look
    like missing keys, and with merges they look like lost updates. *Mitigation*: the vectors
-   gate every change, and the concurrency tests compare against ProtoBase run by itself.
+   gate every change, and the concurrency tests compare against `proto_db` run by itself.
 4. **Speed.** The interpreter is 2-12x slower than CPython; `LargeInteger` modular arithmetic
    runs for every hashed key; large collections cost n log n cells. *Mitigation*: demo scale
    only, no numbers on slides.
@@ -880,4 +880,4 @@ The six questions of revision 1 are decided. What is left to confirm:
 2. **The three Pharo clashes of §5.3.** They are kept as decided; the note is there so that
    the choice is made knowingly.
 3. **Zero-based `PBList` indexes** (§5.2), kept because the name and the persisted counts
-   are ProtoBase's. Confirm, since every Smalltalk collection is 1-based.
+   are `proto_db`'s. Confirm, since every Smalltalk collection is 1-based.

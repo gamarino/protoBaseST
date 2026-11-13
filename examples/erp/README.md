@@ -1,14 +1,14 @@
 # The ERP demo: Python and protoST on one database directory
 
 protoBaseST is a Smalltalk (protoST) port of the Python object database
-ProtoBase. Both read and write the same on-disk format, so the two languages can work on one directory. This demo is a small ERP, three
+`proto_db`. Both read and write the same on-disk format, so the two languages can work on one directory. This demo is a small ERP, three
 customers and 24 invoices, that passes through both of them. It is a proposal prototype, shown
 to collect criticism, not a finished product.
 
 ## Run it
 
 ```bash
-tests/interop/setup_venv.sh                 # once: the pinned ProtoBase and msgpack, in a venv
+tests/interop/setup_venv.sh                 # once: the pinned `proto_db` and msgpack, in a venv
 PROTOST=/path/to/protost examples/erp/run_demo.sh
 ```
 
@@ -60,13 +60,13 @@ the invoices still show the payments. The last line lists the tags as they are n
 
 `run_demo.sh` sets everything up. To run `3_tag.st` by itself, `STPATH` must contain
 `<repo>/src` (the peer script is found from it, whatever the working directory), and `PY` should
-name a Python that can import ProtoBase (the interop venv, `tests/interop/env.sh`; `python3`
+name a Python that can import `proto_db` (the interop venv, `tests/interop/env.sh`; `python3`
 when `PY` is unset). The other steps need only `STPATH` or `PYTHONPATH` and the directory
 argument.
 
 ## API mapping
 
-| Concept | ProtoBase (Python) | protoBaseST (protoST) |
+| Concept | `proto_db` (Python) | protoBaseST (protoST) |
 |---|---|---|
 | open | `ObjectSpace(FileStorage(dir)).open_database(name)` | `(PBObjectSpace storage: (PBFileStorage path: dir)) openDatabase: name` |
 | transaction | `db.new_transaction()`, `db.run(fn)` | `db newTransaction`, `db newTransactionDo: [:tr | ...]`, `db run: [:tr | ...]` |

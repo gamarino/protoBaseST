@@ -53,7 +53,7 @@ Import from: 'protobase'.
 
 ## 2. The model: values, versions and mutable objects
 
-Three ideas carry the whole design. They come from ProtoBase, the Python database whose on-disk
+Three ideas carry the whole design. They come from `proto_db`, the Python database whose on-disk
 format protoBaseST reads and writes; protoBaseST changes none of them.
 
 **A value never changes.** A record, a list, a dictionary, a set is a value. A message that would
@@ -79,7 +79,7 @@ written by Python (`proto_db`) and by protoST. Section 14 shows it.
 
 ## 3. Declaring record types
 
-An application record type subclasses `PBObject` (ProtoBase's `DBObject`). It has a
+An application record type subclasses `PBObject` (`proto_db`'s `DBObject`). It has a
 language-neutral *type name*, written into the file, and optionally the names it used to have. The
 same name must be declared by every implementation that reads the type. This is the same
 declaration as `examples/erp/erp_model.st`.
@@ -188,7 +188,7 @@ outcome.                                      "=> 'The transaction is aborted; s
 
 > **Read this before you write a line.** In protoBaseST, `add:`, `remove:`, `setAt:value:`,
 > `removeAt:` and every other collection message **answer a new collection and leave the receiver
-> unchanged**. The names are ProtoBase's. Three of them mean something else in Pharo:
+> unchanged**. The names are `proto_db`'s. Three of them mean something else in Pharo:
 >
 > | Message | Pharo | protoBaseST |
 > |---|---|---|
@@ -209,7 +209,7 @@ tags count.                                   "=> 1"
 
 The first `add:` built a set and threw it away. Keep the answer.
 
-Why the names were not changed: ProtoBase's names are the documented API of the Python
+Why the names were not changed: `proto_db`'s names are the documented API of the Python
 implementation, and the point of this prototype is that one document explains both languages.
 The cost is the trap above, paid by Smalltalk programmers. `docs/decisions.md` records the call
 and the alternatives (`copyWith:`, `copyWithout:`); the workshop is where it can be overruled.
@@ -217,7 +217,7 @@ and the alternatives (`copyWith:`, `copyWithout:`); the workshop is where it can
 ## 7. Lists count from zero
 
 > **`PBList` positions are zero-based.** `getAt: 0` is the first element. This is deliberate:
-> ProtoBase's `List` is zero-based, and the persisted tree nodes store counts that are the same in
+> `proto_db`'s `List` is zero-based, and the persisted tree nodes store counts that are the same in
 > both languages. `getAt: -1` is the last element. A position out of range is a
 > `PBValidationError`, never `nil`. Every other protoBaseST collection is unaffected: a `PBFrozenList`,
 > a `PBTuple` or an `Array` you build yourself are ordinary one-based Smalltalk collections.
@@ -240,8 +240,8 @@ lines count.                                  "=> 3"
 rules, so `nil` is an open end. The last two lines show again the rule of section 6: `removeAt:`
 answered a new list, and `lines` still has three elements.
 
-An error rather than `nil` for a bad position is ProtoBase's rule too (`tests/unit/list_positions.st`
-records ProtoBase's own answers next to this one's). A silent `nil` in a database hides an
+An error rather than `nil` for a bad position is `proto_db`'s rule too (`tests/unit/list_positions.st`
+records `proto_db`'s own answers next to this one's). A silent `nil` in a database hides an
 off-by-one for as long as the data lives.
 
 ## 8. Keys, and what the format compares
@@ -361,7 +361,7 @@ mine opLog.                                   "=> PBFrozenList(PBTuple('set', 'a
 If the second transaction had *read* `tags` first, it would have conflicted instead, and
 `setRootObject:value:replace: true` says "last writer wins" explicitly. The merge is only defined
 for the collections that support it (`PBDictionary`, `PBHashDictionary`, `PBSet`,
-`PBCountedSet`). A write that cannot be merged replaces, as ProtoBase does; an *indexed*
+`PBCountedSet`). A write that cannot be merged replaces, as `proto_db` does; an *indexed*
 collection is refused outright (section 13).
 
 ## 12. Mutable objects, history and as-of reads
@@ -379,7 +379,7 @@ acme get: db newTransaction.                  "=> 'ACME Argentina S.A.'"
 take the transaction. `newMutable:value:` requires that the cell does not exist yet.
 
 Every committed version stays readable. `db history` answers `PBHistoryEntry` objects, newest
-first; `snapshotAt:` opens one entry for reading. ProtoBase has no "as of a moment" message; it is
+first; `snapshotAt:` opens one entry for reading. `proto_db` has no "as of a moment" message; it is
 a three-line helper, and a script has no class to hold it, so it is a block:
 
 ```smalltalk
@@ -439,28 +439,28 @@ refused for anything else). `docs/deviations.md` lists every refusal and diverge
 
 ## 14. One directory, two languages
 
-The point of keeping ProtoBase's format is that the files are shared. ProtoBase's own verifier
+The point of keeping `proto_db`'s format is that the files are shared. `proto_db`'s own verifier
 accepts what protoBaseST writes:
 
 ```sh
 python -m proto_db.tools.verify DIR
 ```
 
-Its prerequisites: ProtoBase `v2.0.0rc2` importable (`tests/interop/setup_venv.sh` builds a venv
+Its prerequisites: `proto_db` at `v2.0.0rc2` importable (`tests/interop/setup_venv.sh` builds a venv
 with it), `msgpack` 1.2.0 or newer, and `DIR` the path the script's `dir` holds
 (`dir pathString`, under `FileSystem temp`). Run it **before the last block of section 15**: that
 block closes the space and deletes the directory.
 
-The verifier is outside this repository (it is ProtoBase's). What is checked here, in
+The verifier is outside this repository (it is `proto_db`'s). What is checked here, in
 `tests/interop/`, is that spaces written by protoST pass it with an identical dump, spaces written
 by Python are dumped identically by protoST, commits from both languages stack on one directory,
-and concurrent commits from both get ProtoBase's outcomes in 27 scenarios.
+and concurrent commits from both get `proto_db`'s outcomes in 27 scenarios.
 `examples/erp/` is a worked demo: Python creates customers and invoices, protoST records payments
 and renames a customer, a blind write from each language merges, and both print the same as-of
 report. See [examples/erp/README.md](../examples/erp/README.md).
 
-Not proven: anything outside those scenarios, any ProtoBase release other than `v2.0.0rc2`, and
-behaviour under load (the AVL structures are many times slower than ProtoBase's; the dated figures
+Not proven: anything outside those scenarios, any `proto_db` release other than `v2.0.0rc2`, and
+behaviour under load (the AVL structures are many times slower than `proto_db`'s; the dated figures
 are in [deviations.md](deviations.md#performance)).
 
 ## 15. Where to go next
@@ -472,7 +472,7 @@ space isClosed.                               "=> true"
 ```
 
 - [reference.md](reference.md): every public class and message.
-- [deviations.md](deviations.md): everything that differs from ProtoBase, and every refusal.
+- [deviations.md](deviations.md): everything that differs from `proto_db`, and every refusal.
 - [not-done.md](not-done.md): what is not here, and the cost of each omission.
 - [decisions.md](decisions.md): the choices, with what each one costs if it is wrong.
 

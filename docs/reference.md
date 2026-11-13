@@ -1,7 +1,7 @@
 # Reference
 
 Every public class and message of protoBaseST, grouped as the design spec groups them (section
-5.1). The names are ProtoBase's (`proto_db` at `v2.0.0rc2`) with the prefix `PB` and Smalltalk
+5.1). The names are `proto_db`'s (`proto_db` at `v2.0.0rc2`) with the prefix `PB` and Smalltalk
 camelCase; the first table says which is which. This file lists what exists in `src/protobase/`;
 a message that is not here is not public. Names that start with an underscore (`_saveInto:`,
 `_currentRoot`) are the implementation's, used by the tests, and may change.
@@ -29,9 +29,9 @@ Contents:
 [Lower layers](#lower-layers) |
 [The module and its files](#the-module-and-its-files)
 
-## Mapping from ProtoBase
+## Mapping from `proto_db`
 
-| ProtoBase (`proto_db`) | protoBaseST |
+| `proto_db` | protoBaseST |
 |---|---|
 | `ObjectSpace`, `FileStorage`, `Database` | `PBObjectSpace`, `PBFileStorage`, `PBDatabase` |
 | `Transaction`, `Snapshot`, `HistoryEntry` | `PBTransaction`, `PBSnapshot`, `PBHistoryEntry` |
@@ -44,7 +44,7 @@ Contents:
 | `Proto...Error` | `PB...Error` |
 
 Python keyword arguments become keyword parts (`with_(paid_on=d)` is `with: 'paidOn' value: d`).
-There is no `asOf:`: ProtoBase has none either (tutorial, section 12).
+There is no `asOf:`: `proto_db` has none either (tutorial, section 12).
 
 ## Space and databases
 
@@ -58,7 +58,7 @@ format's inter-process protocol, and no other lock exists in the protoST layer.
 |---|---|
 | `PBObjectSpace class >> storage: aStorage` | Space over a storage, with the default lock timeout (30000 ms). `PBValidationError` if not a storage. |
 | `PBObjectSpace class >> storage: aStorage lockTimeout: ms` | The same, with a positive SmallInteger of milliseconds. A commit waits at most that long for the root lock, then `PBTimeoutError`. |
-| `PBObjectSpace class >> registerAtomClass: aClass` | Registers an application record class under its `typeName` and `typeAliases` (`PBTypeRegistry register:`). Process-wide, as ProtoBase's `register_atom_class`. `PBValidationError` for a name already taken, outside the grammar, or a `proto_db.` name outside the built-in table. |
+| `PBObjectSpace class >> registerAtomClass: aClass` | Registers an application record class under its `typeName` and `typeAliases` (`PBTypeRegistry register:`). Process-wide, as `proto_db`'s `register_atom_class`. `PBValidationError` for a name already taken, outside the grammar, or a `proto_db.` name outside the built-in table. |
 | `PBObjectSpace class >> defaultLockTimeout` | 30000. |
 | `firstLockDelay`, `longestLockDelay` (class) | 1 and 50 ms: the caller's backoff while the root lock is held. |
 | `listDatabases` | The names of the databases, sorted, as an Array. |
@@ -82,7 +82,7 @@ format's inter-process protocol, and no other lock exists in the protoST layer.
 ### PBHistoryEntry, PBSnapshot
 
 A `PBHistoryEntry` is a committed version without its roots; open it with `snapshotAt:`
-(ProtoBase has no `get_root_object` on it either). A `PBSnapshot` is a version opened for
+(`proto_db` has no `get_root_object` on it either). A `PBSnapshot` is a version opened for
 reading, immutable.
 
 | Message | On |
@@ -98,7 +98,7 @@ reading, immutable.
 ### PBFileStorage
 
 The directory: segment files `<uuid>.seg`, `space.root`, `space.lock`. It writes as the format
-spec's "minimal external writer" does, so ProtoBase processes share the directory. Applications
+spec's "minimal external writer" does, so `proto_db` processes share the directory. Applications
 use it only to open a space; the other messages are the publisher's and the tests'.
 
 | Message | Meaning |
@@ -176,7 +176,7 @@ commit; the history keeps every earlier value.
 
 ### PBObject
 
-ProtoBase's `DBObject`. Subclass it for an application type.
+`proto_db`'s `DBObject`. Subclass it for an application type.
 
 | Message | Meaning |
 |---|---|
@@ -201,7 +201,7 @@ Applications meet them through `registerAtomClass:` and through a record read fr
 
 | Message | Meaning |
 |---|---|
-| `PBAtom >> oid`, `tag`, `pointer`, `isSaved`, `isLoaded`, `knownOid`, `state`, `stateAt:` | Identity and the stored fields. An atom's oid is its record's; an atom not stored draws a version-4 UUID in memory on first need (ProtoBase D21). Atoms are `=` when one object or sharing an oid. |
+| `PBAtom >> oid`, `tag`, `pointer`, `isSaved`, `isLoaded`, `knownOid`, `state`, `stateAt:` | Identity and the stored fields. An atom's oid is its record's; an atom not stored draws a version-4 UUID in memory on first need (`proto_db` D21). Atoms are `=` when one object or sharing an oid. |
 | `PBAtom class >> typeName`, `typeAliases`, `requiredFields`, `persistedFields`, `integerFields`, `slotFields`, `unloadedAt:storage:` | The class-side declaration. |
 | `PBTypeRegistry class >> register:` | As `registerAtomClass:`. |
 | `classForTag:`, `tagFor:`, `isRegistered:`, `nameOfTag:`, `canonicalTag:`, `writerTag:`, `isTag:sameTypeAs:`, `recordShapeForTag:`, `unloadedAtomFor:at:storage:`, `checkOpaqueName:`, `aliasOf:`, `isValidName:`, `builtinNames`, `builtinCount` | Lookup. An unregistered application name gives `PBOpaqueAtom`; an unknown `proto_db.` name is `PBCorruptionError`. |
@@ -213,7 +213,7 @@ kept byte for byte.
 
 ## Collections
 
-All inherit from `PBIndexedCollection` (ProtoBase's `IndexedCollection`). Every write answers a
+All inherit from `PBIndexedCollection` (`proto_db`'s `IndexedCollection`). Every write answers a
 new version. Values, keys and elements pass through `PBCodec canonical:` at once; a key or
 element that is not orderable (a NaN, a list, a map) is `PBValidationError`. A collection that
 has an index refuses every change with `PBNotSupportedError` naming its indexes (design spec 7.4).
@@ -226,7 +226,7 @@ has an index refuses every change with `PBNotSupportedError` naming its indexes 
 | `count`, `size`, `isEmpty`, `notEmpty` | The persisted count (`size` is a synonym). |
 | `do: aBlock`, `elements` | The elements in the collection's own order; `elements` as an Array. |
 | `indexNames`, `getIndex: aName`, `indexes` | The indexes, sorted; `nil` when absent. |
-| `opLog` | A `PBFrozenList` of `PBTuple`s: the intents that built this version (ProtoBase's names: `('set' k v)`, `('remove' k)`, `('add' e)`, `('transform' e removes adds)`). |
+| `opLog` | A `PBFrozenList` of `PBTuple`s: the intents that built this version (`proto_db`'s names: `('set' k v)`, `('remove' k)`, `('add' e)`, `('transform' e removes adds)`). |
 | `logComplete`, `isMergeable` | True for a version built by `new` and derived only by logged mutators; false for a loaded version and everything derived from it. A `PBList` has no log and is never mergeable. |
 | `rebaseOnto: current` | Replays the net effect of the log onto `current` (the last intent per key, by order key, in order of last occurrence). `current` of another class is `PBValidationError`; one with an index `PBNotSupportedError`. |
 | `markConsumed`, `consumed` | Set by the publisher after a commit: later versions are no longer mergeable, so a reused value replaces instead of replaying twice (D33). |
@@ -348,7 +348,7 @@ For tests, tools and readers of the format. An application does not need them.
   is `PBNotSupportedError`.
 - **`PBNotation`**: `describe:`, `describeObject:`, `describeDatabase:`, `describeRoots:`,
   `describeMutables:`, `describeIndexes:`, `describeOrigin:`, `dumpSpace:to:` (the JSON of
-  ProtoBase's verifier `--out`), `jsonText:`, `build:`, `describeRaw:`, `floatHex:`,
+  `proto_db`'s verifier `--out`), `jsonText:`, `build:`, `describeRaw:`, `floatHex:`,
   `floatFromHex:`.
 - **`PBPublisher`**: the actor that commits (`space:`, `commit:`, `createDatabase:`,
   `closeStorage`).

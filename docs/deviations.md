@@ -1,9 +1,9 @@
 # Deviations and refusals
 
-Where protoBaseST differs from ProtoBase (`proto_db` at `v2.0.0rc2`), and everything it refuses.
+Where protoBaseST differs from `proto_db` at `v2.0.0rc2`, and everything it refuses.
 The rule behind the whole list is the design spec's: **refuse, never diverge**. A value, type,
 version or operation the prototype cannot handle exactly signals an explicit error naming it. It
-never stores something else in its place, and it never replaces where ProtoBase would merge.
+never stores something else in its place, and it never replaces where `proto_db` would merge.
 
 Each entry says what differs, why, and what it costs. "Refusal" means an error; "divergence"
 means a visible difference in behaviour that is not an error.
@@ -25,12 +25,12 @@ Contents:
 
 | What | Divergence | Why | Cost |
 |---|---|---|---|
-| `Set >> add:`, `Set >> remove:`, `List >> removeAt:` (and `Dictionary >> removeAt:`) | They answer a **new version**; Pharo's change the receiver in place and answer the element. | ProtoBase's names are the documented API of the Python implementation, and one document should explain both languages (design spec 5.3). | `s add: 3.` with the result discarded changes nothing and nothing fails. Alternatives, if ever wanted: `copyWith:`, `copyWithout:`, `copyWithoutIndex:`. A protoST lint could warn on a discarded result; that is outside this prototype. |
-| `PBList` positions | **Zero-based**, a negative one counts from the end. | The name is ProtoBase's and the persisted `PosNode` counts are the same in both languages. | Smalltalk programmers expect 1. Every other collection a program builds (`Array`, `PBTuple`, `PBFrozenList`) stays 1-based. |
+| `Set >> add:`, `Set >> remove:`, `List >> removeAt:` (and `Dictionary >> removeAt:`) | They answer a **new version**; Pharo's change the receiver in place and answer the element. | `proto_db`'s names are the documented API of the Python implementation, and one document should explain both languages (design spec 5.3). | `s add: 3.` with the result discarded changes nothing and nothing fails. Alternatives, if ever wanted: `copyWith:`, `copyWithout:`, `copyWithoutIndex:`. A protoST lint could warn on a discarded result; that is outside this prototype. |
+| `PBList` positions | **Zero-based**, a negative one counts from the end. | The name is `proto_db`'s and the persisted `PosNode` counts are the same in both languages. | Smalltalk programmers expect 1. Every other collection a program builds (`Array`, `PBTuple`, `PBFrozenList`) stays 1-based. |
 | `Dictionary` iteration | A `PBDictionary` iterates in key order, a `PBHashDictionary` in hash order. | The format's order. | Insertion order is not kept; `PBFrozenDict` keeps it. |
 | Timeouts and backoffs | SmallInteger **milliseconds**, where Python uses float seconds (`lockTimeout`, `run:retries:backoff:`). | The protoST convention (STATUS D48). | A rounded delay: the jitter is rounded to whole milliseconds and never above the bound. |
-| Class names in some error texts | `PBList element`, `PBSet element` where ProtoBase says `List element`, `Set element`. | They are protoST's class names. | None; the tests pin both sides. |
-| No `asOf:` | None. | ProtoBase has none. As-of is a three-line helper (tutorial, section 12). | The helper is a block in a script. |
+| Class names in some error texts | `PBList element`, `PBSet element` where `proto_db` says `List element`, `Set element`. | They are protoST's class names. | None; the tests pin both sides. |
+| No `asOf:` | None. | `proto_db` has none. As-of is a three-line helper (tutorial, section 12). | The helper is a block in a script. |
 
 ## Values refused when written
 
@@ -48,7 +48,7 @@ All are `PBValidationError`, raised by the call that receives the value, naming 
 | A root name starting with `__` | Reserved for the format. | |
 | An attribute name starting with `_`, or `oid`, `atom_pointer`, `context`, `with_`, `has_defined_attr`, or a name the class reserves | The format's rule for records. | |
 | A `PBSet` element nested past 1020, a `PBHashDictionary` key or value past 1018 | The bucket tuple around it adds containers; refused when the mutator is called. | |
-| A slice bound that is not an Integer or `nil` (including `true`) | Python's `slice.indices` takes `True` as 1; in Smalltalk a Boolean is not a number, and ProtoBase's own positions refuse `bool`. `tests/unit/list_positions.st` records ProtoBase's answers next to this one's. | |
+| A slice bound that is not an Integer or `nil` (including `true`) | Python's `slice.indices` takes `True` as 1; in Smalltalk a Boolean is not a number, and `proto_db`'s own positions refuse `bool`. `tests/unit/list_positions.st` records `proto_db`'s answers next to this one's. | |
 | `PBList extend:` of a `String` | Python's `extend("abc")` appends three one-character strings; in Smalltalk a String's elements are Characters, which no format stores. | `appendLast:` for one string value. |
 
 Host subclasses of a mapped class are stored as their base value, as the format spec says.
@@ -68,25 +68,25 @@ explicit.
   orders, hashes, tokenizes and re-encodes exactly. Its wall clock is not available.
 - **Instants near the ends of the calendar.** Reading presents the instant in UTC even if its
   wall clock in the zone might fall outside years 1 to 9999. Writing an instant within one day of
-  year 1 or year 9999 is `PBNotSupportedError`, because ProtoBase refuses to read such a value
+  year 1 or year 9999 is `PBNotSupportedError`, because `proto_db` refuses to read such a value
   back. *Cost:* a `datetime.max`-style sentinel in an IANA zone cannot be written from protoST; an
-  atom that holds one, written by ProtoBase, can be read but not re-written by protoBaseST.
+  atom that holds one, written by `proto_db`, can be read but not re-written by protoBaseST.
 - **A format-3 `["zone", key]` datetime** (legacy data) is read lazily as a `PBLegacyZoneDateTime`
   (`isLegacyZone` true). Its wall clock and fold are kept. It is never given an offset; every use
   that needs one (hash, order, UTC instant, comparison with an aware value more than the window
   apart, a map with two keys that could conflict) is `PBNotSupportedError` naming the zone.
   Writing it is `PBValidationError`. *Why lazy:* old atoms whose other attributes are fine stay
-  readable, and atoms that are never changed are kept byte for byte. ProtoBase would re-encode
+  readable, and atoms that are never changed are kept byte for byte. `proto_db` would re-encode
   such a value as its instant, which needs a database, so this differs from it on purpose
   (see the conformance vectors, below).
 - **Zone keys: a pinned list.** A key is valid when it is in `PBZoneKeys`, the Zone and Link
   names of IANA tzdata 2026e (`tools/gen_zone_keys.py`, committed). The same on every machine.
   A key outside the list is `PBCorruptionError` when read and `PBValidationError` when written;
-  a key newer than the release is refused until the list is regenerated. *Cost:* ProtoBase checks
+  a key newer than the release is refused until the list is regenerated. *Cost:* `proto_db` checks
   against its host's tz database. On a host that lacks the backward-link names
-  (a host without `tzdata-legacy`; `US/Eastern` is one), ProtoBase refuses those pinned keys. protoBaseST neither refuses nor
+  (a host without `tzdata-legacy`; `US/Eastern` is one), `proto_db` refuses those pinned keys. protoBaseST neither refuses nor
   rewrites such keys, because refusing them on write would make it unable to re-save an atom that
-  ProtoBase wrote legitimately. Cross-implementation tests use canonical Zone names only.
+  `proto_db` wrote legitimately. Cross-implementation tests use canonical Zone names only.
 - **`["zone", key]` inside a `@time`** is a wall clock without a date, fully supported.
 - **`TimeSpan`** counts microseconds (protoST's kernel `Duration` counts milliseconds).
 
@@ -95,13 +95,13 @@ explicit.
 - **Indexed collections are not written or merged.** A collection that has an index (a
   `PBEqualityIndex`, `PBRangeIndex` or `PBVectorIndex`) refuses every change with
   `PBNotSupportedError` naming its indexes, and so does a merge onto one (design spec 7.4).
-  ProtoBase updates the indexes in the same step and merges blind writes onto them; protoBaseST
+  `proto_db` updates the indexes in the same step and merges blind writes onto them; protoBaseST
   cannot do either, so it does not do a lesser version. Index *queries* are not provided either:
-  indexes are decoded and kept. `extend:` of nothing still answers the receiver, as ProtoBase's.
+  indexes are decoded and kept. `extend:` of nothing still answers the receiver, as `proto_db`'s.
   *Cost:* a database that uses indexes can be read and its non-indexed parts changed; the indexed
   collections cannot be changed from protoST.
 - **`PBRepeatedKeysDictionary` is read only.** Its writes and merges are a non-goal. A new empty
-  one is mergeable and its rebase answers `current` unchanged, as ProtoBase's.
+  one is mergeable and its rebase answers `current` unchanged, as `proto_db`'s.
 - **Immutability is by convention** (decision 3). No instance is frozen at run time: a method
   that assigns an instance variable after construction would compile. A test
   (`tests/unit/values_immutable.st`) scans for it. Two runtime-only fields are exceptions, both
@@ -110,26 +110,26 @@ explicit.
 - **Application records.** Accessors only answer the stored value (decision A4). A behaviour name
   that is also a stored attribute, in any implementation, is a defect: a record holding a
   reserved name is refused when loaded (`PBCorruptionError`). There are no generated setters.
-- **Positional trees are not subclassable**, as in ProtoBase: a `PBPosNode` subclass is refused
+- **Positional trees are not subclassable**, as in `proto_db`: a `PBPosNode` subclass is refused
   when registered, built or given to a positional operation. A keyed node class may be extended
   with fields, which every write carries into the copies.
 - **Self-referencing records.** A record whose decoding needs the record itself (a map key that
-  refers back to it) is `PBCorruptionError` naming its pointer. ProtoBase recurses until Python's
-  `RecursionError`. ProtoBase saves every dependent before the record that refers to it, so such a
+  refers back to it) is `PBCorruptionError` naming its pointer. `proto_db` recurses until Python's
+  `RecursionError`. `proto_db` saves every dependent before the record that refers to it, so such a
   record is damaged data or the work of a writer that breaks that invariant.
-- **A mergeable log is a property of the version's history** (ProtoBase D33): a rebased version
-  keeps the completeness of the version it was rebased onto, as ProtoBase's code does (the brief
-  and ProtoBase's docstring said "not mergeable"; the code is the reference).
-- **Counted-set logs** use ProtoBase's op names: `('add' e)`, `('remove' e)` for calls and
+- **A mergeable log is a property of the version's history** (`proto_db` D33): a rebased version
+  keeps the completeness of the version it was rebased onto, as `proto_db`'s code does (the brief
+  and `proto_db`'s docstring said "not mergeable"; the code is the reference).
+- **Counted-set logs** use `proto_db`'s op names: `('add' e)`, `('remove' e)` for calls and
   `('transform' e removes adds)` only for a rebase's adjustments.
 
 ## Transactions and storage
 
 - **No cluster mode.** A directory with `cluster/`, or whose SpaceRoot carries a `cluster_term`,
-  is refused (`PBNotSupportedError`). ProtoBase's "held retries" (an immediate retry without
+  is refused (`PBNotSupportedError`). `proto_db`'s "held retries" (an immediate retry without
   backoff, `permit_held`) are therefore not ported. Mixed Python/protoST clusters are outside
   acceptance until a protocol freeze.
-- **Framed log files** (the `log` and `roots_log` layers) are not read. ProtoBase reads them only
+- **Framed log files** (the `log` and `roots_log` layers) are not read. `proto_db` reads them only
   in its cluster and tiered storage. The conformance vectors of those layers are visible skips
   (ruling R14). A reader was written and then removed, because an uncalled reader is debt.
 - **The caller owns the lock backoff, and it blocks the caller's worker.** The publisher never
@@ -138,12 +138,12 @@ explicit.
   `whileFalse:` block, so it blocks the caller's worker thread instead of suspending the actor
   (protoST question K23, open, see below). It is bounded and only happens while
   another *process* holds the lock; while it waits, the worker still serves other actors.
-- **Group commit** (ProtoBase D52) is not implemented: every publish is a group of one.
-- **One storage failure ends writing through that storage** (`isFailed`), as ProtoBase's; reopen
+- **Group commit** (`proto_db` D52) is not implemented: every publish is a group of one.
+- **One storage failure ends writing through that storage** (`isFailed`), as `proto_db`'s; reopen
   the space. Reads keep working.
 - **Step 8 of a failed publish.** A root at a different epoch is `PBConflictError`, as
-  ProtoBase's `_publish`. A root that reappears at the same epoch, written by a writer that
-  ignored the lock, cannot be told from "nothing published"; ProtoBase has the same limit.
+  `proto_db`'s `_publish`. A root that reappears at the same epoch, written by a writer that
+  ignored the lock, cannot be told from "nothing published"; `proto_db` has the same limit.
 - **`newTransactionDo:` commits on a non-local return** (`^`) and aborts exactly when an
   exception unwinds the block (ruling R20b), as Python's `with`. A resumable exception that an
   enclosing handler resumes does not end the block, and the block's writes are committed. This
@@ -151,11 +151,11 @@ explicit.
 - **Durability** is always `fsync`; there are no other modes. Windows is untested.
 - **A non-aware previous `committedAt`** is `PBCorruptionError` (Python's `max` would raise
   `TypeError`).
-- **Origin bytes** of a new database are a version-4 UUID's, as ProtoBase's `uuid4().bytes`.
+- **Origin bytes** of a new database are a version-4 UUID's, as `proto_db`'s `uuid4().bytes`.
 
 ## Shapes protoBaseST cannot write
 
-The round-trip tests (design spec 10.2) write a space from protoST and have ProtoBase's verifier
+The round-trip tests (design spec 10.2) write a space from protoST and have `proto_db`'s verifier
 accept it. The space cannot contain what protoBaseST cannot write:
 
 - an indexed collection (index maintenance is out of scope, design spec 7.4);
@@ -166,7 +166,7 @@ accept it. The space cannot contain what protoBaseST cannot write:
 Hence the interop round trip compares dumps with `compare_dumps.py --exact` (no normalisation of
 the opaque type), and `tests/interop/concurrency.sh` row 13 (a blind write onto an indexed root)
 uses a copy of the conformance database in all four runs and asserts protoBaseST's
-`PBNotSupportedError` in place of ProtoBase's merge. Likewise `st_random_ops` covers the four
+`PBNotSupportedError` in place of `proto_db`'s merge. Likewise `st_random_ops` covers the four
 collections with writes, and `PBCountedSet` since Task 22.
 
 ## Reading
@@ -181,14 +181,14 @@ collections with writes, and `PBCountedSet` since Task 22.
 - **`snapshot_ref` byte references, pagers and residency** are not provided.
 - **Symbols and the per-database class registry** (`__currentModules`, `@sym`) are format-5
   features and are outside this prototype. The registry of record classes is process-wide, as
-  ProtoBase's.
-- **The root record refusal** is ProtoBase's `decode_root` sentence ("Undecodable root record"),
-  without protoST's MessagePack detail. ProtoBase keeps that detail only as `__cause__`, and
+  `proto_db`'s.
+- **The root record refusal** is `proto_db`'s `decode_root` sentence ("Undecodable root record"),
+  without protoST's MessagePack detail. `proto_db` keeps that detail only as `__cause__`, and
   protoST has no exception chaining. *Cost:* a corrupt root is harder to diagnose.
 
 ## Conformance vectors
 
-The vectors are those of ProtoBase `v2.0.0rc2` (digest recorded in
+The vectors are those of `proto_db` at `v2.0.0rc2` (digest recorded in
 `tests/conformance/vectors.sha256`). Where protoBaseST differs from the manifest on purpose, the
 difference is a tracked table (`tests/conformance/_expected_differences.st`) and the runner fails
 if a listed difference goes away or an unlisted one appears. Three remain, all `permanent,
@@ -205,7 +205,7 @@ visible skips, printed under the `PASS` line of `tests/conformance/cluster.st`.
 
 ## Errors and messages
 
-- The error classes mirror `proto_db/errors.py` with `PB` for `Proto`. ProtoBase's extra classes
+- The error classes mirror `proto_db/errors.py` with `PB` for `Proto`. `proto_db`'s extra classes
   that a prototype of this size never raises (`StalePager`, `Misfiled`, `NotAuthorized`,
   `BacklogFull`, `WriteRefused`) are omitted. `PBDBError` has no `code` API yet. `PBReferenceError`
   exists.
@@ -221,10 +221,10 @@ states figures; the other documents link here.
 
 Measured 2026-11-12 on a pre-release build of protoST 0.10.0 (commit `58f1834`) and
 protoBaseST commit `1564bce` (the source is unchanged since `5d09adf`), with
-`bench/run_avl.sh` (`RUNS=3`), against ProtoBase `v2.0.0rc2`, at a load average of about 3.5, so
+`bench/run_avl.sh` (`RUNS=3`), against `proto_db` at `v2.0.0rc2`, at a load average of about 3.5, so
 the figures are indicative only:
 
-| Operation | Ratio to ProtoBase |
+| Operation | Ratio to `proto_db` |
 |---|---|
 | `posAppend` | 19x |
 | `keyPut`, new key / replacing a key | 14x / 17x |

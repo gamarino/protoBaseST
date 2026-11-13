@@ -5,12 +5,12 @@
 The entries are chronological, and later entries supersede earlier ones (vectors and format
 `v2.0.0rc1` became `v2.0.0rc2`; the nesting limit of 511 containers became 1022).
 
-- Repository skeleton: error hierarchy mirroring ProtoBase, test runner, vendored
-  conformance vectors (ProtoBase `v2.0.0rc1`), Python interop venv and week-0 checks.
+- Repository skeleton: error hierarchy mirroring `proto_db`, test runner, vendored
+  conformance vectors (`proto_db` at `v2.0.0rc1`), Python interop venv and week-0 checks.
 - Values and the canonical codec: `PBFrozenList`, `PBTuple`, `PBFrozenDict`, `PBMissing`,
   `PBMutableObject` (the handle), `PBAtomPointer`, `PBUnresolvedRef` and `PBLegacyZoneDateTime`;
   `PBCodec` with `canonical:`, `toWire:atomRef:`, `fromWire:resolver:`, `encode:` and `decode:`.
-  The bytes are those of ProtoBase `v2.0.0rc1`; every refusal of the format spec is explicit
+  The bytes are those of `proto_db` at `v2.0.0rc1`; every refusal of the format spec is explicit
   (`PBValidationError` when writing, `PBCorruptionError` when reading, `PBNotSupportedError`
   for what needs a time-zone database or `lib/uuid.st`).
 - Time-zone keys are checked against `PBZoneKeys`, a committed list of the IANA tzdata 2026e
@@ -34,7 +34,7 @@ The entries are chronological, and later entries supersede earlier ones (vectors
   `framing` vectors and the invalid `record`, `segment` and `root` vectors pass, and so do
   `ref-format2`, `ref-name-of-builtin` and `ref-alias`.
 - The read path (plan Task 12): AVL nodes and value boxes (`avl.st`); the collections with
-  ProtoBase's read API (`collections.st`); `PBObject` with the reserved behaviour names of DBObject
+  `proto_db`'s read API (`collections.st`); `PBObject` with the reserved behaviour names of DBObject
   (`records.st`); `PBOpaqueAtom` reads its fields and refuses everything else naming its type;
   the indexes, decoded and kept (`indexes.st`); `PBSpaceRoot` and `PBDatabaseRoot` (`roots.st`);
   `PBObjectSpace`, `PBDatabase`, `PBSnapshot` and `PBHistoryEntry`, read side (`space.st`);
@@ -49,40 +49,40 @@ The entries are chronological, and later entries supersede earlier ones (vectors
   (an atom's pointer, a plain value's exact token, `#absent`) in one immutable `PBTxState` held
   in an `Atom` and replaced with `swap:`. After `abort` every other message is `PBUserError`.
   `PBMutableObject >> get:` reads a cell through a transaction.
-- Atom identity as ProtoBase D21 (ruling R13): an atom that is not stored draws its oid (a
+- Atom identity as `proto_db` D21 (ruling R13): an atom that is not stored draws its oid (a
   version-4 UUID, `UUID new`) in memory on first need, published by compare-and-swap so two first
   readers agree; a stored atom's oid is its record's. `PBAtom >> =` and `hash` go by oid, so an
   unsaved atom is a map key and a lookup probe like any other (a lookup by it misses where no
   stored key has its oid). `PBKeys isUnsavedProbe:` and the `PBNotSupportedError` for an atom
   without an oid are removed.
 - A record that needs itself to be decoded (a map key referring back to it) is
-  `PBCorruptionError` naming its pointer, where ProtoBase recurses until Python's
+  `PBCorruptionError` naming its pointer, where `proto_db` recurses until Python's
   `RecursionError`: damaged data, or a writer that breaks the save-dependents-first invariant.
   The loads in progress are passed explicitly to the resolver (`_PBLoadResolver`) instead of
   through a resumable exception, which any `on: Exception do:` around a read used to catch,
   answering the handler's value instead of the data.
 - Map keys `Float infinity` and its negation (and Decimal infinities) are keys again: their
   order-key payloads are private marker objects, not Symbols (a short Symbol is a String in
-  protoST, STATUS D35, so their hash was refused). ProtoBase-written maps, Dictionaries and
+  protoST, STATUS D35, so their hash was refused). `proto_db`-written maps, Dictionaries and
   HashDictionaries keyed by infinities are read (`tests/unit/read_cross_kind_keys.st`).
 - A transaction's read sets are persistent maps: a first read costs O(log n) instead of
   rebuilding the map.
 - The ERP example's record types, `examples/erp/erp_model.st` and `erp_model.py` (`Invoice`,
-  `Customer`; `demo.erp.AuditNote` is Python-only). Design spec 10.2 runs: a space ProtoBase
-  writes is dumped by protoBaseST exactly as by ProtoBase's verifier
+  `Customer`; `demo.erp.AuditNote` is Python-only). Design spec 10.2 runs: a space `proto_db`
+  writes is dumped by protoBaseST exactly as by `proto_db`'s verifier
   (`tests/interop/py_to_st.sh`).
-- ProtoBase reads back the deepest attribute protoBaseST writes (509 nested lists) only with a
+- `proto_db` reads back the deepest attribute protoBaseST writes (509 nested lists) only with a
   raised Python recursion limit: at the default limit its reader raises `RecursionError` from
   about 333 nested lists. `tests/interop/st_deep_to_py.sh` states the workaround in a `NOTE:`
-  line naming ask B12 (which the runner now shows under PASS) and fails once ProtoBase reads the
+  line naming ask B12 (which the runner now shows under PASS) and fails once `proto_db` reads the
   record at the default limit. `_st_dump.st` also reads versions 2 and 1 of the ERP database.
 - New versions (plan Task 15): `PBList new` and `setAt:value:`, `insertAt:value:`, `removeAt:`,
-  `appendFirst:`, `appendLast:`, `extend:`, `sliceFrom:to:`, `head:`, `tail:` with ProtoBase's
+  `appendFirst:`, `appendLast:`, `extend:`, `sliceFrom:to:`, `head:`, `tail:` with `proto_db`'s
   positions (Review Focus 5); `PBDictionary new`, `setAt:value:`, `removeAt:`; `PBSet new`,
   `add:`, `remove:`; `PBObject withAll:`, `with:value:` and `withAll:` on a record. Each answers a
   new atom and leaves the receiver unchanged; values are canonical at once; a collection with an
   index refuses every change (`PBNotSupportedError` naming the indexes). `PBAvl posFromArray:`,
-  `posConcat:with:` and `posSlice:from:to:` build ProtoBase's trees for `extend:` and the slices.
+  `posConcat:with:` and `posSlice:from:to:` build `proto_db`'s trees for `extend:` and the slices.
 - The save, dependents first (`PBAtom >> _saveInto:` over a storage answering `pushAtom:`): every
   record refers only to records written before it; the record carries the oid drawn in memory;
   the atom records its place (`pointer`, `isSaved`), so it is written once. `PBAtom >>
@@ -93,26 +93,26 @@ The entries are chronological, and later entries supersede earlier ones (vectors
 - The save refuses an unregistered class before writing any of its dependents, and two saves of
   one atom that race end the same way whatever the interleaving (one storage: the first pointer
   published; two storages: `PBValidationError`). `extend:` of nothing answers the receiver even
-  when the list is indexed, as ProtoBase's; `extend:` of a String is refused up front. A
+  when the list is indexed, as `proto_db`'s; `extend:` of a String is refused up front. A
   non-Integer slice bound (a Boolean included) is refused, a documented deviation from Python's
   slice rules.
-- Operation logs and merges (plan Task 16, ProtoBase `ConcurrentOptimized`, D33): every
+- Operation logs and merges (plan Task 16, `proto_db` `ConcurrentOptimized`, D33): every
   `PBDictionary`, `PBHashDictionary` and `PBSet` version carries `opLog` (a `PBFrozenList` of
   `PBTuple`s `('set' k v)`, `('remove' k)`, `('add' e)`, kept internally as a persistent chain,
   so a mutator logs in O(1)), `logComplete`/`isMergeable` and a `consumed` cell that
   `markConsumed` sets. `rebaseOnto:` replays the net effect (the last intent per key, by order
   key, in order of last occurrence) through the public mutators; a current of another class
   is `PBValidationError`, one with an index `PBNotSupportedError`. A `PBDictionary` logs a
-  large value in its stored form, so a replay reuses the `PBValueBox` (ProtoBase D51).
+  large value in its stored form, so a replay reuses the `PBValueBox` (`proto_db` D51).
 - `PBHashDictionary >> setAt:value:` and `removeAt:` (buckets of `(key, value)` tuples under
-  the hash key); `PBSet >> union:`, `intersection:` and `difference:`, ProtoBase's folds of
+  the hash key); `PBSet >> union:`, `intersection:` and `difference:`, `proto_db`'s folds of
   `add:` and `remove:`.
-- `PBCountedSet` and `PBRepeatedKeysDictionary` are `ConcurrentOptimized`, as in ProtoBase: a
+- `PBCountedSet` and `PBRepeatedKeysDictionary` are `ConcurrentOptimized`, as in `proto_db`: a
   new empty one is mergeable and rebases to `current` unchanged (Task 16 review I1).
-- `_bucketHash:` on `PBHashDictionary` and `PBHashBuckets` (ProtoBase `_bucket_hash`): lookups
-  and writes file entries under it; multi-entry buckets match ProtoBase byte for byte
+- `_bucketHash:` on `PBHashDictionary` and `PBHashBuckets` (`proto_db` `_bucket_hash`): lookups
+  and writes file entries under it; multi-entry buckets match `proto_db` byte for byte
   (`tests/interop/bucket_collisions_identical.sh`).
-- The invalid `log` vectors (framed log files, read by ProtoBase only in its cluster and
+- The invalid `log` vectors (framed log files, read by `proto_db` only in its cluster and
   tiered storage) are justified skips of `tests/conformance/cluster.st` (ruling R14); the
   runner prints the `SKIP:` lines of a passing test under its `PASS` line.
 - Record field access in a few dispatches (plan Task 16b, ruling R15): every atom class has a
@@ -125,7 +125,7 @@ The entries are chronological, and later entries supersede earlier ones (vectors
   the layout, may reorder its `persistedFields` and may add fields, read with `_slotAt:`; the
   AVL writes carry such a field, present or absent, into every copy of a node); a subclass
   whose layout cannot hold, or whose `persistedFields` name a field twice, is refused when it
-  is registered. Positional trees are not subclassable, as ProtoBase's `PosNode`: their writes
+  is registered. Positional trees are not subclassable, as `proto_db`'s `PosNode`: their writes
   build `PBPosNode` only, and a `PBPosNode` subclass is refused when it is registered, built
   or given to a positional operation. `tests/unit/record_slots.st` holds every
   literal to `slotFields` for every registered class. Integer fields are checked once per
@@ -134,28 +134,28 @@ The entries are chronological, and later entries supersede earlier ones (vectors
   builds no index for it). The walks check each child with one send, `check:` installs one
   handler per tree, and the index and root checks of `PBAvl` use no blocks. The bytes, `=`,
   `hash` and the save are unchanged. `bench/run_avl.sh` measures the AVL workload against
-  ProtoBase, interleaved, for any binary and source tree.
+  `proto_db`, interleaved, for any binary and source tree.
 - The file storage's write side (plan Task 17, `store.st`): `PBFileStorage >> save:`,
   `pushAtom:` (into `PBSegmentWriter`, the segment the storage owns: a fresh UUID4 name,
   `#create #exclusive`, header and directory synced), `flushSegment`, `currentSegment`,
-  `tryLockRoot` and `unlockRoot` (the OS lock on `space.lock`, ProtoBase's `root_lock`),
+  `tryLockRoot` and `unlockRoot` (the OS lock on `space.lock`, `proto_db`'s `root_lock`),
   `replaceRoot:` (lock held, segment synced, SpaceRoot pointer checked, epoch + 1, cluster
   refusal, `space.root.tmp` synced, renamed, directory synced), `isCluster`, `isFailed` and
-  `newSegmentId`. A file-system failure leaves the storage failed for writes, as ProtoBase's.
+  `newSegmentId`. A file-system failure leaves the storage failed for writes, as `proto_db`'s.
   The unit tests that saved into the `SegmentSink` double now save into `PBFileStorage`, and
-  `tests/unit/_sink.st` is gone. `tests/interop/st_write_to_py.sh` runs ProtoBase's verifier on
+  `tests/unit/_sink.st` is gone. `tests/interop/st_write_to_py.sh` runs `proto_db`'s verifier on
   spaces protoST wrote, commits from each side on top of the other, and checks the root lock
   both ways; `compare_dumps.py --exact` compares dumps without the AuditNote normalisation.
 - File storage write side, review fix round 1: one storage state (an Atom changed by
   compare-and-swap: idle, writing, close requested, closed), so `close` during a write is
   completed by that write and never releases the root lock under a publish, and `unlockRoot`
-  during a write is refused; segment rollover as ProtoBase (`path:segmentMaxBytes:`, 256 MiB by
+  during a write is refused; segment rollover as `proto_db` (`path:segmentMaxBytes:`, 256 MiB by
   default), with every segment written since its last sync synced before a root is published;
   the epoch of a publish is documented as the start epoch plus one. New tests:
   `store_close_race.st`, `store_crash_states.st`, `store_segment_rollover.st`, the seams of
   `tests/unit/_seams.st`, `tests/interop/crash_states_to_py.sh`, and the reverse lock
-  exclusion (protoST holds, ProtoBase times out) in `st_write_to_py.sh`.
-- ProtoBase `v2.0.0rc2` (plan Task 17b, ruling R18; ask B12 resolved): a value nests at most
+  exclusion (protoST holds, `proto_db` times out) in `st_write_to_py.sh`.
+- `proto_db` at `v2.0.0rc2` (plan Task 17b, ruling R18; ask B12 resolved): a value nests at most
   `MAX_VALUE_DEPTH` = 1022 msgpack containers (`PBCodec maxValueDepth`), counted from the value
   as the format spec counts it (an empty container counts like any other; map keys are on the
   paths), and a record therefore at most 1024. Depth 1022 round-trips; 1023 is
@@ -171,7 +171,7 @@ The entries are chronological, and later entries supersede earlier ones (vectors
   MessagePack at 1024 levels (protoIO `e952077`, protoST `b412b38`).
 - The conformance vectors are those of `v2.0.0rc2` (digest `6e913bcb…dfbf4`): the
   `values_depth` section (`tests/conformance/values_depth.st`), seven `value-depth-over-*`
-  invalid vectors, and the regenerated database vector. The interop venv holds ProtoBase
+  invalid vectors, and the regenerated database vector. The interop venv holds `proto_db`
   `v2.0.0rc2` with msgpack 1.2.4; `env.sh` fails when the venv holds another commit. The
   recursion-limit workaround of `st_deep_to_py.sh` and its `NOTE:` line are gone; the deep
   cross tests run at 1022 both ways and check the refusals of 1023 both ways.
@@ -195,31 +195,31 @@ The entries are chronological, and later entries supersede earlier ones (vectors
   `PBDatabaseRoot objects:mutables:version:committedAt:origin:previous:` and `committedAfter:`.
   New tests: `tx_commit_basic`, `tx_conflict_read`, `tx_blind_merge`, `tx_replace`,
   `tx_mutables`, `tx_after_end`, `tx_refusals`, `tx_outcome`, `tx_new_database`, and
-  `tests/interop/st_commit_to_py.sh` (ProtoBase verifies and reads the publisher's records,
-  whose fields are in ProtoBase's order, and blind merges compose across the two languages).
+  `tests/interop/st_commit_to_py.sh` (`proto_db` verifies and reads the publisher's records,
+  whose fields are in `proto_db`'s order, and blind merges compose across the two languages).
 - Task 18 review fix round 1:
   - **The publisher never waits** (ruling R19, review C1). An attempt that finds the root lock
     held answers `false` at once, and the committing caller owns the backoff
     (`PBObjectSpace >> _untilPublished:`, used by `commit` and `newDatabase:`). Before, a
     publisher waiting in its backoff inside a helping worker made other commits fail with
     protoST's `deadlock:` Error and lose their writes. New test: `tx_lock_contention.st`.
-  - **Written atoms are saved before the root lock**, once, as ProtoBase's `_commit` does.
+  - **Written atoms are saved before the root lock**, once, as `proto_db`'s `_commit` does.
   - **`newTransactionDo:` commits on a non-local return** (`^`), as Python's `return` inside
     `with` does.
   - **Origin.** A new database's origin is the bytes of a version-4 UUID (`UUID new`), as
-    ProtoBase's `uuid4().bytes`.
+    `proto_db`'s `uuid4().bytes`.
   - **Python's repr in messages.** Error texts quote names as Python's `repr` does
     (`PBCodec repr:`): the `Root`, `Mutable`, `Field` and `Attribute` holders, and the
     database messages.
   - **Unused state removed.** The space's last-known root had no reader in the spec or in
-    ProtoBase outside a cluster.
+    `proto_db` outside a cluster.
   - **Comments.** The `replaceRoot:` comment and the README state the epoch rule the
     publisher follows.
   - **Interop.** New test `tests/interop/st_py_interleaved.sh`: a Python commit between a
     protoST transaction's start and its commit, and the reverse, give a conflict for the read
     root and a merge for the blind write.
 - Task 18 review fix round 2 (ruling R20, review N1):
-  - **`newTransactionDo:` aborts on any exception that ends the block**, as ProtoBase's
+  - **`newTransactionDo:` aborts on any exception that ends the block**, as `proto_db`'s
     `__exit__`. Before, only an `Error` aborted, so a `Warning` or `Notification` ended by an
     enclosing handler (`return:`, falling off) committed the block's partial writes. The block
     now asks the enclosing handlers with `Exception>>outer` (protoST 58f1834): a resumption
@@ -235,42 +235,42 @@ The entries are chronological, and later entries supersede earlier ones (vectors
     exception that is not resumable aborts at once and is passed. `tx_do_exceptions.st` checks
     a resumed `ZeroDivide` (committed with its write), one the handler returns from (aborted)
     and a plain `Error` (aborted).
-- `PBDatabase >> run:`, `run:retries:` and `run:retries:backoff:` with ProtoBase's bounded
+- `PBDatabase >> run:`, `run:retries:` and `run:retries:backoff:` with `proto_db`'s bounded
   exponential backoff with jitter (plan Task 19; `PBDatabase class >> backoffFor:low:high:random:`).
   Retries only `PBConflictError`; `PBOutcomeUnknownError` and every other error abort and propagate.
   New tests: `run_retries.st`, `run_backoff_bounds.st`, `run_no_retry.st`. A conflict-free wait is clamped to `high`; `backoff` is any two-element sequenceable collection.
 - Round trip and write-side proofs (plan Task 20; tests only, no change to the library):
   - `tests/interop/st_to_py.sh`: protoST writes the shapes of spec 10.2 (three versions, every
     collection it can write, records, a mutable cell, the integer boundaries and the boxing
-    threshold by code points) and ProtoBase's verifier accepts them with an identical dump; a
-    ProtoBase reader asserts the boundary keys and which strings are boxed. The helper is
+    threshold by code points) and `proto_db`'s verifier accepts them with an identical dump; a
+    `proto_db` reader asserts the boundary keys and which strings are boxed. The helper is
     `_st_write_shapes.st`, because `_st_write_space.st` already serves the file storage tests.
   - `tests/interop/st_random_ops.sh`: seeded random operations on `PBList`, `PBDictionary`,
     `PBHashDictionary` and `PBSet` over 20 commits, `PBAvl check:` and a model comparison after
-    each, then ProtoBase's verifier over the whole space. `PBCountedSet` joined them in plan
+    each, then `proto_db`'s verifier over the whole space. `PBCountedSet` joined them in plan
     Task 22; `PBRepeatedKeysDictionary` writes are a non-goal of the prototype.
   - `tests/conformance/polyglot_rewrite.st`: rewriting the record that references the opaque
     atoms keeps them byte for byte at their original pointers; the commit writes no record of
     their types.
   - `tests/interop/lock_timeout.sh` with `hold_lock.py`: a protoST commit with a 50 ms
-    `lockTimeout` while ProtoBase holds the lock ends in `PBTimeoutError`; with the lock
+    `lockTimeout` while `proto_db` holds the lock ends in `PBTimeoutError`; with the lock
     released and 30000 ms it commits.
 - The concurrency table of spec 10.4 (plan Task 21; tests only, no change to the library): the
   13 rows in `tests/interop/concurrency_cases.json`, plus row 7 with its roles swapped so that
-  an unlogged remove is observable, in a neutral step vocabulary with ProtoBase's recorded
+  an unlogged remove is observable, in a neutral step vocabulary with `proto_db`'s recorded
   outcomes and final contents. Only the indexed-root case may record a refusal, and only
   `PBNotSupportedError`; both runners check it. `tests/interop/concurrency.sh` runs each row
   three times, ordered as plan call C12 (start A, start B, commit B, commit A): both transactions
-  in ProtoBase (`py_case.py both`, which must give the recorded reference), protoST as A with
-  ProtoBase as B, and ProtoBase as A with protoST as B (`_st_case.st`), and each language reads
+  in `proto_db` (`py_case.py both`, which must give the recorded reference), protoST as A with
+  `proto_db` as B, and `proto_db` as A with protoST as B (`_st_case.st`), and each language reads
   the other's final space. `tests/unit/concurrency_actors.st` runs the same table with two
-  protoST actors driven step by step through Futures. Every row gives ProtoBase's outcome, except
+  protoST actors driven step by step through Futures. Every row gives `proto_db`'s outcome, except
   the blind write onto an indexed root, where protoBaseST's documented `PBNotSupportedError`
-  (spec 7.4) is asserted in place of ProtoBase's merge.
-- `PBCountedSet` writes and the D26 counter-transform merge (plan Task 22; ProtoBase
+  (spec 7.4) is asserted in place of `proto_db`'s merge.
+- `PBCountedSet` writes and the D26 counter-transform merge (plan Task 22; `proto_db`
   `v2.0.0rc2` `proto_db/collections/sets.py`, `CountedSet`): `add:` and `remove:` (one
   occurrence; an absent element answers a new version with the same content) keep `count` and
-  `totalCount`, file `(element, count)` entries in bucket tuples as ProtoBase does, and refuse at
+  `totalCount`, file `(element, count)` entries in bucket tuples as `proto_db` does, and refuse at
   `add:` an element whose entry would nest past `MAX_VALUE_DEPTH` (wrapping 4, 1018 at most).
   Each call logs `('add' e)` or `('remove' e)`; `rebaseOnto:` composes the log per element into
   one counter transform `(removes, adds)` (`counter_net_effect`), applies it as
@@ -278,8 +278,8 @@ The entries are chronological, and later entries supersede earlier ones (vectors
   increments are all kept and a rebased version rebases again. `PBIndexedCollection` gains
   `_withChanges:log:complete:` (a new version with any persisted fields changed). Tests:
   `tests/unit/counted_set_ops.st`, `tests/unit/rebase_counted_set.st`, the concurrency row
-  `counted-set-blind-adds` (outcome generated by ProtoBase), and `PBCountedSet` in
-  `tests/interop/_st_write_shapes.st` (with a blind merge read back by ProtoBase) and
+  `counted-set-blind-adds` (outcome generated by `proto_db`), and `PBCountedSet` in
+  `tests/interop/_st_write_shapes.st` (with a blind merge read back by `proto_db`) and
   `tests/interop/_st_random_ops.st`.
 - Task 22 review fix round 1: `_withChanges:log:complete:` refuses a field the class does not
   persist (`PBUserError` naming the fields), so a misspelled field is never dropped; the
@@ -287,8 +287,8 @@ The entries are chronological, and later entries supersede earlier ones (vectors
   `lastOccurrencesOf:do:`) shared by `PBIndexedCollection` and `PBCountedSet`; the concurrency
   table gains 12 counted set cases (`cs-*`: clamping, concurrent removes, replace, a
   read-modify-write conflict, mixed numbers, an absent root), with outcomes generated by
-  ProtoBase, through one generic step `['counted set ops', r, blind|read|replace, op, e, ...]`
-  that replaces `counted set add`; design spec 7.2 lists ProtoBase's counted set log entries.
+  `proto_db`, through one generic step `['counted set ops', r, blind|read|replace, op, e, ...]`
+  that replaces `counted set add`; design spec 7.2 lists `proto_db`'s counted set log entries.
 - Documentation (plan Task 24): the README is rewritten as the entry point of a proposal prototype
   (what it is, status, the two prominent boxes "Every collection message answers a new version"
   with the three Pharo clashes, and "`PBList` positions are zero-based", a quick start, the API

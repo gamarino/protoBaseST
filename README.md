@@ -2,10 +2,11 @@
 
 A perennial object database for protoST, in the tradition GemStone opened.
 
-protoBaseST is a Smalltalk implementation, on protoST, of [ProtoBase](https://github.com/gamarino/ProtoDB) (the Python
-package `proto_db`). It reads and writes the **same on-disk format** (format 4, frozen at ProtoBase
-`v2.0.0rc1`, with the value nesting limit of `v2.0.0rc2`), so one database directory can be shared
-by Python and Smalltalk programs. It has ProtoBase's API translated to Smalltalk, and ProtoBase's
+protoBaseST is a Smalltalk implementation, on protoST, of the Python object database `proto_db`
+(developed in the [protoBase repository](https://github.com/gamarino/ProtoDB)). It reads and
+writes the **same on-disk format** (format 4, frozen at `v2.0.0rc1`, with the value nesting limit
+of `v2.0.0rc2`), so one database directory can be shared
+by Python and Smalltalk programs. It has `proto_db`'s API translated to Smalltalk, and `proto_db`'s
 transaction semantics: snapshot isolation, read sets checked at commit, merges of blind writes,
 mutable cells, retries.
 
@@ -16,9 +17,9 @@ It is shown to start a conversation and to collect criticism. It is small and me
 it is not fast and not complete. Read [docs/not-done.md](docs/not-done.md) first: it states what
 is missing and what has not been proven.
 
-What was checked, against ProtoBase `v2.0.0rc2`: the conformance vectors, a round trip in both
-directions (a space written by one language passes the other's reader and verifier with an
-identical dump), the shapes of AVL trees node by node, 27 concurrent-commit scenarios with both
+What was checked, against `proto_db` at `v2.0.0rc2`: the conformance vectors, a round trip in both
+directions (a space written by `proto_db` is dumped identically by protoBaseST, and a space
+written by protoBaseST passes the `proto_db` verifier with an identical dump), the shapes of AVL trees node by node, 27 concurrent-commit scenarios with both
 languages as first and second committer, and a small ERP demo. What was not: anything outside
 those scenarios, speed, long runs, and review by anyone but the people who wrote it.
 
@@ -47,7 +48,7 @@ those scenarios, speed, long runs, and review by anyone but the people who wrote
 > tags := tags add: 'urgent'.    "keep the answer"
 > ```
 >
-> Three names clash with Pharo's meaning (design spec 5.3, ruling 2). They are ProtoBase's names,
+> Three names clash with Pharo's meaning (design spec 5.3, ruling 2). They are `proto_db`'s names,
 > kept on purpose so that one document explains both languages:
 >
 > | Message | Pharo | protoBaseST |
@@ -62,7 +63,7 @@ those scenarios, speed, long runs, and review by anyone but the people who wrote
 
 > ### `PBList` positions are zero-based
 >
-> `getAt: 0` is the first element and `getAt: -1` the last. ProtoBase's `List` is zero-based and
+> `getAt: 0` is the first element and `getAt: -1` the last. `proto_db`'s `List` is zero-based and
 > the persisted tree counts are the same in both languages (design spec ruling 3). Smalltalk
 > collections are one-based, so this is a trap for Smalltalk programmers; it is the price of
 > sharing the format. A position out of range is `PBValidationError`, never `nil`. Every other
@@ -78,9 +79,13 @@ those scenarios, speed, long runs, and review by anyone but the people who wrote
 
 Build protoST 0.10.0 against protoCore 3.6.0 and protoIO 0.5.0 (see its own README); it provides
 `lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st` and the fixes for protoST issues S37 to S40
-that this code relies on. The Python interop tests and the ERP demo also need a checkout of
-[ProtoBase](https://github.com/gamarino/ProtoDB) (default `../ProtoBase`, or set
-`PROTOBASE_REPO`) and Python 3.14.
+that this code relies on. The Python interop tests and the ERP demo also need a checkout of the
+[protoBase repository](https://github.com/gamarino/ProtoDB), at the tag `v2.0.0rc2`, and Python
+3.11 or newer (tested with 3.14):
+
+```sh
+git clone https://github.com/gamarino/ProtoDB ../ProtoBase    # default location; or set PROTOBASE_REPO
+```
 
 ## Quick start
 
@@ -114,15 +119,15 @@ space close.
 A fuller walk-through, with the reasoning behind each design choice, is
 [docs/tutorial.md](docs/tutorial.md).
 
-## The API, mapped from ProtoBase
+## The API, mapped from `proto_db`
 
-Names are ProtoBase's public names at `v2.0.0rc2`, prefixed `PB` in place of a namespace, in
+Names are `proto_db`'s public names at `v2.0.0rc2`, prefixed `PB` in place of a namespace, in
 Smalltalk camelCase. Python keyword arguments become keyword parts. Timeouts and backoffs are
 SmallInteger milliseconds, not float seconds.
 
 ### Classes
 
-| ProtoBase (`proto_db`) | protoBaseST |
+| `proto_db` (Python) | protoBaseST |
 |---|---|
 | `ObjectSpace`, `FileStorage`, `Database` | `PBObjectSpace`, `PBFileStorage`, `PBDatabase` |
 | `Transaction`, `Snapshot`, `HistoryEntry` | `PBTransaction`, `PBSnapshot`, `PBHistoryEntry` |
@@ -136,7 +141,7 @@ SmallInteger milliseconds, not float seconds.
 
 ### Messages
 
-| ProtoBase | protoBaseST |
+| `proto_db` (Python) | protoBaseST |
 |---|---|
 | `FileStorage(path)` | `PBFileStorage path: '/srv/erp'` (durability is always `fsync`) |
 | `ObjectSpace(storage, lock_timeout=s)` | `PBObjectSpace storage: aStorage`, `storage:lockTimeout:` (milliseconds) |
@@ -163,7 +168,7 @@ SmallInteger milliseconds, not float seconds.
 | iteration (`for x in coll`) | `do:`; `keysAndValuesDo:` on the dictionaries |
 
 The complete list of what exists is [docs/reference.md](docs/reference.md). There is no `asOf:`
-because ProtoBase has none; the tutorial shows the three-line helper.
+because `proto_db` has none; the tutorial shows the three-line helper.
 
 ## What it refuses
 
@@ -179,7 +184,7 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 |---|---|
 | [docs/tutorial.md](docs/tutorial.md) | A guided build of a small ERP, with the reasoning at each step. Every snippet is run by the tests. |
 | [docs/reference.md](docs/reference.md) | Every public class and message. |
-| [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from ProtoBase. |
+| [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from `proto_db`. |
 | [docs/not-done.md](docs/not-done.md) | What is not done, and what is not proven. |
 | [docs/decisions.md](docs/decisions.md) | The choices, with what each costs if it is wrong. |
 | [examples/erp/](examples/erp/README.md) | A demo in which Python and protoST work on one directory. |
@@ -192,8 +197,8 @@ The tests need protoST 0.10.0 or newer (see Requirements). Point `PROTOST` at th
 
 ```sh
 export PROTOST=../protoST/build_release/protost      # default: protost from PATH
-tests/conformance/fetch_vectors.sh                    # vendors the format-4 vectors; run once, checks digests
-PYTHON=python3.14 tests/interop/setup_venv.sh         # Python side of the interop tests (needs ../ProtoBase)
+tests/conformance/fetch_vectors.sh                    # only to re-vendor the format-4 vectors (they are already in the repository)
+PYTHON=python3.14 tests/interop/setup_venv.sh         # Python side of the interop tests (needs the checkout above)
 tests/run_tests.sh                                    # everything under tests/ and examples/
 tests/run_tests.sh tests/unit tests/docs              # or chosen paths
 ```
@@ -201,9 +206,13 @@ tests/run_tests.sh tests/unit tests/docs              # or chosen paths
 The runner prints `PASS`, `FAIL` or `SKIP` per test and ends with `passed N, failed N, skipped N`.
 A `.st` test starts with an `"EXPECT: <last line>"` or `"EXPECT-ERROR: <text>"` directive; a
 `.sh` test passes with exit 0 and is skipped with exit 77. `PROTOBASE_REPO` (default `../ProtoBase`)
-names the ProtoBase checkout used by the two setup scripts. `tests/docs/` checks the snippets of
+names the protoBase checkout used by the two setup scripts. `tests/docs/` checks the snippets of
 the README and the tutorial against the code.
 
 ## License
 
 MIT. Copyright (c) 2026 Gustavo Marino.
+
+Third-party material: `tests/conformance/` (the vectors, `manifest.json`, `vectors.sha256`) is
+vendored from `proto_db` at `v2.0.0rc2`, MIT, Copyright (c) 2023 ProtoBase Team. Its notice is in
+[tests/conformance/LICENSE](tests/conformance/LICENSE).

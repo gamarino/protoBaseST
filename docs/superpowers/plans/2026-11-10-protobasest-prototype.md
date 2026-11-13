@@ -2,9 +2,9 @@
 
 > **Historical:** the implementation plan this prototype was built from. It is not maintained and is kept so that the task and call numbers cited in the code and the tests resolve. Where it differs from [docs/decisions.md](../../decisions.md), `docs/decisions.md` is authoritative. Parts of it (the execution notes, the release steps and the pinned digest) are out of date.
 
-**Goal:** a Smalltalk implementation of ProtoBase on protoST, reading and writing format 4 at
-ProtoBase `v2.0.0rc2` (format 4 was frozen at `v2.0.0rc1`; `v2.0.0rc2` adds the normative value
-nesting limit, ruling R18), with ProtoBase's transaction semantics, proven by a two-way round trip
+**Goal:** a Smalltalk implementation of `proto_db` on protoST, reading and writing format 4 at
+`proto_db` at `v2.0.0rc2` (format 4 was frozen at `v2.0.0rc1`; `v2.0.0rc2` adds the normative value
+nesting limit, ruling R18), with `proto_db`'s transaction semantics, proven by a two-way round trip
 with Python and an ERP demo for the FAST workshop on 2026-12-03.
 
 **Architecture:** three repositories, bottom up.
@@ -20,11 +20,11 @@ them in order.
 - C++20, protoIO (GoogleTest), protoST 0.9.x (conformance `.st` programs with `EXPECT:`
   directives);
 - protoST Smalltalk;
-- CPython ≥ 3.11 with `msgpack` 1.2.4 (ProtoBase `v2.0.0rc2` needs ≥ 1.2.0, with its C
-  extension), and ProtoBase extracted from `git archive v2.0.0rc2`, for the interop tests only.
+- CPython ≥ 3.11 with `msgpack` 1.2.4 (`proto_db` at `v2.0.0rc2` needs ≥ 1.2.0, with its C
+  extension), and `proto_db` extracted from `git archive v2.0.0rc2`, for the interop tests only.
 
 **Spec:** `docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md` (protoBaseST
-commit `e5f6db9`). The normative format is ProtoBase `v2.0.0rc2` (commit `343b762`; until Task 17b,
+commit `e5f6db9`). The normative format is `proto_db` at `v2.0.0rc2` (commit `343b762`; until Task 17b,
 `v2.0.0rc1`, commit `c48f73e`, which `v2.0.0rc2` keeps byte for byte apart from the value
 nesting limit and the regenerated database vector):
 - `docs/source/format-spec.rst`;
@@ -32,10 +32,10 @@ nesting limit and the regenerated database vector):
 - `proto_db/transactions.py`;
 - `tests/conformance/`.
 
-Read every ProtoBase file with `git -C ../ProtoBase show v2.0.0rc2:<path>`, and never modify
+Read every `proto_db` file with `git -C ../ProtoBase show v2.0.0rc2:<path>`, and never modify
 that repository. Citations: "FS §X" is a section of `format-spec.rst`, "Spec §N" a section of
-the design spec. **When in doubt, ProtoBase at the tag is the reference** (project rule).
-Read ProtoBase's code before guessing a behaviour.
+the design spec. **When in doubt, `proto_db` at the tag is the reference** (project rule).
+Read `proto_db`'s code before guessing a behaviour.
 
 ## Global Constraints
 
@@ -60,7 +60,7 @@ Read ProtoBase's code before guessing a behaviour.
   tolerates no SKIP.
 - **Refuse, never diverge.** Any value, type, version or operation the prototype cannot handle
   signals an explicit error naming it (Spec §2, anti-goals). protoBaseST never replaces where
-  ProtoBase would merge.
+  `proto_db` would merge.
 - **Immutability by convention** (decision 3). A persisted value is built once. No method of a
   protoBaseST class assigns an instance variable after construction. The two exceptions are the
   lazy-load memo and the operation-log *consumed* cell (Spec §4.1), and both are `Atom` cells.
@@ -87,17 +87,17 @@ Read ProtoBase's code before guessing a behaviour.
 | C3 | The protoST API names are `ByteArray randomBytes: n` and `Time utcMicroseconds` (microseconds since 1970-01-01T00:00Z, wall clock). `Time microsecondClockValue` stays monotonic | Clarity over familiar names: Pharo's `microsecondClockValue` is a wall clock, protoST's is monotonic, and reusing the name would mislead |
 | C4 | `randomBytes:` accepts 0 ≤ n ≤ 1,048,576 and signals `InvalidArgument` outside that range | A bound keeps one call from allocating without limit. Identities need 16 bytes |
 | C5 | Week-0 checks and every reader task run on the existing `../protoST/build_release/protost` (0.9.0), with protoST's branch `lib/`. The installed `/usr/bin/protost` is 0.8.1 and is not used | The spec assumed an installed 0.9.0. The local release build is 0.9.0 and runs, so no build is needed until Task 2 |
-| C6 | The §9 lock check targets ProtoBase's **FileStorage root lock** (`fcntl.flock(LOCK_EX\|LOCK_NB)` on `space.lock`), not `OwnerLock` | At the tag, `OwnerLock` guards logs and tiered storage, not `space.lock` |
+| C6 | The §9 lock check targets `proto_db`'s **FileStorage root lock** (`fcntl.flock(LOCK_EX\|LOCK_NB)` on `space.lock`), not `OwnerLock` | At the tag, `OwnerLock` guards logs and tiered storage, not `space.lock` |
 | C7 | The calendar classes signal protoST's own `TimeZoneUnavailable` (an `Error` subclass in `lib/calendar.st`) for a wall clock of an instant-zone `DateTime` and for building a named-zone `DateTime` from a wall clock. protoBaseST's own refusals (format-3 `["zone", key]` datetimes) signal `PBNotSupportedError` | The values live in protoST `lib/` (decision 1), which cannot depend on protoBaseST. Spec §4.3 named `PBNotSupportedError`; the refusal stays explicit and is documented |
 | C8 | Conformance vectors are **vendored** into `protoBaseST/tests/conformance/vectors/` by a script that extracts them from the tag and checks every file against `vectors.sha256` | A clean checkout must run the tests (Spec §10.8) |
-| C9 | The Python side is a venv at `tests/interop/.venv` (git-ignored), made with `--system-site-packages`. `msgpack==1.2.4` is installed only when the import is missing or another version (*amended by Task 17b, ruling R18*: ProtoBase `v2.0.0rc2` needs msgpack ≥ 1.2.0 and its C extension; until then `msgpack==1.1.2` and `v2.0.0rc1`). ProtoBase is extracted with `git archive v2.0.0rc2` into `tests/interop/.venv/protobase/` and used through `PYTHONPATH`; `env.sh` fails a run whose venv holds another commit than `setup_venv.sh` pins | Pure Python, so no install step is needed. Network use is kept to a missing `msgpack` |
-| C10 | Spec §10.2 and §10.3 run the verifier through `tests/interop/py_verify.py`. It imports `examples/erp/erp_model.py`, which registers `demo.erp.*`, then calls `proto_db.tools.verify.main([dir, "--out", file])` | A bare `python -m proto_db.tools.verify` would read `demo.erp.Invoice` as opaque. It is still ProtoBase's verifier, with the application's classes registered |
+| C9 | The Python side is a venv at `tests/interop/.venv` (git-ignored), made with `--system-site-packages`. `msgpack==1.2.4` is installed only when the import is missing or another version (*amended by Task 17b, ruling R18*: `proto_db` at `v2.0.0rc2` needs msgpack ≥ 1.2.0 and its C extension; until then `msgpack==1.1.2` and `v2.0.0rc1`). `proto_db` is extracted with `git archive v2.0.0rc2` into `tests/interop/.venv/protobase/` and used through `PYTHONPATH`; `env.sh` fails a run whose venv holds another commit than `setup_venv.sh` pins | Pure Python, so no install step is needed. Network use is kept to a missing `msgpack` |
+| C10 | Spec §10.2 and §10.3 run the verifier through `tests/interop/py_verify.py`. It imports `examples/erp/erp_model.py`, which registers `demo.erp.*`, then calls `proto_db.tools.verify.main([dir, "--out", file])` | A bare `python -m proto_db.tools.verify` would read `demo.erp.Invoice` as opaque. It is still `proto_db`'s verifier, with the application's classes registered |
 | C11 | The dumps are compared on the `databases` and `opaque_types` keys by `tests/interop/compare_dumps.py`. A `{"opaque": T}` on the protoST side equals `{"object": T}` on the Python side only for the Python-only type `demo.erp.AuditNote` | Atom counts depend on the walk. AuditNote is deliberately unknown to protoST |
 | C12 | protoST cannot drive an interactive pipe (`OSProcess run:arguments:input:` is one batch). Interleavings use nested runs. For "start A, start B, commit B, commit A", the side owning A starts A, runs the other language's one-shot script (start B, commit B) as a subprocess, and then commits A. Both assignments run: protoST as A and Python as B, and Python as A and protoST as B | Deterministic with no pipes. Each language validates against the other's commit |
 | C13 | Spec §10.7 is driven from Python. `tests/interop/hold_lock.py` takes the `flock`, runs a protoST script whose commit uses `lockTimeout: 50`, asserts it ends in `PBTimeoutError`, then releases | The outcome holds for any duration, because the lock is never released while protoST waits |
-| C14 | `PBDBError` is the root of the errors, which mirror `errors.py`: `PBValidationError` (with `PBClosedError` under it), `PBUserError`, `PBCorruptionError`, `PBNotSupportedError`, `PBUnexpectedError` (with `PBOutcomeUnknownError` under it), and `PBLockingError` (with `PBConflictError` and `PBTimeoutError` under it). `PBTimeoutError` is **not** protoST's `TimeoutError` | ProtoBase's hierarchy, so `on: PBLockingError do:` means the same thing in both languages |
-| C15 | `PBList` positions follow ProtoBase's `_position`: negative counts from the end; out of range or not an Integer is `PBValidationError` | `lists.py` at the tag |
-| C16 | A commit with no writes is a no-op, with no new version, as `Transaction._commit` at the tag | ProtoBase's behaviour |
+| C14 | `PBDBError` is the root of the errors, which mirror `errors.py`: `PBValidationError` (with `PBClosedError` under it), `PBUserError`, `PBCorruptionError`, `PBNotSupportedError`, `PBUnexpectedError` (with `PBOutcomeUnknownError` under it), and `PBLockingError` (with `PBConflictError` and `PBTimeoutError` under it). `PBTimeoutError` is **not** protoST's `TimeoutError` | `proto_db`'s hierarchy, so `on: PBLockingError do:` means the same thing in both languages |
+| C15 | `PBList` positions follow `proto_db`'s `_position`: negative counts from the end; out of range or not an Integer is `PBValidationError` | `lists.py` at the tag |
+| C16 | A commit with no writes is a no-op, with no new version, as `Transaction._commit` at the tag | `proto_db`'s behaviour |
 | C17 | Outcome resolution (Spec §7.3 step 8) is tested through a test-only subclass of `PBFileStorage`, defined in the test file, that fails `replaceRoot:` before or after the rename | No flag or hook in product code |
 | C18 | protoBaseST's version is `0.1.0`, with a CHANGELOG from the start and the MIT license, "Copyright (c) 2026 Gustavo Marino" | Same license as protoST |
 | C19 | The as-of moments of the ERP demo are the `committedAt` values of chosen history entries, never wall-clock readings | Deterministic report |
@@ -119,7 +119,7 @@ Read ProtoBase's code before guessing a behaviour.
    (round trip).
 5. **`PBList` positions.** `getAt: -1` answers the last element. `getAt: count` and
    `insertAt: count + 1` signal `PBValidationError`. `insertAt: count value:` appends. Every
-   case does what ProtoBase's `List` does, as recorded by a Python run. Test in Task 15.
+   case does what `proto_db`'s `List` does, as recorded by a Python run. Test in Task 15.
 
 ---
 
@@ -437,7 +437,7 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   - `src/protobase.st`, the module that imports every submodule in layer order; it starts
     empty and grows task by task;
   - `src/protobase/errors.st`, with the hierarchy of C14, each class carrying a class comment
-    naming its ProtoBase counterpart;
+    naming its `proto_db` counterpart;
   - `tests/run_tests.sh [path...]`, which runs `*.st` (directive semantics) and `*.sh` (exit
     0 pass, 77 skip, anything else fail) under the given paths, or under `tests/` and
     `examples/` by default, and prints a summary `passed N, failed N, skipped N`;
@@ -477,7 +477,7 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   - `json_manifest.st` parses the vendored `manifest.json` with `lib/json.st` and prints
     `(m at: 'values') size` and `(m at: 'invalid') size`. Expected: `73 59`.
   - `lock_excludes_protobase.sh` (C6):
-    1. Python opens `space.lock` as ProtoBase's FileStorage does and takes
+    1. Python opens `space.lock` as `proto_db`'s FileStorage does and takes
        `fcntl.flock(fd, LOCK_EX | LOCK_NB)`, holding it until its stdin closes.
     2. A protoST script asserts `(BinaryFile open: lock options: #(#read #write #create)) tryLock`
        answers false.
@@ -740,7 +740,7 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   - A built-in type whose class is not registered yet is `PBNotSupportedError`, never corruption.
   - Registration (fix round 1): a declared name follows the grammar and a `proto_db.` declared
     name must be in the table; an alias is any non-empty string that is not a built-in name, as
-    ProtoBase's `__type_aliases__` (pre-D57 names such as `pkg.mod.f.<locals>.Person`). Writers
+    `proto_db`'s `__type_aliases__` (pre-D57 names such as `pkg.mod.f.<locals>.Person`). Writers
     use `PBTypeRegistry writerTag:`, which writes the canonical spelling and refuses a name
     every reader refuses. The table is a private hashed `Dictionary` snapshot behind the
     `Atom` (constant-time lookup), copied on each registration and never changed once
@@ -790,16 +790,16 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   - `PBKeys class >> checkMapKeys: aPBFrozenDict`, the FS "Map keys" conflict rule, which
     signals `PBValidationError`. `PBCodec` calls it on encode, and on decode for format 4.
   - `PBFrozenDict` keys and lookups compare by map-key id (FS "Map keys"): the order key with
-    every bool read as 0 or 1, as ProtoBase's decoded map (a Python dict) does, so `at: true`
+    every bool read as 0 or 1, as `proto_db`'s decoded map (a Python dict) does, so `at: true`
     finds the key `1` (C-T10-3); a NaN by identity (a tuple holding one by its items'
     identity, as Python's tuple equality); a format-3 zone datetime by zone and wall clock.
   - Atom keys (fix round 1, review I1): every `PBAtom` key is its rank-14 order key, its oid,
-    as ProtoBase's `map_key_ids` and `Atom.__eq__`. A stub's record is loaded to read it, so a
+    as `proto_db`'s `map_key_ids` and `Atom.__eq__`. A stub's record is loaded to read it, so a
     decoded map holding references to two records of one oid is `PBCorruptionError`, and an
     atom's key never changes when it is saved. A `PBUnresolvedRef` (decoded without a resolver,
     its oid unknown) is a map key by its pointer only, a weaker rule than the format's.
     Superseded by ruling R13 (Task 13 fix round 1): there is no atom without an oid. An
-    atom that is not stored draws its oid in memory on first need (ProtoBase D21), so it is a
+    atom that is not stored draws its oid in memory on first need (`proto_db` D21), so it is a
     key like any other; the `PBNotSupportedError` this note first required is gone.
   - Added by the Task 7 review:
     - `checkMapKeys:` replaces the interim rule of `_PBItems` (same class and `=`) and keeps
@@ -962,7 +962,7 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     `legacy contents ok, N expected refusals`.
   - `polyglot_read.st`: the `polyglot.st.Order` record reads as a `PBOpaqueAtom` with its
     fields; the old name `polyglot.st.SalesOrder` resolves through the declared alias; the
-    ProtoBase record it references is readable.
+    `proto_db` record it references is readable.
   - `read_opaque_refusals.st`: `opaque setAt: 1 value: 2`, `opaque with: 'a' value: 1` and
     `opaque do: [...]` each signal `PBNotSupportedError` whose text names the type.
   - `read_cross_kind_keys.st`: `getAt: 1.0` and `getAt: (Decimal fromString: '1.00')` hit
@@ -1032,14 +1032,14 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
   - Atom depth (added by the Task 7 re-review; *superseded by Task 17b, ruling R18*, which
     replaces ruling R12's 509): an attribute value nests at most `MAX_VALUE_DEPTH` = 1022
     msgpack containers, counted from the value (format spec v2.0.0rc2, "Value nesting
-    depth", ProtoBase D60), and the atom payload `{"t", "oid", "s": {name: value}}` adds two,
+    depth", `proto_db` D60), and the atom payload `{"t", "oid", "s": {name: value}}` adds two,
     so a record holds at most 1024. The atom writer names the attribute in the refusal
     (`PBCodec canonical:for:` and `toWire:atomRef:for:`, `Attribute 'v': ...`).
     `tx_atom_depth.st` writes an attribute of 1022 nested lists (accepted, read back through
-    a transaction, and by ProtoBase in the interop run) and one of 1023 (refused with
+    a transaction, and by `proto_db` in the interop run) and one of 1023 (refused with
     `PBValidationError` before any byte is written, never protoST's raw msgpack `Error`), and
     a raw record holding 1023 is refused when read (`PBCorruptionError`). The rc1 history:
-    ProtoBase's recursive codec read about 333 nested lists under Python's default recursion
+    `proto_db`'s recursive codec read about 333 nested lists under Python's default recursion
     limit, so `st_deep_to_py.sh` raised the limit and printed a `NOTE:` naming ask B12; B12 is
     resolved in `v2.0.0rc2` (a non-recursive codec and the normative limit), and the
     workaround and its note are gone.
@@ -1051,7 +1051,7 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     references to two records of one oid is `PBCorruptionError`. `tx_atom_map_keys.st` checks
     it on a space with two versions of one atom.
   - Atom identity (ruling R13, fix round 1; it replaces review note N1 of Task 10 and its
-    `isUnsavedProbe:` gate): an oid is identity, not storage. As ProtoBase D21
+    `isUnsavedProbe:` gate): an oid is identity, not storage. As `proto_db` D21
     (`core/atom.py` `_assign_oid`), an atom that is not stored draws a version-4 UUID in
     memory (`UUID new`, through the seam `PBAtom >> _newOid`) on first need: `oid`, `=`,
     `hash`, an order key or a hash key. It is published by compare-and-swap in the atom's
@@ -1065,10 +1065,10 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     `PBFrozenDict` and every collection.
   - A record that needs itself to be decoded (review note N3 of Task 10): a map key that
     refers back to the record being loaded, directly or through another record keyed by it.
-    ProtoBase recurses until Python's `RecursionError`; protoBaseST signals
+    `proto_db` recurses until Python's `RecursionError`; protoBaseST signals
     `PBCorruptionError` naming the pointer, and the transaction stays usable. Such a record
     is damaged data or the work of a writer that breaks the save-dependents-first invariant
-    (ProtoBase saves every dependent before the record that refers to it, so a record only
+    (`proto_db` saves every dependent before the record that refers to it, so a record only
     points to earlier records); it is not a gap of the format (ask B13 withdrawn). The loads
     in progress are carried explicitly (fix round 1, review C1): a load passes the chain of
     pointers being decoded to the resolver it decodes with (`_PBLoadResolver`), which loads
@@ -1111,17 +1111,17 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
   - `PBAvl posAt: root index: i`, `posInsert: root at: i value: v`, `posSet: root at: i value: v`,
     `posRemove: root at: i`, `posAppend: root value: v`;
   - `PBAvl keyAt: root key: k` (a node or nil), `keyPut: root key: k value: v nodeClass: aClass`
-    (answers ProtoBase key_put's `{ root. replaced. old value }`), `keyRemove: root key: k`
+    (answers `proto_db` key_put's `{ root. replaced. old value }`), `keyRemove: root key: k`
     (key_remove's `{ root. removed. old value }`; the same root when k is absent);
   - `PBAvl nodesDo: aBlock over: root` (each node, in order: _inorder),
     `posDo: aBlock over: root` (each value, unboxed: pos_iter),
     `keysAndValuesDo: aBlock over: root` (each key and unboxed value: key_iter);
-  - a keyed node caches the order key of its key (ProtoBase `_okey`): a write-once cell,
+  - a keyed node caches the order key of its key (`proto_db` `_okey`): a write-once cell,
     never persisted, filled when a write builds the node or on a stub's first use;
   - `PBAvl check: root` (the FS invariants: height, count, balance, key order, `weight`, and
     one node class per tree), signalling `PBCorruptionError` on a violation;
   - a new node is an unsaved atom: no pointer, and no oid until its first need (ruling R13,
-    ProtoBase D21): `knownOid` is nil, `PBAtom >> oid` draws a random version-4 UUID lazily
+    `proto_db` D21): `knownOid` is nil, `PBAtom >> oid` draws a random version-4 UUID lazily
     in memory and keeps it, and the writer (Task 15) persists that same oid.
   - Boxing: a node value that is a `String` of 256 code points or more, or a `ByteArray` of
     256 bytes or more, is stored as a `PBValueBox`, and reads unbox it. Keys and bucket
@@ -1164,23 +1164,23 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
 - Produces:
   - Oids (ruling R13, implemented in Task 13 fix round 1 and kept): every new atom (record,
     node or collection) draws its oid lazily, on first need (`oid`, `=`, `hash`, a key, or
-    the save), as ProtoBase D21: `PBAtom >> oid` answers the oid cell, filled once by
-    compare-and-swap from `PBAtom >> _newOid` (16 bytes of `UUID new`, ProtoBase's
+    the save), as `proto_db` D21: `PBAtom >> oid` answers the oid cell, filled once by
+    compare-and-swap from `PBAtom >> _newOid` (16 bytes of `UUID new`, `proto_db`'s
     `uuid.uuid4()`). The writer persists exactly that oid (the save is a first need), never
     draws a second one.
   - Atom keys (from Task 10 fix round 1, which must be kept): an atom's map-key and order-key
     identity is its oid and never changes when it is saved.
     `atom_keys_oid.st`: an unsaved atom used as a map key keeps its key after the save; the
     writer refuses `{atomV1 -> a, atomV2 -> b}` and `{saved A -> a, twin of A -> b}` (one oid,
-    `PBValidationError`), as ProtoBase's reader would refuse those bytes.
+    `PBValidationError`), as `proto_db`'s reader would refuse those bytes.
   - `PBList new`, plus the mutators of Spec §5.2. Each answers a new `PBList` and leaves the
     receiver unchanged: `setAt:value:`, `insertAt:value:`, `removeAt:`, `appendFirst:`,
     `appendLast:`, `extend:`, `sliceFrom:to:`, `head:`, `tail:`. Positions are zero-based
-    and follow C15. *(Amended by the Task 15 review, M6.)* As ProtoBase's `extend`,
+    and follow C15. *(Amended by the Task 15 review, M6.)* As `proto_db`'s `extend`,
     `extend:` of nothing answers the receiver itself, an indexed list included.
   - Values pass through `PBCodec canonical:` at once.
   - `PBDictionary new`, `setAt:value:`, `removeAt:` (an absent key leaves the content
-    unchanged and answers a new version with the same tree, as ProtoBase's `remove_at`),
+    unchanged and answers a new version with the same tree, as `proto_db`'s `remove_at`),
     each answering a new version. The operation log comes in Task 16.
   - `PBObject withAll: anArrayOfAssociations`; `Invoice withAll:` for subclasses;
     `with: aName value: v`; `withAll:` on an instance. Each answers a new record with a new
@@ -1192,13 +1192,13 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
   - Save-dependents-first (from Task 13 fix round 1, B13 withdrawn): the writer saves every
     atom a record refers to (attribute values, map keys, collection nodes) before the record
     itself, so every reference in a written record points to an earlier record, as
-    ProtoBase's `_save` does; a record never refers to itself or forward. The reader's
+    `proto_db`'s `_save` does; a record never refers to itself or forward. The reader's
     `PBCorruptionError` for a record that needs itself to be decoded stays, as a defence
     against damaged data. `tests/unit/write_dependents_first.st`: records written by
     protoBaseST (an atom keyed by another atom, a chain of three records, a collection of
     records) are walked with `PBFileStorage recordsOfSegment:` and every `@ref` in a record
     points to a lower offset, or to an earlier segment.
-    The `PBList` comment states "Positions are zero-based, as in ProtoBase." Rulings 2 and 3.
+    The `PBList` comment states "Positions are zero-based, as in `proto_db`." Rulings 2 and 3.
 
 - [ ] **Step 1: failing tests.**
   - `list_positions.st` checks `getAt: -1`, `getAt: count` (`PBValidationError`),
@@ -1231,7 +1231,7 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
   - `tests/unit/hashdict_set_ops.st`.
   - *Amended by ruling R14 (Task 16 review I2):* the `tests/conformance/invalid_log.st`
     deliverable is dropped. The `log` layer's vectors are framed log files
-    (`storage/logfile.py`), which ProtoBase reads only in its cluster and tiered storage, both
+    (`storage/logfile.py`), which `proto_db` reads only in its cluster and tiered storage, both
     non-goals; collection operation logs are never persisted, so no "operation-log reader"
     exists to test. `tests/conformance/cluster.st` prints one justified `SKIP: invalid log
     <id>` line per manifest entry of the layer, beside `roots_log` and `message`, and the
@@ -1244,7 +1244,7 @@ Phase C needs Task 2's build: oids and segment names come from `ByteArray random
     `union:`, `intersection:`, `difference:`), with buckets as FS "Collections" describes.
   - Every `PBDictionary`, `PBHashDictionary` and `PBSet` version carries:
     - `opLog`: a `PBFrozenList` of `PBTuple`s `('set' k v)`, `('remove' k)` and
-      `('add' e)`, the names ProtoBase uses (read `collections/*.py` for the exact op names
+      `('add' e)`, the names `proto_db` uses (read `collections/*.py` for the exact op names
       and arities);
     - `logComplete`: true for a version built by `new` and derived only by logged mutators;
       false when loaded, bulk-built or rebased;
@@ -1297,7 +1297,7 @@ cut in `docs/not-done.md`. A blind write never ships without its merge.
     `persistedFields` order, and records the pointer in the atom.
     *(Amended by Task 15.)* The graph walk exists: `PBAtom >> _saveInto: aStorage` saves the
     dependents first, persists the oid drawn in memory and records the atom's place (its
-    `saved` cell); the state is written in the order it was built, which is ProtoBase's
+    `saved` cell); the state is written in the order it was built, which is `proto_db`'s
     (`indexes, count, root` for an empty collection, `persistedFields` later). `save:` is
     `anAtom _saveInto: self`, and `PBFileStorage` adds `pushAtom: aPBAtomEnvelope` → the
     pointer of the ATOM record it appends to the owned segment.
@@ -1338,9 +1338,9 @@ cut in `docs/not-done.md`. A blind write never ships without its merge.
 - [ ] **Step 4:** run. Expected: PASS.
 - [ ] **Step 5:** commit `File storage write side: owned segment, atom saving, root publication`.
 
-### Task 17b (inserted during execution, ruling R18): adopt ProtoBase `v2.0.0rc2`, the value nesting limit (B12)
+### Task 17b (inserted during execution, ruling R18): adopt `proto_db` at `v2.0.0rc2`, the value nesting limit (B12)
 
-ProtoBase resolved ask B12 in `v2.0.0rc2` (commit `343b762`; format spec "Value nesting depth",
+`proto_db` resolved ask B12 in `v2.0.0rc2` (commit `343b762`; format spec "Value nesting depth",
 decision D60). No format version change. It supersedes ruling R12 (509).
 
 **Files:**
@@ -1376,7 +1376,7 @@ decision D60). No format version change. It supersedes ruling R12 (509).
   deep, or a key of 511 tuples, keeps an explicit stack, and the boundary tests run on an
   actor's worker thread too. That includes `PBNotation` (`describe:`, `build:`,
   `describeObject:`, `describeRaw:`, and `jsonText:`, which `dumpSpace:to:` writes with
-  instead of protoST's recursive JSON `stringify:`), as ProtoBase's `tools/notation.py` and
+  instead of protoST's recursive JSON `stringify:`), as `proto_db`'s `tools/notation.py` and
   `verify.dump_text` (fix round 1, I1). Walks left recursive are bounded: through method
   frames only (`_PBSequence =`, `_pbAddUnsavedAtomsTo:in:`; about 19,000 frames, D38), or by
   an AVL tree's height (`avl.st`, under 100 levels for any count).
@@ -1443,7 +1443,7 @@ decision D60). No format version change. It supersedes ruling R12 (509).
   - `PBMutableObject >> set: aTransaction value: v`.
   - (Task 17b) A root's value and a mutable cell's value pass through
     `PBCodec canonical:for:` with the holder `Root 'name'` or `Mutable 'name'`, as
-    ProtoBase's `canonical_for` names them, so a value deeper than `MAX_VALUE_DEPTH` is
+    `proto_db`'s `canonical_for` names them, so a value deeper than `MAX_VALUE_DEPTH` is
     refused naming where it was going.
   - `PBPublisher >> commit: aTransaction`, one actor per `PBObjectSpace`, which answers a
     Future. It runs the steps of Spec §7.3 in order:
@@ -1551,7 +1551,7 @@ decision D60). No format version change. It supersedes ruling R12 (509).
   A failure is a bug in Tasks 12-19: fix it there, and never weaken the test.
 - [ ] **Step 3:** commit `Round trip protoST → Python (10.3), random structures (10.6), polyglot rewrite, lock timeout (10.7)`.
 
-### Task 21: Concurrency table, the same outcomes as ProtoBase (Spec §10.4)
+### Task 21: Concurrency table, the same outcomes as `proto_db` (Spec §10.4)
 
 **Files:**
 - Create:
@@ -1580,7 +1580,7 @@ decision D60). No format version change. It supersedes ruling R12 (509).
   4. The three outcome lines are identical.
 
   Exception: the indexed-root case. Its expected protoST result is the documented
-  `PBNotSupportedError` while ProtoBase merges. The script asserts exactly that difference
+  `PBNotSupportedError` while `proto_db` merges. The script asserts exactly that difference
   and prints it. `concurrency_actors.st` asserts the reference outcomes recorded in the JSON.
 - [ ] **Step 2:** run. Expected: PASS for all 13 rows.
 - [ ] **Step 3:** commit `Concurrency: ProtoBase's outcomes across languages and actors (10.4)`.
@@ -1597,11 +1597,11 @@ decision D60). No format version change. It supersedes ruling R12 (509).
   - `PBCountedSet` `add:`, `remove:` (one occurrence; an absent element is a no-op) and
     `countOf:`, with `total_count` kept;
   - log entries `('transform' e removes adds)` for a rebase's adjustments; `add:` and `remove:`
-    log `('add' e)` and `('remove' e)`, as ProtoBase's `CountedSet` (amended at Task 22,
+    log `('add' e)` and `('remove' e)`, as `proto_db`'s `CountedSet` (amended at Task 22,
     design spec 7.2);
   - net effect per element `c → max(c - removes, 0) + adds`.
   - (Task 17b) An element is refused past 1018 containers (`PBCodec check:wrapping:...` with
-    4: its `(element, count)` entry in its bucket tuple adds 4), as ProtoBase's
+    4: its `(element, count)` entry in its bucket tuple adds 4), as `proto_db`'s
     `CountedSet.ELEMENT_WRAPPING`.
   - (Task 16 review I1) `PBCountedSet` already logs (`_logsOperations` true, an empty log
     rebases to `current`); this task supplies its `('transform' ...)` ops in
