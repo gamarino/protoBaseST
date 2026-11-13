@@ -602,10 +602,59 @@ PBAtom >> oid
   oid value: self _newOid ifCurrent: nil.
   ^ oid value.
 
-"A fresh oid: the 16 bytes of a version-4 UUID (ProtoBase uuid.uuid4()). The
- seam a test overrides to drive two first readers in a chosen order."
+"A fresh oid: the 16 bytes of a version-4 UUID (ProtoBase uuid.uuid4()), from
+ _PBOidPool. The seam a test overrides to drive two first readers in a chosen
+ order."
 PBAtom >> _newOid
-  ^ UUID new bytes.
+  ^ _PBOidPool next.
+
+"=== _PBOidPool ================================================================
+
+The source of fresh oids: the 16 bytes of version-4 UUIDs, as UUID new makes
+them (RFC 4122 section 4.4: ByteArray randomBytes:, the operating system's
+secure generator, with the version nibble set to 4 and the variant bits to
+2r10), drawn batchSize at a time, so a commit that writes a dozen atoms makes
+one call to the generator instead of a dozen. Every oid is 16 bytes of the
+generator's output, of which the same 6 bits are fixed as in UUID new, so the
+distribution is UUID new's.
+
+The pool is an Atom holding { bytes. next }: the batch (batchSize * 16 bytes,
+already marked) and the offset of the next unused oid. A draw takes the slice at
+next by compare-and-swap of a new pair, so each slice is handed out once,
+whatever the threads; a batch that is used up is replaced by a fresh one, by
+compare-and-swap too (a batch drawn by a loser of that race is dropped, never
+handed out). No lock, and nothing depends on timing."
+Object subclass: #_PBOidPool classVariableNames: 'Pool'.
+
+_PBOidPool class >> batchSize
+  ^ 64.
+
+"The 16 bytes of a fresh version-4 UUID."
+_PBOidPool class >> next
+  [| current bytes at |
+   current := Pool value.
+   bytes := current at: 1.
+   at := current at: 2.
+   at + 16 > bytes size
+     ifTrue: [Pool value: { self _batch. 0 } ifCurrent: current]
+     ifFalse: [(Pool value: { bytes. at + 16 } ifCurrent: current) ifTrue: [^ bytes copyFrom: at + 1 to: at + 16]]]
+    repeat.
+
+"batchSize oids: random bytes with the version and variant bits of each set."
+_PBOidPool class >> _batch
+  | raw marked |
+  raw := ByteArray randomBytes: self batchSize * 16.
+  marked := Array new: raw size.
+  1 to: raw size do: [:i | marked at: i put: (raw at: i)].
+  0 to: self batchSize - 1 do: [:k |
+    marked at: k * 16 + 7 put: (((raw at: k * 16 + 7) bitAnd: 16r0F) bitOr: 16r40).
+    marked at: k * 16 + 9 put: (((raw at: k * 16 + 9) bitAnd: 16r3F) bitOr: 16r80)].
+  ^ ByteArray withAll: marked.
+
+_PBOidPool class >> _initializePool
+  Pool := Atom on: { ByteArray new. 0 }.
+
+_PBOidPool _initializePool.
 
 "ProtoBase Atom.__eq__: the same object, or another atom of the same oid."
 PBAtom >> = anObject

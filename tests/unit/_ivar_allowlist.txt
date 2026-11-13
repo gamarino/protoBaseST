@@ -1,6 +1,6 @@
 # Spec 12.6: the only methods of src/protobase/*.st that assign an instance or class
 # variable. Each is a private initialiser called once by a class-side constructor
-# (or, for PBMissing and PBZoneKeys, once when the module loads). One entry per line:
+# (or, for PBMissing, PBZoneKeys and _PBOidPool, once when the module loads). One entry per line:
 # Class>>selector or Class class>>selector.
 # PBAtom>>_slots and PBAtom>>_installState: are not initialisers: they publish the runtime-only
 # slots field once, by compare-and-swap from nil (setInstVar:from:to:), always from the installed
@@ -19,6 +19,7 @@ PBAtomPointer>>_setSegmentBytes:offset:
 PBUnresolvedRef>>_setPointer:tag:
 PBZoneKeys class>>_initializeKeys
 PBTypeRegistry class>>_initializeRegistry
+_PBOidPool class>>_initializePool
 PBAtom>>_setOid:pointer:storage:
 _PBRecordShape>>_setPersisted:index:fields:persistedSlots:integerSlots:optional:required:
 _PBRecordShape class>>_initializeTable
