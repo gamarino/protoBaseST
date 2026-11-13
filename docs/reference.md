@@ -105,13 +105,14 @@ use it only to open a space; the other messages are the publisher's and the test
 |---|---|
 | `PBFileStorage class >> path: aPath` | Opens the directory, creating it if needed. Refuses (`PBNotSupportedError`) a directory with `cluster/`, or whose SpaceRoot carries a `cluster_term`. Durability is always `fsync`. |
 | `PBFileStorage class >> path: aPath segmentMaxBytes: n` | A segment rolls over before it exceeds `n` bytes (default 256 MiB). |
-| `directory`, `segmentMaxBytes`, `isClosed`, `isFailed`, `isCluster` | State. A write failure of the file system is `PBUnexpectedError` and ends writing through that storage (`isFailed`); reads keep working. |
+| `PBFileStorage class >> path: aPath atomCacheEntries: n`, `path:segmentMaxBytes:atomCacheEntries:` | The atom cache holds at most `n` records (default 20,000, `defaultAtomCacheEntries`; `0` disables it). It keeps, per record, what a load needs instead of decoding the record again: records are immutable once written, so it is never stale, even with other processes writing. A load still answers new, unloaded stubs for the references, as a decode does. It is emptied on `close` and on a write failure; each storage instance has its own. |
+| `directory`, `segmentMaxBytes`, `atomCacheEntries`, `atomCacheSize`, `isClosed`, `isFailed`, `isCluster` | State. A write failure of the file system is `PBUnexpectedError` and ends writing through that storage (`isFailed`); reads keep working. |
 | `readRoot` | The `PBRootRecord` of `space.root`, `nil` for a new space. |
 | `recordAt:`, `loadAt:expecting:`, `refTo:offset:tag:`, `recordsOfSegment:`, `openSegmentCount` | Reading by pointer. |
 | `save: anAtom` | Writes the atom and its dependents (dependents first) and answers its `PBAtomPointer`. |
 | `pushAtom: anEnvelope`, `flushSegment`, `currentSegment`, `newSegmentId` | One record into the storage's own segment; sync; the segment; a fresh id. |
 | `tryLockRoot`, `unlockRoot`, `holdsRootLock` | The OS lock on `space.lock`. `tryLockRoot` answers at once. |
-| `replaceRoot: aRootRecord` | Publishes: lock held (`PBUserError`), segments synced, SpaceRoot pointer checked, epoch is current + 1 (`PBConflictError`), then `space.root.tmp` is synced, renamed, and the directory synced. |
+| `replaceRoot: aRootRecord` | Publishes: lock held (`PBUserError`), segments synced, SpaceRoot pointer checked (the SpaceRoot this storage just wrote is read back and compared byte for byte with what was written; any other pointer is decoded in full), epoch is current + 1 (`PBConflictError`), then `space.root.tmp` is synced, renamed, and the directory synced. |
 | `close` | Never waits and never releases the root lock under a publish. |
 | `PBFileStorage class >> rootFileName`, `segmentSuffix`, `rootTempFileName`, `lockFileName`, `clusterDirectoryName`, `defaultSegmentMaxBytes`, `spaceRootTag` | Format constants. |
 

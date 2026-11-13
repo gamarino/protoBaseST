@@ -237,6 +237,38 @@ Re-run the script on your binary before quoting any of them. No claim of speed i
 was measured under heavy concurrent load, and the remaining cost is mostly protoST's interpreter
 and node building, not the format.
 
+### Commits per second (2026-11-13)
+
+Measured 2026-11-13 with `bench/run_tx.sh` (`RUNS=5`, interleaved, `TX_SCALE=1`) and
+`bench/run_avl.sh` (`RUNS=5`), on the protoST `build_release` binary of that morning (the same
+binary for both columns), against `proto_db` `v2.0.0rc2` on Python 3.14.6, at a load average of
+about 5.7 to 6.1, so the figures are indicative only. Segments on ZFS (`sync=standard`), `fsync`
+durability on both sides. "Before" is protoBaseST at `7ef11d7`, "after" at `5d2e8e2`, after the
+commit performance work (decisions R23 to R29): each value made canonical once, the new root
+checked by its bytes, a bounded atom cache, batched oids, codec fast paths. The bytes written
+are the same (`tests/unit/bytes_pinned.st`). Commits per second from the minimum wall time:
+
+| Profile | `proto_db` | before | after | after / `proto_db` |
+|---|---|---|---|---|
+| tiny (one key) | 152 | 24.0 | 45.1 | 0.30x |
+| small-record (3 fields of a record) | 150 | 16.7 | 35.0 | 0.23x |
+| batch-100 (100 keys per commit) | 68.6 | 2.6 | 4.5 | 0.07x |
+| conc-disjoint, 1 / 2 / 4 writers | 154 / 145 / 242 | 16.7 / 17.9 / 17.6 | 34.4 / 40.0 / 45.2 | 0.22x / 0.28x / 0.19x |
+| conc-merge, 1 / 2 / 4 writers | 143 / 143 / 218 | 13.4 / 13.0 / 12.5 | 30.1 / 28.7 / 28.8 | 0.21x / 0.20x / 0.13x |
+| conc-hot, 1 / 2 / 4 writers | 160 / 141 / 139 | 21.2 / 19.0 / 16.2 | 39.2 / 35.5 / 29.7 | 0.25x / 0.25x / 0.21x |
+
+User-space instructions per committed transaction (`bench/run_tx_instr.sh`, which counts
+instructions rather than time, so it holds on a busy machine): tiny 119 M before, 51 M after,
+3.6 M for `proto_db`; small-record 140 M, 59 M and 4.0 M; batch-100 1,335 M, 813 M and 61 M. The
+I/O is the same on both sides (about 2.4 KB and three `fsync` per small commit), so the remaining
+gap is CPU: protoST's interpreter, node building and record encoding. A batch commit is dominated
+by the 100 in-memory tree inserts, which this work did not change.
+
+The AVL operations of the table above, re-measured the same day, did not move (they are
+in-memory, and the work changed the commit path only; their instruction count is the same within
+0.1 %): `posAppend` 18x, `keyPut` new / replacing 13x / 17x, `posAt` / `keyAt` 16x / 14x, `check:`
+positional / keyed 23x / 30x (three runs each; their medians moved the other way).
+
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded
