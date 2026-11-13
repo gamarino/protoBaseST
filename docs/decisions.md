@@ -73,9 +73,8 @@ Cost if wrong, in brief (C1 and C2 were renumbered by rulings R1 and R10, below)
 
 ## 3. Execution rulings
 
-Rulings R1 to R22 were taken while the tasks ran, by the controller of the build, recorded in
-the build ledger, which is not part of this repository; the text of each is here, with its what,
-why and cost. Unnumbered rulings follow them.
+Rulings R1 to R22 were taken while the tasks ran; their record is here, with the what, why
+and cost of each. Unnumbered rulings follow them.
 A "task" is a task of the implementation plan (`docs/superpowers/plans/`).
 
 | # | What was decided | Why | Cost if wrong |
