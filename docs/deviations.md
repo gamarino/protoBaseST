@@ -219,55 +219,57 @@ visible skips, printed under the `PASS` line of `tests/conformance/cluster.st`.
 The prototype need not be fast, and it is not. This is the only place in the documentation that
 states figures; the other documents link here.
 
-Measured 2026-11-12 on a pre-release build of protoST 0.10.0 (commit `58f1834`) and
-protoBaseST commit `1564bce` (the source is unchanged since `5d09adf`), with
-`bench/run_avl.sh` (`RUNS=3`), against `proto_db` at `v2.0.0rc2`, at a load average of about 3.5, so
-the figures are indicative only:
+All figures below were measured 2026-11-13 on the same machine, at a load average of about 9 to 14
+(other work was running), so they are indicative only; instruction counts hold better than wall
+time on a busy machine. The binary is protoST 0.10.0 built at `build_rel0100` (protoST with S37 to
+S40 merged), the same binary for every column, against `proto_db` `v2.0.0rc2` on Python 3.14.6.
+Re-run the scripts on your binary before quoting any figure. No claim of speed is made.
 
-| Operation | Ratio to `proto_db` |
-|---|---|
-| `posAppend` | 19x |
-| `keyPut`, new key / replacing a key | 14x / 17x |
-| `posAt` / `keyAt` | 17x / 16x |
-| `check:` of a positional / of a keyed tree | 52x / 54x |
+An earlier table (2026-11-12, `RUNS=3`, a pre-release protoST build, load about 3.5) gave
+`check:` at 52x / 54x. It is superseded by the figures below: every re-measurement on later
+protoST builds gave about half that ratio; which protoST change caused it was not isolated.
 
-So the AVL structures are roughly 14 to 54 times slower; `check:` is the slowest. protoST
-interpreter work is ongoing and its branches are not merged yet, so these numbers will move.
-Re-run the script on your binary before quoting any of them. No claim of speed is made, nothing
-was measured under heavy concurrent load, and the remaining cost is mostly protoST's interpreter
-and node building, not the format.
+### AVL operations
 
-### Commits per second (2026-11-13)
+`bench/run_avl.sh` (`RUNS=5`), ratio of the minimum time to `proto_db`'s minimum; "before" is
+protoBaseST at `7ef11d7`, "after" at `36f2579` (the commit work below changed the commit path
+only):
 
-Measured 2026-11-13 with `bench/run_tx.sh` (`RUNS=5`, interleaved, `TX_SCALE=1`) and
-`bench/run_avl.sh` (`RUNS=5`), on the protoST `build_release` binary of that morning (the same
-binary for both columns), against `proto_db` `v2.0.0rc2` on Python 3.14.6, at a load average of
-about 5.7 to 6.1, so the figures are indicative only. Segments on ZFS (`sync=standard`), `fsync`
-durability on both sides. "Before" is protoBaseST at `7ef11d7`, "after" at `5d2e8e2`, after the
-commit performance work (decisions R23 to R29): each value made canonical once, the new root
-checked by its bytes, a bounded atom cache, batched oids, codec fast paths. The bytes written
-are the same (`tests/unit/bytes_pinned.st`). Commits per second from the minimum wall time:
+| Operation | before | after |
+|---|---|---|
+| `posAppend` | 21x | 24x |
+| `keyPut`, new key / replacing a key | 12x / 18x | 13x / 22x |
+| `posAt` / `keyAt` | 19x / 14x | 17x / 14x |
+| `check:` of a positional / of a keyed tree | 22x / 31x | 22x / 30x |
+
+So the AVL structures are roughly 12 to 31 times slower. The before/after differences are within
+the noise of this load (the medians moved the other way for several rows); the remaining cost is
+protoST's interpreter and node building, not the format.
+
+### Commits per second
+
+`bench/run_tx.sh` (`RUNS=5`, interleaved, `TX_SCALE=1`). Segments on ZFS (`sync=standard`),
+`fsync` durability on both sides. "Before" is protoBaseST at `7ef11d7`; "after" is `36f2579`,
+after the commit performance work (decisions R23 to R29: each value made canonical once, the new
+root checked by its bytes, an atom cache bounded in entries and bytes, batched oids, codec fast
+paths) and its first review fixes (values the writer must refuse are refused again at save). The
+bytes written are the same (`tests/unit/bytes_pinned.st`). Commits per second from the minimum /
+median wall time:
 
 | Profile | `proto_db` | before | after | after / `proto_db` |
 |---|---|---|---|---|
-| tiny (one key) | 152 | 24.0 | 45.1 | 0.30x |
-| small-record (3 fields of a record) | 150 | 16.7 | 35.0 | 0.23x |
-| batch-100 (100 keys per commit) | 68.6 | 2.6 | 4.5 | 0.07x |
-| conc-disjoint, 1 / 2 / 4 writers | 154 / 145 / 242 | 16.7 / 17.9 / 17.6 | 34.4 / 40.0 / 45.2 | 0.22x / 0.28x / 0.19x |
-| conc-merge, 1 / 2 / 4 writers | 143 / 143 / 218 | 13.4 / 13.0 / 12.5 | 30.1 / 28.7 / 28.8 | 0.21x / 0.20x / 0.13x |
-| conc-hot, 1 / 2 / 4 writers | 160 / 141 / 139 | 21.2 / 19.0 / 16.2 | 39.2 / 35.5 / 29.7 | 0.25x / 0.25x / 0.21x |
+| tiny (one key) | 152 / 130 | 18.3 / 16.4 | 31.9 / 29.3 | 0.21x |
+| small-record (3 fields of a record) | 148 / 122 | 13.6 / 12.8 | 26.2 / 22.0 | 0.18x |
+| batch-100 (100 keys per commit) | 55.2 / 49.5 | 2.2 / 2.0 | 3.2 / 2.6 | 0.06x |
+| conc-disjoint, 1 / 2 / 4 writers (min) | 141 / 134 / 226 | 14.6 / 15.7 / 15.0 | 25.2 / 27.5 / 31.3 | 0.18x / 0.21x / 0.14x |
+| conc-merge, 1 / 2 / 4 writers (min) | 145 / 128 / 207 | 10.8 / 10.4 / 10.3 | 22.3 / 22.4 / 18.7 | 0.15x / 0.18x / 0.09x |
+| conc-hot, 1 / 2 / 4 writers (min) | 153 / 151 / 114 | 21.5 / 21.7 / 16.0 | 32.9 / 29.1 / 25.3 | 0.22x / 0.19x / 0.22x |
 
-User-space instructions per committed transaction (`bench/run_tx_instr.sh`, which counts
-instructions rather than time, so it holds on a busy machine): tiny 119 M before, 51 M after,
-3.6 M for `proto_db`; small-record 140 M, 59 M and 4.0 M; batch-100 1,335 M, 813 M and 61 M. The
-I/O is the same on both sides (about 2.4 KB and three `fsync` per small commit), so the remaining
-gap is CPU: protoST's interpreter, node building and record encoding. A batch commit is dominated
-by the 100 in-memory tree inserts, which this work did not change.
-
-The AVL operations of the table above, re-measured the same day, did not move (they are
-in-memory, and the work changed the commit path only; their instruction count is the same within
-0.1 %): `posAppend` 18x, `keyPut` new / replacing 13x / 17x, `posAt` / `keyAt` 16x / 14x, `check:`
-positional / keyed 23x / 30x (three runs each; their medians moved the other way).
+User-space instructions per committed transaction (`bench/run_tx_instr.sh`): tiny 119 M before,
+53 M after, 3.6 M for `proto_db`; small-record 140 M, 61 M and 4.0 M; batch-100 1,335 M, 904 M
+and 61 M. The I/O is the same on both sides (about 2.4 KB and three `fsync` per small commit), so
+the remaining gap is CPU: protoST's interpreter, node building and record encoding. A batch commit
+is dominated by the 100 in-memory tree inserts, which this work did not change.
 
 ## Known protoST limits
 
