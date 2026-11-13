@@ -383,14 +383,23 @@ PBFileStorage class >> defaultSegmentMaxBytes
 PBFileStorage class >> path: aPath
   ^ self path: aPath segmentMaxBytes: self defaultSegmentMaxBytes.
 
-"The number of loaded records the atom cache of a storage holds at most, by
- default (see _PBAtomCache)."
+"The number of records and the payload bytes the atom cache of a storage holds
+ at most, by default (see _PBAtomCache): 20,000 records, and 64 MiB, the
+ default byte bound of ProtoBase's storage cache (FileStorage cache_bytes)."
 PBFileStorage class >> defaultAtomCacheEntries
   ^ 20000.
 
+PBFileStorage class >> defaultAtomCacheBytes
+  ^ 64 * 1024 * 1024.
+
 "As path:, with an atom cache of at most anInteger records (0: none)."
 PBFileStorage class >> path: aPath atomCacheEntries: anInteger
-  ^ self path: aPath segmentMaxBytes: self defaultSegmentMaxBytes atomCacheEntries: anInteger.
+  ^ self path: aPath atomCacheEntries: anInteger atomCacheBytes: self defaultAtomCacheBytes.
+
+"As path:, with an atom cache of at most anInteger records (0: none) and
+ bytes of record payload."
+PBFileStorage class >> path: aPath atomCacheEntries: anInteger atomCacheBytes: bytes
+  ^ self path: aPath segmentMaxBytes: self defaultSegmentMaxBytes atomCacheEntries: anInteger atomCacheBytes: bytes.
 
 "As path:, with segments rolled over before they exceed anInteger bytes (a
  single larger record gets a segment of its own). anInteger must exceed the
@@ -401,9 +410,16 @@ PBFileStorage class >> path: aPath segmentMaxBytes: anInteger
 "As path:segmentMaxBytes:, with an atom cache of at most cacheEntries records
  (an Integer >= 0; 0: no cache)."
 PBFileStorage class >> path: aPath segmentMaxBytes: anInteger atomCacheEntries: cacheEntries
+  ^ self path: aPath segmentMaxBytes: anInteger atomCacheEntries: cacheEntries atomCacheBytes: self defaultAtomCacheBytes.
+
+"As path:segmentMaxBytes:, with an atom cache of at most cacheEntries records
+ and cacheBytes bytes of record payload (Integers >= 0; either 0: no cache)."
+PBFileStorage class >> path: aPath segmentMaxBytes: anInteger atomCacheEntries: cacheEntries atomCacheBytes: cacheBytes
   | dir storage ok |
   ((_PBFrame isInt: cacheEntries) and: [cacheEntries >= 0]) ifFalse: [
     ^ PBValidationError signal: 'PBFileStorage: atomCacheEntries must be an Integer >= 0, not ' , cacheEntries printString].
+  ((_PBFrame isInt: cacheBytes) and: [cacheBytes >= 0]) ifFalse: [
+    ^ PBValidationError signal: 'PBFileStorage: atomCacheBytes must be an Integer >= 0, not ' , cacheBytes printString].
   ((_PBFrame isInt: anInteger) and: [anInteger > (PBSegmentHeader byteSize + PBRecordHeader byteSize)]) ifFalse: [
     ^ PBValidationError signal: 'PBFileStorage: segmentMaxBytes must be an Integer greater than '
       , (PBSegmentHeader byteSize + PBRecordHeader byteSize) printString , ', not ' , anInteger printString].
@@ -417,12 +433,12 @@ PBFileStorage class >> path: aPath segmentMaxBytes: anInteger atomCacheEntries: 
       , ' holds cluster/, the space of a cluster node: clusters are not supported by protoBaseST'].
   [dir ensureCreateDirectory] on: FileSystemError do: [:e |
     ^ PBUnexpectedError signal: 'PBFileStorage: cannot create the space directory ' , dir pathString , ': ' , e messageText].
-  storage := self basicNew _setDirectory: dir segmentMaxBytes: anInteger atomCacheEntries: cacheEntries.
+  storage := self basicNew _setDirectory: dir segmentMaxBytes: anInteger atomCacheEntries: cacheEntries atomCacheBytes: cacheBytes.
   ok := false.
   [storage _validateRoot. ok := true] ensure: [ok ifFalse: [storage close]].
   ^ storage.
 
-PBFileStorage >> _setDirectory: aFileReference segmentMaxBytes: anInteger atomCacheEntries: cacheEntries
+PBFileStorage >> _setDirectory: aFileReference segmentMaxBytes: anInteger atomCacheEntries: cacheEntries atomCacheBytes: cacheBytes
   "Runs once, on a fresh instance."
   directory isNil ifFalse: [^ PBUserError signal: 'PBFileStorage is initialised once'].
   directory := aFileReference.
@@ -434,75 +450,83 @@ PBFileStorage >> _setDirectory: aFileReference segmentMaxBytes: anInteger atomCa
   failed := Atom on: nil.
   rootLock := Atom on: nil.
   lastPush := Atom on: nil.
-  atomCache := _PBAtomCache entries: cacheEntries.
+  atomCache := _PBAtomCache entries: cacheEntries bytes: cacheBytes.
   ^ self.
 
 "The size cap of a segment (segmentMaxBytes)."
 PBFileStorage >> segmentMaxBytes
   ^ segmentMax.
 
-"The atom cache's bound (atomCacheEntries; 0: no cache) and the number of
- records it holds now."
+"The atom cache's bounds (atomCacheEntries, atomCacheBytes; 0: no cache), and
+ the number of records and payload bytes it holds now."
 PBFileStorage >> atomCacheEntries
   ^ atomCache capacity.
+
+PBFileStorage >> atomCacheBytes
+  ^ atomCache byteCapacity.
 
 PBFileStorage >> atomCacheSize
   ^ atomCache size.
 
+PBFileStorage >> atomCacheWeight
+  ^ atomCache weight.
+
 "The loaded envelope of the record at aPointer for anAtom (PBAtom >>
- _envelopeWithin:). When the atom cache holds the record for anAtom's class,
- a copy of the cached template with new stubs for its references
- (_pbOwnCopyOf:class:), so no record is decoded and every load still answers
- references of its own, unloaded, as a decode does; otherwise the record
- decoded and checked, and its template cached. A closed storage answers
- PBClosedError, cached or not."
+ _envelopeWithin:): the record as the atom cache holds it, or else decoded
+ (loadAt:expecting:within:), then checked against anAtom's class by
+ _loadedEnvelope:at:for:, for anAtom, on every load, cached or not. A cached
+ record is answered as a copy whose references are new stubs
+ (_pbOwnCopyOf:), so every load answers references of its own, unloaded, as a
+ decode does. A decoded record is cached unless its state holds a reference
+ inside a container. A closed storage answers PBClosedError, cached or not."
 PBFileStorage >> _pbLoadedEnvelopeAt: aPointer for: anAtom within: aChain
-  | cls cached template envelope |
+  | cls cached decoded envelope |
   self _checkOpen.
   cls := anAtom class.
   cached := atomCache valueAt: aPointer class: cls.
   cached isNil ifFalse: [
-    template := (cached isKindOf: PBAtomEnvelope)
-      ifTrue: [cached]
-      ifFalse: [self _pbTemplateOfSaved: cached at: aPointer].
-    template isNil ifFalse: [
-      template == cached ifFalse: [atomCache at: aPointer class: cls put: template].
-      ^ self _pbOwnCopyOf: template class: cls]].
-  envelope := super _pbLoadedEnvelopeAt: aPointer for: anAtom within: aChain.
-  (atomCache isEnabled and: [cls ~~ PBOpaqueAtom and: [envelope state _pbHoldsNestedReference not]]) ifTrue: [
-    atomCache at: aPointer class: cls put: (self _pbOwnCopyOf: envelope class: cls)].
+    envelope := cls _loadedEnvelope: (self _pbOwnCopyOf: cached) at: aPointer for: anAtom.
+    self _checkOpen.
+    ^ envelope].
+  decoded := self loadAt: aPointer expecting: anAtom tag within: aChain.
+  envelope := cls _loadedEnvelope: decoded at: aPointer for: anAtom.
+  (cls ~~ PBOpaqueAtom and: [decoded state _pbHoldsNestedReference not]) ifTrue: [
+    self _pbCache: (self _pbOwnCopyOf: decoded) at: aPointer class: cls].
   ^ envelope.
 
-"A save wrote anAtom's record at aPointer: the atom cache keeps anAtom, whose
- template (_pbTemplateOfSaved:at:) is built when the record is first read, so
- a record nobody reads again costs one insertion, and the next transaction
- reads what this one saved without decoding it."
+"A save wrote anAtom's record at aPointer (pushAtom:, just before): the atom
+ cache keeps the record as a decode of it would give it, built from anAtom's
+ state with each atom replaced by a new stub (PBAtom >> _pbStoredStateIn:),
+ never anAtom itself, so nothing a transaction loaded stays reachable from the
+ cache. Weighed by the payload size pushAtom: wrote. Nothing is cached when the
+ state holds a reference inside a container."
 PBFileStorage >> _pbSaved: anAtom at: aPointer
-  atomCache isEnabled ifTrue: [atomCache at: aPointer class: anAtom class put: anAtom].
-
-"The template of the record anAtom saved at aPointer: the loaded envelope a
- decode of it would give, built from anAtom's state (PBAtom >>
- _pbStoredStateIn:, references as stubs of this storage) and checked as a
- decode is checked (_loadedEnvelope:at:for:). nil when the state holds a
- reference inside a container, or the check refuses it: the record is then
- decoded, and a refusal reported, as before."
-PBFileStorage >> _pbTemplateOfSaved: anAtom at: aPointer
-  | cls stored |
-  cls := anAtom class.
+  | last stored |
+  atomCache isEnabled ifFalse: [^ self].
+  last := lastPush value.
+  (last notNil and: [(last at: 1) = aPointer]) ifFalse: [^ self].
   stored := anAtom _pbStoredStateIn: self.
-  stored isNil ifTrue: [^ nil].
-  ^ [cls _loadedEnvelope: (PBAtomEnvelope _ofAtomTag: anAtom tag oid: anAtom oid state: stored)
-       at: aPointer for: (cls unloadedAt: aPointer storage: self)]
-    on: PBDBError do: [:e | nil].
+  stored isNil ifTrue: [^ self].
+  self _pbCache: (PBAtomEnvelope basicNew _setTag: (last at: 2) oid: anAtom oid state: stored slots: nil size: (last at: 4))
+    at: aPointer class: anAtom class.
 
-"anEnvelope, a loaded envelope of aClass whose state holds no reference inside
- a container, with a new stub of this storage for each reference: a copy that
- shares every value but the stubs, which belong to the one load that answers
- it (a stub loaded by one reader never shows loaded to another, and a cached
- template never keeps a reader's graph loaded). An envelope with no reference
- is answered as is."
-PBFileStorage >> _pbOwnCopyOf: anEnvelope class: aClass
-  | st values fresh |
+"Caches anEnvelope for the record at aPointer and aClass, unless the storage
+ is closed or failed. A close or a failure that empties the cache while the
+ insertion runs is seen after it, and the cache emptied again, so no entry
+ outlives a close or a failure."
+PBFileStorage >> _pbCache: anEnvelope at: aPointer class: aClass
+  (atomCache isEnabled and: [self isClosed not and: [self isFailed not]]) ifFalse: [^ self].
+  atomCache at: aPointer class: aClass put: anEnvelope.
+  (self isClosed or: [self isFailed]) ifTrue: [atomCache clear].
+
+"anEnvelope, an unchecked envelope (no slots) whose state holds no reference
+ inside a container, with a new stub of this storage for each reference: a
+ copy that shares every value but the stubs, which belong to the one load
+ that answers it (a stub loaded by one reader never shows loaded to another,
+ and a cached record never keeps a reader's graph loaded). An envelope with no
+ reference is answered as is."
+PBFileStorage >> _pbOwnCopyOf: anEnvelope
+  | st values |
   st := anEnvelope state.
   values := nil.
   1 to: st size do: [:i |
@@ -512,9 +536,8 @@ PBFileStorage >> _pbOwnCopyOf: anEnvelope class: aClass
       values isNil ifTrue: [values := (1 to: st size) asArray collect: [:k | st _valueAt: k]].
       values at: i put: (v _pbStubIn: self)]].
   values isNil ifTrue: [^ anEnvelope].
-  fresh := st _withValues: values.
-  ^ PBAtomEnvelope basicNew _setTag: anEnvelope tag oid: anEnvelope oid state: fresh
-    slots: (aClass _recordShape slotsOf: fresh).
+  ^ PBAtomEnvelope basicNew _setTag: anEnvelope tag oid: anEnvelope oid state: (st _withValues: values)
+    slots: nil size: anEnvelope payloadSize.
 
 "The kind of the storage state: #idle, #writing, #closeRequested or #closed."
 PBFileStorage >> _stateKind
@@ -634,7 +657,10 @@ PBFileStorage >> pushAtom: anEnvelope
     self _stopIfCloseRequested: 'before appending a record'.
     offset := self _write: [w append: record] what: 'appending a record to the segment ' , w segmentHex.
     ptr := PBAtomPointer segment: w segment offset: offset.
-    lastPush value: { ptr. anEnvelope tag. payload } ifCurrent: lastPush value.
+    "What the next steps need of this push: _pbSaved:at: its tag and size,
+     _checkRootRecordAt: the payload of a SpaceRoot (kept for a SpaceRoot only)."
+    lastPush swap: [:previous | { ptr. anEnvelope tag.
+      (anEnvelope tag = self class _spaceRootWriterTag) ifTrue: [payload] ifFalse: [nil]. payload size }].
     ptr].
 
 "Makes every record pushed so far durable: syncs every segment written since
@@ -738,37 +764,47 @@ PBFileStorage >> isCluster
   ^ (self _clusterReasonAt: self readRoot) notNil.
 
 "Why the space is a cluster node's, with the root record aRootRecord current
- (nil: none), or nil when it is not. The SpaceRoot is read as an atom of this
- storage (PBTypeRegistry unloadedAtomFor:at:storage:), the one the publisher
- decoded to build the commit when the atom cache holds it."
+ (nil: none), or nil when it is not. The SpaceRoot's state is the atom cache's
+ when it holds the record (decoded or written by this storage, so a decode by
+ loadAt:expecting: would answer that state), else the record decoded by
+ loadAt:expecting:, as before: no class check of PBSpaceRoot is added, so a
+ malformed SpaceRoot is reported as it was."
 PBFileStorage >> _clusterReasonAt: aRootRecord
-  | term |
+  | term cached |
   (directory / self class clusterDirectoryName) exists ifTrue: [
     ^ 'its directory holds ' , self class clusterDirectoryName , '/'].
   aRootRecord isNil ifTrue: [^ nil].
-  term := (PBTypeRegistry unloadedAtomFor: self class spaceRootTag at: aRootRecord pointer storage: self)
-    stateAt: 'cluster_term'.
+  cached := atomCache valueAt: aRootRecord pointer class: PBSpaceRoot.
+  term := (cached isNil
+    ifTrue: [(self loadAt: aRootRecord pointer expecting: self class spaceRootTag) state]
+    ifFalse: [cached state]) at: 'cluster_term' ifAbsent: [nil].
   term isNil ifTrue: [^ nil].
   ^ 'its SpaceRoot at ' , aRootRecord pointer printString , ' carries the cluster_term ' , term printString.
 
 "Refuses (PBCorruptionError) a pointer that is not a valid SpaceRoot record
- (replaceRoot:). The record this storage pushed last is checked by reading it
- back, its framing and CRC verified (PBSegmentReader >> recordAt:, ProtoBase
+ (replaceRoot:). The SpaceRoot this storage pushed last is checked by reading
+ it back, its framing and CRC verified (PBSegmentReader >> recordAt:, ProtoBase
  publish_root's _fetch_record), and comparing its payload with the bytes
- encoded from the SpaceRoot envelope: what the publisher just saved, checked
- against the disk at least as strictly as ProtoBase does, without decoding it
- again. Any other pointer is decoded in full as a SpaceRoot (loadAt:expecting:)."
+ encoded from its envelope. Those bytes passed every check a decode makes
+ (PBAtomEnvelope >> encode: the attribute names, each value as a writer must
+ write it, the tag in its canonical form, a 16-byte oid, the map t, oid, s),
+ so a decode of them could only refuse what the disk changed, which the CRC
+ and the comparison catch. Any other pointer is decoded in full as a
+ SpaceRoot (loadAt:expecting:)."
 PBFileStorage >> _checkRootRecordAt: aPointer
   | last record |
   last := lastPush value.
-  ((last notNil and: [(last at: 1) = aPointer])
-    and: [(PBTypeRegistry nameOfTag: (last at: 2)) = (PBTypeRegistry nameOfTag: self class spaceRootTag)])
+  ((last notNil and: [(last at: 3) notNil]) and: [(last at: 1) = aPointer])
     ifFalse: [^ self loadAt: aPointer expecting: self class spaceRootTag].
   record := self recordAt: aPointer.
   ((record at: 1) isAtom and: [(record at: 2) = (last at: 3)]) ifFalse: [
     ^ PBCorruptionError signal: 'PBFileStorage: the record at ' , aPointer printString
       , ' does not hold the bytes of the SpaceRoot written there'].
   ^ self.
+
+"The tag a writer puts in a SpaceRoot record (PBTypeRegistry writerTag:)."
+PBFileStorage class >> _spaceRootWriterTag
+  ^ PBTypeRegistry writerTag: self spaceRootTag.
 
 "The tag of the SpaceRoot records a root record points to."
 PBFileStorage class >> spaceRootTag
@@ -952,85 +988,91 @@ PBFileStorage >> isFailed
 
 "=== _PBAtomCache ============================================================
 
-The atom cache of a PBFileStorage: for the records this storage decoded or
-wrote, what makes a load of them need no decode, keyed by their pointer, so a
-record is decoded once while it stays cached instead of once per transaction
-that reads it. ProtoBase keeps such a cache in its storage too.
+The atom cache of a PBFileStorage: records this storage decoded or wrote, kept
+so that loading them again needs no read and no decode. An entry is one
+record, for the class it is loaded as: an envelope as a decode gives it (tag,
+oid, state; no slots), whose references are stubs of the storage that are
+never handed out and never loaded. A load copies it with new stubs for its
+references and checks the copy against the loading atom's class, as a decode
+is checked (PBFileStorage >> _pbLoadedEnvelopeAt:for:within:), so a load
+answers what a decode answers, every reader's stubs are its own, and the
+cache keeps nothing a reader loaded reachable.
 
-An entry holds, for a record and the class it was checked for, either a
-template (the loaded envelope, as PBAtom class >> _loadedEnvelope:at:for:
-answers it) or, for a record this storage just wrote, the saved atom, whose
-template is built from its state the first time the record is read
-(PBFileStorage >> _pbTemplateOfSaved:at:): a record never read again costs one
-insertion. A load answers a copy of the template whose references are new
-stubs (PBFileStorage >> _pbOwnCopyOf:class:): the values are shared, the stubs
-are the reader's, so a load sees its references unloaded exactly as after a
-decode, a reader never sees another's loaded graph, and a template never keeps
-one loaded (DatabaseRoot previous stays unloaded, D53). A record whose state
-holds a reference inside a container (a list of atoms, a map keyed by atoms)
-is not cached: it is decoded as before.
+ProtoBase's storage keeps a cache too, of a different kind: the raw bytes of
+the records it read, bounded in bytes (FileStorage cache_bytes, 64 MiB). This
+one keeps decoded state, to spare protoST the decode, which is where the time
+goes; it is bounded both in records and in payload bytes.
 
-Why a template is the right answer: a record never changes once written
-(segments are append-only, never truncated, and each is written by one
-storage), so a pointer names the same bytes for every process, and a decode
-gives the same state every time. An entry is added only after a decode that
-verified the record's CRCs and tag, or after this storage wrote the record (the
-template is built from the state just encoded, and checked as a decode checks
-it). An entry serves a stub of its class only: a reference of another type to
-the same record is decoded, and refused, as before.
+Why an entry is the right answer: a record never changes once written
+(segments are append-only, never truncated, each written by one storage), so
+a pointer names the same bytes for every process, and a decode gives the same
+state every time. An entry is added only after a decode that verified the
+record's CRCs and tag, or after this storage wrote the record (the state just
+encoded, every value checked by the encoder, references as stubs of the
+records already written). A record whose state holds a reference inside a
+container (a list of atoms, a map keyed by atoms) is not cached.
 
-Bound and eviction: at most capacity entries, in two generations (young and
-old, each up to half); a full young generation becomes the old one and the
-previous old one is dropped, and an old entry read again moves to the young
-one. A generation is a Dictionary keyed by the record's offset (an Integer
-hashes far cheaper than a pointer), whose entry names its segment: a record of
-another segment at the same offset replaces it (a miss later, never a wrong
-answer). Concurrency: the generations are a pair of Dictionaries in an Atom,
-never changed once published; an insertion publishes a changed copy by
-compare-and-swap and retries when it loses, so readers never lock. The values
-are immutable (templates) or never changed by the cache (saved atoms).
-Invalidation: the cache is emptied when the storage closes and when a write
-fails; it belongs to one storage instance, so a reopen, or another storage on
-the same directory, starts empty."
-Object subclass: #_PBAtomCache instanceVariableNames: 'capacity cell'.
+Bounds and eviction: at most capacity records and byteCapacity bytes of
+record payload (the size the record has on disk, a measure of its decoded
+state; a record larger than half the byte bound is not cached), in two
+generations: the young one takes the insertions until it holds half of either
+bound, then becomes the old one, and the previous old one is dropped; an old
+entry read again moves to the young one. A generation is a Dictionary keyed by
+the record's offset (an Integer hashes far cheaper than a pointer), whose entry
+names its segment: a record of another segment at the same offset replaces it
+(a miss later, never a wrong answer). Concurrency: the cell holds { young. old.
+young bytes. old bytes }, never changed once published; an insertion publishes
+a changed copy by compare-and-swap and retries when it loses, so readers never
+lock. Invalidation: emptied when the storage closes and when a write fails,
+and an insertion that races either empties it again (PBFileStorage >>
+_pbCache:at:class:); it belongs to one storage instance, so a reopen, or
+another storage on the same directory, starts empty."
+Object subclass: #_PBAtomCache instanceVariableNames: 'capacity byteCapacity cell'.
 
-_PBAtomCache class >> entries: anInteger
-  ^ self basicNew _setCapacity: anInteger.
+_PBAtomCache class >> entries: anInteger bytes: bytes
+  ^ self basicNew _setCapacity: anInteger bytes: bytes.
 
-_PBAtomCache >> _setCapacity: anInteger
+_PBAtomCache >> _setCapacity: anInteger bytes: bytes
   "Runs once, on a fresh instance."
   cell isNil ifFalse: [^ PBUserError signal: '_PBAtomCache is initialised once'].
   capacity := anInteger.
-  cell := Atom on: { Dictionary new. Dictionary new }.
+  byteCapacity := bytes.
+  cell := Atom on: { Dictionary new. Dictionary new. 0. 0 }.
   ^ self.
 
 _PBAtomCache >> capacity
   ^ capacity.
 
-_PBAtomCache >> isEnabled
-  ^ capacity > 0.
+_PBAtomCache >> byteCapacity
+  ^ byteCapacity.
 
+_PBAtomCache >> isEnabled
+  ^ capacity > 0 and: [byteCapacity > 0].
+
+"The number of records cached."
 _PBAtomCache >> size
   | g |
   g := cell value.
   ^ (g at: 1) size + (g at: 2) size.
 
-"The entry { segment bytes. class. envelope } of aGeneration (a Dictionary
- offset -> entry) for aPointer, or nil. The offset is the key: an Integer
- hashes far cheaper than a pointer, and one segment receives most records; a
- record of another segment at the same offset replaces the entry (a miss
- later, never a wrong answer: the segment is compared on every read)."
+"The payload bytes of the records cached."
+_PBAtomCache >> weight
+  | g |
+  g := cell value.
+  ^ (g at: 3) + (g at: 4).
+
+"The entry { segment bytes. class. envelope. weight } of aGeneration (a
+ Dictionary offset -> entry) for aPointer, or nil."
 _PBAtomCache >> _entryIn: aGeneration at: aPointer
   | entry seg |
   entry := aGeneration at: aPointer offset ifAbsent: [^ nil].
   seg := entry at: 1.
   ^ (seg == aPointer segmentBytes or: [seg = aPointer segmentBytes]) ifTrue: [entry] ifFalse: [nil].
 
-"What is cached for the record at aPointer and aClass (a template envelope,
- or the saved atom its template is built from); nil when nothing is."
+"The envelope cached for the record at aPointer and aClass, or nil."
 _PBAtomCache >> valueAt: aPointer class: aClass
   | g entry |
-  capacity = 0 ifTrue: [^ nil].
+  self isEnabled ifFalse: [^ nil].
   g := cell value.
   entry := self _entryIn: (g at: 1) at: aPointer.
   entry isNil ifTrue: [
@@ -1040,33 +1082,34 @@ _PBAtomCache >> valueAt: aPointer class: aClass
   (entry at: 2) == aClass ifFalse: [^ nil].
   ^ entry at: 3.
 
-"Caches aValue (a template envelope, or a saved atom) for the record at
- aPointer and aClass in the young generation, unless a template for them is
- there already (a saved atom is replaced by its template); answers the value
- cached."
-_PBAtomCache >> at: aPointer class: aClass put: aValue
-  | entry half off |
-  capacity = 0 ifTrue: [^ aValue].
+"Caches anEnvelope for the record at aPointer and aClass in the young
+ generation, unless one is there already; answers the envelope cached. A
+ record heavier than half the byte bound is not cached."
+_PBAtomCache >> at: aPointer class: aClass put: anEnvelope
+  | entry half halfBytes off w |
+  self isEnabled ifFalse: [^ anEnvelope].
+  w := anEnvelope payloadSize ifNil: [0].
+  halfBytes := (byteCapacity + 1) // 2.
+  w > halfBytes ifTrue: [^ anEnvelope].
   off := aPointer offset.
-  entry := { aPointer segmentBytes. aClass. aValue }.
+  entry := { aPointer segmentBytes. aClass. anEnvelope. w }.
   half := (capacity + 1) // 2.
   [| g young installed next |
    g := cell value.
    young := g at: 1.
    installed := self _entryIn: young at: aPointer.
-   (installed notNil and: [(installed at: 2) == aClass and: [(installed at: 3) isKindOf: PBAtomEnvelope]]) ifTrue: [
-     ^ installed at: 3].
-   next := young size >= half
-     ifTrue: [{ Dictionary new at: off put: entry; yourself. young }]
-     ifFalse: [{ young copy at: off put: entry; yourself. g at: 2 }].
+   (installed notNil and: [(installed at: 2) == aClass]) ifTrue: [^ installed at: 3].
+   next := (young size >= half or: [(g at: 3) + w > halfBytes])
+     ifTrue: [{ Dictionary new at: off put: entry; yourself. young. w. g at: 3 }]
+     ifFalse: [{ young copy at: off put: entry; yourself. g at: 2. (g at: 3) + w. g at: 4 }].
    cell value: next ifCurrent: g] whileFalse.
-  ^ aValue.
+  ^ anEnvelope.
 
 "Drops every entry."
 _PBAtomCache >> clear
   | g |
   [g := cell value.
-   cell value: { Dictionary new. Dictionary new } ifCurrent: g] whileFalse.
+   cell value: { Dictionary new. Dictionary new. 0. 0 } ifCurrent: g] whileFalse.
 
 "=== _PBLoadResolver ========================================================="
 

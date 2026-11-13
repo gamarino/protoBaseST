@@ -1,4 +1,4 @@
-"EXPECT: ok 27"
+"EXPECT: ok 36"
 "The atom cache of PBFileStorage (_PBAtomCache): the loaded envelopes of the records the
  storage decoded or wrote, keyed by pointer, bounded, emptied on close and on a write
  failure, one per storage instance.
@@ -37,7 +37,7 @@ CountingStorage >> _pbSaved: anAtom at: aPointer
   self savedRecords add: { anAtom class. aPointer. (anAtom _pbStoredStateIn: self) notNil }.
   ^ super _pbSaved: anAtom at: aPointer.
 
-| c base dir st plain space db mismatches stub loads ptrs fresh s2 space2 seam other |
+| c base dir st plain space db mismatches stub loads ptrs fresh s2 space2 seam other scanned reached gens |
 c := Check new.
 base := FileSystem temp / ('pbst-store-atom-cache-' , Smalltalk pid printString).
 base deleteAll.
@@ -147,6 +147,42 @@ c that: '0 disables the cache' is: fresh atomCacheSize equals: 0.
 fresh close.
 c that: 'a negative bound is refused' signals: PBValidationError during: [
   PBFileStorage path: (base / 'neg') pathString atomCacheEntries: -1].
+
+"--- nothing a transaction loaded stays reachable from the cache ---"
+st := PBFileStorage path: (base / 'reach') pathString.
+space := PBObjectSpace storage: st.
+db := space newDatabase: 'reach'.
+db newTransactionDo: [:tr | | d |
+  d := tr newDictionary.
+  1 to: 300 do: [:k | d := d setAt: k value: k].
+  tr setRootObject: 'kv' value: d].
+db newTransactionDo: [:tr | | d |
+  d := tr getRootObject: 'kv'.
+  scanned := d keys size.
+  tr setRootObject: 'kv' value: (d setAt: 1 value: -1)].
+c that: 'a transaction scanned the whole tree, then wrote one key' is: scanned equals: 300.
+reached := OrderedCollection new.
+gens := ((st instVarNamed: 'atomCache') instVarNamed: 'cell') value.
+{ gens at: 1. gens at: 2 } do: [:g | g do: [:entry |
+  (entry at: 3) state do: [:v | (v isKindOf: PBAtom) ifTrue: [reached add: v]]]].
+c that: 'the cache holds references' isTrue: reached notEmpty.
+c that: 'every one an unloaded stub: nothing the transactions loaded or built is reachable from it'
+  is: (reached count: [:v | v isLoaded or: [(v instVarNamed: 'pointer') isNil]]) equals: 0.
+space close.
+
+"--- the byte bound ---"
+st := PBFileStorage path: (base / 'bytes') pathString atomCacheEntries: 1000 atomCacheBytes: 2000.
+c that: 'the byte bound is configurable' is: { st atomCacheEntries. st atomCacheBytes } equals: #(1000 2000).
+c that: 'the default byte bound is 64 MiB' is: PBFileStorage defaultAtomCacheBytes equals: 67108864.
+1 to: 50 do: [:i | st save: (PBObject withAll: { 'i' -> i. 's' -> (String new: 100 withAll: $x) })].
+c that: 'the cache holds at most its bytes' isTrue: (st atomCacheWeight <= 2000 and: [st atomCacheWeight > 0]).
+c that: 'so fewer records than were saved' isTrue: st atomCacheSize < 50.
+fresh := st atomCacheSize.
+st save: (PBObject withAll: { 's' -> (String new: 1500 withAll: $y) }).
+c that: 'a record heavier than half the bound is not cached' isTrue: st atomCacheSize <= fresh.
+c that: 'a negative byte bound is refused' signals: PBValidationError during: [
+  PBFileStorage path: (base / 'negbytes') pathString atomCacheEntries: 10 atomCacheBytes: -1].
+st close.
 
 "--- a failed write empties the cache ---"
 seam := SeamStorage path: (base / 'failing') pathString.

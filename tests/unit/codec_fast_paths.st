@@ -27,7 +27,7 @@ values := { nil. true. false. 0. 1. -1. 127. 128. -32. -33. 255. 256. 65535. 655
   (PBTuple withAll: { 1. 2 }). (PBFrozenDict withAssociations: { 'k' -> 1 }). atom } , floats.
 values do: [:v |
   | fast general |
-  fast := MessagePack encode: (PBCodec wireOfCanonical: v atomRef: ref).
+  fast := MessagePack encode: (PBCodec wireOf: v atomRef: ref for: 'v').
   general := MessagePack encode: (PBCodec _wire: v ref: ref).
   c that: 'encode ' , v printString is: fast hex equals: general hex].
 values do: [:v |

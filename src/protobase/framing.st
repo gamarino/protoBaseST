@@ -306,7 +306,7 @@ PBRootRecord >> encode
 "The payload of an ATOM record: the type tag t, the 16-byte oid and the state
  s (attribute name to canonical value), with the checks of format spec 'Atom
  records'."
-Object subclass: #PBAtomEnvelope instanceVariableNames: 'tag oid state slots'.
+Object subclass: #PBAtomEnvelope instanceVariableNames: 'tag oid state slots size'.
 
 "An envelope to write: aTag is an alias Integer or a type name (written in
  its canonical form; a name every reader refuses is PBValidationError), anOid 16 bytes (or a UUID), aState a PBFrozenDict of
@@ -329,9 +329,11 @@ PBAtomEnvelope class >> tag: aTag oid: anOid state: aState
   ^ self basicNew _setTag: (PBTypeRegistry writerTag: aTag) oid: bytes state: canonicalState.
 
 "The envelope that saves an atom: its tag (PBAtom >> tag), its oid (16 bytes)
- and its state, which is canonical, with valid attribute names, by
- construction (PBAtom class >> _unsaved:withState:tag:), so neither is checked
- again here (tag:oid:state: is the checking constructor, for any state)."
+ and its state. Nothing is checked or made canonical here: encode checks each
+ attribute name and value as a writer must, so a value copied forward from a
+ decoded record that may not be written is still refused at the save, before
+ anything is written (tag:oid:state: is the constructor that checks and
+ canonicalises when the envelope is built)."
 PBAtomEnvelope class >> _ofAtomTag: aTag oid: aByteArray state: aPBFrozenDict
   ^ self basicNew _setTag: (PBTypeRegistry writerTag: aTag) oid: aByteArray state: aPBFrozenDict.
 
@@ -396,9 +398,10 @@ PBAtomEnvelope class >> decode: aByteArray at: aPointer expecting: aTypeTag reso
       names add: each key].
     PBCodec fromWireValue: each value resolver: aResolver].
   shared ifTrue: [
-    ^ self basicNew _setTag: t oid: oid state: (PBFrozenDict _keys: shape persisted index: shape persistedIndex values: values)].
+    ^ self basicNew _setTag: t oid: oid state: (PBFrozenDict _keys: shape persisted index: shape persistedIndex values: values)
+      slots: nil size: aByteArray size].
   ^ self basicNew _setTag: t oid: oid state: (PBFrozenDict withAssociations:
-    ((1 to: fieldNames size) asArray collect: [:i | (fieldNames at: i) -> (values at: i)])).
+    ((1 to: fieldNames size) asArray collect: [:i | (fieldNames at: i) -> (values at: i)])) slots: nil size: aByteArray size.
 
 PBAtomEnvelope class >> _corrupt: aString
   ^ PBCorruptionError signal: 'PBAtomEnvelope: ' , aString.
@@ -430,6 +433,12 @@ PBAtomEnvelope >> _setTag: aTag oid: aByteArray state: aState
  derived from aState; nil for an envelope that is not an atom's state (one a
  storage decoded or one to write) or an atom of another class."
 PBAtomEnvelope >> _setTag: aTag oid: aByteArray state: aState slots: anArray
+  ^ self _setTag: aTag oid: aByteArray state: aState slots: anArray size: nil.
+
+"As _setTag:oid:state:slots:, with the size in bytes of the ATOM payload the
+ envelope was decoded from or encoded to (nil when not known): the weight of the
+ envelope in a storage's atom cache."
+PBAtomEnvelope >> _setTag: aTag oid: aByteArray state: aState slots: anArray size: anInteger
   "Runs once, on a fresh instance. The guard tests state, which every envelope
    holds (an envelope an atom builds in memory has no oid, and may have no tag)."
   state isNil ifFalse: [^ PBUserError signal: 'PBAtomEnvelope is immutable'].
@@ -437,7 +446,13 @@ PBAtomEnvelope >> _setTag: aTag oid: aByteArray state: aState slots: anArray
   oid := aByteArray.
   state := aState.
   slots := anArray.
+  size := anInteger.
   ^ self.
+
+"The size in bytes of the ATOM payload of the record, or nil when not known.
+ Runtime-only: never encoded."
+PBAtomEnvelope >> payloadSize
+  ^ size.
 
 "The type tag as read (an alias Integer or a name)."
 PBAtomEnvelope >> tag
@@ -458,13 +473,22 @@ PBAtomEnvelope >> slots
 
 "The ATOM payload: the msgpack map t, oid, s, in that order; t is written in
  canonical form, references as their pointers, every value two containers
- deep (so at most 1024 in all). The state is canonical already (every
- constructor makes it so, or decoded it), so it is not made canonical again."
+ deep (so at most 1024 in all). Each attribute name, then each value, is
+ checked as a writer must (PBAtomEnvelope _nameProblem:, PBCodec
+ wireOf:atomRef:for:): a name or a value that cannot be written is refused
+ here, before anything is written, with the text of tag:oid:state:."
 PBAtomEnvelope >> encode
   | wireState ref ks |
   ref := PBCodec pointerRef.
   ks := state keys.
+  "The names first, as tag:oid:state: checks them before the values."
+  ks do: [:name |
+    | why |
+    why := PBAtomEnvelope _nameProblem: name.
+    why isNil ifFalse: [^ PBValidationError signal: 'PBAtomEnvelope: ' , why]].
   wireState := MessagePackMap withAll: ((1 to: ks size) asArray collect: [:i |
-    (ks at: i) -> (PBCodec wireOfCanonical: (state _valueAt: i) atomRef: ref)]).
+    | key |
+    key := ks at: i.
+    key -> (PBCodec wireOf: (state _valueAt: i) atomRef: ref for: ['Attribute ' , (PBCodec repr: key)])]).
   ^ MessagePack encode: (MessagePackMap withAll: {
     't' -> (PBTypeRegistry writerTag: tag). 'oid' -> oid. 's' -> wireState }).

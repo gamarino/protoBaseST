@@ -413,12 +413,13 @@ PBAtom class >> _unsavedWithState: aPBFrozenDict tag: aTag
 
 "aBlank (a fresh basicNew instance of this class, which a subclass may have
  given its own runtime-only fields first) made an unsaved atom holding
- aPBFrozenDict. The state must be canonical (PBCodec canonical:) with valid
- attribute names (PBAtomEnvelope _nameProblem:): the save writes it as it is
- (PBAtomEnvelope _ofAtomTag:oid:state:). The public constructors guarantee it:
- PBObject checks and canonicalises each field when the record is built, the
- collections each element, key and value when it is inserted, and the library
- builds its nodes and roots from such values."
+ aPBFrozenDict. The attribute names must be valid (PBAtomEnvelope
+ _nameProblem:): the save does not check them again (PBAtomEnvelope
+ _ofAtomTag:oid:state:); the public constructors guarantee it. The values may
+ come from a decoded record (PBObject >> withAll: copies the fields it does
+ not change, a tree rebuild copies stored values), so they are not trusted to
+ be writable: the save checks each as a writer must (PBAtomEnvelope >>
+ encode)."
 PBAtom class >> _unsaved: aBlank withState: aPBFrozenDict tag: aTag
   | atom |
   atom := aBlank _setOid: nil pointer: nil storage: nil.

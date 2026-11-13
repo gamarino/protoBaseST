@@ -510,20 +510,26 @@ PBCodec class >> toWire: aValue atomRef: aBlock
 PBCodec class >> toWire: aValue atomRef: aBlock for: aHolder
   ^ self _wire: (self canonical: aValue for: aHolder) ref: aBlock.
 
-"The wire form of aValue, which is canonical already (the state of an
- envelope: PBAtomEnvelope makes it canonical when it is built, and a decoded
- one is canonical by the format), without a second canonical: pass."
-PBCodec class >> wireOfCanonical: aValue atomRef: aBlock
-  "The values most records hold are answered first, as _wireOpen: and
-   _wireLeaf: answer them (same order of tests, same results): nil, a string,
-   an integer msgpack holds, a float, a Boolean, a reference."
+"The wire form of aValue, an attribute value of a record being saved, as
+ toWire:atomRef:for: answers it, refusing what it refuses with the same text.
+ The values every writer may write as they are, whatever their origin, are
+ answered first: nil, a Boolean, an integer msgpack holds, a float, an atom of
+ a registered class (its tag is its class's registered name). Every other
+ value goes through canonical:for:, so a value a reader accepts but a writer
+ must refuse (a format-3 zone datetime, an instant within a day of year 1 or
+ 9999, a container deeper than the writer's limit, map keys only the reader's
+ legacy rule admits, a string holding a lone surrogate) is refused here, even
+ when it was copied forward from a decoded record (PBObject >> withAll:, a
+ tree node rebuilt around a stored value): a decoded value is not writable by
+ construction."
+PBCodec class >> wireOf: aValue atomRef: aBlock for: aHolder
   aValue isNil ifTrue: [^ aValue].
-  (aValue isString and: [aValue isSymbol not]) ifTrue: [^ aValue].
+  (aValue == true or: [aValue == false]) ifTrue: [^ aValue].
   (aValue isInteger and: [aValue between: self _intMin and: self _intMax]) ifTrue: [^ aValue].
   aValue isFloat ifTrue: [^ aValue].
-  (aValue == true or: [aValue == false]) ifTrue: [^ aValue].
-  ((aValue isKindOf: PBAtom) and: [aValue isPBReference == true]) ifTrue: [^ aBlock value: aValue].
-  ^ self _wire: aValue ref: aBlock.
+  ((aValue isKindOf: PBAtom) and: [aValue class ~~ PBOpaqueAtom and: [aValue isPBReference == true]]) ifTrue: [
+    ^ aBlock value: aValue].
+  ^ self toWire: aValue atomRef: aBlock for: aHolder.
 
 "The block that writes a reference as its pointer: {'@ref': [segment, offset,
  tag]}, from the reference's pointer and tag."
