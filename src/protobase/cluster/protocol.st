@@ -29,7 +29,9 @@ Field kinds (format spec, 'Field types'; proto_db _check_field):
 Received maps are read as proto_db reads them (msgpack-python unpackb, strict_map_key): a map
 key that is not a str or a bin is refused, a repeated key keeps its last value, extra fields
 are ignored and never re-encoded. As Python's 13.0 == 13, a version written as the Float 13.0
-is protocol 13. A message holds its own copies of the field values and at: answers a fresh
+is protocol 13. A timestamp ext (type -1) anywhere in the map, extra fields included, is refused
+where msgpack-python's Timestamp refuses it. A message protoBaseST builds holds no integer
+outside msgpack's range and never the 3-item root form. A message holds its own copies of the field values and at: answers a fresh
 copy: every value here is immutable."
 
 Import from: 'protobase/errors'.
@@ -124,7 +126,23 @@ PBClusterMessage class >> type: aString from: anId fields: anArrayOfAssociations
         ^ PBValidationError signal: 'A ' , aString printString , ' message lacks the field ' , field key printString].
       (self _is: given value kind: field value) ifFalse: [
         ^ PBValidationError signal: (self _field: field of: aString refusing: given value)].
+      (self _isWritable: given value kind: field value) ifFalse: [
+        ^ PBValidationError signal: (self _field: field of: aString refusing: given value)
+          , ': a message protoBaseST writes holds integers below 2^64 and roots of 4 items (CC17)'].
       self _copyWire: given value]).
+
+"Whether aValue, a wire value of aKind, may be written: every Integer in it below 2^64 (the
+ largest msgpack uint is 2^64 - 1), and a root never in the 3-item form (CC17)."
+PBClusterMessage class >> _isWritable: aValue kind: aKind
+  | pending |
+  (aKind = #root and: [aValue notNil and: [aValue size ~= 4]]) ifTrue: [^ false].
+  pending := OrderedCollection with: aValue.
+  [pending notEmpty] whileTrue: [
+    | x |
+    x := pending removeLast.
+    (x isInteger and: [x >= (2 raisedTo: 64)]) ifTrue: [^ false].
+    x isArray ifTrue: [pending addAll: x]].
+  ^ true.
 
 "The message of aByteArray, the body of one frame (proto_db decode_message, validate_message).
  PBClusterProtocolError for bytes that are not one msgpack map, a key that is not a str or a
@@ -140,6 +158,7 @@ PBClusterMessage class >> decode: aByteArray
       PBClusterProtocolError signal: 'Undecodable message: ' , e messageText].
   (map isKindOf: MessagePackMap) ifFalse: [
     ^ PBClusterProtocolError signal: 'A message must be a map, got ' , map class name].
+  self _checkTimestampsIn: map.
   version := map at: 'v' ifAbsent: [nil].
   (((_PBFrame isInt: version) or: [version isFloat])
       and: [version = self protocolVersion or: [version = self protocolVersion asFloat]]) ifFalse: [
@@ -161,13 +180,34 @@ PBClusterMessage class >> decode: aByteArray
         ^ PBClusterProtocolError signal: (self _field: field of: kind refusing: value)].
       value]).
 
+"Refuses (PBClusterProtocolError) a timestamp ext (type -1) anywhere in aTree that
+ msgpack-python's unpackb refuses while decoding, before proto_db looks at any field: data of 4
+ bytes, 8 bytes whose upper 30 bits (nanoseconds) are below 10^9, or 12 bytes whose first 4 (big
+ endian nanoseconds) are below 10^9; other ext types are kept as they are. An explicit stack:
+ a map nests up to 1024 containers."
+PBClusterMessage class >> _checkTimestampsIn: aTree
+  | pending |
+  pending := OrderedCollection with: aTree.
+  [pending notEmpty] whileTrue: [
+    | x |
+    x := pending removeLast.
+    x isArray ifTrue: [pending addAll: x].
+    (x isKindOf: MessagePackMap) ifTrue: [x associations do: [:each | pending add: each value]].
+    ((x isKindOf: MessagePackExt) and: [x type = -1]) ifTrue: [
+      | data nanoseconds |
+      data := x data.
+      nanoseconds := data size = 8
+        ifTrue: [(data unsignedLongAt: 1 bigEndian: true) bitShift: -2]
+        ifFalse: [data size = 12 ifTrue: [data unsignedLongAt: 1 bigEndian: true] ifFalse: [0]].
+      ((#(4 8 12) includes: data size) and: [nanoseconds < 1000000000]) ifFalse: [
+        ^ PBClusterProtocolError signal: 'Undecodable message: invalid timestamp data ' , data printString]]].
+
 PBClusterMessage class >> _field: aField of: aType refusing: aValue
   | text problem |
   text := 'Field ' , aField key printString , ' of a ' , aType printString , ' message must be a valid '
     , aField value , ', got ' , aValue printString.
-  aField value = #root ifFalse: [^ text].
-  problem := self _rootProblem: aValue.
-  ^ text , ': ' , problem.
+  problem := aField value = #root ifTrue: [self _rootProblem: aValue] ifFalse: [nil].
+  ^ problem isNil ifTrue: [text] ifFalse: [text , ': ' , problem].
 
 "Whether aValue is a wire value of aKind (proto_db _check_field)."
 PBClusterMessage class >> _is: aValue kind: aKind

@@ -376,8 +376,11 @@ For tests, tools and readers of the format. An application does not need them.
   (a fresh copy of a field's wire value) and `encode` (the msgpack map `v type from` then the
   fields in table order). `decode:` signals `PBClusterProtocolError` (a `PBCorruptionError`) for
   bytes that are not one msgpack map, a map key that is not a str or bin, a missing `v`, `type`
-  or `from`, another version, an unknown type, a missing or ill-typed field; extra fields are
-  ignored and never re-encoded. The frame around a message is not here.
+  or `from`, another version, an unknown type, a missing or ill-typed field, or a timestamp ext
+  msgpack-python would refuse (extra fields included); extra fields are ignored and never
+  re-encoded. `type:from:fields:` also refuses integers of 2^64 or more and the 3-item root
+  form. The rules where `proto_db`'s code and format spec differ are in
+  [deviations.md](deviations.md#cluster-wire-messages). The frame around a message is not here.
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.

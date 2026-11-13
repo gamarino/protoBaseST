@@ -17,6 +17,7 @@ Contents:
 [Shapes protoBaseST cannot write](#shapes-protobasest-cannot-write) |
 [Reading](#reading) |
 [Conformance vectors](#conformance-vectors) |
+[Cluster wire messages](#cluster-wire-messages) |
 [Errors and messages](#errors-and-messages) |
 [Performance](#performance) |
 [Known protoST limits](#known-protost-limits)
@@ -203,6 +204,37 @@ design 4.3` (no time-zone database):
 The acceptor log of the cluster section, the invalid vectors of the `roots_log` layer and the
 invalid `message-oversized` vector (a frame length, the frame layer's refusal) are visible skips,
 printed under the `PASS` line of `tests/conformance/cluster.st`.
+
+## Cluster wire messages
+
+`PBClusterMessage` (`cluster/protocol.st`) decodes what `proto_db`'s `protocol.py` at
+`v2.0.0rc3` decodes and refuses what it refuses. Where `proto_db`'s format spec (and so the
+cluster plan's brief and design spec 1.11, which quote it) words a rule differently from its
+code, the code is followed (controller ruling, cluster Task 5 review), because a peer is judged
+by the bytes `proto_db` accepts. Pinned by `tests/unit/cluster_messages.st`:
+
+- **Map keys.** The format spec says a map key that is not a string drops the connection.
+  `proto_db` decodes with msgpack-python's `strict_map_key=True`, which also admits bin keys, so
+  protoBaseST decodes with `strictKeys: true`: an int, float or nil key is refused; a bin key
+  never equals a field name, so a bin `v`, `type` or `from` is a missing one and an extra bin key
+  is ignored. No honest peer writes bin keys (`packb(use_bin_type=True)`); the two readings
+  differ only on garbage. The disagreement between `format-spec.rst` and `protocol.py` is a note
+  for `proto_db` upstream.
+- **Version.** `proto_db` refuses `msg.get('v') != 13`, and Python's `13.0 == 13`: a `v` written
+  as the Float 13.0 (float64 or float32) is version 13. `true` is not (Python's `True == 1`).
+- **Value lists.** The format spec lists the values of `done.outcome` (`committed`, `none`,
+  `unknown`) and `answer.state` (`ok`, `empty`, `unknown`); `proto_db`'s `_check_field` checks
+  only that they are strings, and so does protoBaseST. A message using another value is a
+  protocol matter for the rules (later tasks), not a decoding refusal.
+- **Timestamp exts.** msgpack-python turns every ext of type -1 into a `Timestamp` while
+  decoding, and refuses data that is not 4, 8 or 12 bytes or whose nanoseconds reach 10^9, even
+  inside an extra field that `proto_db` then ignores. protoST's MessagePack keeps exts as they
+  are, so `PBClusterMessage decode:` checks every type -1 ext in the map the same way
+  (`PBClusterProtocolError`).
+
+A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
+`make_message`: an integer of 2^64 or more and the 3-item root form (never written, CC17) are
+`PBValidationError` when it is built, not a failure of `encode` or a form only a reader takes.
 
 ## Errors and messages
 
