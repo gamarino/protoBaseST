@@ -343,8 +343,10 @@ For tests, tools and readers of the format. An application does not need them.
 - **Framed logs** (`cluster/log.st`): `PBFramedLog`, the append-only log file of `proto_db`'s
   `logfile.py`. Class side: `header:` (kinds `'ROOT'`, `'RANG'`, `'SEGS'`), `frame:`,
   `scan:kind:path:`, `read:kind:` (never writes; a missing file is an empty log),
-  `openAppend:kind:` (creates the file with its header, truncates a torn tail and reports it on stderr, syncs). Any other failure to read a file is `PBUnexpectedError`, where `proto_db` lets `OSError` propagate. An
-  open log answers `payloads`, `append:sync:`, `close`, `isClosed`, `path`. A scan is a
+  `openAppend:kind:` (creates the file with its header, truncates a torn tail and reports it on stderr, syncs; a file
+  with more than one hard link is `PBLockingError`, checked on the open file before anything is read or repaired, as
+  `proto_db`'s open_log). Any other failure to read a file is `PBUnexpectedError`, where `proto_db` lets `OSError` propagate. An
+  open log answers `payloads`, `append:sync:`, `sync`, `close`, `isClosed`, `path`. A scan is a
   `PBLogScan` (`payloads`, `validEnd`, `isTorn`). A torn tail is dropped; a damaged frame
   followed by a valid one is `PBCorruptionError` ("mid-log"); another format version is
   `PBNotSupportedError`. The search for a later valid frame is linear in the file size.
@@ -363,6 +365,23 @@ For tests, tools and readers of the format. An application does not need them.
   by `PBLabeledRoot key` and applies no corruption rule), the only comparison of roots.
   An unknown root is `nil` and orders below every known one; two different roots with equal
   label and epoch are `PBCorruptionError`.
+- **Acceptor log** (`cluster/rootlog.st`): `PBAcceptorLog`, `proto_db`'s RootsLog (kind
+  `'ROOT'`). Class side: `path:` (takes the lock on the path plus `lockSuffix` (`'.lock'`) first,
+  a held lock being `PBUserError` naming the lock file; then opens or creates the log and its
+  directory with `PBFramedLog openAppend:kind:` and syncs the file, its directory and the
+  parent directory), `encode:label:root:` (the 41-byte entry of kind `#accepted`, `#committed`,
+  `#promise` or `#rejoined`; the root a `PBRootRecord` or `nil`), `decode:path:` (pure: payloads
+  to a `PBLoggedRoots`; kinds 1 to 6), `logKind`, `framedLogClass` (a test seam). An open log
+  answers `append:label:root:` (`#accepted`, synced, or `#committed`, not synced), `promise:`
+  (synced; a term not above the durable promise writes nothing), `markRejoined` (synced),
+  `load`, `close` (idempotent), `isClosed`, `isFailed`, `path`. A failed write or sync is
+  `PBUnexpectedError` and poisons the log: every later write is `PBUnexpectedError` until it is
+  reopened; a closed log refuses writes with `PBClosedError`. `PBLoggedRoots` answers
+  `accepted` and `committed` (`PBLabeledRoot` or `nil`), `promise` (0 when none), `top`,
+  `isRejoined`, `dataEntryCount` (kinds 5 and 6) and `entries` (`PBLogEntry`: `kind`, `label`,
+  `root`, `seq`, `pred`, `records`, `ranges`, `flags`; `nil` where the kind has no such field).
+  Malformed entries and two different roots of one kind with equal label and epoch are
+  `PBCorruptionError`.
 - **Wire messages** (`cluster/protocol.st`): `PBClusterMessage`, the 22 message types of
   `proto_db`'s cluster protocol 13 (`protocol.py`). Class side: `protocolVersion` (13), `schema`
   (a fresh `Dictionary` from each type to its `name -> kind` Associations in the order of the

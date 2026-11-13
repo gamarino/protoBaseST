@@ -130,9 +130,15 @@ explicit.
   is refused (`PBNotSupportedError`). `proto_db`'s "held retries" (an immediate retry without
   backoff, `permit_held`) are therefore not ported. Mixed Python/protoST clusters are outside
   acceptance until a protocol freeze.
-- **Framed log files** (the `log` and `roots_log` layers) are not read. `proto_db` reads them only
-  in its cluster and tiered storage. The conformance vectors of those layers are visible skips
-  (ruling R14). A reader was written and then removed, because an uncalled reader is debt.
+- **Framed log files** (the `log` and `roots_log` layers) are read and written by the cluster
+  modules (`PBFramedLog`, `PBAcceptorLog`), which no space uses yet. The acceptor log writes
+  kinds 1 to 4 and reads 1 to 6 (it never writes kinds 5 and 6, which belong to `proto_db`'s
+  tiered storage), and it is never compacted (`proto_db`'s `RootsLog` rewrites a log over 1 MiB).
+  `proto_db` resolves the log path with `os.path.realpath` before it names the lock file, so a
+  symbolic link to a log names the same lock; protoST has no `realpath`, so `PBAcceptorLog` names
+  the lock after the path as given (a hard link is refused, as in `proto_db`). A lock held
+  elsewhere is `PBUserError` naming the lock file (cluster plan, Review Focus 3), where `proto_db`
+  raises `ProtoLockingError`; a log with two hard links is `PBLockingError`, as `proto_db`.
 - **The caller owns the lock backoff, and it blocks the caller's worker.** The publisher never
   waits (ruling R19): an attempt that finds the root lock held answers at once, and the
   committing caller waits 1 ms, doubling to 50 ms, until `lockTimeout`. That wait sits in a
@@ -201,9 +207,8 @@ design 4.3` (no time-zone database):
 | `values_read_not_rewritten` | `map-zone-key-format3` | Re-encoding is refused, as listed; the decoded keys are format-3 wall clocks, not instants. |
 | `invalid` | `value-instant-wall-out-of-range` | **Accepted** and presented in UTC. The wall-clock range needs the zone's rules; the format spec ("Known gaps") lets a reader without a database present the instant in UTC. Refusing would call valid data corrupt. |
 
-The acceptor log of the cluster section, the invalid vectors of the `roots_log` layer and the
-invalid `message-oversized` vector (a frame length, the frame layer's refusal) are visible skips,
-printed under the `PASS` line of `tests/conformance/cluster.st`.
+The invalid `message-oversized` vector (a frame length, the frame layer's refusal) is a visible
+skip, printed under the `PASS` line of `tests/conformance/cluster.st`.
 
 ## Cluster wire messages
 

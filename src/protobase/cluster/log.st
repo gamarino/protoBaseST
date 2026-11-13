@@ -231,7 +231,9 @@ PBFramedLog class >> _warn: aString
  header when absent, truncates a torn tail to the last valid frame, and syncs the file (and,
  for a new file, its directory and the parent directory) before answering, so an append never
  lands after torn bytes (a trimmed tail is reported on stderr: the byte count and the offset). The payloads found are those the log held at open. The file is closed
- on any refusal."
+ on any refusal. A file with more than one hard link is PBLockingError, checked on the open file
+ before anything is read or repaired (proto_db open_log): a lock file named after one path
+ excludes only the openers of that path, and opening repairs the file."
 PBFramedLog class >> openAppend: aPath kind: aKind
   | ref directory createdDir existed handle ok scan |
   ref := aPath asFileReference.
@@ -241,7 +243,12 @@ PBFramedLog class >> openAppend: aPath kind: aKind
   directory ensureCreateDirectory.
   handle := BinaryFile open: ref options: #(#read #write #create).
   ok := false.
-  [scan := self scan: (handle readAt: 0 size: handle size) kind: aKind path: ref pathString.
+  [| links |
+   links := handle linkCount.
+   links > 1 ifTrue: [
+     ^ PBLockingError signal: 'The log ' , ref pathString , ' has ' , links printString
+       , ' hard links; a log must have exactly one name (remove the other links) because opening repairs the file and its lock is named after the path'].
+   scan := self scan: (handle readAt: 0 size: handle size) kind: aKind path: ref pathString.
    scan isTorn ifTrue: [
      self _warn: 'The log ' , ref pathString , ' ends in a torn tail of ' , (handle size - scan validEnd) printString
        , ' bytes (an interrupted append); truncated to its last valid entry at offset ' , scan validEnd printString.
@@ -283,5 +290,10 @@ PBFramedLog >> append: aPayload sync: aBoolean
   | offset |
   file isClosed ifTrue: [^ PBClosedError signal: 'PBFramedLog: the log ' , path pathString , ' is closed'].
   offset := file append: (self class frame: aPayload).
-  aBoolean ifTrue: [file sync].
+  aBoolean ifTrue: [self sync].
   ^ offset.
+
+"Makes what was appended durable (the file's data and metadata). A seam: tests count and fail it."
+PBFramedLog >> sync
+  file isClosed ifTrue: [^ PBClosedError signal: 'PBFramedLog: the log ' , path pathString , ' is closed'].
+  file sync.

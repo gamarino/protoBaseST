@@ -74,12 +74,12 @@ those scenarios, speed, long runs, and review by anyone but the people who wrote
 | Component | Version | Source |
 |---|---|---|
 | protoCore | v3.6.0 | https://github.com/numaes/protoCore |
-| protoIO | v0.5.0 | https://github.com/gamarino/protoIO |
-| protoST | v0.10.0 | https://github.com/gamarino/protoST |
+| protoIO | v0.6.0 | https://github.com/gamarino/protoIO |
+| protoST | v0.11.0 | https://github.com/gamarino/protoST |
 
-Build protoST 0.10.0 against protoCore 3.6.0 and protoIO 0.5.0 (see its own README); it provides
-`lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st` and the fixes for protoST issues S37 to S40
-that this code relies on. The Python interop tests and the ERP demo also need a checkout of the
+Build protoST 0.11.0 against protoCore 3.6.0 and protoIO 0.6.0 (see its own README); it provides
+`lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S40 and
+`BinaryFile >> linkCount` (the hard-link refusal of the cluster logs), which this code relies on. The Python interop tests and the ERP demo also need a checkout of the
 [protoBase repository](https://github.com/gamarino/ProtoDB), at the tag `v2.0.0rc2`, and Python
 3.11 or newer (tested with 3.14):
 
@@ -193,7 +193,7 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 
 ## Running the tests
 
-The tests need protoST 0.10.0 or newer (see Requirements). Point `PROTOST` at the binary:
+The tests need protoST 0.11.0 or newer (see Requirements). Point `PROTOST` at the binary:
 
 ```sh
 export PROTOST=../protoST/build_release/protost      # default: protost from PATH

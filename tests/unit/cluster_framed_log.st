@@ -1,4 +1,4 @@
-"EXPECT: ok 15"
+"EXPECT: ok 16"
 "PBFramedLog (cluster/log.st): the framed log of proto_db's logfile.py, byte for byte, and its
  linear torn-tail search. The frame of a 3-byte payload is also checked against the bytes
  CPython's struct and zlib make (c1f7 | 03000000 | crc32 | crc32 of the ten bytes | payload)."
@@ -162,6 +162,16 @@ tests add: 15.
 "15. a log kind is 4 ASCII bytes"
 check value: 'kind of 3 characters' value: ([PBFramedLog header: 'ROO'. false] on: PBValidationError do: [:e | true]).
 check value: 'non-ASCII kind' value: ([PBFramedLog header: 'RO' , (String with: (Character value: 233)) , 'T'. false] on: PBValidationError do: [:e | true]).
+tests add: 16.
+"16. a log file with two hard links is refused before it is read or repaired (proto_db open_log):
+ PBLockingError naming the count, the torn tail left in place"
+(base / 'e') ensureCreateDirectory.
+(base / 'e' / 'torn.log') binaryContents: (file copyFrom: 1 to: file size - 4).
+check value: 'hard link made' value: (OSProcess run: 'ln' arguments: { (base / 'e' / 'torn.log') pathString. (base / 'e' / 'alias.log') pathString }) exitCode = 0.
+check value: 'two names refused' value: ([PBFramedLog openAppend: base / 'e' / 'alias.log' kind: 'ROOT'. nil]
+  on: PBLockingError do: [:e | e messageText]) = ('The log ' , (base / 'e' / 'alias.log') pathString
+  , ' has 2 hard links; a log must have exactly one name (remove the other links) because opening repairs the file and its lock is named after the path').
+check value: 'nothing repaired' value: (base / 'e' / 'torn.log') binaryContents = (file copyFrom: 1 to: file size - 4).
 base deleteAll.
 failures isEmpty ifFalse: [failures do: [:f | ('FAIL ' , f) displayNl]. Smalltalk exit: 1].
 'ok ' , tests size printString

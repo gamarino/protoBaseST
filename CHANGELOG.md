@@ -2,6 +2,17 @@
 
 ## 0.2.0 (unreleased)
 
+- The acceptor log (`src/protobase/cluster/rootlog.st`): `PBAcceptorLog`, `proto_db`'s
+  `RootsLog`, with `PBLoggedRoots` and `PBLogEntry`. It writes entry kinds 1 to 4 (promise,
+  accepted, committed synced or not as `proto_db`, rejoined marker) and reads kinds 1 to 6, holds
+  `<path>.lock` while open (a held lock is `PBUserError` naming it) and refuses every write after
+  a failed one. `roots.log` and the invalid `roots_log` vectors are verified by
+  `tests/conformance/rootlog.st` and no longer skipped.
+- `PBFramedLog openAppend:kind:` refuses a log file with more than one hard link
+  (`PBLockingError`), before reading or repairing it, as `proto_db`'s `open_log`; `PBFramedLog >>
+  sync`. protoBaseST now needs **protoST 0.11.0** (`BinaryFile >> linkCount`), built on protoIO
+  0.6.0.
+
 - The wire messages of cluster protocol 13 (`src/protobase/cluster/protocol.st`):
   `PBClusterMessage`, the 22 types of `proto_db`'s `protocol.py` with its field table and
   validation (`decode:`, `encode`, `type:from:fields:`), the wire roots of CC17 (`rootFrom:`,
