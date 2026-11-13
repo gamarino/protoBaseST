@@ -1,6 +1,6 @@
 # protoBaseST Prototype Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical:** the implementation plan this prototype was built from. It is not maintained and is kept so that the task and call numbers cited in the code and the tests resolve. Where it differs from [docs/decisions.md](../../decisions.md), `docs/decisions.md` is authoritative. Parts of it (the execution notes, the release steps and the pinned digest) are out of date.
 
 **Goal:** a Smalltalk implementation of ProtoBase on protoST, reading and writing format 4 at
 ProtoBase `v2.0.0rc2` (format 4 was frozen at `v2.0.0rc1`; `v2.0.0rc2` adds the normative value
@@ -34,7 +34,7 @@ nesting limit and the regenerated database vector):
 
 Read every ProtoBase file with `git -C ../ProtoBase show v2.0.0rc2:<path>`, and never modify
 that repository. Citations: "FS §X" is a section of `format-spec.rst`, "Spec §N" a section of
-the design spec. **When in doubt, ProtoBase at the tag is the reference** (maintainer rule).
+the design spec. **When in doubt, ProtoBase at the tag is the reference** (project rule).
 Read ProtoBase's code before guessing a behaviour.
 
 ## Global Constraints
@@ -44,15 +44,11 @@ Read ProtoBase's code before guessing a behaviour.
   - `protoST` on branch `feat/protobase-support`;
   - `protoBaseST` on branch `feat/prototype`;
   - `ProtoBase` is read only.
-- **Do not push, merge, tag or publish anything before Task 26.** The maintainer's rule is
-  "mergear y publicar al final". Commits stay local on the branches above.
-- **Build gate (DEV12).** Every step marked **[BUILD-GATED]** compiles C++. Before it, run
-  `pgrep -fa 'protoPython' | grep -E 'cmake|make|ninja|cc1plus|c\+\+|ld'`. If that prints
-  anything, wait with a Monitor until-loop until it prints nothing. Never start a build while
-  protoPython builds run.
-  - Builds use `-j4`. Never run two protoST builds at once.
-  - After a protoST build, run `ldd build_release/protost | grep -i protocore` and record the
-    library it links.
+- **Do not push, merge, tag or publish anything before Task 26.** Commits stay local on the
+  branches above until then.
+- **Builds.** Every step marked **[BUILD-GATED]** compiles C++; run one protoST build at a
+  time. After a protoST build, run `ldd build_release/protost | grep -i protocore` and record
+  the library it links.
 - **No locks in the protoST layer.** Synchronisation uses only actors, `Future` and `Atom`.
   The `flock` on `space.lock` is the format's inter-process protocol, and only the publisher
   actor takes it.
@@ -72,17 +68,17 @@ Read ProtoBase's code before guessing a behaviour.
   `proto_db/errors.py`, with `PB` in place of `Proto`.
 - **Units.** Timeouts and backoffs are SmallInteger milliseconds: `lockTimeout` defaults to
   30000, and `run:` backoff to `(1, 200)`.
-- **Pinned vectors.** The SHA-256 of `tests/conformance/vectors.sha256` is
-  `5f86eb09ed1683aa9f048051c64cca68d23b9fb753e87416cb1ecf11ed406df0`. Runners refuse any
-  other value.
+- **Pinned vectors.** The SHA-256 of `tests/conformance/vectors.sha256` is pinned in
+  `tests/conformance/fetch_vectors.sh`; runners refuse any other value. (This plan originally
+  pinned `5f86eb09...`, the `v2.0.0rc1` vectors. That digest is superseded: the current pin is the
+  one in the script, for `v2.0.0rc2`.)
 - **Defects found in protoST** go to protoST `KNOWN_ISSUES.md`, are fixed in protoST on the
   protoST branch, and are never worked around in protoBaseST (Spec §12.5).
 - **Documentation.** Every task that adds API also updates its documentation in the same task:
   the tutorial, the reference and the CHANGELOG. Text is professional English.
-- **Commits** end with the line `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-  `LICENSE`, copyright and attribution use "Gustavo Marino".
+- **Attribution.** `LICENSE`, copyright and attribution use "Gustavo Marino".
 
-## Calls made by the planner (unattended; review at Task 26)
+## Calls made by the planner (reviewed at Task 26)
 
 | # | Call | Why |
 |---|---|---|
@@ -168,7 +164,7 @@ Read ProtoBase's code before guessing a behaviour.
     - `UtcMicroseconds.BracketedBySystemTime`: `t0 = std::time(nullptr)` before,
       `t1 = std::time(nullptr)` after, and `t0 <= us / 1000000 <= t1`.
 - [ ] **Step 2 [BUILD-GATED]:** run
-  `cmake -S . -B build_release -DCMAKE_BUILD_TYPE=Release && cmake --build build_release -j4 && ctest --test-dir build_release -L 'random|clock' --output-on-failure`.
+  `cmake -S . -B build_release -DCMAKE_BUILD_TYPE=Release && cmake --build build_release -j && ctest --test-dir build_release -L 'random|clock' --output-on-failure`.
   Expected: compile FAIL (missing headers).
 - [ ] **Step 3:** implement both modules, each header starting with the project's 2-line
   copyright comment and `#pragma once`.
@@ -224,7 +220,7 @@ Read ProtoBase's code before guessing a behaviour.
     t1 := nil __currentMillis.` Print `(u > 1767225600000000) & (u // 1000 between: t0 and: t1)`.
     Expected `true`.
 - [ ] **Step 2 [BUILD-GATED]:** build protoST against the sibling `../protoIO` on its branch
-  (`cmake --build build_release -j4`), then run the three files with
+  (`cmake --build build_release -j`), then run the three files with
   `tests/conformance/run_conformance.sh build_release/protost <file>`. Expected: FAIL
   (doesNotUnderstand).
 - [ ] **Step 3:** implement the primitives and the kernel methods.
@@ -497,7 +493,7 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
 - [ ] **Step 2:** run `PROTOST=../protoST/build_release/protost tests/run_tests.sh tests/week0 tests/unit`.
   Expected: the three checks PASS (they test protoST 0.9.0 itself) and `errors_hierarchy.st`
   FAILS. **If a week-0 check fails, stop.** Record the defect in protoST `KNOWN_ISSUES.md`
-  and fix it on the protoST branch (a C++ fix is BUILD-GATED) before Task 7.
+  and fix it on the protoST branch (a C++ fix needs a build) before Task 7.
 - [ ] **Step 3:** implement `errors.st` and `src/protobase.st`.
 - [ ] **Step 4:** run `fetch_vectors.sh` (expected: "digest ok"), then `setup_venv.sh`, then
   the runner on everything. Expected: all PASS.
@@ -622,8 +618,8 @@ directory and `STPATH=$REPO/src`, so a test imports `Import from: 'protobase'`. 
     with the wrong class is a FAIL.
 - [ ] **Step 2:** run `tests/run_tests.sh tests/conformance tests/unit`. Expected: FAIL.
 - [ ] **Step 3:** implement `notation.st` and `_vectors.st`.
-- **Expected differences** (added by the Task 7 review; tracked here, never only in the SDD
-  workspace). The runners keep this list as data in `tests/conformance/_expected_differences.st`.
+- **Expected differences** (added by the Task 7 review; tracked here and in the repository,
+  never only elsewhere). The runners keep this list as data in `tests/conformance/_expected_differences.st`.
   - Each listed id prints `EXPECTED <id>: <reason>` and is counted apart from passes.
   - A listed id that now matches the manifest (it "unexpectedly passes") is a FAIL, so the
     list cannot go stale.
@@ -1342,7 +1338,7 @@ cut in `docs/not-done.md`. A blind write never ships without its merge.
 - [ ] **Step 4:** run. Expected: PASS.
 - [ ] **Step 5:** commit `File storage write side: owned segment, atom saving, root publication`.
 
-### Task 17b (controller-inserted, ruling R18): adopt ProtoBase `v2.0.0rc2`, the value nesting limit (B12)
+### Task 17b (inserted during execution, ruling R18): adopt ProtoBase `v2.0.0rc2`, the value nesting limit (B12)
 
 ProtoBase resolved ask B12 in `v2.0.0rc2` (commit `343b762`; format spec "Value nesting depth",
 decision D60). No format version change. It supersedes ruling R12 (509).
@@ -1697,21 +1693,19 @@ If this task is cut, `docs/not-done.md` says so, and any `PBCountedSet` mutator 
   ids they ran; an id that no runner names is a FAIL, so a vector can never be silently
   unrun.
 - [ ] **Step 4:** run a whole-branch review per repository with superpowers:requesting-code-review,
-  and fix every finding, cheap "can stay" items included (maintainer rule). Then re-run Steps
+  and fix every finding, cheap "can stay" items included (project rule). Then re-run Steps
   1-3.
 - [ ] **Step 4b (Task 20 review I1):** `docs/deviations.md` and `docs/not-done.md` record the §10.2/§10.3
   shapes protoBaseST cannot write: indexed collections (index maintenance is out of scope, design §7.4),
   `PBRepeatedKeysDictionary` writes (a non-goal), `PBCountedSet` writes if Task 22 is cut, and
   Python-only types such as `demo.erp.AuditNote` (preserved as opaque atoms); hence the round trip
   compares with `compare_dumps --exact`.
-- [ ] **Step 5:** write `tasks/protobasest-prototype-report-<date>.md` in the workspace. It
-  records the gates passed, the cuts, the protoST defects found (with their K-numbers), and
-  what remains unproven.
+- [ ] **Step 5:** write the final report: the gates passed, the cuts, the protoST defects found
+  (with their K-numbers), and what remains unproven.
 
 ### Task 26: Merge and publish (at the very end only)
 
-Run this task only after Task 25 passes. The maintainer's rule is "mergear y publicar al
-final".
+Run this task only after Task 25 passes: merge and publish once, at the very end.
 
 - [ ] **Step 1: protoIO (first: protoST's CI needs its tag).**
   - Date the CHANGELOG section `0.5.0 - <date>` (rulings R1, R10).
@@ -1728,13 +1722,12 @@ final".
     CHANGELOG section `0.10.0 - <date>`.
   - Push `feat/protobase-support` (which holds `feat/random-clock`, merged locally) and open a
     PR from it into protoST `main`. Wait for CI to pass on Linux, macOS and Windows.
-  - Merge it into `main`, tag `v0.10.0`, and build the deb with the recipe in
-    `project_protoio030_protost090_binary_storage` (docker `pc-deb-build:24.04 --dns 8.8.8.8`,
-    protoIO at the tag as a sibling, `-DPROTOCORE_REQUIRE_PACKAGE=ON`, `cpack -G DEB`).
+  - Merge it into `main`, tag `v0.10.0`, and build the deb (protoIO at the tag as a sibling,
+    `-DPROTOCORE_REQUIRE_PACKAGE=ON`, `cpack -G DEB`).
   - Create the GitHub release with the deb.
 - [ ] **Step 3: protoBaseST.**
   - Date the CHANGELOG `0.1.0` and merge `feat/prototype` into `main`.
-  - Create the GitHub repository **only if the maintainer has said where**; otherwise stop
+  - Create the GitHub repository **only once the destination is decided**; otherwise stop
     and report that it is ready to push.
   - Tag `v0.1.0`.
-- [ ] **Step 4:** update the workspace memory and the report with the released versions.
+- [ ] **Step 4:** record the released versions in the report.
