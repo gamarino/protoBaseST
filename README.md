@@ -117,7 +117,10 @@ space close.
 ```
 
 A fuller walk-through, with the reasoning behind each design choice, is
-[docs/tutorial.md](docs/tutorial.md).
+[docs/tutorial.md](docs/tutorial.md). The chaptered tutorial, [docs/tutorial/](docs/tutorial/README.md),
+walks twelve small self-checking programs ([examples/tutorial/](examples/tutorial/README.md)), one
+concept each, and has two orientation chapters: [Coming from GemStone/S](docs/tutorial/gemstone.md)
+and [Coming from Soil](docs/tutorial/soil.md).
 
 ## The API, mapped from `proto_db`
 
@@ -183,6 +186,8 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 | | |
 |---|---|
 | [docs/tutorial.md](docs/tutorial.md) | A guided build of a small ERP, with the reasoning at each step. Every snippet is run by the tests. |
+| [docs/tutorial/](docs/tutorial/README.md) | The chaptered tutorial: twelve chapters, one concept each, quoting the programs of `examples/tutorial/`; and two orientation chapters, coming from GemStone/S and coming from Soil, with their sources. |
+| [examples/tutorial/](examples/tutorial/README.md) | Twelve small programs, one concept each, each checking its own results; run by the tests. |
 | [docs/reference.md](docs/reference.md) | Every public class and message. |
 | [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from `proto_db`. |
 | [docs/not-done.md](docs/not-done.md) | What is not done, and what is not proven. |
@@ -207,7 +212,9 @@ The runner prints `PASS`, `FAIL` or `SKIP` per test and ends with `passed N, fai
 A `.st` test starts with an `"EXPECT: <last line>"` or `"EXPECT-ERROR: <text>"` directive; a
 `.sh` test passes with exit 0 and is skipped with exit 77. `PROTOBASE_REPO` (default `../ProtoBase`)
 names the protoBase checkout used by the two setup scripts. `tests/docs/` checks the snippets of
-the README and the tutorial against the code.
+the README and the tutorial against the code, the code quoted by the chapters of `docs/tutorial/`
+against the programs of `examples/tutorial/`, and the selectors the documents cite against
+`src/protobase`.
 
 ## License
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- A tutorial example suite, `examples/tutorial/`: twelve small protoST programs, one concept each
+  (a first commit, values and versions, records, collections and queries, transactions and
+  conflicts, blind-write merges, mutable cells and history, bytes, actors, crash recovery, sharing
+  a directory with Python's `proto_db`, the refusals). Each prints a line per check and ends with
+  `<lesson> ok (N checks)`; a failed check exits 1. They run with the other tests; lesson 11 is
+  skipped without the interop venv.
+- A chaptered tutorial, `docs/tutorial/`, one chapter per program, quoting it; and two orientation
+  chapters, "Coming from GemStone/S" and "Coming from Soil", which map each system's concepts to
+  protoBaseST's, cite GemTalk's programmer's guide, Soil's repository and Norbert Hartl's blog
+  series, and list what could not be verified. `docs/tutorial.md` (the ERP walk-through) and
+  `examples/erp/` are unchanged.
+- `tests/docs/tutorial_chapters_sync.sh` fails when a chapter's code differs from its program;
+  `tests/docs/reference_selectors.sh` now also checks the selectors cited by the chapters and by
+  `examples/tutorial/README.md` (GemStone and Soil selectors are allowed only in `docs/tutorial/`).
+
 ## 0.1.0 (2026-11-13)
 
 The entries are chronological, and later entries supersede earlier ones (vectors and format

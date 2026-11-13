@@ -475,5 +475,7 @@ space isClosed.                               "=> true"
 - [deviations.md](deviations.md): everything that differs from `proto_db`, and every refusal.
 - [not-done.md](not-done.md): what is not here, and the cost of each omission.
 - [decisions.md](decisions.md): the choices, with what each one costs if it is wrong.
+- [tutorial/](tutorial/README.md): the chaptered tutorial, twelve small self-checking programs
+  one concept each, and two orientation chapters, coming from GemStone/S and coming from Soil.
 
 The questions this prototype exists to ask the workshop are in the README.
