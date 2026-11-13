@@ -1,5 +1,5 @@
 "EXPECT: ok 47"
-"Every Smalltalk block of docs/tutorial.md, in order, in one session (plan Task 24). A line of the tutorial that ends in => value is asserted here. tutorial_sync.sh fails when a block of the tutorial is not in this file."
+"Every Smalltalk block of docs/tutorial/erp.md, in order, in one session (plan Task 24). A line of the tutorial that ends in => value is asserted here. tutorial_sync.sh fails when a block of the tutorial is not in this file."
 
 Import from: 'protobase'.
 Import from: '../unit/_check'.

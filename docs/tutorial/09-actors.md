@@ -21,29 +21,57 @@ Writer >> commit: n as: aName on: aDatabase
         runs := runs + 1.
         tr setRootObject: 'counter' value: (tr getRootObject: 'counter') + 1.
         tr setRootObject: 'log' value: (tr newDictionary setAt: aName , '-' , i printString value: i)]
-      retries: 100].
+      retries: 100.
+    (probe notNil and: [i = 5]) ifTrue: [seen := (probe look: aDatabase) wait]].
   ^ runs.
 ```
 
 Each transaction does two things: a read-modify-write of `'counter'`, which conflicts when another
 writer got there first and is retried by `run:`, and a blind write of one entry to `'log'`, which
-merges (chapter 6). Both happen in one commit or neither does.
+merges (chapter 6). Both happen in one commit or neither does. The last line of the loop is for
+the probe, below.
 
 ```smalltalk
 writers := names collect: [:each | Writer new asActor].
+(writers first probeWith: Auditor new asActor) wait.
 "Each send answers a Future at once: the four writers and the auditor run together."
 futures := (1 to: names size) collect: [:i | (writers at: i) commit: 10 as: (names at: i) on: db].
 audit := Auditor new asActor sample: 30 on: db.
 runs := futures inject: 0 into: [:sum :f | sum + f wait].
-lesson check: 'no snapshot was ever inconsistent' is: audit wait equals: 0.
 ```
 
 The database object is shared by all of them; there is no lock in the program. Commits of one
-space are serialised by its publisher, an actor, and readers do not involve it at all. On the
-machine where this was written, the 40 commits ran their blocks about 96 times: the counter is a
-hot spot, and every conflict is a retry. The log, written blindly, never caused one.
+space are serialised by its publisher, an actor, and readers do not involve it at all. In one run
+on the machine where this was written, the 40 commits ran their blocks 78 times: the counter is a
+hot spot, and every conflict is a retry. The log, written blindly, never caused one. The program
+prints its own count; it varies from run to run.
 
-## The auditor
+## Consistent snapshots, proved in the middle of the run
+
+A check that every snapshot is consistent proves little if every snapshot was taken before the
+first commit or after the last one. So the first writer asks a probe actor for a snapshot right
+after its own fifth commit, and waits for the answer before its sixth:
+
+```smalltalk
+Auditor >> look: aDatabase
+  | tr answer |
+  tr := aDatabase newTransaction.
+  answer := { tr getRootObject: 'counter'. (tr getRootObject: 'log') count }.
+  tr abort.
+  ^ answer.
+```
+
+```smalltalk
+mid := writers first seen wait.
+lesson check: 'the probe saw the middle of the run (5 to 35 commits)' isTrue: ((mid at: 1) between: 5 and: 35).
+lesson check: 'and that snapshot was consistent' is: (mid at: 1) equals: (mid at: 2).
+```
+
+That snapshot holds at least the first writer's five commits and lacks at least its last five,
+whatever the timing: it is strictly inside the run, and `'counter'` equals the size of `'log'`
+there. A second actor, the auditor, also samples the database while the writers run, without any
+coordination; how many of its samples fall inside the run depends on timing, so it adds coverage
+but is not the proof:
 
 ```smalltalk
 Auditor >> sample: count on: aDatabase
@@ -57,9 +85,8 @@ Auditor >> sample: count on: aDatabase
   ^ broken.
 ```
 
-While the writers commit, the auditor opens snapshots and checks that `'counter'` equals the size of
-`'log'`. It never finds one where they differ: a snapshot is a committed version, and a version is a
-whole commit.
+Neither ever finds a snapshot where the two differ: a snapshot is a committed version, and a
+version is a whole commit.
 
 ## Sharing a value
 

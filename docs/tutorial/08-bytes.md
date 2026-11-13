@@ -24,6 +24,9 @@ small.
 
 ## What a new version costs
 
+The variable scan holds a block that answers the total size of the segment files, so each measurement below
+reads it before and after the commits it measures.
+
 ```smalltalk
 grew := scan value.
 1 to: 10 do: [:i | db run: [:t | t setRootObject: 'views' value: (t getRootObject: 'views') + 1]].
@@ -39,6 +42,7 @@ records that changed plus the path to them; everything else is referred to where
 A value that changes is written again whole:
 
 ```smalltalk
+grew := scan value.
 db newTransactionDo: [:t |
     t setRootObject: 'cover' value: ((photo copyFrom: 1 to: 1048575) , #[0])].
 grew := scan value - grew.
@@ -48,6 +52,7 @@ lesson check: 'a changed value is written whole' isTrue: grew > 1048576.
 So large data that changes in parts is better split into parts. A `PBList` of chunks is one way:
 
 ```smalltalk
+grew := scan value.
 db newTransactionDo: [:t |
     | list |
     list := t getRootObject: 'chunked'.

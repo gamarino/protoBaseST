@@ -11,8 +11,10 @@
 - A chaptered tutorial, `docs/tutorial/`, one chapter per program, quoting it; and two orientation
   chapters, "Coming from GemStone/S" and "Coming from Soil", which map each system's concepts to
   protoBaseST's, cite GemTalk's programmer's guide, Soil's repository and Norbert Hartl's blog
-  series, and list what could not be verified. `docs/tutorial.md` (the ERP walk-through) and
-  `examples/erp/` are unchanged.
+  series, and list what could not be verified.
+- The ERP walk-through moved from `docs/tutorial.md` to `docs/tutorial/erp.md` (content
+  unchanged apart from its relative links), so that the repository has one tutorial directory;
+  every link and `tests/docs/tutorial_sync.sh` follow it. `examples/erp/` is unchanged.
 - `tests/docs/tutorial_chapters_sync.sh` fails when a chapter's code differs from its program;
   `tests/docs/reference_selectors.sh` now also checks the selectors cited by the chapters and by
   `examples/tutorial/README.md` (GemStone and Soil selectors are allowed only in `docs/tutorial/`).

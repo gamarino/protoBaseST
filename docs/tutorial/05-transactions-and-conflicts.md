@@ -48,8 +48,10 @@ lesson check: 'a root that was only read conflicts too'
 ```
 
 A check on written objects alone (a write-write check) would have committed an interest computed
-from a rate that no longer holds. This is stricter than both GemStone's default optimistic
-detection and Soil's, as their documentation describes them (see the orientation chapters).
+from a rate that no longer holds. This is stricter than the write-write check that Soil's
+documentation describes ([Coming from Soil](soil.md)). GemStone provides read-side protection
+through read locks, and its conflict report has a Read-Write category whose exact rule this
+tutorial could not confirm ([Coming from GemStone/S](gemstone.md)).
 
 The other side of the coin is **granularity**. The read set records roots and cells, not each
 object inside them. Two transactions that both read the root `'books'` and write back different

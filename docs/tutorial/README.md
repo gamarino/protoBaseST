@@ -72,7 +72,7 @@ Both are explained in chapter 2, and both surprise Smalltalk programmers:
 
 ## Other documentation
 
-- [tutorial.md](../tutorial.md): the guided build of a small ERP in one script, with the reasoning
+- [erp.md](erp.md): the guided build of a small ERP in one script, with the reasoning
   behind each design choice. These chapters split the same ground into small programs and add
   bytes, actors, crashes and the refusals; read either first.
 - [reference.md](../reference.md): every public class and message.

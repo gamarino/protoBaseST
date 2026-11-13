@@ -21,7 +21,8 @@ lesson check: 'keep the answer' is: tags count equals: 1.
 
 `add:`, `remove:`, `setAt:value:`, `removeAt:`, `appendLast:` and the rest answer a new collection.
 The names are `proto_db`'s, kept so that one document explains both languages; three of them mean
-something else in Pharo (`Set >> add:` answers the element there, and changes the set). A
+something else in Pharo: `Set >> add:` and `Set >> remove:` change the set there and answer the
+element, and `removeAt:` on a Pharo collection removes in place and answers the element. A
 statement that discards the answer changes nothing, and nothing fails. The README states this in a
 box, and [decisions.md](../decisions.md) records the alternatives (`copyWith:`, `copyWithout:`);
 the workshop may overrule it.

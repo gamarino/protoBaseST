@@ -22,7 +22,9 @@ tests/run_tests.sh examples/tutorial                    # all of them, as tests
 
 `tests/run_tests.sh` (with no arguments) runs them with everything else: the first line of each
 `.st` file is its `EXPECT:` directive, and lesson 11 is a `.sh` test that is skipped (exit 77)
-without the Python venv. Every lesson works in its own temporary directory and deletes it.
+without the Python venv. Every lesson works in its own temporary directory under
+`FileSystem temp` (`pbst-tutorial-NN-<pid>`) and deletes it when it ends normally or with a failed
+check; a lesson that stops on an unexpected error leaves that directory behind.
 
 ## The lessons
 
@@ -50,6 +52,6 @@ variable (the test runner sets it), or `protost` on the `PATH`.
 
 ## See also
 
-- [docs/tutorial.md](../../docs/tutorial.md): the guided build of a small ERP, one script, with
+- [docs/tutorial/erp.md](../../docs/tutorial/erp.md): the guided build of a small ERP, one script, with
   the reasoning behind each design choice.
 - [examples/erp/](../erp/README.md): the ERP demo, Python and protoST on one directory.

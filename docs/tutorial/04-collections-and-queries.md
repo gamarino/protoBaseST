@@ -68,7 +68,8 @@ books keysAndValuesDo: [:isbn :book | (book at: 'year') < 1985 ifTrue: [old add:
 ```
 
 Or a lookup in a second collection that the program keeps up to date itself, **in the same
-transaction** as the data, so both change or neither does:
+transaction** as the data, so both change or neither does. (`run:` is `newTransactionDo:` that
+retries when another commit got there first; chapter 5 explains it.)
 
 ```smalltalk
 addBook := [:isbn :title :year |

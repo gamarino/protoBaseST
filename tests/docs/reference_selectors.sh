@@ -44,7 +44,7 @@ new_counted_set new_object new_database open_database list_databases new_transac
 snapshot_at with_ has_defined_attr get_at set_at insert_at remove_at append_first append_last
 extend slice head tail has union intersection difference count_of index_names get_index items
 register_atom_class is_active committed_at lock_timeout retries backoff keys values
-asFrozenDict asOf: tr: asActor wait EXPECT: protost bytes date
+asFrozenDict asOf: tr: asActor wait EXPECT: protost bytes date ensure:
 flock fsync nil true false proto_db remove aName atom_pointer context cluster_term current pair n i v repr
 avl calendar codec collections decimal errors framing notation publisher registry roots store transactions uuid zonekeys
 """.split())
@@ -56,6 +56,7 @@ commitTransaction abortTransaction continueTransaction migrateTo: migrateInstanc
 migrateFrom:instVarMap: cluster clusterDepthFirst markForCollection
 createOnPath: openOnPath: root: makeRoot: markDirty: commitAndContinue
 newTransactionForVersion: allVersionsOf: garbageCollect renameClassNamed:to: isFsyncEnabled
+beAutomaticWriteTracking beManualWriteTracking transactionConflicts
 """.split())
 # selectors the programs of examples/tutorial define themselves (Book >> isClassic...), which the
 # chapters quote; allowed only in docs/tutorial/ and examples/tutorial/README.md
@@ -68,10 +69,14 @@ for f in glob.glob(repo + "/examples/tutorial/*.st"):
             lessons.add(head if re.match(r"^[A-Za-z_]\w*$", head) else "".join(re.findall(r"[A-Za-z_]\w*:", head)))
 parts = {p for d in defined for p in re.findall(r"[A-Za-z_]\w*:", d)}
 docs = ["docs/reference.md", "README.md", "examples/tutorial/README.md"]
-docs += sorted(os.path.relpath(f, repo) for f in glob.glob(repo + "/docs/tutorial/*.md"))
+# docs/tutorial/erp.md is the ERP walk-through, whose code tutorial_snippets.st runs; its prose
+# names variables and roots in backticks, so it stays outside this guard, as before its move
+docs += sorted(os.path.relpath(f, repo) for f in glob.glob(repo + "/docs/tutorial/*.md")
+               if not f.endswith("/erp.md"))
 bad = []
 for doc in docs:
-    allow_here = allow | (foreign | lessons if doc.startswith(("docs/tutorial/", "examples/tutorial/")) else set())
+    allow_here = allow | (foreign | lessons | {p for d in lessons for p in re.findall(r"[A-Za-z_]\w*:", d)}
+                          if doc.startswith(("docs/tutorial/", "examples/tutorial/")) else set())
     text = open(repo + "/" + doc, encoding="utf-8").read()
     text = re.sub(r"```.*?```", "", text, flags=re.S)
     for span in re.findall(r"`([^`\n]+)`", text):

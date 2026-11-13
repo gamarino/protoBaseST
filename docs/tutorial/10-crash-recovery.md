@@ -45,25 +45,31 @@ them the same way.)
 
 ## A real kill
 
-The second half starts a writer process that commits for ever:
+The second half starts a writer process that commits until it is killed:
 
 ```smalltalk
-[true] whileTrue: [
+[i < 1000 and: [sentinel exists and: [Time millisecondClockValue < deadline]]] whileTrue: [
   i := i + 1.
   db run: [:tr |
     tr setRootObject: 'counter' value: (tr getRootObject: 'counter') + 1.
     tr setRootObject: 'log' value: ((tr getRootObject: 'log') setAt: i value: Smalltalk pid)]].
 ```
 
-and kills it with `SIGKILL` once it has committed a few versions:
+It is built so that it can never outlive the lesson by long: it stops by itself when a sentinel
+file the lesson created is gone, after 1000 commits, or after 60 seconds. The lesson waits until
+it has committed a few versions and then kills it with `SIGKILL`. The kill is in an `ensure:`
+block, so an error while waiting still ends the writer, and the only process it signals is the
+one it started:
 
 ```smalltalk
-pid := OSProcess spawn: protost arguments: { writer. dir pathString }.
+pid := OSProcess spawn: protost arguments: { writer. dir pathString. sentinel pathString }.
 ```
 
 ```smalltalk
-OSProcess kill: pid signal: 9.
-status := OSProcess waitFor: pid.
+  ensure: [
+    sentinel ensureDelete.
+    OSProcess kill: pid signal: 9.
+    status := OSProcess waitFor: pid].
 ```
 
 Where it dies varies from run to run: between commits, in the middle of writing records, during a

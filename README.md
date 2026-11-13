@@ -117,7 +117,7 @@ space close.
 ```
 
 A fuller walk-through, with the reasoning behind each design choice, is
-[docs/tutorial.md](docs/tutorial.md). The chaptered tutorial, [docs/tutorial/](docs/tutorial/README.md),
+[docs/tutorial/erp.md](docs/tutorial/erp.md). The chaptered tutorial, [docs/tutorial/](docs/tutorial/README.md),
 walks twelve small self-checking programs ([examples/tutorial/](examples/tutorial/README.md)), one
 concept each, and has two orientation chapters: [Coming from GemStone/S](docs/tutorial/gemstone.md)
 and [Coming from Soil](docs/tutorial/soil.md).
@@ -185,7 +185,7 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 
 | | |
 |---|---|
-| [docs/tutorial.md](docs/tutorial.md) | A guided build of a small ERP, with the reasoning at each step. Every snippet is run by the tests. |
+| [docs/tutorial/erp.md](docs/tutorial/erp.md) | A guided build of a small ERP, with the reasoning at each step. Every snippet is run by the tests. |
 | [docs/tutorial/](docs/tutorial/README.md) | The chaptered tutorial: twelve chapters, one concept each, quoting the programs of `examples/tutorial/`; and two orientation chapters, coming from GemStone/S and coming from Soil, with their sources. |
 | [examples/tutorial/](examples/tutorial/README.md) | Twelve small programs, one concept each, each checking its own results; run by the tests. |
 | [docs/reference.md](docs/reference.md) | Every public class and message. |

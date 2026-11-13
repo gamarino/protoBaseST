@@ -17,7 +17,7 @@
 Import from: 'protobase'.
 Import from: '_lesson'.
 
-| lesson dir space db segment file before protost writer pid deadline committed status snap |
+| lesson dir space db segment file before protost writer sentinel pid deadline committed status snap |
 lesson := Lesson named: '10 crash recovery'.
 dir := FileSystem temp / ('pbst-tutorial-10-' , Smalltalk pid printString).
 dir deleteAll.
@@ -59,17 +59,23 @@ db newTransactionDo: [:t | t setRootObject: 'counter' value: 0. t setRootObject:
 space close.
 protost := (Smalltalk getenv: 'PROTOST') ifNil: ['protost'].
 writer := (Smalltalk programPath asFileReference parent / '_crash_writer.st') fullName.
-pid := OSProcess spawn: protost arguments: { writer. dir pathString }.
-"Wait until it has committed a few versions (at most 60 seconds), then kill it."
-deadline := Time millisecondClockValue + 60000.
+"The writer runs while this file exists, and stops by itself after 1000 commits or 60 s."
+sentinel := dir / 'keep-writing'.
+sentinel contents: 'delete me to stop the writer'.
+pid := OSProcess spawn: protost arguments: { writer. dir pathString. sentinel pathString }.
+"Wait until it has committed a few versions (at most 60 seconds), then kill it. The kill is in
+ an ensure: block, so an error while waiting still ends the writer; only its own pid is killed."
 committed := 0.
-[committed < 5 and: [Time millisecondClockValue < deadline]] whileTrue: [
+[deadline := Time millisecondClockValue + 60000.
+ [committed < 5 and: [Time millisecondClockValue < deadline]] whileTrue: [
     (Future after: 50) wait.
     space := PBObjectSpace storage: (PBFileStorage path: dir pathString).
-    committed := ((space openDatabase: 'crash') newTransaction getRootObject: 'counter').
-    space close].
-OSProcess kill: pid signal: 9.
-status := OSProcess waitFor: pid.
+    [committed := (space openDatabase: 'crash') newTransaction getRootObject: 'counter']
+        ensure: [space close]]]
+  ensure: [
+    sentinel ensureDelete.
+    OSProcess kill: pid signal: 9.
+    status := OSProcess waitFor: pid].
 lesson check: 'the writer committed before it was killed' isTrue: committed >= 5.
 lesson check: 'it died by SIGKILL' is: status equals: 137.
 
@@ -81,7 +87,7 @@ lesson check: 'every version is a whole commit: counter = log size'
     is: (snap getRootObject: 'counter') equals: (snap getRootObject: 'log') count.
 lesson check: 'one version per commit, none half-made'
     is: db history first version equals: 3 + (snap getRootObject: 'counter').
-lesson check: 'and in every older version too' isTrue: ((db history copyFrom: 1 to: 5) allSatisfy: [:entry |
+lesson check: 'and in every version since the writer started' isTrue: ((db history select: [:entry | entry version >= 3]) allSatisfy: [:entry |
     | s |
     s := db snapshotAt: entry.
     (s getRootObject: 'counter') = (s getRootObject: 'log') count]).

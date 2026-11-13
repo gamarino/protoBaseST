@@ -4,6 +4,12 @@
 Program: [examples/tutorial/01_first_commit.st](../../examples/tutorial/01_first_commit.st).
 Next: [2. Values and versions](02-values-and-versions.md).
 
+A note on the quoted code: the programs prove what they show. `lesson check: 'what' is: actual
+equals: expected` prints `ok - what` when the two agree and `FAIL - ...` when they do not, and
+`lesson check: ... signals: AnError containing: 'text' during: [...]` checks that a block is
+refused. They come from the small helper `examples/tutorial/_lesson.st`; read `lesson check:` as
+"assert", and everything else is protoBaseST.
+
 ## A space is a directory
 
 ```smalltalk
