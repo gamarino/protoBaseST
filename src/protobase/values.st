@@ -180,6 +180,11 @@ PBFrozenDict >> _setKeys: aKeyArray values: aValueArray index: aPBMapKeyIndex
   index := aPBMapKeyIndex.
   ^ self.
 
+"A map of the receiver's keys (and their index) with the values anArray, in
+ order."
+PBFrozenDict >> _withValues: anArray
+  ^ self class _keys: keys index: index values: anArray.
+
 PBFrozenDict >> size
   ^ keys size.
 

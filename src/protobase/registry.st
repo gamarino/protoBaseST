@@ -544,8 +544,7 @@ PBAtom >> _envelopeWithin: aChain
   (aChain includes: pointer) ifTrue: [
     ^ PBCorruptionError signal: 'the record at ' , pointer printString , ' (' , (PBTypeRegistry nameOfTag: self tag)
       , ') cannot be loaded: decoding its state needs the record itself (a map key refers back to it: damaged data, or a writer that broke the save-dependents-first invariant)'].
-  envelope := self class _loadedEnvelope: (storage loadAt: pointer expecting: self tag within: (aChain copyWith: pointer))
-    at: pointer for: self.
+  envelope := storage _pbLoadedEnvelopeAt: pointer for: self within: (aChain copyWith: pointer).
   (memo value: envelope ifCurrent: nil) ifTrue: [^ envelope].
   ^ memo value.
 
@@ -771,8 +770,84 @@ PBAtom >> _storedElsewhere: aStorage
 PBAtom >> _pushInto: aStorage
   | ptr |
   ptr := aStorage pushAtom: (PBAtomEnvelope _ofAtomTag: self tag oid: self oid state: self state).
-  (saved value: (_PBPlace pointer: ptr storage: aStorage) ifCurrent: nil) ifTrue: [^ ptr].
+  (saved value: (_PBPlace pointer: ptr storage: aStorage) ifCurrent: nil) ifTrue: [
+    aStorage _pbSaved: self at: ptr.
+    ^ ptr].
   ^ self _pointerIn: aStorage.
+
+"=== loading through a storage, and the stored form of a saved state =========="
+
+"The loaded envelope of the record at aPointer for anAtom, a stub of this
+ storage (PBAtom >> _envelopeWithin:): the record decoded, expecting anAtom's
+ tag, within aChain, then checked against anAtom's class (_loadedEnvelope:).
+ A storage may answer one it holds already (PBFileStorage's atom cache)."
+Object >> _pbLoadedEnvelopeAt: aPointer for: anAtom within: aChain
+  ^ anAtom class _loadedEnvelope: (self loadAt: aPointer expecting: anAtom tag within: aChain)
+    at: aPointer for: anAtom.
+
+"Told by a save that anAtom's record is now at aPointer in this storage (a
+ storage may keep the loaded envelope a decode of it would give)."
+Object >> _pbSaved: anAtom at: aPointer
+  ^ self.
+
+"What a decode of the record of this saved atom's state would hold, built
+ from the state without decoding: each attribute value that is an atom becomes
+ a new stub of it in aStorage (the atom itself is never shared: its runtime
+ fields belong to the transaction that made it), each other value is itself,
+ canonical and immutable. nil when a container value holds a reference, or a
+ value is a reference read without a resolver: those are left to a decode."
+PBAtom >> _pbStoredStateIn: aStorage
+  | st values shape |
+  st := self state.
+  values := Array new: st size.
+  1 to: st size do: [:i |
+    | v kind |
+    v := st _valueAt: i.
+    kind := v _pbReferenceKind.
+    kind = 0 ifFalse: [
+      kind = 1 ifFalse: [^ nil].
+      v := v _pbStubIn: aStorage].
+    values at: i put: v].
+  "As a decode does, a state in the persisted order of its class shares the
+   class's keys and index."
+  shape := self class _recordShape.
+  (st _valuesIfKeys: shape persisted) notNil ifTrue: [
+    ^ PBFrozenDict _keys: shape persisted index: shape persistedIndex values: values].
+  ^ st _withValues: values.
+
+"0: the value holds no reference; 1: it is an atom; 2: it is a reference read
+ without a resolver, or a container holding a reference."
+Object >> _pbReferenceKind
+  ^ 0.
+
+PBAtom >> _pbReferenceKind
+  ^ 1.
+
+PBUnresolvedRef >> _pbReferenceKind
+  ^ 2.
+
+_PBSequence >> _pbReferenceKind
+  1 to: self size do: [:i | (self at: i) _pbReferenceKind = 0 ifFalse: [^ 2]].
+  ^ 0.
+
+"Whether a value of this state is a container holding a reference, or a
+ reference read without a resolver (_pbReferenceKind 2)."
+PBFrozenDict >> _pbHoldsNestedReference
+  1 to: self size do: [:i | (self _valueAt: i) _pbReferenceKind = 2 ifTrue: [^ true]].
+  ^ false.
+
+PBFrozenDict >> _pbReferenceKind
+  | ks |
+  ks := self keys.
+  1 to: ks size do: [:i |
+    ((ks at: i) _pbReferenceKind = 0 and: [(self _valueAt: i) _pbReferenceKind = 0]) ifFalse: [^ 2]].
+  ^ 0.
+
+"A new stub of this saved atom in aStorage: what a decode of a reference to it
+ answers (PBTypeRegistry unloadedAtomFor:at:storage:, of the class its tag
+ names, which is this atom's class)."
+PBAtom >> _pbStubIn: aStorage
+  ^ self class unloadedAt: (self _pointerIn: aStorage) storage: aStorage.
 
 "Adds to anOrderedCollection the atoms the receiver refers to that are not
  saved in aStorage, in encoder order (a value holds none; the containers and
@@ -1079,6 +1154,9 @@ PBOpaqueAtom >> printOn: aStream
 
 "An opaque atom is never written (D59): it is always a stub, so a save only
  refers to it. Its decoded twin would need its type's behaviour."
+PBOpaqueAtom >> _pbStubIn: aStorage
+  ^ PBOpaqueAtom named: referencedName unloadedAt: (self _pointerIn: aStorage) storage: aStorage.
+
 PBOpaqueAtom >> _decodedTwin
   ^ PBNotSupportedError signal: 'this ' , referencedName
     , ' atom has no class registered in this process: protoBaseST never writes it, so it has no decoded twin'.

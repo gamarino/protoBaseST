@@ -30,7 +30,8 @@ PBRootRecord>>_setVersion:segment:offset:epoch:
 PBAtomEnvelope>>_setTag:oid:state:slots:
 PBSegmentReader>>_setSegment:file:header:
 PBSegmentWriter>>_setSegment:file:
-PBFileStorage>>_setDirectory:segmentMaxBytes:
+PBFileStorage>>_setDirectory:segmentMaxBytes:atomCacheEntries:
+_PBAtomCache>>_setCapacity:
 PBHistoryEntry>>_setRoot:database:
 PBSnapshot>>_setRoot:database:
 PBObjectSpace>>_setStorage:lockTimeout:

@@ -146,8 +146,9 @@ c that: 'a loaded node: the first field read checks height' signals: PBCorruptio
   containing: 'the height of PBPosNode(' during: [stub left].
 c that: 'and the record is not installed' isTrue: stub isLoaded not.
 
-"The load race: the inner load installs its envelope, the outer load reads its slots."
-racing := RacingLoadSink path: (base / 'racing') pathString.
+"The load race: the inner load installs its envelope, the outer load reads its slots. The
+ storage has no atom cache, so both loads decode the record."
+racing := RacingLoadSink path: (base / 'racing') pathString atomCacheEntries: 0.
 node := PBPosNode value: 'x' left: nil right: nil.
 node _saveInto: racing.
 stub := node unloadedCopy.
