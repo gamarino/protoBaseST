@@ -139,7 +139,7 @@ explicit.
   (protoST question K23, open, see below). It is bounded and only happens while
   another *process* holds the lock; while it waits, the worker still serves other actors.
 - **Group commit** (`proto_db` D52) is not implemented: every publish is a group of one.
-- **One storage failure ends writing through that storage** (`isFailed`), as `proto_db`'s; reopen
+- **One storage failure ends writing through that storage** (`isFailed`), like `proto_db`'s, but triggered by any write error (see decisions, Task 17); reopen
   the space. Reads keep working.
 - **Step 8 of a failed publish.** A root at a different epoch is `PBConflictError`, as
   `proto_db`'s `_publish`. A root that reappears at the same epoch, written by a writer that

@@ -45,6 +45,8 @@ asOf := [:aMoment |
 ```python
 def as_of(db, moment):
     entry = next((e for e in db.history() if e.committed_at <= moment), None)
+    if entry is None:
+        raise ValueError("the database did not exist yet")
     return db.snapshot_at(entry)
 ```
 
