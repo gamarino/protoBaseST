@@ -320,7 +320,7 @@ PBIndexedCollection >> _probe: aKey
  collection ('PBList element', 'PBDictionary key'), as ProtoBase's
  canonical_for names the List's element."
 PBIndexedCollection >> _canonical: aValue as: aRole
-  ^ PBCodec canonical: aValue for: self class name , ' ' , aRole.
+  ^ PBCodec canonical: aValue for: [self class name , ' ' , aRole].
 
 "As _canonical:as:, refused (PBValidationError) also when the anInteger
  containers aWrapper adds around the value in a stored node would make it nest

@@ -190,11 +190,14 @@ PBCodec class >> repr: aString
 
 "As canonical:, with a PBValidationError of the codec's own (not of a subclass)
  signalled again with aHolder in front: the field, root, mutable cell or
- collection element the value was going to (ProtoBase canonical_for)."
+ collection element the value was going to (ProtoBase canonical_for). aHolder
+ is a String, or a block answering one, evaluated only when the value is
+ refused: the callers on the write path pass a block, so the text is built on
+ the error path only."
 PBCodec class >> canonical: aValue for: aHolder
   ^ [self canonical: aValue] on: PBValidationError do: [:e |
     e class == PBValidationError ifFalse: [e pass].
-    PBValidationError signal: aHolder , ': ' , e messageText].
+    PBValidationError signal: (aHolder isString ifTrue: [aHolder] ifFalse: [aHolder value]) , ': ' , e messageText].
 
 "The msgpack containers the wire form of the canonical value aValue nests
  (format spec, 'Value nesting depth'), counted with an explicit stack."
@@ -506,6 +509,12 @@ PBCodec class >> toWire: aValue atomRef: aBlock
  aHolder (canonical:for:)."
 PBCodec class >> toWire: aValue atomRef: aBlock for: aHolder
   ^ self _wire: (self canonical: aValue for: aHolder) ref: aBlock.
+
+"The wire form of aValue, which is canonical already (the state of an
+ envelope: PBAtomEnvelope makes it canonical when it is built, and a decoded
+ one is canonical by the format), without a second canonical: pass."
+PBCodec class >> wireOfCanonical: aValue atomRef: aBlock
+  ^ self _wire: aValue ref: aBlock.
 
 "The block that writes a reference as its pointer: {'@ref': [segment, offset,
  tag]}, from the reference's pointer and tag."

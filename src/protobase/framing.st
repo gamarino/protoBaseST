@@ -325,8 +325,15 @@ PBAtomEnvelope class >> tag: aTag oid: anOid state: aState
     why := self _nameProblem: name.
     why isNil ifFalse: [^ PBValidationError signal: 'PBAtomEnvelope: ' , why]].
   canonicalState := PBFrozenDict withAssociations: (aState associations collect: [:each |
-    each key -> (PBCodec canonical: each value for: 'Attribute ' , (PBCodec repr: each key))]).
+    each key -> (PBCodec canonical: each value for: ['Attribute ' , (PBCodec repr: each key)])]).
   ^ self basicNew _setTag: (PBTypeRegistry writerTag: aTag) oid: bytes state: canonicalState.
+
+"The envelope that saves an atom: its tag (PBAtom >> tag), its oid (16 bytes)
+ and its state, which is canonical, with valid attribute names, by
+ construction (PBAtom class >> _unsaved:withState:tag:), so neither is checked
+ again here (tag:oid:state: is the checking constructor, for any state)."
+PBAtomEnvelope class >> _ofAtomTag: aTag oid: aByteArray state: aPBFrozenDict
+  ^ self basicNew _setTag: (PBTypeRegistry writerTag: aTag) oid: aByteArray state: aPBFrozenDict.
 
 "Why aName cannot be a persisted attribute name, or nil."
 PBAtomEnvelope class >> _nameProblem: aName
@@ -451,10 +458,12 @@ PBAtomEnvelope >> slots
 
 "The ATOM payload: the msgpack map t, oid, s, in that order; t is written in
  canonical form, references as their pointers, every value two containers
- deep (so at most 1024 in all)."
+ deep (so at most 1024 in all). The state is canonical already (every
+ constructor makes it so, or decoded it), so it is not made canonical again."
 PBAtomEnvelope >> encode
-  | wireState |
+  | wireState ref |
+  ref := PBCodec pointerRef.
   wireState := MessagePackMap withAll: (state associations collect: [:each |
-    each key -> (PBCodec toWire: each value atomRef: PBCodec pointerRef for: 'Attribute ' , (PBCodec repr: each key))]).
+    each key -> (PBCodec wireOfCanonical: each value atomRef: ref)]).
   ^ MessagePack encode: (MessagePackMap withAll: {
     't' -> (PBTypeRegistry writerTag: tag). 'oid' -> oid. 's' -> wireState }).

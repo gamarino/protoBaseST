@@ -447,7 +447,7 @@ PBTransaction >> setRootObject: aName value: aValue replace: aBoolean
     ^ PBValidationError signal: 'Root names starting with ''__'' are reserved for the format, not ' , (PBCodec repr: aName)].
   (aBoolean == true or: [aBoolean == false]) ifFalse: [
     ^ PBValidationError signal: 'replace must be a Boolean, not ' , aBoolean printString].
-  value := PBCodec canonical: aValue for: 'Root ' , (PBCodec repr: aName).
+  value := PBCodec canonical: aValue for: ['Root ' , (PBCodec repr: aName)].
   bookkeeping swap: [:st | st checkActive withWrite: aName value: value replace: aBoolean].
 
 "Removes the root aName at commit (a no-op if it is absent then); a later set
@@ -464,7 +464,7 @@ PBTransaction >> removeRootObject: aName
 PBTransaction >> newMutable: aName value: aValue
   | value exists |
   _PBNameCheck check: aName what: 'mutable'.
-  value := PBCodec canonical: aValue for: 'Mutable ' , (PBCodec repr: aName).
+  value := PBCodec canonical: aValue for: ['Mutable ' , (PBCodec repr: aName)].
   bookkeeping swap: [:st |
     | current view |
     current := st checkActive.
@@ -484,7 +484,7 @@ PBTransaction >> newMutable: aName value: aValue
 PBTransaction >> setMutable: aName value: aValue
   | value absent |
   _PBNameCheck check: aName what: 'mutable'.
-  value := PBCodec canonical: aValue for: 'Mutable ' , (PBCodec repr: aName).
+  value := PBCodec canonical: aValue for: ['Mutable ' , (PBCodec repr: aName)].
   bookkeeping swap: [:st |
     | current |
     current := st checkActive.
