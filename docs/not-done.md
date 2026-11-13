@@ -31,8 +31,8 @@ design (spec section 2) or a cut made while building, with its reason.
 
 Tested, with the `proto_db` at `v2.0.0rc2` reference:
 
-- the conformance vectors of the tag, for every layer protoBaseST implements (the cluster and
-  framed-log vectors are visible skips; three differences are on purpose, see
+- the conformance vectors of the tag, for every layer protoBaseST implements (the acceptor-log and
+  cluster-message vectors are visible skips; three differences are on purpose, see
   [deviations.md](deviations.md));
 - both directions of the round trip: spaces written by `proto_db` are dumped identically by
   protoBaseST, and spaces written by protoBaseST pass `proto_db`'s verifier with an identical dump,

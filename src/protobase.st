@@ -14,6 +14,8 @@ Import from: 'protobase/notation'.
 Import from: 'protobase/framing'.
 Import from: 'protobase/store'.
 Import from: 'protobase/cluster/log'.
+Import from: 'protobase/cluster/members'.
+Import from: 'protobase/cluster/rootlog'.
 Import from: 'protobase/avl'.
 Import from: 'protobase/collections'.
 Import from: 'protobase/records'.

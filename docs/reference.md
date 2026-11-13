@@ -347,11 +347,26 @@ For tests, tools and readers of the format. An application does not need them.
   `PBLogScan` (`payloads`, `validEnd`, `isTorn`). A torn tail is dropped; a damaged frame
   followed by a valid one is `PBCorruptionError` ("mid-log"); another format version is
   `PBNotSupportedError`. The search for a later valid frame is linear in the file size.
+- **Membership** (`cluster/members.st`): `PBPeer` (`nodeId:host:port:`; `nodeId`, `host`,
+  `port`) and `PBMembership` (`peers:voters:`, voters `nil` for the default: the first three ids
+  in code point order, every member of a smaller cluster; an explicit set has distinct members,
+  odd and at least three when the cluster has three or more). It answers `ids` (code point
+  order), `rankOf:`, `voters`, `isVoter:`, `majority` (`V // 2 + 1`), `fingerprint` (CRC-32 of
+  the UTF-8 of the voter ids joined with `,`) and `peerNamed:`. An empty or non-String id,
+  duplicate ids and more than 4096 members are `PBValidationError`. Class side:
+  `ballotAfter:rank:` (`((floor - r) // 4096 + 1) * 4096 + r`), `rankBits` (12), `maxMembers`,
+  `refoundStep` (2^44).
+- **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
+  the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
+  `PBRootOrder` (`compare:with:`, `max:with:`, `compareKey:with:`), the only comparison of roots.
+  An unknown root is `nil` and orders below every known one; two different roots with equal
+  label and epoch are `PBCorruptionError`.
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.
   A large value is stored in a `PBValueBox`.
-- **Roots**: `PBSpaceRoot` (`databases`, `clusterTerm`, `clusterEpoch`, `clusterPrevious`),
+- **Roots**: `PBSpaceRoot` (`databases`, `clusterTerm`, `clusterEpoch`, `clusterPrevious`;
+  `databases:` and, for a cluster commit, `databases:term:epoch:previous:`),
   `PBDatabaseRoot` (`objects`, `mutables`, `version`, `committedAt`, `previous`, `origin`).
   A DatabaseRoot without `mutables` is `PBCorruptionError`; a SpaceRoot written by a cluster node
   is `PBNotSupportedError`.
@@ -365,6 +380,6 @@ For tests, tools and readers of the format. An application does not need them.
 ## The module and its files
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
-`notation`, `framing`, `store`, `cluster/log`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
+`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
 `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar` and `uuid`.

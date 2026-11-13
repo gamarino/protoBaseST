@@ -2,6 +2,13 @@
 
 ## 0.2.0 (unreleased)
 
+- Cluster membership values (`src/protobase/cluster/members.st`): `PBPeer` and `PBMembership`
+  (ranks in code point order, the voter set of `proto_db`'s `_voter_set`, `majority`, the
+  voter-set fingerprint, `ballotAfter:rank:`); the root order (`src/protobase/cluster/rootlog.st`):
+  `PBLabeledRoot` and `PBRootOrder`, the order of `proto_db`'s `root_key`/`compare_roots`; and
+  `PBSpaceRoot databases:term:epoch:previous:`, which writes the cluster fields. The cluster
+  segment vector is verified by `tests/conformance/cluster_segment.st` (writing and reading) and
+  no longer skipped.
 - `PBFramedLog` (`src/protobase/cluster/log.st`): the framed append-only log of `proto_db`'s
   `logfile.py` (headers, frames, `openAppend:kind:`, `read:kind:`), re-ported with the linear
   prefix-checksum torn-tail search; the condition of ruling R14 (cluster storage enters scope) is

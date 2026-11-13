@@ -2,7 +2,8 @@
 "The cluster section (README, 'Using the vectors', 8) and the invalid vectors of the
  layers roots_log (an acceptor log) and message (bytes received on a cluster
  connection). The framed log files (roots-torn.log, ranges.log, segments.log and the
- invalid vectors of layer log) are verified by framing_logs.st (PBFramedLog). Clusters
+ invalid vectors of layer log) are verified by framing_logs.st (PBFramedLog), the cluster
+ segment by cluster_segment.st (PBSpaceRoot databases:term:epoch:previous:). Clusters
  are not yet implemented here (design spec 10.5: PBFileStorage refuses a space holding
  cluster/ with PBNotSupportedError), so the rest is a visible skip: one
  'SKIP: cluster <item>' line per remaining item of the cluster section (each message
@@ -15,13 +16,12 @@ Import from: '_vectors'.
 | manifest cluster base refused |
 manifest := Vectors manifest.
 cluster := manifest at: 'cluster'.
-('SKIP: cluster segment (' , ((cluster at: 'segment') at: 'file') , '): pending, the cluster segment is cluster Task 3') displayNl.
 ('SKIP: cluster roots_log (' , ((cluster at: 'roots_log') at: 'file') , '): pending, the acceptor log and its entries are cluster Task 4') displayNl.
 (cluster at: 'messages') do: [:message |
   ('SKIP: cluster message ' , (message at: 'id') , ' (' , (message at: 'file') , '): pending, the wire messages are cluster Task 5') displayNl].
 ((manifest at: 'invalid') select: [:e | #('roots_log' 'message') includes: (e at: 'layer')]) do: [:e |
   ('SKIP: invalid ' , (e at: 'layer') , ' ' , (e at: 'id') , ((e at: 'layer') = 'roots_log' ifTrue: [': pending, the acceptor log is cluster Task 4'] ifFalse: [': pending, the wire messages are cluster Task 5'])) displayNl].
-"The section must hold exactly the items skipped above."
+"The section must hold exactly the items skipped above or verified elsewhere."
 (cluster keys asSortedCollection asArray = #('messages' 'ranges_log' 'roots_log' 'roots_log_torn' 'segment' 'segments_log'))
   ifFalse: [('FAIL the cluster section holds ' , cluster keys asSortedCollection asArray printString) displayNl. Smalltalk exit: 1].
 base := FileSystem temp / ('pbst-cluster-' , Smalltalk pid printString).
