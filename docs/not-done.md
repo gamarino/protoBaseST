@@ -65,7 +65,7 @@ Not tested, or not proven:
 | Item | State | Why | Cost |
 |---|---|---|---|
 | `CountedSet` | **Done** (ruling R22), first a stretch goal | Time allowed, and cutting it would have left `PBCountedSet` mutators refusing. | None. |
-| Framed log reader (`PBFramedLog`) | Written, then **removed** (ruling R14) | The spec lists framed logs as a non-goal and nothing in protoBaseST reads them; an uncalled reader is debt. Its worst case was quadratic. | If cluster or tiered storage enters scope, the reader must be re-ported with `proto_db`'s linear prefix-checksum search. |
+| Framed log reader (`PBFramedLog`) | Written, removed (ruling R14), **re-ported** with the linear search in cluster Task A1 (`cluster/log.st`) | The spec lists framed logs as a non-goal and nothing in protoBaseST reads them; an uncalled reader is debt. Its worst case was quadratic. | If cluster or tiered storage enters scope, the reader must be re-ported with `proto_db`'s linear prefix-checksum search. |
 | `asOf:` | Not added | `proto_db` has none. | A three-line helper in each program. |
 | Cluster held retries | Not ported | No cluster mode. | |
 | Index maintenance | Not done | Out of scope (design 7.4). Refused explicitly rather than done partly. | A database with indexes can be read, not changed in its indexed collections. |

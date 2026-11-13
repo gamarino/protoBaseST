@@ -13,6 +13,7 @@ Import from: 'protobase/codec'.
 Import from: 'protobase/notation'.
 Import from: 'protobase/framing'.
 Import from: 'protobase/store'.
+Import from: 'protobase/cluster/log'.
 Import from: 'protobase/avl'.
 Import from: 'protobase/collections'.
 Import from: 'protobase/records'.

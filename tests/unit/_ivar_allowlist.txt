@@ -48,3 +48,5 @@ _PBPlace>>_setPointer:storage:
 PBIndexedCollection>>_setLog:complete:
 _PBOpLog>>_setPrevious:op:
 PBPublisher>>_setSpace:
+PBLogScan>>_setPayloads:validEnd:torn:
+PBFramedLog>>_setPath:file:payloads:

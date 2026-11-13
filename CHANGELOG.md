@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- `PBFramedLog` (`src/protobase/cluster/log.st`): the framed append-only log of `proto_db`'s
+  `logfile.py` (headers, frames, `openAppend:kind:`, `read:kind:`), re-ported with the linear
+  prefix-checksum torn-tail search; the condition of ruling R14 (cluster storage enters scope) is
+  met. The `log`-layer, `ranges_log`, `segments_log` and `roots_log_torn` vectors are verified by
+  `tests/conformance/framing_logs.st` and no longer skipped.
+
 ## 0.1.0 (2026-11-13)
 
 The entries are chronological, and later entries supersede earlier ones (vectors and format

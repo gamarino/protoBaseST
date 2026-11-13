@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Guards docs/reference.md and the README against invented API: every backticked selector in them
-# must be defined in src/protobase/*.st (as `Class >> selector` or `Class class >> selector`), or be
+# must be defined in src/protobase/*.st and src/protobase/cluster/*.st (as `Class >> selector` or `Class class >> selector`), or be
 # on the short allow-list of names that are not protoBaseST's (Python names, protoST kernel
 # selectors, words that are not selectors). Keyword selectors are checked part by part
 # (`setAt:value:` needs both `setAt:` and `value:` to exist in one defined selector's parts, and the
@@ -14,7 +14,7 @@ python3 -I - "$REPO" <<'PY'
 import re, sys, glob
 repo = sys.argv[1]
 defined = set()
-for f in glob.glob(repo + "/src/protobase/*.st") + [repo + "/src/protobase.st"]:
+for f in glob.glob(repo + "/src/protobase/*.st") + glob.glob(repo + "/src/protobase/cluster/*.st") + [repo + "/src/protobase.st"]:
     for line in open(f, encoding="utf-8"):
         m = re.match(r"^\S+(?: class)? >> (.+)$", line.rstrip())
         if not m:

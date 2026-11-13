@@ -1,5 +1,5 @@
 "EXPECT: ok"
-"Spec 12.6 (decision 3, immutability by convention): in src/protobase/*.st an
+"Spec 12.6 (decision 3, immutability by convention): in src/protobase/*.st and src/protobase/cluster/*.st an
  instance or class variable is assigned only by the initialisers listed in
  _ivar_allowlist.txt (Class>>selector, or Class class>>selector), which the
  class-side constructors call once, or which publish a runtime-only field once
@@ -77,7 +77,7 @@ methodOf := [:lines :n |
 allow := ((FileReference path: '_ivar_allowlist.txt') lines
   reject: [:l | l isEmpty or: [l first = $#]]) asArray.
 used := Set new.
-grep := OSProcess shell: 'grep -n -e '':= '' -e ''setInstVar:'' ../../src/protobase/*.st'.
+grep := OSProcess shell: 'grep -n -e '':= '' -e ''setInstVar:'' ../../src/protobase/*.st ../../src/protobase/cluster/*.st'.
 grep exitCode = 0 ifFalse: [failures add: 'grep failed: ' , grep errorOutput].
 "file -> the grep line numbers"
 dict := Dictionary new.

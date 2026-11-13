@@ -339,6 +339,14 @@ For tests, tools and readers of the format. An application does not need them.
 - **Framing** (`framing.st`): `PBSegmentHeader`, `PBRecordHeader`, `PBRootRecord`,
   `PBAtomEnvelope`: `decode:` and `encode` for the byte frames. Integers are little-endian;
   every checksum is CRC-32. Readers accept format versions 2, 3 and 4; writers write 4.
+- **Framed logs** (`cluster/log.st`): `PBFramedLog`, the append-only log file of `proto_db`'s
+  `logfile.py`. Class side: `header:` (kinds `'ROOT'`, `'RANG'`, `'SEGS'`), `frame:`,
+  `scan:kind:path:`, `read:kind:` (never writes; a missing file is an empty log),
+  `openAppend:kind:` (creates the file with its header, truncates a torn tail, syncs). An
+  open log answers `payloads`, `append:sync:`, `close`, `isClosed`, `path`. A scan is a
+  `PBLogScan` (`payloads`, `validEnd`, `isTorn`). A torn tail is dropped; a damaged frame
+  followed by a valid one is `PBCorruptionError` ("mid-log"); another format version is
+  `PBNotSupportedError`. The search for a later valid frame is linear in the file size.
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.
@@ -357,6 +365,6 @@ For tests, tools and readers of the format. An application does not need them.
 ## The module and its files
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
-`notation`, `framing`, `store`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
+`notation`, `framing`, `store`, `cluster/log`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
 `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar` and `uuid`.
