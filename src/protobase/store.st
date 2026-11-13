@@ -355,7 +355,7 @@ PBSegmentWriter >> printOn: aStream
  synced yet; failed over nil or the text of the write failure that ended
  writing; rootLock over nil or the open BinaryFile of space.lock whose OS lock
  this storage holds."
-Object subclass: #PBFileStorage instanceVariableNames: 'directory segmentMax readers state writer sealed failed rootLock'.
+Object subclass: #PBFileStorage instanceVariableNames: 'directory segmentMax readers state writer sealed failed rootLock lastPush'.
 
 PBFileStorage class >> rootFileName
   ^ 'space.root'.
@@ -417,6 +417,7 @@ PBFileStorage >> _setDirectory: aFileReference segmentMaxBytes: anInteger
   sealed := Atom on: #().
   failed := Atom on: nil.
   rootLock := Atom on: nil.
+  lastPush := Atom on: nil.
   ^ self.
 
 "The size cap of a segment (segmentMaxBytes)."
@@ -529,17 +530,20 @@ PBFileStorage >> save: anAtom
  PBAtomPointer, valid for the life of the storage. The record is not durable
  until flushSegment (or replaceRoot:) syncs it."
 PBFileStorage >> pushAtom: anEnvelope
-  | record |
+  | record payload |
   (anEnvelope isKindOf: PBAtomEnvelope) ifFalse: [
     ^ PBValidationError signal: 'PBFileStorage pushAtom: a PBAtomEnvelope was expected, not ' , anEnvelope printString].
-  record := PBRecordHeader encodeKind: PBRecordHeader atomKind payload: anEnvelope encode.
+  payload := anEnvelope encode.
+  record := PBRecordHeader encodeKind: PBRecordHeader atomKind payload: payload.
   ^ self _writeOperation: [
-    | w offset |
+    | w offset ptr |
     self _stopIfCloseRequested: 'before choosing the segment'.
     w := self _segmentFor: record size.
     self _stopIfCloseRequested: 'before appending a record'.
     offset := self _write: [w append: record] what: 'appending a record to the segment ' , w segmentHex.
-    PBAtomPointer segment: w segment offset: offset].
+    ptr := PBAtomPointer segment: w segment offset: offset.
+    lastPush value: { ptr. anEnvelope tag. payload } ifCurrent: lastPush value.
+    ptr].
 
 "Makes every record pushed so far durable: syncs every segment written since
  its last sync (nothing to do before the first push)."
@@ -642,16 +646,37 @@ PBFileStorage >> isCluster
   ^ (self _clusterReasonAt: self readRoot) notNil.
 
 "Why the space is a cluster node's, with the root record aRootRecord current
- (nil: none), or nil when it is not."
+ (nil: none), or nil when it is not. The SpaceRoot is read as an atom of this
+ storage (PBTypeRegistry unloadedAtomFor:at:storage:), the one the publisher
+ decoded to build the commit when the atom cache holds it."
 PBFileStorage >> _clusterReasonAt: aRootRecord
   | term |
   (directory / self class clusterDirectoryName) exists ifTrue: [
     ^ 'its directory holds ' , self class clusterDirectoryName , '/'].
   aRootRecord isNil ifTrue: [^ nil].
-  term := (self loadAt: aRootRecord pointer expecting: self class spaceRootTag) state
-    at: 'cluster_term' ifAbsent: [nil].
+  term := (PBTypeRegistry unloadedAtomFor: self class spaceRootTag at: aRootRecord pointer storage: self)
+    stateAt: 'cluster_term'.
   term isNil ifTrue: [^ nil].
   ^ 'its SpaceRoot at ' , aRootRecord pointer printString , ' carries the cluster_term ' , term printString.
+
+"Refuses (PBCorruptionError) a pointer that is not a valid SpaceRoot record
+ (replaceRoot:). The record this storage pushed last is checked by reading it
+ back, its framing and CRC verified (PBSegmentReader >> recordAt:, ProtoBase
+ publish_root's _fetch_record), and comparing its payload with the bytes
+ encoded from the SpaceRoot envelope: what the publisher just saved, checked
+ against the disk at least as strictly as ProtoBase does, without decoding it
+ again. Any other pointer is decoded in full as a SpaceRoot (loadAt:expecting:)."
+PBFileStorage >> _checkRootRecordAt: aPointer
+  | last record |
+  last := lastPush value.
+  ((last notNil and: [(last at: 1) = aPointer])
+    and: [(PBTypeRegistry nameOfTag: (last at: 2)) = (PBTypeRegistry nameOfTag: self class spaceRootTag)])
+    ifFalse: [^ self loadAt: aPointer expecting: self class spaceRootTag].
+  record := self recordAt: aPointer.
+  ((record at: 1) isAtom and: [(record at: 2) = (last at: 3)]) ifFalse: [
+    ^ PBCorruptionError signal: 'PBFileStorage: the record at ' , aPointer printString
+      , ' does not hold the bytes of the SpaceRoot written there'].
+  ^ self.
 
 "The tag of the SpaceRoot records a root record points to."
 PBFileStorage class >> spaceRootTag
@@ -679,7 +704,7 @@ PBFileStorage >> replaceRoot: aPBRootRecord
     rootLock value isNil ifTrue: [
       ^ PBUserError signal: 'PBFileStorage replaceRoot: needs the root lock (tryLockRoot)'].
     self _syncSegments.
-    self loadAt: aPBRootRecord pointer expecting: self class spaceRootTag.
+    self _checkRootRecordAt: aPBRootRecord pointer.
     current := self readRoot.
     expected := current isNil ifTrue: [1] ifFalse: [current epoch + 1].
     aPBRootRecord epoch = expected ifFalse: [
