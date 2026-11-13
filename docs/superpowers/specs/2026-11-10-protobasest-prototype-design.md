@@ -1,7 +1,11 @@
 # protoBaseST prototype: a perennial object database for protoST
 
-Status: **draft, revision 2, for maintainer review** (2026-11-10). Author: Gustavo Marino,
-with Claude. No code is written until this document is approved.
+Status: **approved 2026-11-10 and implemented by this prototype.** Author: Gustavo Marino, with Claude.
+This document is kept as the design the prototype was built from. Where
+[docs/decisions.md](../../decisions.md) differs, `docs/decisions.md` supersedes it: notably the
+move to ProtoBase `v2.0.0rc2` (ruling R18: value nesting limit 1022, a new vectors digest), R14
+(log layers) and R19 (the publisher never waits). The `v2.0.0rc1` pin, commit and vectors digest
+below are historical; the current pin is in `tests/conformance/fetch_vectors.sh`.
 
 Revision 2 applies the maintainer's answers to the six questions of revision 1, and one rule:
 **when in doubt, ProtoBase v2.0.0rc1 is the reference**, for semantics, API shape and names.
@@ -12,7 +16,7 @@ Normative source: ProtoBase `docs/source/format-spec.rst` at tag `v2.0.0rc1` (co
 `5f86eb09ed1683aa9f048051c64cca68d23b9fb753e87416cb1ecf11ed406df0`. The transaction semantics
 follow `docs/source/concurrency-model.rst` and `proto_db/transactions.py` at the same tag.
 "Spec §X" means a section of `format-spec.rst`; "CM §X" a section of
-`concurrency-model.rst`. Background: `tasks/protobasest-readiness-2026-11-10.md`.
+`concurrency-model.rst`.
 
 **Decisions recorded in this revision**
 
@@ -23,7 +27,7 @@ follow `docs/source/concurrency-model.rst` and `proto_db/transactions.py` at the
 | 3 | Immutability of stored values | By convention: built once, never assigned afterwards. No frozen instances (§4.1) |
 | 4 | Names | ProtoBase's names with the `PB` prefix, the camelCase translation of the real API at the tag (§5) |
 | 5 | Conflict granularity | **The same as ProtoBase**: per-root and per-cell read sets, the replace and merge rules, and the mutable-cell rules of D35 (§7) |
-| 6 | Early primitives | Approved: protoIO 0.5.0 and protoST 0.10.0 (ruling R10) with `randomBytes:` and a microsecond clock, in weeks 0-1, once the protoPython release frees DEV12 (§9) |
+| 6 | Early primitives | Approved: protoIO 0.5.0 and protoST 0.10.0 (ruling R10) with `randomBytes:` and a microsecond clock, in weeks 0-1 (§9) |
 
 ## 1. Intent
 
@@ -708,7 +712,7 @@ STATUS deviations.
 
 | Need | Why | Where | When |
 |---|---|---|---|
-| OS random bytes, `ByteArray randomBytes: n` | oids, segment UUID4 names, `origin`. `Random` is a 32-bit Park-Miller generator, unfit for identities | protoIO `random::bytes(n)` (`getrandom`; `BCryptGenRandom` on Windows), bound by protoST | **Approved** for protoIO 0.5.0 / protoST 0.10.0 (ruling R10), weeks 0-1, once the protoPython release frees DEV12 |
+| OS random bytes, `ByteArray randomBytes: n` | oids, segment UUID4 names, `origin`. `Random` is a 32-bit Park-Miller generator, unfit for identities | protoIO `random::bytes(n)` (`getrandom`; `BCryptGenRandom` on Windows), bound by protoST | **Approved** for protoIO 0.5.0 / protoST 0.10.0 (ruling R10), weeks 0-1 |
 | A UTC clock in microseconds | `committed_at` | protoIO `clock::utcMicroseconds()` plus a protoST binding | **Approved**, same release |
 | `Decimal` | `@dec`; rank-3 order and hash | protoST `lib/decimal.st`, Smalltalk over `LargeInteger`: parse, to-scientific-string, exact comparison, special values; no arithmetic context yet | Week 1, Smalltalk only |
 | Calendar values and fixed offsets | `@date`, `@time`, `@dt`, `@td` | protoST `lib/calendar.st`, Smalltalk | Week 1 |
@@ -813,15 +817,14 @@ the scale this audience knows.
 
 ## 11. Plan (revised)
 
-The work starts once the ProtoBase agent finishes; the format is frozen at `v2.0.0rc1`. The
-primitives release waits for the protoPython release to free DEV12. Decision 5 adds about
+The work starts once the format is frozen at `v2.0.0rc1`. Decision 5 adds about
 four days: the transaction bookkeeping, operation logs and replay, validation, outcome
 resolution, and the concurrency tests. Three weeks do not hold everything, so the plan moves
 work out explicitly.
 
 | Week | Dates | Work | Gate |
 |---|---|---|---|
-| 0 | 11-11 to 11-14 | `protoBaseST` skeleton; pinned Python venv; the three checks of §9 on the installed 0.9.0; protoIO `random::bytes` and the µs clock written, released as protoIO 0.5.0 / protoST 0.10.0 (ruling R10) when DEV12 is free | the checks pass; the release is scheduled |
+| 0 | 11-11 to 11-14 | `protoBaseST` skeleton; pinned Python venv; the three checks of §9 on the installed 0.9.0; protoIO `random::bytes` and the µs clock written, released as protoIO 0.5.0 / protoST 0.10.0 (ruling R10) | the checks pass; the release is scheduled |
 | 1 | 11-12 to 11-18 | `Decimal`, calendar values and `UUID` in protoST `lib/`; codec with every refusal; framing for formats 2-4; vector runner and notation printer | `values`, `values_*`, `invalid` (storage layers), `framing` |
 | 2 | 11-19 to 11-25 | order keys, hash keys, exact tokens; lazy loading; read path for every collection, records, opaque atoms; `history`, `snapshotAt:`, `getMutable:`; `PBTransaction` read side (snapshot, tokens, read sets) | `order`, `hashes`, `exact_tokens`, `atom_*`, `database`, `legacy_database` (with listed refusals), `polyglot_database` read; test 10.2 |
 | 3 | 11-26 to 12-01 | AVL writes; `PBList`, `PBDictionary`, `PBHashDictionary`, `PBSet`, records and mutable cells with their operation logs; the publisher (lock, validation, merge, save, publish, outcome); `run:` | tests 10.3, 10.4, 10.5, 10.7; the polyglot byte-for-byte check |
@@ -847,7 +850,7 @@ A blind write is never shipped without its merge: that would replace where Proto
    work in six. *Mitigation*: the cut order above, decided now, so that the demo is never
    built on a half-implemented rule. *Residual risk*: if `PBDictionary`'s merge is not
    correct by 11-30, the demo shows the read side and the validation only, and says so.
-2. **DEV12 availability.** If the protoPython release does not free DEV12 by about 11-24, the
+2. **Primitives availability.** If the primitives release is not ready by about 11-24, the
    writer has no fit source for oids. *Mitigation*: the reader (weeks 1-2) does not depend
    on it. *Residual risk*: a late release cuts week 3.
 3. **Numeric exactness.** Cross-kind equality, hash residues and tokens: wrong values look
