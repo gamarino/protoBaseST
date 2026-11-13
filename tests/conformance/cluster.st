@@ -15,8 +15,8 @@ Import from: '_vectors'.
 | manifest cluster base refused |
 manifest := Vectors manifest.
 cluster := manifest at: 'cluster'.
-#('segment' 'roots_log') do: [:item |
-  ('SKIP: cluster ' , item , ' (' , ((cluster at: item) at: 'file') , '): pending, the acceptor log and its entries are cluster Task 4') displayNl].
+('SKIP: cluster segment (' , ((cluster at: 'segment') at: 'file') , '): pending, the cluster segment is cluster Task 3') displayNl.
+('SKIP: cluster roots_log (' , ((cluster at: 'roots_log') at: 'file') , '): pending, the acceptor log and its entries are cluster Task 4') displayNl.
 (cluster at: 'messages') do: [:message |
   ('SKIP: cluster message ' , (message at: 'id') , ' (' , (message at: 'file') , '): pending, the wire messages are cluster Task 5') displayNl].
 ((manifest at: 'invalid') select: [:e | #('roots_log' 'message') includes: (e at: 'layer')]) do: [:e |
