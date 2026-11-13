@@ -301,7 +301,11 @@ requires; one question is still open and one observation was not a bug:
   `tests/week0/k23_network_settled_futures.st` has 64 actors waiting nested (blocking their
   worker) and 64 waiting at the top level of their method on Futures a hub actor hands out and a
   socket reader actor settles; all 128 answer and no `deadlock:` is raised, also with
-  `PROTOST_WORKERS=1`. The question stays open for the pattern that first raised it.
+  `PROTOST_WORKERS=1`. **Limit of that evidence:** the interleaving the check targets (a caller
+  already in its second `wait` when the reader settles its Future) is likely but not forced; a
+  caller that gets there late waits on a settled Future and cannot show the defect. 40 runs (10 of
+  them with one worker) never raised `deadlock:`: an absence of observed failure, not a proof.
+  The question stays open, for this pattern too and for the pattern that first raised it.
 - **Module resolution is documented protoST behaviour, not a bug.** The working directory is
   searched before the library, as in Python, so a stray `calendar.st` in the current directory
   shadows the library's calendar module. **Security note:** an untrusted working directory's

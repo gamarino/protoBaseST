@@ -8,7 +8,13 @@
  their method (which suspends the actor). The program's thread writes the 128 ids once an Atom
  counter shows the 128 registrations, then prints the number of callers that answered the right
  value and the number of deadlock: errors caught. Nothing depends on time; the polling waits for
- a count, and a hang shows as the runner's timeout."
+ a count, and a hang shows as the runner's timeout.
+ Limit: the interleaving this targets (a caller already in its second wait when the reader
+ settles its Future) is likely but not forced. A caller that gets there late waits on a settled
+ Future and cannot show the defect, so a pass is an absence of observed failure, not a proof.
+ Why wait wait: an actor method that answers a Future makes the send's Future resolve with that
+ Future itself (protoST 0.10.0 does not flatten; LANGUAGE.md does not say either way). The first
+ wait is the hub's reply, the second the network-settled Future."
 Import from: 'net'.
 
 Object subclass: #K23Hub instanceVariableNames: 'pending registered'.

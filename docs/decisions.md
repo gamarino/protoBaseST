@@ -147,5 +147,7 @@ Unnumbered rulings, in task order:
   stream it answers what is left (4 bytes of the 10 asked for, the peer having closed), and the
   next `nextBytes:` answers `nil`. LANGUAGE.md §12.11.1 does not promise the mid-stream
   behaviour, so the cluster's `_readExactly:from:` (Task 19) still loops until it has `n` bytes
-  and treats `nil` (or an empty answer) as the end of the stream.
+  and treats `nil` (or an empty answer) as the end of the stream. The runner does not show the
+  `NOTE:` lines of a `.st` test, so if the protoST binary changes, Task 19 re-runs
+  `tests/week0/socket_short_reads.st` directly and updates this note.
 - The open protoST question K23 (not yet filed), the fixed issues S37 to S40 and the documented working-directory module resolution, in [deviations.md](deviations.md#known-protost-limits).

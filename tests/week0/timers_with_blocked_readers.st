@@ -5,7 +5,13 @@
  (1) (Future after: 1) wait answers nil; (2) a thenDo: on Future after: 1 resolves a second Future
  that the program's thread waits for (the callback runs on a pool worker); (3) closing the 64
  writers settles all 64 reader Futures, counted through an Atom. No check depends on time: each
- waits for an event, and a defect shows as the runner's timeout."
+ waits for an event, and a defect shows as the runner's timeout.
+ What a pass of (1) and (2) supports: a timer's settle and its thenDo: callback need a free pool
+ worker (LANGUAGE.md 10.3), so the pass shows that the pool adds workers past those blocked in
+ I/O (LANGUAGE.md 12.11), as it does with PROTOST_WORKERS=1 too.
+ Limit: each reader resolves started just before its nextBytes: 1, so the readers are likely but
+ not forced to be blocked when the timers run; a pass is an absence of observed failure, not a
+ proof."
 Import from: 'net'.
 
 Object subclass: #BlockedReader instanceVariableNames: ''.
