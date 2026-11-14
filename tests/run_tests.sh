@@ -13,9 +13,8 @@
 #   "EXPECT: <text>"        exit 0, and the last non-empty stdout line equals <text>
 #   "EXPECT-ERROR: <text>"  non-zero exit, and the error output contains <text> (text optional)
 # A successful run whose last line starts with "SKIP: " counts as skipped. A passing test may also
-# print justified per-item skips (lines starting with "SKIP: " before its last line, such as the
-# cluster vectors of tests/conformance/cluster.st): they are shown under its PASS line, so a skip is
-# always visible where the run is read.
+# print justified per-item skips (lines starting with "SKIP: " before its last line): they are
+# shown under its PASS line, so a skip is always visible where the run is read.
 # Each *.sh file passes with exit 0, is skipped with exit 77, and fails otherwise. The lines of a
 # passing *.sh file's output that start with "NOTE: " or "SKIP: " are shown under its PASS line (a workaround
 # a test relies on is stated where the run is read, never hidden).

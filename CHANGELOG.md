@@ -2,6 +2,13 @@
 
 ## 0.2.0 (unreleased)
 
+- Cluster frames (`src/protobase/cluster/protocol.st`): `PBClusterFrame`, the 4-byte big-endian
+  length and the 64 MiB limit of `proto_db`'s `encode_frame`/`FrameDecoder` (`encode:to:key:`,
+  `lengthFrom:`, `decodeBody:to:key:`, `decode:to:key:`), with optional HMAC-SHA-256 frame
+  authentication bound to the receiver (CC4): without a key the frames are protocol 13 byte for
+  byte, with one they diverge (`docs/deviations.md`, "Cluster mode", which also states the
+  trusted-network assumption). The invalid `message-oversized` vector is verified by
+  `tests/conformance/cluster.st`, which no longer skips anything.
 - The acceptor log (`src/protobase/cluster/rootlog.st`): `PBAcceptorLog`, `proto_db`'s
   `RootsLog`, with `PBLoggedRoots` and `PBLogEntry`. It writes entry kinds 1 to 4 (promise,
   accepted, committed synced or not as `proto_db`, rejoined marker) and reads kinds 1 to 6, holds

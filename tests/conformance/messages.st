@@ -10,7 +10,7 @@
                      encode gives the body byte for byte
    invalid message-* each body (after its 4-byte length) is refused with
                      PBClusterProtocolError, except message-oversized: a length over 64 MiB is
-                     the frame layer's refusal (cluster Task 6), skipped visibly by cluster.st"
+                     the frame layer's refusal (PBClusterFrame), verified by cluster.st"
 Import from: 'protobase'.
 Import from: '_vectors'.
 | manifest cluster failures passed body schema typed invalid |

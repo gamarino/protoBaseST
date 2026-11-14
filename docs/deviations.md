@@ -18,6 +18,7 @@ Contents:
 [Reading](#reading) |
 [Conformance vectors](#conformance-vectors) |
 [Cluster wire messages](#cluster-wire-messages) |
+[Cluster mode](#cluster-mode) |
 [Errors and messages](#errors-and-messages) |
 [Performance](#performance) |
 [Known protoST limits](#known-protost-limits)
@@ -206,8 +207,8 @@ design 4.3` (no time-zone database):
 | `values_read_not_rewritten` | `map-zone-key-format3` | Re-encoding is refused, as listed; the decoded keys are format-3 wall clocks, not instants. |
 | `invalid` | `value-instant-wall-out-of-range` | **Accepted** and presented in UTC. The wall-clock range needs the zone's rules; the format spec ("Known gaps") lets a reader without a database present the instant in UTC. Refusing would call valid data corrupt. |
 
-The invalid `message-oversized` vector (a frame length, the frame layer's refusal) is a visible
-skip, printed under the `PASS` line of `tests/conformance/cluster.st`.
+The invalid `message-oversized` vector (a frame length, the frame layer's refusal) is verified by
+`tests/conformance/cluster.st` with `PBClusterFrame lengthFrom:`; no vector is skipped.
 
 ## Cluster wire messages
 
@@ -239,6 +240,30 @@ by the bytes `proto_db` accepts. Pinned by `tests/unit/cluster_messages.st`:
 A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
 `make_message`: an integer of 2^64 or more and the 3-item root form (never written, CC17) are
 `PBValidationError` when it is built, not a failure of `encode` or a form only a reader takes.
+
+## Cluster mode
+
+- **Frame authentication (divergence, design spec 8.4 Q5, CC4).** `proto_db`'s cluster has no
+  authentication: a frame is a 4-byte length and a msgpack map. protoBaseST offers optional HMAC
+  frame authentication with a shared key (`PBClusterFrame`, a `ByteArray` of at least 32
+  bytes). **Disabled** (no key), the frames are protocol 13 byte for byte and the message
+  vectors are the test. **Enabled**, every frame body is the msgpack bytes followed by a 32-byte
+  tag, HMAC-SHA-256(key, UTF-8(receiver id) ‖ 0x00 ‖ msgpack bytes), and the 4-byte length
+  covers both: such frames are not protocol 13, and a `proto_db` node (or a protoBaseST node
+  without the key) refuses them as undecodable, as protoBaseST with a key refuses an unkeyed
+  frame. A missing or wrong tag drops the connection like an invalid message. The receiver id in
+  the tag stops a frame from being delivered to another member; there is no replay counter,
+  because duplicated and reordered messages are already inside the failure model. protoST has
+  no constant-time comparison: the tag is compared by accumulating the XOR of all 32 byte pairs
+  and testing the result once, with no early exit. *Cost:* a keyed cluster cannot mix with
+  `proto_db` nodes; with the key, a frame costs 32 bytes and one HMAC each way.
+- **Trusted network (both cases).** The cluster transport is plaintext. Without a key it is
+  unauthenticated, exactly as `proto_db`'s: anyone who can reach a member's port can send it any
+  message, so the network must be trusted. With a key, frames are authenticated but **not
+  encrypted**: a listener on the network reads every message (roots, records, data), so the
+  network must still be trusted for confidentiality. Encrypted links would need a TLS server in
+  protoST. `proto_db`'s documentation does not state the assumption; proposing that it does is
+  Q7(b) of the design spec.
 
 ## Errors and messages
 

@@ -316,7 +316,7 @@ means the same in both languages. `PBTimeoutError` is not protoST's `TimeoutErro
 | `PBClosedError` (under `PBValidationError`) | The space or storage is closed |
 | `PBUserError` | Misuse: a transaction used after its end, a lock not held |
 | `PBCorruptionError` | Stored data is damaged or malformed |
-| `PBClusterProtocolError` (under `PBCorruptionError`) | Bytes received on a cluster connection are not a valid protocol-13 message |
+| `PBClusterProtocolError` (under `PBCorruptionError`) | Bytes received on a cluster connection are not a valid protocol-13 frame or message, or fail frame authentication |
 | `PBNotSupportedError` | Valid, but outside what the prototype handles |
 | `PBUnexpectedError` | The file system failed |
 | `PBOutcomeUnknownError` (under `PBUnexpectedError`) | The commit may or may not have been applied; never retried |
@@ -401,7 +401,21 @@ For tests, tools and readers of the format. An application does not need them.
   msgpack-python would refuse (extra fields included); extra fields are ignored and never
   re-encoded. `type:from:fields:` also refuses integers of 2^64 or more and the 3-item root
   form. The rules where `proto_db`'s code and format spec differ are in
-  [deviations.md](deviations.md#cluster-wire-messages). The frame around a message is not here.
+  [deviations.md](deviations.md#cluster-wire-messages).
+- **Frames** (`cluster/protocol.st`): `PBClusterFrame`, class side only. `maxFrameBytes`
+  (67108864, `proto_db`'s `MAX_FRAME_BYTES`) and `tagSize` (32). `encode: aMessage to: aNodeId
+  key: aKeyOrNil` answers the 4-byte big-endian length then the body; `lengthFrom:` reads the
+  length from the first 4 bytes alone and refuses one above `maxFrameBytes`;
+  `decodeBody:to:key:` answers the message of a body; `decode:to:key:` that of a whole frame
+  (its length must be the size of its body). Without a key (`nil`) the frame is protocol 13 byte
+  for byte. With a key (a `ByteArray` of at least 32 bytes, else `PBValidationError`) the body
+  is the msgpack bytes followed by the tag HMAC-SHA-256(key, UTF-8(receiver id) ‖ 0x00 ‖
+  msgpack bytes); the length covers both and the 64 MiB limit is unchanged. A tag that does
+  not match (another key, another receiver, a changed byte, an unkeyed frame) is
+  `PBClusterProtocolError` whose text names authentication; the tags are compared over all 32 bytes.
+  Every refusal of received bytes is `PBClusterProtocolError`, and so is encoding a body over
+  the limit, as in `proto_db`'s protocol.py. The divergence from protocol 13 and the
+  trusted-network assumption are in [deviations.md](deviations.md#cluster-mode).
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.
