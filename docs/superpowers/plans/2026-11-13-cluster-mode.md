@@ -1128,6 +1128,16 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     proto_db's `test_c2_audit_a_forced_rejoin_does_not_outlive_the_log_it_was_forced_for` over
     the shell (forceRejoin, detach before completion, re-attach over a new empty log: the new
     rejoin is not forced).
+    Also from Task 16's second re-review: (m10) `PBLogDetached` must carry the detached log
+    (the shell knows it), and the `#detached` marker takes its log from the event, not from
+    the dispatcher's view. Otherwise a detach that arrives before that log's first report
+    leaves the marker without a log. A late old-log report then starts a rejoin bound to the
+    old log, which is safe because its adoption is refused, but the new log's first report
+    drops it together with an operator's forced flag. Pin it with a rules check: detach
+    before the first report, then a late old-log report, then the new log's report must keep
+    a forced flag set while detached. (N4) Build a fresh `PBLoggedRoots` at every attach, even
+    over the same disk. Re-attaching the very same object would leave the `#detached` marker
+    in place forever, so the node would never rejoin.
     (CC24), `forceRejoin`, `committedRoot` (`PBLabeledRoot` from an `Atom`, never a message),
     `committedEpoch`, `needsConfirmation`, `isFenced`, `nodeId`, `config`.
   - For the round runner (all answer `Future`s, never wait): `_permit` → `PBPermission`
