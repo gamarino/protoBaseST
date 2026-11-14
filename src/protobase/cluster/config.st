@@ -32,7 +32,12 @@ PBClusterConfig class >> _options
       #persistInterval #persistLag #ownerIdleRelease #voters #authKey #seed #transport #clock).
 
 PBClusterConfig class >> _phaseDOptions
-  ^ #(#fetchTimeout #tier #tierOptions #dataReplicas #replicaHedge).
+  ^ #(#fetchTimeout).
+
+"The most milliseconds an option takes: the microseconds, and the sums derived from them (D +
+ margin is below 2 D), stay SmallIntegers."
+PBClusterConfig class >> _maxMillis
+  ^ SmallInteger maxVal // 4000.
 
 "A non-negative (positive when mustBePositive) Integer number of milliseconds, as microseconds;
  PBValidationError naming aName otherwise (proto_db _number: never a Boolean)."
@@ -40,6 +45,8 @@ PBClusterConfig class >> _micros: aValue named: aName positive: mustBePositive
   (aValue isInteger and: [aValue >= 0 and: [mustBePositive not or: [aValue > 0]]]) ifFalse: [
     ^ PBValidationError signal: aName , ' must be a ' , (mustBePositive ifTrue: ['positive'] ifFalse: ['non-negative'])
       , ' Integer number of milliseconds, not ' , aValue printString].
+  aValue > self _maxMillis ifTrue: [
+    ^ PBValidationError signal: aName , ' is at most ' , self _maxMillis printString , ' milliseconds, not ' , aValue printString].
   ^ aValue * 1000.
 
 "The configuration of the member aNodeId of the cluster anArrayOfPBPeer with the options of
@@ -49,16 +56,23 @@ PBClusterConfig class >> nodeId: aNodeId peers: anArrayOfPBPeer options: aDictio
   (aDictionary isKindOf: Dictionary) ifFalse: [
     ^ PBValidationError signal: 'PBClusterConfig: the options are a Dictionary, not ' , aDictionary printString].
   aDictionary keys do: [:k |
+    "protoST has no Symbol apart from String that a lookup can tell: #voters == 'voters', and
+     Dictionary finds either spelling, so a String key is honoured, never dropped; a key that is
+     no String at all names no option."
+    k isString ifFalse: [
+      ^ PBValidationError signal: 'A cluster option is named by a Symbol or String, not ' , k printString].
     (self _phaseDOptions includes: k) ifTrue: [
       ^ PBNotSupportedError signal: 'Option ' , k printString , ' belongs to tiered storage, which is Phase D, not supported'].
     (self _options includes: k) ifFalse: [
       ^ PBValidationError signal: 'Unknown cluster option ' , k printString]].
   membership := PBMembership peers: anArrayOfPBPeer voters: (aDictionary at: #voters ifAbsent: [nil]).
-  opt := [:name :default | aDictionary at: name ifAbsent: [default]].
+  membership rankOf: aNodeId.
+  "As proto_db's None, an explicit nil for a nullable option means its default."
+  opt := [:name :default | (aDictionary at: name ifAbsent: [nil]) ifNil: [default]].
   micros := [:name :default :positive |
-    (aDictionary includesKey: name)
-      ifTrue: [self _micros: (aDictionary at: name) named: name printString positive: positive]
-      ifFalse: [default]].
+    (aDictionary at: name ifAbsent: [nil]) isNil
+      ifTrue: [default]
+      ifFalse: [self _micros: (aDictionary at: name) named: name printString positive: positive]].
   duration := micros value: #leaseDuration value: 2000000 value: true.
   minMargin := (duration * 2 + 2) // 3.
   margin := micros value: #driftMargin value: minMargin value: false.
@@ -77,8 +91,9 @@ PBClusterConfig class >> nodeId: aNodeId peers: anArrayOfPBPeer options: aDictio
       , (belief // 4) printString , ' us): a larger reserve would refuse by rule the permissions an owner issues'].
   grace := micros value: #startupGrace value: duration + margin value: false.
   backoff := opt value: #backoff value: #(1 50).
-  ((backoff isKindOf: Array) and: [backoff size = 2]) ifFalse: [
+  ((backoff isCollection and: [backoff isString not]) and: [backoff size = 2]) ifFalse: [
     ^ PBValidationError signal: 'backoff must be a (min, max) pair of milliseconds'].
+  backoff := backoff asArray.
   low := self _micros: backoff first named: 'backoff minimum' positive: false.
   high := self _micros: backoff last named: 'backoff maximum' positive: false.
   high < low ifTrue: [^ PBValidationError signal: 'backoff must satisfy min <= max'].
@@ -98,7 +113,7 @@ PBClusterConfig class >> nodeId: aNodeId peers: anArrayOfPBPeer options: aDictio
       at: #startupGrace put: grace;
       at: #persistInterval put: (micros value: #persistInterval value: 50000 value: true);
       at: #persistLag put: (micros value: #persistLag value: 1000000 value: false);
-      at: #ownerIdleRelease put: (micros value: #ownerIdleRelease value: nil value: false);
+      at: #ownerIdleRelease put: (micros value: #ownerIdleRelease value: nil value: true);
       yourself)
     authKey: key seed: (opt value: #seed value: nil)
     transport: (opt value: #transport value: nil) clock: (opt value: #clock value: nil).

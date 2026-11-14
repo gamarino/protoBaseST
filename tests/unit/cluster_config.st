@@ -1,4 +1,4 @@
-"EXPECT: ok 13"
+"EXPECT: ok 23"
 "PBClusterConfig (cluster/config.st): the options of a cluster member and the timer table.
  Options are milliseconds; the accessors answer microseconds (CC3). With the proto_db defaults
  (lease 2000 ms) the margin is ceiling(2D/3) = 1333334 us, the belief 666666 us, the send
@@ -9,7 +9,7 @@
  this file runs a timer."
 Import from: 'protobase'.
 Import from: '_check'.
-| c peers cfg opts build expected names |
+| c peers cfg build expected names n a b |
 c := Check new.
 peers := #('n0' 'n1' 'n2') collect: [:id | PBPeer nodeId: id host: '127.0.0.1' port: 7000].
 build := [:pairs |
@@ -54,4 +54,27 @@ names := PBClusterConfig timerTable collect: [:row | row first].
 c that: 'the timer table has one row per timer at depth 0' is:
   { names. (PBClusterConfig timerTable allSatisfy: [:row | row size = 3 and: [row allSatisfy: [:s | s isString and: [s notEmpty]]]]) }
   equals: { expected. true }.
+c that: 'a String key is honoured, as its Symbol' is: (build value: { 'leaseDuration' -> 9000 }) leaseDuration equals: 9000000.
+c that: 'a key that is no String is refused naming it' signals: PBValidationError containing: '5'
+  during: [build value: { 5 -> 9000 }].
+c that: 'ownerIdleRelease 0 is refused' signals: PBValidationError containing: 'ownerIdleRelease'
+  during: [build value: { #ownerIdleRelease -> 0 }].
+c that: 'ownerIdleRelease 500 is kept' is: (build value: { #ownerIdleRelease -> 500 }) ownerIdleRelease equals: 500000.
+n := build value: { #driftMargin -> nil. #sendReserve -> nil. #startupGrace -> nil. #ownerIdleRelease -> nil. #voters -> nil. #authKey -> nil }.
+c that: 'an explicit nil is the default of a nullable option' is:
+  { n driftMargin. n sendReserve. n startupGrace. n ownerIdleRelease. n authKey }
+  equals: { 1333334. 166666. 3333334. nil. nil }.
+c that: 'a duration above the SmallInteger bound is refused' signals: PBValidationError containing: 'acquireTimeout'
+  during: [build value: { #acquireTimeout -> (SmallInteger maxVal // 4000 + 1) }].
+c that: 'the bound itself is accepted' is: (build value: { #acquireTimeout -> (SmallInteger maxVal // 4000) }) acquireTimeout
+  equals: SmallInteger maxVal // 4000 * 1000.
+a := build value: { #backoff -> (OrderedCollection with: 3 with: 4) }.
+b := build value: { #backoff -> (2 to: 3) }.
+c that: 'backoff takes any pair of integers' is:
+  { a backoffLow. a backoffHigh. b backoffLow. b backoffHigh }
+  equals: { 3000. 4000. 2000. 3000 }.
+c that: 'the member check comes before the duration checks' signals: PBValidationError containing: 'n9'
+  during: [PBClusterConfig nodeId: 'n9' peers: peers options: (Dictionary new at: #leaseDuration put: 0; yourself)].
+c that: 'tier options are ordinary unknown options' signals: PBValidationError containing: 'tier'
+  during: [build value: { #tier -> 1 }].
 c report displayNl.

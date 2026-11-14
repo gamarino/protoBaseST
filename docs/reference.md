@@ -365,8 +365,9 @@ For tests, tools and readers of the format. An application does not need them.
   `#sendReserve` (default `min(requestTimeout, belief // 4)`, at most `belief // 4`), `#acquireTimeout` 30000, `#backoff`
   `#(1 50)`, `#startupGrace` (default `D + margin`), `#persistInterval` 50, `#persistLag` 1000, `#ownerIdleRelease` nil,
   `#voters` nil, `#authKey` nil or a `ByteArray` of at least 32 bytes, `#seed`, and the test seams `#transport` and `#clock`.
-  An unknown option or a refused value is `PBValidationError` naming it; `#fetchTimeout` and the tier options are
-  `PBNotSupportedError` (Phase D). The accessors answer microseconds: `leaseDuration`, `driftMargin`, `belief`,
+  An unknown option or a refused value is `PBValidationError` naming it; `#fetchTimeout` is
+  `PBNotSupportedError` (Phase D). An option key is a Symbol or String; a duration is at most `SmallInteger maxVal // 4000` ms; an explicit `nil` for
+  `#driftMargin`, `#sendReserve`, `#startupGrace` or `#ownerIdleRelease` (positive when given) means the default. The accessors answer microseconds: `leaseDuration`, `driftMargin`, `belief`,
   `requestTimeout`, `sendReserve`, `acquireTimeout`, `backoffLow`, `backoffHigh`, `startupGrace`, `idleEnd`,
   `persistInterval`, `persistLag`, `ownerIdleRelease`; the constants `wakeSpread`, `minStraggle`, `straggleFactor`,
   `turnSilence`, `gatherAttempts`, `retryHold`, `retryWait`, `permitRetries`, `depth` (0); and `membership`, `nodeId`,

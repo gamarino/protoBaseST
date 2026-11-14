@@ -5,7 +5,7 @@
 - Cluster configuration (`src/protobase/cluster/config.st`): `PBClusterConfig` validates a member's options with
   `proto_db`'s defaults and refusal rules (drift margin at least 2/3 of the lease, request timeout below the belief,
   send reserve at most a quarter of it), takes milliseconds and answers microseconds, and `timerTable` lists the timers
-  that apply at depth 0. `#fetchTimeout` and tier options are refused as Phase D.
+  that apply at depth 0. `#fetchTimeout` is refused as Phase D.
 - Cluster frames (`src/protobase/cluster/protocol.st`): `PBClusterFrame`, the 4-byte big-endian
   length and the 64 MiB limit of `proto_db`'s `encode_frame`/`FrameDecoder` (`encode:to:key:`,
   `lengthFrom:`, `decodeBody:to:key:`, `decode:to:key:`), with optional HMAC-SHA-256 frame
