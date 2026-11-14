@@ -403,6 +403,37 @@ For tests, tools and readers of the format. An application does not need them.
   request plus the owner's `valid:`, with `seq`, `rid`, `owner` and `after` (`nil` at depth 0).
   The constructors refuse a missing or ill-typed term, holder, seq or time
   (`PBValidationError`).
+- **Coordinator core** (`cluster/core.st`): the sans-IO core's vocabulary. `PBCoordinatorCore new`
+  is the rules object, stateless: `dispatch:in:now:` (an event, a `PBNodeState`, the time now in
+  microseconds of the node's clock) answers a `PBStep` (`state`, `effects`), and
+  `accept:in:now:` (a `PBReceived` or a `PBStartNode`, a `PBAcceptorState`) answers a
+  `PBAcceptorStep` (`state`, `appends`, `reply`: the shell writes the appends in order and
+  performs the reply only once every append with `sync` true is durable, then hands the step to
+  the dispatcher as `PBAcceptorDecided step:`). The event picks its rule method by double
+  dispatch (`dispatchWith:in:now:`, `acceptWith:in:now:`), one per event class:
+  `dispatchReceived:in:now:`, `dispatchTimerFired:in:now:`, `dispatchStartNode:in:now:`,
+  `dispatchStopNode:in:now:`, `dispatchPermitWanted:in:now:`, `dispatchBaseWanted:in:now:`,
+  `dispatchReplicateWanted:in:now:`, `dispatchDoneReport:in:now:`,
+  `dispatchRejoinWanted:in:now:`, `dispatchAcceptorDecided:in:now:`, `acceptReceived:in:now:`
+  and `acceptStart:in:now:`; a rule not yet defined by a later module answers the state
+  unchanged with no effect. Events: `PBReceived message:`, `PBTimerFired token:event:`,
+  `PBStartNode`, `PBStopNode`, `PBPermitWanted waiter:`, `PBBaseWanted permission:waiter:`,
+  `PBReplicateWanted permission:root:waiter:`, `PBDoneReport permission:outcome:` (`#committed`,
+  `#unknown` or `#none`), `PBRejoinWanted`, `PBAcceptorDecided step:`. Effects, each answering
+  `applyTo:` with one message the shell implements (applySend:, applyToAcceptor:, applyTimer:,
+  applySettle:, applyPublishCommitted:, applyPublishAcceptor:, applyFence:): `PBSend
+  to:message:`, `PBToAcceptor event:` (the node's own vote and acceptance, never through the
+  transport), `PBTimer after:token:event:` (`fired` is its `PBTimerFired`), `PBSettle
+  waiter:outcome:`, `PBPublishCommitted root:`, `PBPublishAcceptor state:`, `PBFence reason:`,
+  and `PBLogAppend kind:label:root:sync:` (`payload` is its `PBAcceptorLog` entry), allowed only
+  in the appends of an acceptor step. `PBNodeState config:inc:` answers `config`, `inc`,
+  `acceptorView`, `hints`, `proposer`, `ownership`, `waiters`, `suspectTerm`, `fenced`, `rejoin`,
+  `nextRid` and `withOwnership:`; `PBAcceptorState config:logged:now:` (a `PBLoggedRoots`: the
+  grant state starts its grace at that time and restores the logged promise) answers `config`,
+  `grants`, `accepted`, `committed`, `seqSeen`, `suspectTerm`, `isRejoined`, `rejoinBallot`,
+  `tierFailed` and `fenced`. Nothing in the core reads a clock; constructors refuse ill-typed
+  arguments (`PBValidationError`). The deterministic simulator that drives it in the tests is
+  test support (`tests/unit/_sim.st`), not part of the module.
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
   `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered
@@ -482,6 +513,6 @@ For tests, tools and readers of the format. An application does not need them.
 ## The module and its files
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
-`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
+`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/lease`, `cluster/core`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
 `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar` and `uuid`.

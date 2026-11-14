@@ -2,6 +2,17 @@
 
 ## 0.2.0 (unreleased)
 
+- The coordinator core's vocabulary (`src/protobase/cluster/core.st`): `PBCoordinatorCore`
+  (`dispatch:in:now:` answering a `PBStep`, `accept:in:now:` answering a `PBAcceptorStep`, one
+  rule method per event chosen by double dispatch), the events (`PBReceived`, `PBTimerFired`,
+  `PBStartNode`, `PBStopNode`, `PBPermitWanted`, `PBBaseWanted`, `PBReplicateWanted`,
+  `PBDoneReport`, `PBRejoinWanted`, `PBAcceptorDecided`), the effects (`PBSend`, `PBToAcceptor`,
+  `PBLogAppend`, `PBTimer`, `PBSettle`, `PBPublishCommitted`, `PBPublishAcceptor`, `PBFence`) and
+  the state values `PBNodeState` and `PBAcceptorState`, immutable, with time passed in
+  microseconds. The protocol rules follow in later modules. The tests gain a seeded,
+  virtual-time simulator (`tests/unit/_sim.st`: fake clocks with per-node rates, a faulty
+  network with partitions, simulated acceptor-log disks with crashes and torn tails, synthetic
+  commits, and an invariant checker), exercised by `tests/unit/sim_harness.st`.
 - Lease values (`src/protobase/cluster/lease.st`): `PBGrantState` (the grant rules of
   `proto_db`'s `PeerGrants` with the ballot check of `_decide`), `PBGrantDecision`,
   `PBActiveGrant`, `PBAttempt`, `PBLease` and `PBPermission`, immutable, with time passed in
