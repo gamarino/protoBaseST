@@ -1087,15 +1087,20 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     drops lane messages once fenced; replicate and store get `ack(ok=false)`, Task 13): the
     acceptor drops request, renew and release when `fenced`; the dispatcher's fence is this
     task's. (e) `PBCount` effects (`config_mismatches`, `grants_given`) feed `stats` (CC24).
-    (f) Carried from Task 13 (review m1, open item): after a renewal lost to a majority that
-    rejects at once (members restarted inside their startup grace, or a newer term granted),
+    (f) Carried from Task 13 (review m1, open item; Task 16 review m5): after a renewal lost
+    to a majority that rejects at once (a rejoin ballot that a majority promised under a live
+    holder, the most common trigger since Task 16: every disk-loss rejoin; members restarted
+    inside their startup grace; or a newer term granted),
     the owner renews again immediately, as `proto_db`'s `_own_loop_body`/`_renew` do: one round
     per RTT until the lease ends (at most belief / 2), messages and acceptor-lane work only, no
     log write, safety unaffected. Decide here, with real timers and RTTs: keep `proto_db`'s
     behaviour, adopt a lost-renewal back-off as a recorded timing-only deviation (for example
     wait min(requestTimeout, remaining - belief / 4) before the next attempt), or propose it to
     `proto_db` upstream (preferred, since the behaviour is `proto_db`'s); record the decision in
-    docs/deviations.md. (g) Carried from Task 13 (review note): `stop` settles a replication in
+    docs/deviations.md. Its cost so far: the simulator families of Task 16 cut the holder off
+    before its timer resumes (`tests/unit/_rejoin.st` r78a) or run with 1 ms links (`lagged:`,
+    belowBallot and majorityLoss), or the storm makes the run intractable; Tasks 17-19 will need
+    the same, and if they need more, bring this decision forward. (g) Carried from Task 13 (review note): `stop` settles a replication in
     flight (`PBHolder replications`) `#unknown`, never `#none` (the root left the node;
     `proto_db` `replicate` 3895-3897). (h) Carried from Task 15 (review note, R148): the commit
     round's `_endPermission:` emits `PBReportDone` and then, when commits are queued,
@@ -1108,6 +1113,15 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     held caller's own thread (its fn or its wait): the round runner is its own actor, so a kept
     permission waiting for that caller's retry never waits on the thread that must make it
     (`proto_db` excludes the runner's own thread from `held` for this reason).
+    (k) Carried from Task 16 (review I1): the shell hands the dispatcher `PBLogDetached` when the
+    tier is detached (proto_db `detach`, coordinator.py 1621-1650: `_rejoining` and
+    `_rejoin_forced` dropped), and a re-attach reports an acceptor state over the new log; the
+    core then drops the rejoin (`rejoinDetached:`, and `rejoinCheck:now:effects:` starts a fresh
+    one when the reported log is not the one the rejoin ran on), so a forced rejoin never
+    outlives the log it was forced for and a failed rejoin restarts over a replaced tier. Test:
+    proto_db's `test_c2_audit_a_forced_rejoin_does_not_outlive_the_log_it_was_forced_for` over
+    the shell (forceRejoin, detach before completion, re-attach over a new empty log: the new
+    rejoin is not forced).
     (CC24), `forceRejoin`, `committedRoot` (`PBLabeledRoot` from an `Atom`, never a message),
     `committedEpoch`, `needsConfirmation`, `isFenced`, `nodeId`, `config`.
   - For the round runner (all answer `Future`s, never wait): `_permit` → `PBPermission`
@@ -1270,7 +1284,15 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
 **Files:**
 - Modify: `src/protobase/space.st` (`_snapshotRecord` reads the coordinator's committed root,
   the persisted root when none is known; confirmation commit before the first snapshot after
-  attach; `committedEpoch`; `newDatabase:` through the round runner).
+  attach and before any snapshot while `needsConfirmation` holds; `committedEpoch`;
+  `newDatabase:` through the round runner).
+- Carried from Task 16 (review I2): `proto_db`'s `_read_storage_root` (transactions.py
+  1556-1575) checks `needs_confirmation` on **every** snapshot, not only after attach, so
+  `forceRejoin` on a survivor (which sets it again, `PBForceRejoin`) is followed by a
+  confirmation before the next snapshot. The readers' committed root must follow the acceptor
+  when it drops one: `PBPublishCommitted` cannot carry nil, so either the publish carries the
+  acceptor's committed knowledge (nil included) or the space reads the coordinator's current
+  root, as `proto_db`'s `current_root()`.
 - Test: `tests/unit/cluster_reads.st`.
 
 **Interfaces:**
@@ -1281,7 +1303,9 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   restarts reads at or above its last committed root before any commit of its own (L18); a
   snapshot never goes backwards across ten restarts; `newDatabase:` on one node is visible on
   the others after a barrier commit (`run:` writing `'_read_barrier'`, CC9); `committedEpoch`
-  is monotonic.
+  is monotonic; and (Task 16, I2) after a majority loss and `forceRejoin` on the survivor, the
+  survivor's next snapshot does not start from the dropped committed root R (the confirmation
+  runs first, and the readers' root is no longer R).
 - [ ] **Step 2:** run. Expected: FAIL.
 - [ ] **Step 3:** implement.
 - [ ] **Step 4:** run, then the suite. Expected: PASS.

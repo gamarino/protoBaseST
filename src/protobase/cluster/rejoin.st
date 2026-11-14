@@ -51,6 +51,9 @@ clock (CC3).
     appends the promise synced when it is above the logged one, and answers after the sync,
     echoing the ballot, with its accepted and committed roots read in the same step. Any other
     state answers as a plain query (ballot 0); a fenced node answers no ballot query.
+  Detach (PBLogDetached, proto_db detach): the rejoin and its forced flag are dropped; a report
+    over another log than the one the rejoin runs for drops it too, so a re-attached log
+    starts a fresh rejoin, never a forced one the operator asked for another log.
   forceRejoin (PBRejoinWanted, proto_db force_rejoin): the operator's decision after the loss of
     a majority of acceptor logs. On a node not rejoined yet (its acceptor's last report, or
     none yet), its rejoin, running or to come, completes with the answers of majority - 1
@@ -140,6 +143,14 @@ PBForceRejoin class >> isAcceptorEvent
 PBForceRejoin >> acceptWith: aCore in: anAcceptorState now: t
   ^ aCore acceptForceRejoin: self in: anAcceptorState now: t.
 
+"--- PBLogDetached (a dispatcher event) ---"
+
+"The shell detached the node's acceptor log (proto_db detach; Task 20 sends it)."
+PBCoreEvent subclass: #PBLogDetached.
+
+PBLogDetached >> dispatchWith: aCore in: aNodeState now: t
+  ^ aCore rejoinDetached: self in: aNodeState now: t.
+
 "--- PBConfirmed (a dispatcher and acceptor event) ---"
 
 "The space starts the confirmation round of this attach (proto_db confirmed(), called once per
@@ -210,20 +221,26 @@ PBRejoinAnswer >> highestLabel
  for its timer; #failed: the tier failed), forced, blocked (why it cannot complete, or nil),
  ballot (of the gather, 0 for a plain one), attempt (of the gather), rid and targets (of its
  attempt), token (of its timer or probe), answers (PBRejoinAnswers of the gather, one per
- member) and pending (the PBRejoinLearnt to adopt)."
+ member), pending (the PBRejoinLearnt to adopt) and log (the acceptor log it runs for: a
+ report over another log drops it, as proto_db's detach drops _rejoining and _rejoin_forced)."
 PBProposerValue subclass: #PBRejoin.
 
 PBRejoin class >> fieldNames
-  ^ #(#phase #forced #blocked #ballot #attempt #rid #targets #token #answers #pending).
+  ^ #(#phase #forced #blocked #ballot #attempt #rid #targets #token #answers #pending #log).
 
 "No rejoin running, not forced."
 PBRejoin class >> idle
   ^ self _from: (Dictionary new
     at: #phase put: #idle; at: #forced put: false; at: #blocked put: nil; at: #ballot put: 0; at: #attempt put: 0;
-    at: #rid put: nil; at: #targets put: #(); at: #token put: nil; at: #answers put: #(); at: #pending put: nil; yourself).
+    at: #rid put: nil; at: #targets put: #(); at: #token put: nil; at: #answers put: #(); at: #pending put: nil;
+    at: #log put: nil; yourself).
 
 PBRejoin >> phase
   ^ self _at: #phase.
+
+"The PBLoggedRoots of the acceptor log this rejoin runs for (its first report), nil before one."
+PBRejoin >> log
+  ^ self _at: #log.
 
 PBRejoin >> isForced
   ^ self _at: #forced.
@@ -332,12 +349,22 @@ PBCoordinatorCore >> rejoinBlockedIn: s
 "The acceptor reported (s acceptorView): a log without the rejoined marker starts a rejoin
  (proto_db _attach_locked starts its thread), unless one runs, its tier failed or the node is
  fenced; a rejoined acceptor ends the rejoin (counted rejoins when its adoption came back, the
- hint raised to what it learnt)."
-PBCoordinatorCore >> rejoinCheck: s now: t effects: fx
-  | view r h |
-  view := s acceptorView.
-  view isNil ifTrue: [^ s].
+ hint raised to what it learnt). A rejoin that ran for another log is dropped first, its forced
+ flag with it (proto_db detach, coordinator.py 1644): a report over a re-attached log starts a
+ fresh one; a rejoin forced before any report runs for the first log reported. An adoption the
+ failed tier refused (no step came back discarded) fails the rejoin with proto_db's reason."
+PBCoordinatorCore >> rejoinCheck: aState now: t effects: fx
+  | s view r h |
+  view := aState acceptorView.
+  view isNil ifTrue: [^ aState].
+  s := aState.
   r := s rejoin.
+  r notNil ifTrue: [
+    r log isNil
+      ifTrue: [r := r with: { #log -> view log }. s := s with: { #rejoin -> r }]
+      ifFalse: [r log == view log ifFalse: [r := nil. s := s with: { #rejoin -> nil }]]].
+  (r notNil and: [r phase = #adopt and: [view tierFailed notNil and: [view isRejoined not]]]) ifTrue: [
+    ^ s with: { #rejoin -> (r with: { #phase -> #failed. #token -> nil. #blocked -> self _adoptFailed }) }].
   view isRejoined ifTrue: [
     r isNil ifTrue: [^ s].
     r phase = #adopt ifFalse: [^ s with: { #rejoin -> nil }].
@@ -346,7 +373,16 @@ PBCoordinatorCore >> rejoinCheck: s now: t effects: fx
     ^ s with: { #rejoin -> nil. #hints -> (h with: { #hint -> (h hint max: r pending learnt) }) }].
   (r notNil and: [r phase ~= #idle]) ifTrue: [^ s].
   (view tierFailed notNil or: [s fenced notNil]) ifTrue: [^ s].
-  ^ self _rejoinStart: (s with: { #rejoin -> (self _rejoinIn: s) }) now: t effects: fx.
+  ^ self _rejoinStart: (s with: { #rejoin -> ((self _rejoinIn: s) with: { #log -> view log }) }) now: t effects: fx.
+
+"proto_db detach (coordinator.py 1621-1650): the tier is gone, and with it the rejoin running
+ for it and a forced flag set for it (PBLogDetached, sent by the shell, Task 20)."
+PBCoordinatorCore >> rejoinDetached: anEvent in: s now: t
+  ^ PBStep state: (s with: { #rejoin -> nil }) effects: #().
+
+"Why a rejoin whose adoption could not be written fails (proto_db _complete_rejoin)."
+PBCoordinatorCore >> _adoptFailed
+  ^ 'writing its acceptor log failed; close and reopen the space on a healthy disk'.
 
 "The rejoin starts: its first round (proto_db _rejoin's loop)."
 PBCoordinatorCore >> _rejoinStart: s now: t effects: fx
@@ -377,13 +413,12 @@ PBCoordinatorCore >> _rejoinAsk: s now: t effects: fx
   ^ pair first with: { #rejoin -> (r with: { #attempt -> (r attempt + 1). #rid -> rid. #targets -> missing. #token -> pair last }) }.
 
 "An answer to the rejoin's current attempt (its rid; the caller dropped one of another
- incarnation): recorded when its sender was asked; the attempt ends once every member it asked
- answered. Answers nil when aMessage answers no rejoin of s."
+ incarnation): recorded (a rid goes only to the members its attempt asked, and the decision
+ counts other voters only); the attempt ends once every member it asked answered. Answers nil when aMessage answers no rejoin of s."
 PBCoordinatorCore >> rejoinAnswered: aMessage in: s now: t effects: fx
   | r state |
   r := s rejoin.
   (r notNil and: [r phase = #gather and: [r rid = (aMessage at: 'rid')]]) ifFalse: [^ nil].
-  (r targets includes: aMessage from) ifFalse: [^ s].
   r := r answered: (PBRejoinAnswer from: aMessage).
   state := s with: { #rejoin -> r }.
   (r targets allSatisfy: [:id | r hasAnswerFrom: id]) ifFalse: [^ state].
@@ -427,7 +462,9 @@ PBCoordinatorCore >> _gathered: s now: t effects: fx
       ^ self _ballotRound: decision answers: answers in: s now: t effects: fx].
     ^ self _completeRejoin: decision answers: answers ballot: 0 in: s now: t effects: fx].
   answers := self _confirming: r ballot answers: r answers.
-  decision := self rejoinDecision: answers forced: false in: s.
+  "proto_db's _rejoin_decision reads the forced flag live: a forceRejoin during the ballot round
+   decides 'forced', which blocks it, and the next plain round completes forced."
+  decision := self rejoinDecision: answers forced: r isForced in: s.
   (decision notNil and: [decision last = #witnesses or: [decision last = #rootless]]) ifFalse: [
     ^ self _rejoinRetry: (self _block: 'too few members confirmed the rejoin ballot ' , r ballot printString
       , ' durably; it asks again' in: s) after: s config requestTimeout now: t effects: fx].
@@ -499,7 +536,7 @@ PBCoordinatorCore >> rejoinDiscarded: aStep in: s
   r := s rejoin.
   (r notNil and: [r phase = #adopt and: [aStep appends anySatisfy: [:a | a kind = #rejoined]]]) ifFalse: [^ s].
   ^ s with: { #rejoin -> (r with: { #phase -> #failed. #token -> nil.
-    #blocked -> 'writing its acceptor log failed; close and reopen the space on a healthy disk' }) }.
+    #blocked -> self _adoptFailed }) }.
 
 "=== PBCoordinatorCore: forceRejoin and the confirmation ======================="
 
@@ -511,7 +548,10 @@ PBCoordinatorCore >> dispatchRejoinWanted: anEvent in: s now: t
   view := s acceptorView.
   state := s.
   (view isNil or: [view isRejoined not]) ifTrue: [
-    state := s with: { #rejoin -> ((self _rejoinIn: s) with: { #forced -> true }) }].
+    state := s with: { #rejoin -> ((self _rejoinIn: s) with: { #forced -> true }) }.
+    "A rejoin forced before any report runs for the first log reported (rejoinCheck:)."
+    (view notNil and: [state rejoin log isNil]) ifTrue: [
+      state := state with: { #rejoin -> (state rejoin with: { #log -> view log }) }]].
   ^ PBStep state: state effects: { PBToAcceptor event: PBForceRejoin new }.
 
 "proto_db force_rejoin on a survivor (loaded and rejoined): a committed root that orders above

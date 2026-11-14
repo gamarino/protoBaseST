@@ -16,7 +16,8 @@
   durable promise answered echoing the ballot. `PBRejoinWanted` (forceRejoin) completes a rejoin
   on majority - 1 loaded answers and, on a survivor (`PBForceRejoin`), forgets a committed root
   above the accepted one. `PBAcceptorState needsConfirmation` is true at every attach, cleared by
-  `PBConfirmed`; `with:` also takes `#rejoinBallot` and `#confirmed`. Tested by
+  `PBConfirmed`; `with:` also takes `#rejoinBallot` and `#confirmed`. `PBLogDetached` (and a
+  report over another log) drops a rejoin and its forced flag, as `proto_db`'s detach. Tested by
   `tests/unit/sim_rejoin.st` (the R78a schedule at three wiped-timer rates, the holder's timer
   running or stalled, with `PlantRejoinByWaiting` caught; first and late first start; L14 with
   `PlantReplicateBelowBallot` caught; a majority log loss detected by the guard naming

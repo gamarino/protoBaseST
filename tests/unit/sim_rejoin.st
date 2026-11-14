@@ -1,4 +1,4 @@
-"EXPECT: ok 6"
+"EXPECT: ok 8"
 "The rejoin of an empty acceptor log (cluster/rejoin.st, CP 'A node that lost its disk', R51,
  R78a, L13, L14) in the simulator (_sim.st), proto_db test_cluster_rejoin, _rejoin_fresh and
  _rejoin_records. The families, the hooked simulator and the planted wrong rules are in
@@ -12,7 +12,10 @@
  below its ballot (L14): a permission of the owner's older term sends nothing (#none). (5)
  PlantReplicateBelowBallot sends it, and the voters refuse it (#unknown). (6) Losing a majority
  of logs: the wiped nodes stay rejoining until forceRejoin; the survivor's base is then a
- PBCorruptionError naming forceRejoin, and forceRejoin on it forgets the lost commit."
+ PBCorruptionError naming forceRejoin, and forceRejoin on it forgets the lost commit. (7) The
+ R78b boundary (5x, (D + m)/(D - m) with m = 2/3 D) with the holder's timer running: the
+ waiting plant is safe at 5 and loses a at 6; the product is safe at 8. (8) proto_db's literal
+ check: with every clock stopped the ballot rejoin completes, the waiting one never does."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_rejoin'.
@@ -55,5 +58,18 @@ c that: 'PlantReplicateBelowBallot is caught (it sends below its ballot; the vot
 c that: 'majority loss: stuck until forceRejoin, the guard names forceRejoin, forceRejoin on the survivor'
   is: (RejoinFamilies majorityLoss: RejoinRules new seed: 1) asArray
   equals: { #(false false). #(true true). true. #(true true). #acknowledged. #failed }.
+
+"(7)"
+c that: 'R78b boundary, holder running: PlantRejoinByWaiting safe at 5, loses a at 6 (S4); the product safe at 8'
+  is: { (RejoinFamilies r78a: PlantRejoinByWaiting new seed: 1 rate: 5 stall: false) first.
+    [:r | { (r first ifNil: ['']) includesSubstring: 'S4: the acknowledged commit ''a'''. r at: 2 }]
+      value: (RejoinFamilies r78a: PlantRejoinByWaiting new seed: 1 rate: 6 stall: false).
+    [:r | { r first. r at: 2. r at: 3 }] value: (RejoinFamilies r78a: RejoinRules new seed: 1 rate: 8 stall: false) }
+  equals: { nil. { true. #acknowledged }. { nil. #unknown. #acknowledged } }.
+
+"(8)"
+c that: 'every clock stopped: the ballot rejoin completes, a waiting one never does (L13)'
+  is: { RejoinFamilies frozen: RejoinRules new seed: 1. RejoinFamilies frozen: PlantRejoinByWaiting new seed: 1 }
+  equals: #(#(true 1) #(false 0)).
 
 c report displayNl.

@@ -203,6 +203,19 @@ RejoinFamilies class >> r78a: aRules seed: n rate: aRate stall: isStall
   out at: 4 put: (sim countOf: 'rejoin_ballots' at: 'n2').
   ^ out.
 
+"{ n2 rejoined. rejoin ballots at n2 }: proto_db's literal R78a check (test_r7_a_..., 'no clock
+ advance at all'): three voters hold r1, n2 loses its disk, and every clock stands still (rate
+ 0) from its restart on. A rejoin by ballot completes on messages alone (L13); one that waits for
+ time never does."
+RejoinFamilies class >> frozen: aRules seed: n
+  | sim |
+  sim := self formed: aRules seed: n.
+  sim crash: 'n2' keepDisk: false.
+  sim ids do: [:id | sim clockRate: id rate: 0].
+  sim restart: 'n2'.
+  sim runUntil: [self isRejoined: 'n2' in: sim] steps: 200000.
+  ^ { self isRejoined: 'n2' in: sim. sim countOf: 'rejoin_ballots' at: 'n2' }.
+
 "--- 2. a cluster's first start, and a late first start ---"
 
 "{ violation. rejoin ballots of n0..n2. rejoins of n0..n2. the highest termsSeen of the acceptors

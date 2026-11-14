@@ -1,4 +1,4 @@
-"EXPECT: ok 17"
+"EXPECT: ok 21"
 "The rejoin's rules (cluster/rejoin.st) called directly, one guard per check (proto_db
  coordinator.py _rejoin_answers, _rejoin_decision, _rejoin_round, _gather, _complete_rejoin,
  _publish_rejoin, _on_ballot_query, force_rejoin, needs_confirmation, confirmed). drive runs a
@@ -28,7 +28,11 @@
  incarnation is a stale reply. (14) Forced: completes on one loaded answer after the plain
  round, without a ballot, and drops a committed root above the adopted root. (15) No rejoin
  starts on a failed tier or a fenced node. (16) An adoption whose append failed fails the
- rejoin. (17) rejoinBlockedIn: names the reason only while the node rejoins."
+ rejoin. (17) rejoinBlockedIn: names the reason only while the node rejoins. (18) A ballot query
+ raises the dispatcher's hint only toward an 'ok', unfenced view. (19) PBLogDetached and a
+ report over another log drop the rejoin and its forced flag; one forced before any report
+ runs for the first log. (20) A failed rejoin restarts over a new log; an adoption the failed
+ tier refused fails it, with the reason. (21) A forceRejoin during a ballot round blocks it."
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -147,10 +151,10 @@ c that: 'the ballot: above every promise and label, the highest term seen and th
     PBMembership ballotAfter: 30000 rank: s config rank. PBMembership ballotAfter: 40000 rank: s config rank }.
 
 "(4) Echoed ballots."
-c that: 'an ok answer that does not echo the ballot counts as unknown'
+c that: 'an ok answer that does not echo the ballot (0 or another ballot) counts as unknown'
   is: ((core _confirming: 777 answers: { ans value: { 'n1'. r1. nil. 0. 'ok'. 777 }. ans value: { 'n2'. r1. nil. 0. 'ok'. 0 }.
-    ans value: { 'n2'. nil. nil. 0. 'empty'. 0 } }) collect: [:a | a state])
-  equals: #('ok' 'unknown' 'empty').
+    ans value: { 'n2'. nil. nil. 0. 'empty'. 0 }. ans value: { 'n2'. r1. nil. 0. 'ok'. 778 } }) collect: [:a | a state])
+  equals: #('ok' 'unknown' 'empty' 'unknown').
 
 "(5) The witness."
 v := witness value: 'n1'.
@@ -161,18 +165,20 @@ out := { step appends collect: [:a | { a kind. a label. a sync }].
   (step reply detect: [:e | e isKindOf: PBSend]) message at: 'state'.
   (step reply detect: [:e | e isKindOf: PBSend]) message at: 'ballot'.
   ((step reply detect: [:e | e isKindOf: PBSend]) message at: 'root') notNil.
+  ((step reply detect: [:e | e isKindOf: PBSend]) message at: 'promised') >= 20481.
   (core accept: (queryOf value: 'n2' value: 20481) in: step state now: 1000) appends.
   (core accept: (PBReceived message: (PBClusterMessage type: 'request' from: 'n2' fields: { 'term' -> 16386. 'rid' -> 1. 'inc' -> 1.
     'vs' -> v config membership fingerprint })) in: step state now: 1000) reply first message type.
-  [:granted | (core accept: (queryOf value: 'n0' value: 20481) in: granted now: 1000) state suspectTerm]
+  [:granted | | st | st := core accept: (queryOf value: 'n0' value: 20481) in: granted now: 1000.
+    { st state suspectTerm. (st reply detect: [:e | e isKindOf: PBSend]) message at: 'certain' }]
     value: (core accept: (PBReceived message: (PBClusterMessage type: 'request' from: 'n2' fields: { 'term' -> 8194. 'rid' -> 1. 'inc' -> 1.
       'vs' -> v config membership fingerprint })) in: v now: 1000) state.
   [:st | { st appends. (st reply detect: [:e | e isKindOf: PBSend]) message at: 'state'. (st reply detect: [:e | e isKindOf: PBSend]) message at: 'ballot' }]
     value: (core accept: (queryOf value: 'n0' value: 20481) in: (rejoining value: 'n1') now: 1000).
   (core accept: (queryOf value: 'n0' value: 20481) in: fenced now: 1000) reply }.
-c that: 'the witness promises, logs once, echoes; refuses lower; suspect for an ended grant; empty and fenced'
+c that: 'the witness promises, logs once, echoes, answers after the promise; refuses lower; suspect (certain false) for an ended grant; empty and fenced'
   is: out
-  equals: { #(#(#promise 20481 true)). 'ok'. 20481. true. #(). 'reject'. 8194. { #(). 'empty'. 0 }. #() }.
+  equals: { #(#(#promise 20481 true)). 'ok'. 20481. true. true. #(). 'reject'. #(8194 false). { #(). 'empty'. 0 }. #() }.
 
 "(6) The adoption."
 v := rejoining value: 'n0'.
@@ -258,7 +264,7 @@ s := (core dispatch: PBRejoinWanted new in: (PBNodeState config: (cfg value: 'n0
 out := drive value: s value: (rejoining value: 'n0') value: (Dictionary new at: 'n1' put: v; yourself)
   value: [:m | m] value: true value: false value: nil.
 c that: 'forced: one loaded answer after a plain round, no ballot, a committed root above the adopted one dropped'
-  is: { s rejoin isForced. ballotOf value: (out at: 3). (out at: 2) isRejoined. (out at: 2) accepted key = r1 key. (out at: 2) committed.
+  is: { s rejoin isForced. ballotOf value: (out at: 3). (out at: 2) isRejoined. ((out at: 2) accepted notNil and: [(out at: 2) accepted key = r1 key]). (out at: 2) committed.
     (out at: 2) rejoinBallot }
   equals: { true. #(). true. true. nil. 0 }.
 
@@ -286,5 +292,60 @@ c that: 'rejoinBlockedIn: names the reason while rejoining, nil once rejoined'
   is: { ((core rejoinBlockedIn: out first) ifNil: ['']) includesSubstring: 'too few'.
     core rejoinBlockedIn: (out first with: { #acceptorView -> (witness value: 'n0') }) }
   equals: { true. nil }.
+
+"(18) The witness's hint."
+s := PBNodeState config: (cfg value: 'n1' value: three) inc: 5.
+out := [:aView | (core _hintsIn: (core dispatch: (queryOf value: 'n0' value: 20481) in: (s with: { #acceptorView -> aView }) now: 1000) state) hint].
+c that: 'a ballot query raises the hint when the view is an ok, unfenced witness only'
+  is: { out value: (witness value: 'n1'). out value: (rejoining value: 'n1'). out value: fenced. (core _hintsIn: s) hint }
+  equals: { 20481. 0. 0. 0 }.
+
+"(19) Detach and re-attach drop the rejoin and its forced flag (proto_db detach,
+ test_c2_audit_a_forced_rejoin_does_not_outlive_the_log_it_was_forced_for)."
+v := rejoining value: 'n0'.
+s := (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v now: 0)) in: (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) now: 0) state.
+s := (core dispatch: PBRejoinWanted new in: s now: 0) state.
+out := { s rejoin isForced. s rejoin log == v log.
+  (core dispatch: PBLogDetached new in: s now: 0) state rejoin.
+  [:st | { st rejoin isForced. st rejoin phase. st rejoin log == v log }]
+    value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: (rejoining value: 'n0') now: 0)) in: s now: 0) state.
+  [:st | | v2 st2 | v2 := rejoining value: 'n0'.
+    st2 := (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v2 now: 0)) in: st now: 0) state.
+    { st2 rejoin isForced. st2 rejoin log == v2 log }]
+    value: (core dispatch: PBRejoinWanted new in: (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) now: 0) state }.
+c that: 'a forced rejoin is dropped at detach and by a report over another log; forced before any report, it runs for the first'
+  is: out
+  equals: { true. true. nil. { false. #gather. false }. #(true true) }.
+
+"(20) A failed rejoin restarts over a replaced tier; an adoption the failed tier refused fails it."
+out := drive value: (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) value: (rejoining value: 'n0')
+  value: (Dictionary new at: 'n1' put: (witness value: 'n1'); at: 'n2' put: (witness value: 'n2'); yourself)
+  value: [:m | m] value: true value: true value: nil.
+v := rejoining value: 'n0'.
+s := (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) with: { #acceptorView -> v.
+  #rejoin -> (PBRejoin idle with: { #phase -> #adopt. #log -> v log.
+    #pending -> (PBRejoinLearnt learnt: 0 seen: 0 accepted: nil committed: nil ballot: 0) }) }.
+step := core dispatch: (PBAcceptorDecided step: (core accept: (PBAppendFailed reason: 'disk') in: v now: 0)) in: s now: 0.
+c that: 'a failed rejoin restarts on a new log; an adoption refused by a failed tier fails with the reason'
+  is: { phaseOf value: out first.
+    phaseOf value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: (rejoining value: 'n0') now: 0)) in: out first now: 0) state.
+    phaseOf value: step state. (blockedOf value: step state) includesSubstring: 'writing its acceptor log failed'.
+    core rejoinBlockedIn: step state.
+    phaseOf value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: (rejoining value: 'n0') now: 0)) in: step state now: 0) state }
+  equals: { #failed. #gather. #failed. true. 'writing its acceptor log failed; close and reopen the space on a healthy disk'. #gather }.
+
+"(21) A forceRejoin during the ballot round (proto_db reads the flag live): the round decides
+ 'forced', is blocked and retried, never completed on its witnesses."
+v := rejoining value: 'n0'.
+s := (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) with: { #acceptorView -> v.
+  #rejoin -> (PBRejoin idle with: { #phase -> #gather. #ballot -> 20481. #attempt -> 1. #rid -> 7. #targets -> #('n1' 'n2').
+    #forced -> true. #log -> v log }) }.
+#('n1' 'n2') do: [:from |
+  s := (core dispatch: (PBReceived message: (PBClusterMessage type: 'answer' from: from fields: {
+    'rid' -> 7. 'inc' -> 5. 'root' -> (PBClusterMessage rootValue: r1). 'committed' -> nil. 'certain' -> true.
+    'promised' -> 20481. 'state' -> 'ok'. 'ballot' -> 20481 })) in: s now: 1000) state].
+c that: 'a forceRejoin during the ballot round blocks it (forced is not witnesses), then retries'
+  is: { phaseOf value: s. (blockedOf value: s) includesSubstring: 'too few members confirmed' }
+  equals: { #retry. true }.
 
 c report displayNl.

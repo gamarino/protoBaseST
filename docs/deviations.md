@@ -385,13 +385,18 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   term's floor reports it again, so commits keep getting retryable conflicts where `proto_db`
   surfaces the storage error each time; one storage probe per base that needs a commit first.
 - **Open item: no back-off after a lost renewal (`proto_db` behaviour, kept).** After a
-  renewal lost to a majority that rejects at once (members restarted inside their startup
-  grace, or a newer term granted), the owner renews again immediately, one round per RTT,
+  renewal lost to a majority that rejects at once (a rejoin ballot a majority promised under a
+  live holder, the most common trigger since the rejoin exists: every disk-loss rejoin; members
+  restarted inside their startup grace; or a newer term granted), the owner renews again
+  immediately, one round per RTT,
   until its lease ends (at most belief / 2): `proto_db`'s `_own_loop_body` and `_renew` do the
   same, so this is not a deviation today. Messages and acceptor-lane work only, no log write;
   safety is unaffected (nothing is issued once 4 x remaining < belief, and a won renewal counts
   only before its validUntil). In the simulator, at about 1 us per round, it makes such runs
-  long in virtual time, which the acceptance families avoid by crashing between terms. The
+  long in virtual time, which the acceptance families avoid by crashing between terms and the
+  rejoin families by cutting the holder off before its timer resumes (`tests/unit/_rejoin.st`
+  r78a) or by 1 ms links (`lagged:`, belowBallot and majorityLoss); without them a run does not
+  finish. The
   decision (keep it, adopt a timing-only lost-renewal back-off here as a recorded deviation,
   or propose one to `proto_db` upstream) is carried by the plan's Task 20. *Cost:* network and
   acceptor-lane load for up to belief / 2 after such a loss.
@@ -426,14 +431,21 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   and not fenced (`_queryHint:in:`), before the acceptor promises. *Cost:* none: the hint only
   steers which term this node asks for next.
 - **forceRejoin before the first attach report (representation).** `proto_db`'s `force_rejoin`
-  on a node not attached yet sets `_rejoin_forced` for the next attach. protoBaseST's
-  `PBRejoinWanted` marks the rejoin forced whenever the acceptor's last report (or none yet) is
-  not rejoined; the space's attach is Task 20's. On a survivor the acceptor forgets a committed
-  root above its accepted root (memory only: such a root was learnt, never logged) and asks for
-  a confirmation again; a committed root already published to the space's readers is not
-  withdrawn here (the space's confirmation round, Task 24, is what re-reads it). *Cost:* none
-  under the failure model; outside it (a majority of logs lost), readers may have seen the lost
-  root until the confirmation round.
+  on a node not attached yet sets `_rejoin_forced` for the next attach, and `detach` drops it
+  with the rest of the rejoin (coordinator.py 1644). protoBaseST's `PBRejoinWanted` marks the
+  rejoin forced whenever the acceptor's last report (or none yet) is not rejoined, and the
+  forced flag is dropped at detach, as in `proto_db`: `PBLogDetached` drops the rejoin
+  (`rejoinDetached:`), and a report over another log than the one a rejoin ran on starts a fresh,
+  unforced rejoin (`rejoinCheck:now:effects:`); the shell's attach and detach are Task 20's
+  (carry-over (k)). On a survivor the acceptor forgets a committed root above its accepted
+  root (memory only: such a root was learnt, never logged) and asks for a confirmation again;
+  a committed root already published to the space's readers is not withdrawn by the core
+  (`PBPublishCommitted` carries no nil). Task 24 (carried, review I2) makes the space check
+  `needsConfirmation` on every snapshot, as `proto_db`'s `_read_storage_root`, and its readers'
+  root follow the acceptor's drop. *Cost:* none under the failure model; outside it (a majority
+  of logs lost, the operator's recovery path), until Task 24 a space would keep starting
+  snapshots from the lost root, without bound; once Task 24 lands, only until the next
+  snapshot's confirmation.
 - **The commit round is a state machine (representation and timing, CC2, CC10).** `proto_db`'s
   `_run_round` is a thread that blocks on the permit, the base, each build and the replication,
   and waits on a condition for held retries. protoBaseST's `round:in:now:` is pure: each answer

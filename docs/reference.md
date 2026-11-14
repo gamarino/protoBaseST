@@ -654,7 +654,7 @@ For tests, tools and readers of the format. An application does not need them.
   L18): `proto_db`'s `_rejoin`, `_rejoin_round`, `_gather`, `_rejoin_decision`,
   `_complete_rejoin`, `_on_ballot_query` and `force_rejoin` as rule methods of
   `PBCoordinatorCore` over `PBRejoin` (`idle`; `phase`: `#idle`, `#gather`, `#probe`, `#adopt`,
-  `#retry` or `#failed`; `isForced`, `blocked`, `ballot`, `attempt`, `answers`, `pending`), kept
+  `#retry` or `#failed`; `isForced`, `blocked`, `ballot`, `attempt`, `answers`, `pending`, `log`), kept
   in `PBNodeState rejoin`, and `PBRejoinAnswer from:` (`state`, `accepted`, `committed`,
   `promised`, `ballot`, `highestLabel`). An acceptor report still rejoining starts the rejoin
   (`rejoinCheck:now:effects:`, from `dispatchAcceptorDecided:in:now:`) unless its tier failed or
@@ -680,7 +680,9 @@ For tests, tools and readers of the format. An application does not need them.
   other state answers as a plain query; a fenced node answers none. `PBRejoinWanted`
   (`dispatchRejoinWanted:in:now:`, the operator's forceRejoin) forces a rejoin not completed
   yet and hands the acceptor `PBForceRejoin` (`acceptForceRejoin:in:now:`): a survivor forgets a
-  committed root above its accepted root and needs a confirmation again. `PBConfirmed`
+  committed root above its accepted root and needs a confirmation again. `PBLogDetached`
+  (`rejoinDetached:in:now:`, `proto_db`'s detach) drops the rejoin and its forced flag, and a
+  report over another log than the one a rejoin runs for starts a fresh one. `PBConfirmed`
   (`dispatchConfirmed:in:now:`, `acceptConfirmed:in:now:`) clears `needsConfirmation`. See
   [deviations.md](deviations.md#cluster-mode).
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
