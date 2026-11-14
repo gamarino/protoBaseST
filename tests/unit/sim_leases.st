@@ -4,7 +4,8 @@
  _coordinator). The scenarios and the planted rules are in _plants.st; every node starts over a
  log holding the rejoined marker (a cluster formed before), startup grace 0, and the simulator's
  checker runs after every step (S1, and L5 with watchLeases). Families 1 and 2 (seeds 1-200
- under drop/dup/reorder) are sim_leases_terms.st's, the other plants sim_leases_plants.st's.
+ under drop/dup/reorder) are sim_leases_terms_a.st's and
+ sim_leases_terms_b.st's, the other plants sim_leases_plants.st's.
  (3) The lease runs from the send, not the win (L5, seeds 1-10): a win 533 ms after the send
  on the holder's clock is valid until the send + the belief, so the next owner's lease never
  overlaps it. A grant arriving after the belief is not a win: the simulator cannot schedule it
