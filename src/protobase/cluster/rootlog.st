@@ -37,7 +37,8 @@ PBRootOrder is the only comparison of roots in the code base.
                  takes) from before it opens the file until close, so a second open, in this
                  process or another, is PBUserError naming the lock file; a log file with more
                  than one hard link is PBLockingError (PBFramedLog openAppend:kind:). One caller
-                 at a time: the acceptor actor owns the log (the methods are not serialized).
+                 at a time: the acceptor actor owns the log (the methods are not serialized; load
+                 reads by path and is safe from any caller).
   PBLoggedRoots  what a log holds (load, decode:path:).
   PBLogEntry     one entry of a log, field by field.
 
@@ -463,7 +464,8 @@ PBAcceptorLog >> _append: aPayload sync: aBoolean
 "Appends an #accepted root, synced before this answers, or a #committed root, durable with the
  next synced entry (R67). anInteger is the label, aPBRootRecordOrNil the root (nil: the empty
  space). PBValidationError for another kind or a bad argument, PBClosedError when closed,
- PBUnexpectedError when failed or when the write fails."
+ PBUnexpectedError when failed or when the write fails. As proto_db RootsLog.append, the kind and
+ the entry are checked before the handle."
 PBAcceptorLog >> append: aKind label: anInteger root: aPBRootRecordOrNil
   | payload |
   (aKind == #accepted or: [aKind == #committed]) ifFalse: [
@@ -473,11 +475,12 @@ PBAcceptorLog >> append: aKind label: anInteger root: aPBRootRecordOrNil
   self _append: payload sync: aKind == #accepted.
 
 "Makes the promise of aTerm durable (synced) before it is sent. A term not above the promise
- already durable writes nothing (proto_db RootsLog.promise). Refused as append:label:root:."
+ already durable writes nothing (proto_db RootsLog.promise). As proto_db, the handle is checked
+ first (PBClosedError, PBUnexpectedError), then the term (PBValidationError)."
 PBAcceptorLog >> promise: aTerm
   | payload current |
-  payload := self class encode: #promise label: aTerm root: nil.
   self _checkWritable.
+  payload := self class encode: #promise label: aTerm root: nil.
   current := promised value.
   aTerm <= current ifTrue: [^ self].
   self _append: payload sync: true.

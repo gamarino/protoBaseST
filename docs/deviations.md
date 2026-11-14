@@ -134,9 +134,8 @@ explicit.
   modules (`PBFramedLog`, `PBAcceptorLog`), which no space uses yet. The acceptor log writes
   kinds 1 to 4 and reads 1 to 6 (it never writes kinds 5 and 6, which belong to `proto_db`'s
   tiered storage), and it is never compacted (`proto_db`'s `RootsLog` rewrites a log over 1 MiB).
-  `proto_db` resolves the log path with `os.path.realpath` before it names the lock file, so a
-  symbolic link to a log names the same lock; protoST has no `realpath`, so `PBAcceptorLog` names
-  the lock after the path as given (a hard link is refused, as in `proto_db`). A lock held
+  The lock file is still named after the path as given, not its real path: an open,
+  ship-blocking item in `docs/not-done.md` (symbolic link to the log file). A lock held
   elsewhere is `PBUserError` naming the lock file (cluster plan, Review Focus 3), where `proto_db`
   raises `ProtoLockingError`; a log with two hard links is `PBLockingError`, as `proto_db`.
 - **The caller owns the lock backoff, and it blocks the caller's worker.** The publisher never

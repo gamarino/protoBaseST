@@ -374,7 +374,9 @@ For tests, tools and readers of the format. An application does not need them.
   to a `PBLoggedRoots`; kinds 1 to 6), `logKind`, `framedLogClass` (a test seam). An open log
   answers `append:label:root:` (`#accepted`, synced, or `#committed`, not synced), `promise:`
   (synced; a term not above the durable promise writes nothing), `markRejoined` (synced),
-  `load`, `close` (idempotent), `isClosed`, `isFailed`, `path`. A failed write or sync is
+  `load`, `close` (idempotent), `isClosed`, `isFailed`, `path`. The methods are not serialized:
+  one caller (the acceptor actor) owns the writes, and `load` (which reads by path) is safe from
+  any caller. A failed write or sync is
   `PBUnexpectedError` and poisons the log: every later write is `PBUnexpectedError` until it is
   reopened; a closed log refuses writes with `PBClosedError`. `PBLoggedRoots` answers
   `accepted` and `committed` (`PBLabeledRoot` or `nil`), `promise` (0 when none), `top`,

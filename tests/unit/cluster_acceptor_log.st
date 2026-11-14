@@ -80,6 +80,18 @@ check value: 'two roots with one label and epoch' value: (refusal value: [PBAcce
 check value: 'empty kind-5 entry' value: (PBAcceptorLog decode: { #[5] , (ByteArray new: 92) } path: 'x.roots') accepted notNil.
 check value: 'kind-5 trailing bytes' value: ((refusal value: [PBAcceptorLog decode: { #[5] , (ByteArray new: 93) } path: 'x.roots'] value: PBCorruptionError)
   includesSubstring: 'trailing').
+"Kind 6 (98-byte head; flags at offset 1, label at 2, range count at 90): stored without ACCEPTED
+ it is no accepted root and leaves top alone (proto_db _decode adds only accepted entries);
+ 97 bytes is short; a range count of 1 with no range is cut inside a range."
+roots := PBAcceptorLog decode: {
+    PBAcceptorLog encode: #promise label: 9 root: nil.
+    #[6 0 50] , (ByteArray new: 95) } path: 'x.roots'.
+check value: 'an unaccepted kind 6 leaves top' value: (roots top = 9 and: [roots accepted isNil and: [roots dataEntryCount = 1]]).
+check value: 'an accepted kind 6 raises top' value: (PBAcceptorLog decode: { #[6 1 50] , (ByteArray new: 95) } path: 'x.roots') top = 50.
+check value: 'short kind-6 entry' value: ((refusal value: [PBAcceptorLog decode: { #[6] , (ByteArray new: 96) } path: 'x.roots'] value: PBCorruptionError)
+  includesSubstring: 'short replica entry').
+check value: 'kind-6 cut inside a range' value: ((refusal value: [PBAcceptorLog decode: { #[6 1] , (ByteArray new: 88) , #[1 0 0 0 0 0 0 0] } path: 'x.roots'] value: PBCorruptionError)
+  includesSubstring: 'cut inside a range').
 check value: 'kind-5 cut inside an item' value: ((refusal value: [PBAcceptorLog decode: { #[5] , (ByteArray new: 88) , #[1 0 0 0] } path: 'x.roots'] value: PBCorruptionError)
   includesSubstring: 'cut inside an item').
 
@@ -94,6 +106,10 @@ tests add: 5.
 "5. after close the log opens again; a closed log refuses writes"
 log close.
 check value: 'closed log refuses' value: (refusal value: [log promise: 20] value: PBClosedError) notNil.
+"proto_db order: promise and markRejoined check the handle first (a closed log given a bad term
+ is closed); append checks its kind and encodes the entry before it looks at the handle."
+check value: 'closed before a bad term' value: (refusal value: [log promise: -1] value: PBClosedError) notNil.
+check value: 'append checks its kind first' value: (refusal value: [log append: #promise label: 1 root: nil] value: PBValidationError) notNil.
 log close.
 log := PBAcceptorLog path: path.
 check value: 'opens after close' value: (log load accepted label = 8 and: [log isFailed not]).

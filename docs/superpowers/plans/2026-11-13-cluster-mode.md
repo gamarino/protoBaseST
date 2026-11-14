@@ -358,7 +358,7 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:signals:
   - `PBAcceptorLog class >> path: aPath` → opens or creates the `ROOT` log, after taking
     `tryLock` on `aPath , '.lock'` (`LOCK_SUFFIX`); a held lock is `PBUserError` naming the lock
     file (Review Focus 3). Creation syncs file, directory and parent directory (L10).
-  - `append: aKind label: anInteger root: aPBLabeledRootOrNil` for `#accepted #committed`,
+  - `append: aKind label: anInteger root: aPBRootRecordOrNil` for `#accepted #committed`,
     `promise: aTerm`, `markRejoined`. Every entry is synced before the call answers, except
     `#committed` (knowledge, R67); a sync failure is `PBUnexpectedError` and the log refuses
     every later call (`isFailed`).
@@ -1031,8 +1031,11 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   - `PBSharedTier class >> storage: aClusterStorage nodeId: anId` → creates `cluster/` (synced
     with its parent), opens `PBAcceptorLog path: 'cluster/' , (self logName: anId) , '.roots'`;
     refuses a log holding kinds 5/6 (CC15). `PBSharedTier class >> logName: anId` (CC21).
-    `flushLocal` (`storage flushSegment`), `logAccepted:`, `logCommitted:`, `logPromise:`,
-    `logRejoined`, `loadRoots`, `readPersisted` → `PBLabeledRoot` (label and cluster epoch from
+    `flushLocal` (`storage flushSegment`), `logAccepted: aLabeledRoot` and `logCommitted:
+    aLabeledRoot` (unpacked for the log: `append: #accepted label: r label root: r record`, the
+    record a `PBRootRecord` or nil; `PBAcceptorLog` never takes a `PBLabeledRoot`), `logPromise:`,
+    `logRejoined` (every write from the one actor that owns the log: `PBAcceptorLog` is not
+    serialized), `loadRoots`, `readPersisted` → `PBLabeledRoot` (label and cluster epoch from
     the SpaceRoot's fields; label 0 and the storage epoch for a plain root), `persist:
     aLabeledRoot` → `true | false | #busy` (CC19), `canRead: aLabeledRoot`, `close`.
   - `PBObjectSpace class >> storage: aClusterStorage coordinator: aCoordinator`: refuses a

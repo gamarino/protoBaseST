@@ -10,10 +10,12 @@
                     and kind-6 entries; encode:label:root: of each kind 1-4 entry gives its
                     payload byte for byte
    invalid rootlog-* each file scans (PBFramedLog) to payloads that decode:path: refuses with
-                    PBCorruptionError"
+                    PBCorruptionError for the vector's reason: the manifest lists only the error
+                    class and a note, so the reason is matched as a substring of proto_db's message
+                    for that refusal (rootlog.py _decode, decode_records_entry, compare_roots)"
 Import from: 'protobase'.
 Import from: '_vectors'.
-| manifest cluster failures entry scan roots listed describeRoot describeLabeled describeTriples kinds base copy log loaded loadedSpec invalid |
+| manifest cluster failures entry scan roots listed describeRoot describeLabeled describeTriples kinds base copy log loaded loadedSpec invalid reasons |
 manifest := Vectors manifest.
 cluster := manifest at: 'cluster'.
 failures := OrderedCollection new.
@@ -89,12 +91,20 @@ loaded entries size = listed size ifFalse: [failures add: 'load: ' , loaded entr
 "invalid vectors of layer roots_log"
 invalid := (manifest at: 'invalid') select: [:e | (e at: 'layer') = 'roots_log'].
 invalid size = 5 ifFalse: [failures add: 'the manifest lists ' , invalid size printString , ' invalid roots_log vectors, not 5'].
+reasons := Dictionary new.
+reasons at: 'rootlog-unknown-flags' put: 'unknown flags 3';
+  at: 'rootlog-range-reversed' put: 'inverted range';
+  at: 'rootlog-same-label-epoch' put: 'two different roots carry label 7 and epoch 3';
+  at: 'rootlog-short-entry' put: 'an entry of 40 bytes';
+  at: 'rootlog-unknown-kind' put: 'unknown kind 9'.
 invalid do: [:e |
-  | outcome |
+  | outcome reason |
   (e at: 'error') = 'corruption' ifFalse: [failures add: (e at: 'id') , ': the manifest expects ' , (e at: 'error')].
+  reason := reasons at: (e at: 'id') ifAbsent: [failures add: (e at: 'id') , ': no expected reason in this test'. ''].
   outcome := [PBAcceptorLog decode: (PBFramedLog scan: (Vectors bytesOf: (e at: 'file')) kind: 'ROOT' path: (e at: 'file')) payloads
       path: (e at: 'file'). 'accepted']
-    on: PBDBError do: [:x | (x isKindOf: PBCorruptionError) ifTrue: [nil] ifFalse: [x class name , ': ' , x messageText]].
+    on: PBDBError do: [:x | ((x isKindOf: PBCorruptionError) and: [x messageText includesSubstring: reason])
+      ifTrue: [nil] ifFalse: [x class name , ': ' , x messageText]].
   outcome isNil ifFalse: [failures add: (e at: 'id') , ': ' , outcome]].
 failures isEmpty ifFalse: [failures do: [:f | ('FAIL ' , f) displayNl]. Smalltalk exit: 1].
 'roots log ok'
