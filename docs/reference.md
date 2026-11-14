@@ -359,6 +359,19 @@ For tests, tools and readers of the format. An application does not need them.
   duplicate ids and more than 4096 members are `PBValidationError`. Class side:
   `ballotAfter:rank:` (`((floor - r) // 4096 + 1) * 4096 + r`), `rankBits` (12), `maxMembers`,
   `refoundStep` (2^44).
+- **Configuration** (`cluster/config.st`): `PBClusterConfig nodeId:peers:options:`, the validated settings of one member
+  (the node id must be a member). Options, in milliseconds as Integers, with `proto_db`'s defaults: `#leaseDuration` 2000,
+  `#driftMargin` (default and minimum `ceiling(2D/3)`, below `D`), `#requestTimeout` 250 (below the belief `D - margin`),
+  `#sendReserve` (default `min(requestTimeout, belief // 4)`, at most `belief // 4`), `#acquireTimeout` 30000, `#backoff`
+  `#(1 50)`, `#startupGrace` (default `D + margin`), `#persistInterval` 50, `#persistLag` 1000, `#ownerIdleRelease` nil,
+  `#voters` nil, `#authKey` nil or a `ByteArray` of at least 32 bytes, `#seed`, and the test seams `#transport` and `#clock`.
+  An unknown option or a refused value is `PBValidationError` naming it; `#fetchTimeout` and the tier options are
+  `PBNotSupportedError` (Phase D). The accessors answer microseconds: `leaseDuration`, `driftMargin`, `belief`,
+  `requestTimeout`, `sendReserve`, `acquireTimeout`, `backoffLow`, `backoffHigh`, `startupGrace`, `idleEnd`,
+  `persistInterval`, `persistLag`, `ownerIdleRelease`; the constants `wakeSpread`, `minStraggle`, `straggleFactor`,
+  `turnSilence`, `gatherAttempts`, `retryHold`, `retryWait`, `permitRetries`, `depth` (0); and `membership`, `nodeId`,
+  `rank`, `authKey`, `seed`, `transport`, `clock`. `PBClusterConfig timerTable` answers the timers that apply at depth 0 as
+  rows `{ name. default. what it drives }`.
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
   `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered
@@ -438,6 +451,6 @@ For tests, tools and readers of the format. An application does not need them.
 ## The module and its files
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
-`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
+`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
 `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar` and `uuid`.

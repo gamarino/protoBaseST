@@ -58,3 +58,4 @@ PBClusterMessage class>>_initializeSchema
 PBLogEntry>>_setKind:label:root:seq:pred:records:ranges:flags:
 PBLoggedRoots>>_setAccepted:committed:promise:top:rejoined:dataEntryCount:entries:
 PBAcceptorLog>>_setPath:lock:log:promised:failed:
+PBClusterConfig>>_setMembership:nodeId:durations:authKey:seed:transport:clock:
