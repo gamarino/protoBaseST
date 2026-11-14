@@ -66,7 +66,7 @@ PermitRules >> dispatchBaseWanted: anEvent in: s now: t
   | root |
   root := anEvent permission root.
   root isNil ifTrue: [root := PBLabeledRoot label: 0 record: nil].
-  ^ PBStep state: s effects: { PBSettle waiter: anEvent waiter outcome: root }.
+  ^ PBStep state: s effects: { PBSettle waiter: anEvent waiter outcome: (PBBaseDecision base: root needsCommit: false outcome: #ok) }.
 
 "The stand-in for the replication (Task 13): it commits at once, or after the node's hold."
 PermitRules >> dispatchReplicateWanted: anEvent in: s now: t

@@ -35,7 +35,7 @@ AcceptRules >> dispatchBaseWanted: anEvent in: s now: t
   | root |
   root := anEvent permission root.
   root isNil ifTrue: [root := PBLabeledRoot label: 0 record: nil].
-  ^ PBStep state: s effects: { PBSettle waiter: anEvent waiter outcome: root }.
+  ^ PBStep state: s effects: { PBSettle waiter: anEvent waiter outcome: (PBBaseDecision base: root needsCommit: false outcome: #ok) }.
 
 AcceptRules subclass: #PlantAckBeforeSync.
 

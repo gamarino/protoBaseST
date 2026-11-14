@@ -135,7 +135,8 @@ CommitRules >> dispatchPermitWanted: anEvent in: s now: t
     seq: 1 rid: s nextRid owner: s config nodeId root: nil certain: false sentAt: t valid: 1000) }.
 
 CommitRules >> dispatchBaseWanted: anEvent in: s now: t
-  ^ PBStep state: s effects: { PBSettle waiter: anEvent waiter outcome: (PBLabeledRoot label: 0 record: nil) }.
+  ^ PBStep state: s effects: { PBSettle waiter: anEvent waiter
+    outcome: (PBBaseDecision base: (PBLabeledRoot label: 0 record: nil) needsCommit: false outcome: #ok) }.
 
 CommitRules >> outcome
   ^ #committed.

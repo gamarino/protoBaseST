@@ -422,7 +422,8 @@ For tests, tools and readers of the format. An application does not need them.
   `#unknown` or `#none`), `PBRejoinWanted`, `PBAcceptorDecided step:`, `PBAcceptorDiscarded
   step:` (the step the shell discarded because its append failed; `dispatchAcceptorDiscarded:in:now:`). Effects, each answering
   `applyTo:` with one message the shell implements (applySend:, applyToAcceptor:, applyTimer:,
-  applySettle:, applyPublishCommitted:, applyPublishAcceptor:, applyFence:): `PBSend
+  applySettle:, applyPublishCommitted:, applyPublishAcceptor:, applyFence:, and for the base
+  choice applyReadPersisted: and applyProbeRoot:): `PBSend
   to:message:`, `PBToAcceptor event:` (the node's own vote and acceptance, never through the
   transport; the event's class answers `isAcceptorEvent` true: `PBReceived` and `PBStartNode` here, and
   a later module adds its own), `PBTimer after:token:event:` (`fired` is its `PBTimerFired`), `PBSettle
@@ -531,7 +532,8 @@ For tests, tools and readers of the format. An application does not need them.
   `_on_permit_reply`), over the immutable values `PBIssued` (`node`, `seq`, `inc`, `rid`,
   `deadline`, `permit`, `base`), `PBPermitAsk` (`waiter`, `rid`, `sentAt`, `term`, `target`,
   `request`, `retryAt`, `endAt`, `token`) and `PBHolder` (`asks`, `deadlines`, `seen`,
-  `deadlineOf:`, `askWithRid:`; `empty`, `permitsSeenLimit`, 64), kept in `PBNodeState holder`.
+  `replications`, `choices`, `permits`, `deadlineOf:`, `askWithRid:`; `empty`, `permitsSeenLimit`,
+  64), kept in `PBNodeState holder`.
   An owner issues one permission at a time (`'permits_issued'`): to a local waiter a
   `PBPermission` settled at once, to a member a `'permit'` valid for the lease's remaining time,
   certain when its base is known committed; its deadline is valid + `requestTimeout`. A
@@ -554,7 +556,9 @@ For tests, tools and readers of the format. An application does not need them.
   root is committed knowledge only (`cluster/proposer.st`).
 - **Holder's replication** (`cluster/holder.st`): `proto_db`'s replicate and `_on_answer` for an
   ack, at DEPTH 0 over a shared storage. `dispatchReplicateWanted:in:now:` refuses a root not
-  labelled with the permission's term (`PBValidationError`); past the permission or under
+  labelled with the permission's term, and a pred other than `predFor:in:` (the root last sent
+  under the permission, else the base bound to it, else its root; the empty space labelled 0
+  when it has none), with `PBValidationError`; past the permission or under
   `sendReserve` it sends nothing and settles `#none` (H7); else it sends `'replicate'` (no
   records, chunks 0, the permission's seq, the pred, the committed root, vs, copies this node)
   to the other voters and the own acceptor when a voter (`'replications'`), with a timer at the
@@ -569,6 +573,38 @@ For tests, tools and readers of the format. An application does not need them.
   allows, the permission's end (a timer that comes earlier is set again for the time left) or a
   failed own append end it `#unknown`
   (`'replication_failures'`, the node and its acceptor suspect for the term).
+- **Base choice** (`cluster/holder.st`, CP 1.6): `proto_db`'s `_lease_base`, `recover_root`,
+  `_phase_1_floor`, `_base_needs_commit` and the refound and hard guard, as rules over the values
+  `PBBaseDecision base:needsCommit:outcome:` (`base`, `needsCommit`, `outcome`: `#ok`, `#stale` or
+  `#unreachable`, `isOk`) and `PBBaseChoice` (a choice or a recovery round in progress: `waiter`,
+  `permission`, `every`, `phase`, `rid`, `token`, `suspected`, `answers`, `learnt`, `current`,
+  `answered:accepted:committed:state:`), kept in `PBHolder choices`. `dispatchBaseWanted:in:now:`
+  is `leaseBase:waiter:in:now:`: a certain permit or a base already bound under the permission
+  is the base; else a recovery round (`'query'`, ballot 0, to the other voters, a timer of
+  `requestTimeout`, `receivedAnswer:in:now:`; an answer of another incarnation is dropped,
+  `'stale_replies'`, a sender's later answer replaces its earlier one) that ends when
+  `recoveryDone:in:` answers true: every other voter answered, or, unless `every`, a majority of
+  the voters are witnesses (state `'ok'`) that answered, this node counted when it is one. The
+  round counts `'recoveries'`; with fewer witnesses than a majority it settles a `PBConflictError`;
+  else its result is the highest accepted root of the witnesses (this node's included), their
+  committed roots are learnt (`PBLearnCommitted`, accept false, not logged), the hint rises to
+  their accepted labels, and the suspicion held at the send is cleared (the acceptor's half by
+  `PBRecovered suspected:`, `acceptRecovered:in:now:`, only when at most it). When
+  `phase1Floor:` answers true (the permission's root is a known root other than the empty space
+  labelled 0, R127) that root is the base if it orders above the result. With no root known
+  anywhere the shared storage's persisted root is read (`PBReadPersisted token:`, answered by
+  `PBStorageRead token:root:failure:`; `'storage_root_reads'`, learnt committed, not accepted) and
+  a term below its label + `refoundStep` refounds: the hint rises to that and the decision is
+  `#stale`. A committed root of a later term, or of this term above the base, makes it `#stale`;
+  a base below the committed root this node knows reads the persisted root: none, one below it
+  or a failed read settles the `PBCorruptionError` that names the operator's remedy (D46), one at
+  or above it refounds from it. A base labelled above the term is `#stale`. `needsCommit` is true
+  when the base is not the committed root this node knows (R50); such a base other than the empty
+  space is probed (`PBProbeRoot root:token:`, answered by `PBRootProbed token:readable:`,
+  `isReadable`) and an unreadable one is `#unreachable` (R133). An `#ok` base is bound to the
+  permission (the next choice under it is certain; `predFor:in:`). `PBRecoverWanted every:waiter:`
+  (`dispatchRecoverWanted:in:now:`) runs a round alone and settles `{ known. root }` or its
+  `PBConflictError`. See [deviations.md](deviations.md#cluster-mode).
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
   `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered

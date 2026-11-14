@@ -1022,4 +1022,7 @@ PBCoordinatorCore >> dispatchTimerFired: anEvent in: s now: t
               ifFalse: [
                 anEvent event = #replicate
                   ifTrue: [self _replicationTimer: anEvent in: s now: t effects: fx]
-                  ifFalse: [s]]]]].
+                  ifFalse: [
+                    anEvent event = #recovery
+                      ifTrue: [self _recoveryTimer: anEvent in: s now: t effects: fx]
+                      ifFalse: [s]]]]]].

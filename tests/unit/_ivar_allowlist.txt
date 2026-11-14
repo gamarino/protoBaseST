@@ -90,3 +90,10 @@ PBCount>>_setStat:
 PBSuspect>>_setTerm:
 PBAppendFailed>>_setReason:
 PBProposerValue>>_setValues:
+PBBaseDecision>>_setBase:needsCommit:outcome:
+PBRecoverWanted>>_setEvery:waiter:
+PBStorageRead>>_setToken:root:failure:
+PBRootProbed>>_setToken:readable:
+PBRecovered>>_setSuspected:
+PBReadPersisted>>_setToken:
+PBProbeRoot>>_setRoot:token:

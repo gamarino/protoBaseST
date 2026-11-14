@@ -2,6 +2,28 @@
 
 ## 0.2.0 (unreleased)
 
+- The base choice (`src/protobase/cluster/holder.st`, CP 1.6): `proto_db`'s `_lease_base`,
+  `recover_root`, `_phase_1_floor`, `_base_needs_commit`, the refound and the hard guard, as rule
+  methods of `PBCoordinatorCore` (`leaseBase:waiter:in:now:`, the default rule of
+  `PBBaseWanted`). A certain permit's root is the base; an uncertain one runs a recovery round
+  (ballot 0) that ends at a majority of witnesses, or waits for every voter when asked
+  (`PBRecoverWanted every:waiter:`); the phase-1 floor (R127) raises the base to the
+  permission's root; with nothing known the persisted root is read and the cluster refounds
+  (terms raised by `refoundStep`); a base superseded by a committed root is `#stale`; a base
+  below the committed root this node knows is a `PBCorruptionError` naming the operator's
+  remedy, unless the persisted root lets it refound; a base that is not the committed root must
+  be committed first (R50), and one whose SpaceRoot the shared storage cannot read is
+  `#unreachable` (R133: a retryable conflict, the term abandoned). The decision is a
+  `PBBaseDecision`; new events `PBRecoverWanted`, `PBStorageRead`, `PBRootProbed`, the acceptor
+  event `PBRecovered`, the effects `PBReadPersisted` and `PBProbeRoot`, and `PBHolder` gains
+  `choices` and `permits`. The holder now keeps the base bound and the root last sent under each
+  permission and refuses a `PBReplicateWanted` whose pred is not `proto_db`'s `lease.sent` rule
+  (`predFor:in:`). The simulator gains the persisted root, an unreadable-root disk fault, an
+  epoch step per node and the commit path's base, re-commit and replicate stages. Tested by
+  `tests/unit/sim_base_choice.st` (the C1, I1, M6 and refound schedules, the strict R79/L28 form
+  and four plants; families in `tests/unit/_base.st`), `tests/unit/sim_base_seeds_a.st` and
+  `tests/unit/sim_base_seeds_b.st` (200 seeds under drops and clock skew) and
+  `tests/unit/cluster_base_rules.st` (one guard per check).
 - Acceptance, the commit point and committed knowledge (`src/protobase/cluster/acceptor.st`, the
   new `src/protobase/cluster/holder.st`): `proto_db`'s `_may_accept`, `_apply_replicate` over a
   shared storage, `_on_done`, `_observe_accepted`, `_observe_committed`, `_learn_label`,

@@ -183,19 +183,22 @@ PBPermitAsk >> printOn: aStream
 
 "The holder side of a node's permissions: the permit requests out (PBPermitAsk), the deadline of
  every local waiter not yet settled ({ waiter. deadline }), the last permits seen ({ term.
- seq }, at most permitsSeenLimit: proto_db _permits_seen) and the replications not decided yet
- (holder.st PBReplication)."
+ seq }, at most permitsSeenLimit: proto_db _permits_seen), the replications not decided yet
+ (holder.st PBReplication), the base choices and recovery rounds in progress (holder.st
+ PBBaseChoice) and what the holder bound and sent under each permission it holds ({ { term.
+ seq }. base bound or nil. root last sent or nil }, at most permitsSeenLimit: proto_db
+ lease.bind_root and lease.sent)."
 PBProposerValue subclass: #PBHolder.
 
 PBHolder class >> fieldNames
-  ^ #(#asks #deadlines #seen #replications).
+  ^ #(#asks #deadlines #seen #replications #choices #permits).
 
 PBHolder class >> permitsSeenLimit
   ^ 64.
 
 PBHolder class >> empty
   ^ self _from: (Dictionary new at: #asks put: #(); at: #deadlines put: #(); at: #seen put: #();
-    at: #replications put: #(); yourself).
+    at: #replications put: #(); at: #choices put: #(); at: #permits put: #(); yourself).
 
 "A fresh Array."
 PBHolder >> asks
@@ -218,6 +221,14 @@ PBHolder >> deadlineOf: aWaiter
 "The replications not decided yet (holder.st PBReplication), a fresh Array."
 PBHolder >> replications
   ^ (self _at: #replications) copy.
+
+"The base choices and recovery rounds in progress (holder.st PBBaseChoice), a fresh Array."
+PBHolder >> choices
+  ^ (self _at: #choices) copy.
+
+"{ { term. seq }. bound. sent } of the permissions held (holder.st), a fresh Array."
+PBHolder >> permits
+  ^ (self _at: #permits) collect: [:e | e copy].
 
 "The ask whose request id is aRid, or nil."
 PBHolder >> askWithRid: aRid
@@ -626,13 +637,14 @@ PBCoordinatorCore >> dispatchDoneReport: anEvent in: s now: t
     root := outcome = 'committed'
       ifTrue: [anEvent root isNil ifTrue: [PBLabeledRoot label: 0 record: nil] ifFalse: [anEvent root]]
       ifFalse: [nil].
-    state := s.
+    "The permission ended: what the holder bound and sent under it is forgotten (holder.st)."
+    state := self _forgetPermit: p in: s.
     later := OrderedCollection new.
     p owner = s config nodeId ifTrue: [
       own := s ownership.
       issued := (own notNil and: [own term = p term]) ifTrue: [own entryOf: s config nodeId seq: p seq] ifFalse: [nil].
       (issued notNil and: [issued inc = s inc]) ifTrue: [
-        state := self _permitOutcome: issued outcome: outcome root: root in: s now: t effects: later]].
+        state := self _permitOutcome: issued outcome: outcome root: root in: state now: t effects: later]].
     self _broadcast: (PBClusterMessage type: 'done' from: s config nodeId fields: {
       'term' -> p term. 'seq' -> p seq. 'inc' -> s inc. 'outcome' -> outcome.
       'root' -> (PBClusterMessage rootValue: root).

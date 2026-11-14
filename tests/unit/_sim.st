@@ -45,11 +45,23 @@ applyTo:).
   PBTimer        comes due when the node's clock has advanced by its after (above).
   PBSettle       advances the synthetic transaction of its waiter: commit: aToken at: id asks
                  the node for a permission (PBPermitWanted), then for the base under it
-                 (PBBaseWanted), builds a new root on that base (label the permission's term,
-                 epoch the base's + 1, a fresh offset; its pred link is the base) and
-                 replicates it (PBReplicateWanted). The replication's outcome is the commit's
-                 (#committed: #acknowledged, #unknown, #none; anything else: #failed) and the
-                 node gets it as a PBDoneReport (with the built root when #committed).
+                 (PBBaseWanted, settled with a PBBaseDecision or an error), builds a new root on
+                 that base (label the permission's term, epoch the base's + 1, or + epochStep:at:,
+                 a fresh offset; its pred link is the base) and replicates it
+                 (PBReplicateWanted). The replication's outcome is the commit's (#committed:
+                 #acknowledged, #unknown, #none; anything else: #failed) and the node gets it as
+                 a PBDoneReport (with the built root when #committed). A decision that needs a
+                 commit first replicates an unchanged root on the base (label the term, epoch the
+                 base's + 1, proto_db _commit_base) and, once it is #committed, builds the
+                 commit's root on it; any other outcome of it is the commit's. A #stale decision
+                 reports #unknown and asks for a permission again (the round requeues, D50); an
+                 #unreachable one reports #unknown and ends the commit #none (a retryable
+                 conflict, nothing sent, R133); an error reports #none and ends the commit #none
+                 (a PBConflictError) or #failed.
+  PBReadPersisted is answered at once with PBStorageRead token: root: (the persisted root of the
+                 shared storage, persist:, nil until one is set) failure: nil.
+  PBProbeRoot    is answered at once with PBRootProbed token: readable: (false for a root the
+                 node's PBSimDisk was told it cannot read, unreadable:).
   PBPublishCommitted sets the root the node's readers see; PBPublishAcceptor and PBFence are
                  recorded by their trace lines; PBCount adds one to the node's counter
                  (countOf:at:).
@@ -166,7 +178,7 @@ PBSimClock >> rate: aNumber at: g
 
 "The acceptor log of one node: its entries (41-byte payloads, PBAcceptorLog encode:label:root:)
  in order, of which the first syncedSize are synced."
-Object subclass: #PBSimDisk instanceVariableNames: 'name entries synced'.
+Object subclass: #PBSimDisk instanceVariableNames: 'name entries synced unreadable'.
 
 PBSimDisk class >> named: aName
   ^ self basicNew setName: aName.
@@ -175,6 +187,16 @@ PBSimDisk >> setName: aName
   name := aName.
   entries := OrderedCollection new.
   synced := 0.
+  unreadable := OrderedCollection new.
+
+"A fault of the shared storage seen from this node: the SpaceRoot of aRoot (a PBLabeledRoot)
+ cannot be read from now on (it survives crashes and a lost disk: it is not the log's)."
+PBSimDisk >> unreadable: aRoot
+  unreadable add: aRoot key.
+
+"Whether this node can read the SpaceRoot of aRoot."
+PBSimDisk >> canRead: aRoot
+  ^ (unreadable includes: aRoot key) not.
 
 "Writes aPayload, not synced; answers its index (from 1)."
 PBSimDisk >> append: aPayload
@@ -439,7 +461,7 @@ PBSimChecker >> checkConverged
 
 "=== PBSim ==================================================================="
 
-Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current counts failing syncCost fixedLags peers'.
+Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current counts failing syncCost fixedLags peers persisted epochSteps'.
 
 "N nodes (anArray of ids) running aRules, each configured with aDictionary (PBClusterConfig
  options), all started at virtual time 0, every choice drawn from Random seed: n."
@@ -477,6 +499,8 @@ PBSim >> setSeed: n ids: anArray rules: aRules options: aDictionary logs: aLogs
   failing := Set new.
   syncCost := 0.
   fixedLags := Dictionary new.
+  persisted := nil.
+  epochSteps := Dictionary new.
   aLogs keysAndValuesDo: [:id :appends |
     | disk |
     disk := (self nodeAt: id) disk.
@@ -660,6 +684,21 @@ PBSim >> delay: fromId to: toId by: someMicros
   (someMicros isInteger and: [someMicros >= 0]) ifFalse: [^ Error signal: 'PBSim delay:to:by: an Integer >= 0'].
   fixedLags at: fromId , '>' , toId put: someMicros.
   self _trace: fromId , ' -> ' , toId , ' delayed by ' , someMicros printString.
+
+"The shared storage's persisted root is aRoot (a PBLabeledRoot) from now on (the persister of
+ a later task writes it; a script sets it here)."
+PBSim >> persist: aRoot
+  persisted := aRoot.
+  self _trace: 'persisted ' , (PBCoreValue textOf: aRoot).
+
+PBSim >> persisted
+  ^ persisted.
+
+"The commits of anId build their root at the base's epoch + n (an Integer >= 1) from now on: a
+ node whose transactions write several epochs (a test of root order between siblings)."
+PBSim >> epochStep: n at: anId
+  (n isInteger and: [n >= 1]) ifFalse: [^ Error signal: 'PBSim epochStep:at: an Integer >= 1'].
+  epochSteps at: anId put: n.
 
 PBSim >> failAppends: anId
   failing add: anId.
@@ -888,6 +927,14 @@ PBSim >> applyPublishAcceptor: aPublish
 PBSim >> applyFence: aFence
   ^ self.
 
+PBSim >> applyReadPersisted: aRead
+  self _schedule: #dispatch node: current
+    payload: (PBStorageRead token: aRead token root: persisted failure: nil) at: now.
+
+PBSim >> applyProbeRoot: aProbe
+  self _schedule: #dispatch node: current
+    payload: (PBRootProbed token: aProbe token readable: (current disk canRead: aProbe root)) at: now.
+
 PBSim >> applyCount: aCount
   | key |
   key := current id , ' ' , aCount stat.
@@ -906,27 +953,65 @@ PBSim >> _settle: aWaiter outcome: anOutcome at: aNode
     ^ self _schedule: #dispatch node: aNode
       payload: (PBBaseWanted permission: anOutcome waiter: { 'base'. token. anOutcome }) at: now].
   permission := aWaiter at: 3.
-  stage = 'base' ifTrue: [
-    | root |
-    (anOutcome isKindOf: PBLabeledRoot) ifFalse: [^ self _end: token as: #failed].
-    offsets := offsets + 1.
-    root := PBLabeledRoot label: permission term
-      record: (PBRootRecord segment: aNode segment offset: offsets epoch: anOutcome epoch + 1).
-    preds at: (self keyText: root) put: (self keyText: anOutcome).
-    commitRoots at: token put: root.
-    self _trace: aNode id , ' built ' , (PBCoreValue textOf: root) , ' on ' , (PBCoreValue textOf: anOutcome)
-      , ' for ' , token printString.
-    ^ self _schedule: #dispatch node: aNode
-      payload: (PBReplicateWanted permission: permission root: root pred: anOutcome waiter: { 'replicate'. token. permission }) at: now].
-  stage = 'replicate' ifTrue: [
-    self _end: token as: ((PBDoneReport outcomes includes: anOutcome)
-      ifTrue: [anOutcome = #committed ifTrue: [#acknowledged] ifFalse: [anOutcome]]
-      ifFalse: [#failed]).
-    ^ self _schedule: #dispatch node: aNode
-      payload: (PBDoneReport permission: permission
-        outcome: ((PBDoneReport outcomes includes: anOutcome) ifTrue: [anOutcome] ifFalse: [#none])
-        root: (anOutcome = #committed ifTrue: [commitRoots at: token] ifFalse: [nil])) at: now].
+  stage = 'base' ifTrue: [^ self _based: token decision: anOutcome permission: permission at: aNode].
+  stage = 'recommit' ifTrue: [
+    anOutcome = #committed ifTrue: [^ self _build: token on: (commitRoots at: token) permission: permission step: nil at: aNode].
+    ^ self _replicated: token outcome: anOutcome permission: permission at: aNode].
+  stage = 'replicate' ifTrue: [^ self _replicated: token outcome: anOutcome permission: permission at: aNode].
   ^ Error signal: 'PBSim: settled an unknown waiter ' , aWaiter printString.
+
+"The base decision (or error) of aToken's permission."
+PBSim >> _based: aToken decision: anOutcome permission: aPermission at: aNode
+  | base root |
+  (anOutcome isKindOf: PBBaseDecision) ifFalse: [
+    self _end: aToken as: ((anOutcome isKindOf: PBConflictError) ifTrue: [#none] ifFalse: [#failed]).
+    ^ self _report: aPermission outcome: #none root: nil at: aNode].
+  anOutcome outcome = #stale ifTrue: [
+    self _trace: aNode id , ' requeues ' , aToken printString , ' (stale base)'.
+    self _report: aPermission outcome: #unknown root: nil at: aNode.
+    ^ self _schedule: #dispatch node: aNode payload: (PBPermitWanted waiter: { 'permit'. aToken }) at: now].
+  anOutcome outcome = #unreachable ifTrue: [
+    self _end: aToken as: #none.
+    ^ self _report: aPermission outcome: #unknown root: nil at: aNode].
+  base := anOutcome base.
+  anOutcome needsCommit ifFalse: [^ self _build: aToken on: base permission: aPermission step: nil at: aNode].
+  "proto_db _commit_base: an unchanged root on the base, labelled with the term, epoch + 1."
+  root := self _newRoot: aPermission on: base step: 1 at: aNode.
+  commitRoots at: aToken put: root.
+  self _trace: aNode id , ' re-commits ' , (PBCoreValue textOf: base) , ' as ' , (PBCoreValue textOf: root)
+    , ' for ' , aToken printString.
+  ^ self _schedule: #dispatch node: aNode
+    payload: (PBReplicateWanted permission: aPermission root: root pred: base waiter: { 'recommit'. aToken. aPermission }) at: now.
+
+"A new root of aPermission's term on aBase at epoch + n, its pred link recorded."
+PBSim >> _newRoot: aPermission on: aBase step: n at: aNode
+  | root |
+  offsets := offsets + 1.
+  root := PBLabeledRoot label: aPermission term
+    record: (PBRootRecord segment: aNode segment offset: offsets epoch: aBase epoch + n).
+  preds at: (self keyText: root) put: (self keyText: aBase).
+  ^ root.
+
+PBSim >> _build: aToken on: aBase permission: aPermission step: aStep at: aNode
+  | root |
+  root := self _newRoot: aPermission on: aBase step: (epochSteps at: aNode id ifAbsent: [1]) at: aNode.
+  commitRoots at: aToken put: root.
+  self _trace: aNode id , ' built ' , (PBCoreValue textOf: root) , ' on ' , (PBCoreValue textOf: aBase)
+    , ' for ' , aToken printString.
+  ^ self _schedule: #dispatch node: aNode
+    payload: (PBReplicateWanted permission: aPermission root: root pred: aBase waiter: { 'replicate'. aToken. aPermission }) at: now.
+
+PBSim >> _replicated: aToken outcome: anOutcome permission: aPermission at: aNode
+  self _end: aToken as: ((PBDoneReport outcomes includes: anOutcome)
+    ifTrue: [anOutcome = #committed ifTrue: [#acknowledged] ifFalse: [anOutcome]]
+    ifFalse: [#failed]).
+  ^ self _report: aPermission
+    outcome: ((PBDoneReport outcomes includes: anOutcome) ifTrue: [anOutcome] ifFalse: [#none])
+    root: (anOutcome = #committed ifTrue: [commitRoots at: aToken] ifFalse: [nil]) at: aNode.
+
+"aNode ends aPermission with anOutcome (its PBDoneReport)."
+PBSim >> _report: aPermission outcome: anOutcome root: aRoot at: aNode
+  ^ self _schedule: #dispatch node: aNode payload: (PBDoneReport permission: aPermission outcome: anOutcome root: aRoot) at: now.
 
 PBSim >> _end: aToken as: aStatus
   commits at: aToken put: aStatus.

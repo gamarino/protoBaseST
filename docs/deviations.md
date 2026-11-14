@@ -305,11 +305,13 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   (design spec section 4), and a protoBaseST cluster never sends `after` (DEPTH 0). A received
   permit whose `after` is not nil is held as uncertain (H2, tested); its proposal and the gate
   H5 are not tracked, and that case is untested. *Cost:* none in a protoBaseST cluster.
-- **The base issued twice, tested in its stand-in form (until Task 14).** `proto_db` keeps R79/L28
-  (an owner issuing one base twice) as an expected failure at convergence (S4). With the
-  stand-in replication of Task 12 the plant `PlantBaseTwice` is caught earlier, by the
-  simulator checker's sibling-roots rule (two roots of one label and epoch); the strict S4 form
-  is Task 14's. *Cost:* none in the product; the test is weaker until then.
+- **The base issued twice (R79/L28), tested in its strict form.** `proto_db` keeps an owner
+  issuing one base twice as a strict expected failure at convergence (S4). protoBaseST plants the
+  same defect (`PlantBaseTwice`, O1's pipeline check dropped) over the real base choice and
+  replication: the second holder's root commits, the first holder's higher-epoch sibling is ranked
+  above it by phase 1, and the run must fail S4 at convergence (`sim_base_choice.st` (5)); the
+  product passes the same schedule. Not a deviation; recorded because the stand-in form of
+  Task 12 (caught earlier, by the sibling-roots rule) was one.
 - **The dispatcher's suspicion clears one acceptor step later (timing only, CC2).** `proto_db`'s
   `_learn_label` clears the node's `suspect_term` in the one shared state the moment a committed
   label at or above it is observed. protoBaseST's suspicion has two halves: the acceptor's
@@ -327,20 +329,50 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   `PBSuspect` step lands, the acceptor's half holds the suspicion again, more conservatively
   than `proto_db`. *Cost:* uncertainty reported a little longer in (1); in (2) a certainty
   `proto_db` also reports under a delayed observation, never one it could not.
-- **The replicate's pred comes with the commit (until Task 14; a safety obligation on it).**
-  `proto_db`'s `replicate` takes the pred from the lease (`lease.sent`, else the lease root);
-  protoBaseST's commit path hands it in `PBReplicateWanted permission:root:pred:waiter:`, since
-  the base choice is Task 14's and a `PBPermission` is immutable. The `replicate` message is
-  the same. Acceptors trust the pred the holder names: V2' compares it with their own accepted
-  root and cannot detect a pred that lies about the build base, so a holder that builds on one
-  root and names another can make acceptors holding r1 take an r2 that does not contain r1,
-  and r1's commit is lost. Task 14's commit path must therefore follow `proto_db`'s
-  `lease.sent` rules: the pred of the first root under a permission is the permission's root;
-  that of each later root is the root last sent under it, even when its outcome was
-  `#unknown`; a round that ended `#none` does not move it; and the root is built on exactly
-  that pred (the plan's Task 14 entry carries this, with the option of the core keeping `sent`
-  per permission and refusing a wrong pred). *Cost:* none on the wire; today nothing in the
-  product sends a `PBReplicateWanted`, so the obligation binds Task 14.
+- **The replicate's pred is named by the commit path and checked by the core (representation
+  only).** `proto_db`'s `replicate` takes the pred from the lease (`lease.sent`, else the lease
+  root, which `bind_root` sets to the base); protoBaseST's commit path names it in
+  `PBReplicateWanted permission:root:pred:waiter:`, since a `PBPermission` is immutable. The
+  `replicate` message is the same. Acceptors trust the pred (V2' cannot detect one that lies
+  about the build base), so the core keeps `proto_db`'s rule itself: `PBHolder permits` records,
+  per permission held, the base bound by the base choice and the root last sent, and
+  `dispatchReplicateWanted:` refuses (`PBValidationError`) a pred other than `predFor:in:` (the
+  root last sent, even when its outcome was `#unknown`; else the base bound; else the
+  permission's root; a round that sent nothing does not move it). A record is forgotten when
+  the permission's done report is made; at most `permitsSeenLimit` (64) are kept, the oldest
+  dropped first, and a permission whose record was dropped falls back to its permission's root,
+  so a later root is refused, never sent on a wrong pred. *Cost:* none on the wire; a commit path
+  that holds more than 64 permissions at once sees refusals.
+- **The base choice runs as values on the dispatcher (representation and timing, CC2).**
+  `proto_db`'s `_lease_base` and `recover_root` block a commit thread on the recovery round and
+  on the storage read. protoBaseST's `leaseBase:waiter:in:now:` (`cluster/holder.st`) records a
+  `PBBaseChoice` in the holder and goes on at each answer (`receivedAnswer:in:now:`), at the
+  recovery timer (`requestTimeout`), at the persisted-root read (`PBReadPersisted`, answered by
+  `PBStorageRead`) and at the probe of the base (`PBProbeRoot`, answered by `PBRootProbed`); the
+  waiter is settled with a `PBBaseDecision` (`#ok`, `#stale`, `#unreachable`) or with an error
+  value: the `PBConflictError` of a recovery that no majority of witnesses answered (retryable:
+  the permission ends `none`, as `proto_db`'s raising), the hard guard's `PBCorruptionError`, or
+  the failure of a refound read. This node's own accepted and committed roots and its witness
+  state are the acceptor's last report (`acceptorView`), not the one shared state `proto_db`
+  reads: they can lag one acceptor step. A lagging accepted root can only lower the recovery
+  result (the phase-1 floor and the hard guard still apply); a lagging committed root can give
+  an extra re-commit (`needsCommit` where `proto_db` would not) or miss a `#stale` supersession,
+  whose replicate the acceptors then refuse by the chain rule like any stale one. The suspicion
+  held when the query was sent is cleared on both halves: the dispatcher's at once, the
+  acceptor's by `PBRecovered`, which keeps a higher one raised meanwhile (`proto_db`'s single
+  variable has the same rule: cleared only when at most the one held at the send). *Cost:* the
+  lag only; no safety rule reads a value the acceptor has not made durable.
+- **An unreachable base is probed on shared storage (coverage, R133).** In `proto_db`
+  `_BaseUnreachable` arises only on a local-records tier, whose `commit_records` answers that a
+  base's records are not readable; on shared storage it answers "persisted" and the case never
+  arises (`await_records` is likewise only for local tiers, and protoBaseST has none, so it is
+  not ported). protoBaseST's storage is shared, but a base that must be committed first can still
+  name a SpaceRoot the storage cannot read (a holder that crashed before its write reached the
+  storage, or a lost object): the core probes it (`PBProbeRoot`) and an unreadable one is R133's
+  unreachable base: nothing is sent, the commits get a retryable conflict and the permission ends
+  `unknown`, so its owner abandons the term (O6) instead of issuing the same base again. The
+  probe is modelled in the simulator by `PBSimDisk unreadable:`. *Cost:* one storage probe per
+  base that needs a commit first.
 - **Open item: no back-off after a lost renewal (`proto_db` behaviour, kept).** After a
   renewal lost to a majority that rejects at once (members restarted inside their startup
   grace, or a newer term granted), the owner renews again immediately, one round per RTT,

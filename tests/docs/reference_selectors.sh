@@ -37,6 +37,7 @@ get_root_object set_root_object remove_root_object root_names new_mutable get_mu
 set_mutable remove_mutable mutable_names new_list new_dictionary new_hash_dictionary new_set
 new_counted_set new_object new_database open_database list_databases new_transaction
 snapshot_at with_ has_defined_attr get_at set_at insert_at remove_at append_first append_last
+recover_root
 extend slice head tail has union intersection difference count_of index_names get_index items
 register_atom_class is_active committed_at lock_timeout retries backoff keys values
 asFrozenDict asOf: tr:
