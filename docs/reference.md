@@ -527,7 +527,8 @@ For tests, tools and readers of the format. An application does not need them.
   permit of another incarnation is dropped (`'permits_foreign_dropped'`), one nobody waits for
   handed back with done `'none'`, else held (`'permits_held'`, valid from the request's send); a
   refusal (`'permits_refused'`) or a silence of `leaseDuration` forgets the owner only while the
-  hint names the term asked under.
+  hint names the term asked under. A local waiter queued at the ownership leaves the queue with
+  `PBTimeoutError` at its deadline (`acquireTimeout`).
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
   `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered

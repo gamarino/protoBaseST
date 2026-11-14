@@ -11,11 +11,12 @@
   'none' from the only entry removes it, anything else (an unknown outcome, a done of another
   incarnation, no done by valid + `requestTimeout`, the lease expiring with a permission out)
   abandons the term: suspect, the queue refused 'abandoned', an uncertain release. A waiter has
-  a deadline of `acquireTimeout` and ends in `PBTimeoutError`; a refusal or a silence forgets an
+  a deadline of `acquireTimeout` and ends in `PBTimeoutError`, also while queued at its own
+  node's ownership; a refusal or a silence forgets an
   owner only for the term asked under. `PBOwnership` is now `lease:base:committed:now:` with a
   queue of requests and a pipeline; `PBNodeState` gains `holder`; `PBDoneReport` gains `root`
   (`permission:outcome:root:`). Tested by `tests/unit/sim_permits.st` (scenarios and plants in
-  `tests/unit/_permits.st`); `tests/unit/cluster_proposer_rules.st` now sees the first
+  `tests/unit/_permits.st`) and `tests/unit/cluster_owner_rules.st` (one guard per check); `tests/unit/cluster_proposer_rules.st` now sees the first
   permission issued at once.
 - The proposer's rules (`src/protobase/cluster/proposer.st`): acquiring, owning, renewing,
   releasing and the fairness hints of `proto_db`'s coordinator (`permit`, `_become_owner`,

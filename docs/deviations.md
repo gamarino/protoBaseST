@@ -290,19 +290,30 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
 - **Permission waiters (timing only, `cluster/owner.st`).** `proto_db` runs one thread per
   commit, each asking an owner, backing off and timing out on its own. protoBaseST's waiters
   share the node's acquisition: a waiter refused or met with silence rejoins it, and the next
-  round asks a known owner at once (`proto_db` backs off once first); a waiter queued at the
-  node's own ownership keeps its place until served or the term ends (`proto_db` re-queues it at
-  the back once its deadline passes); a waiter that is not the head of the acquisition times out
-  at the first lost round after its deadline. No safety rule reads these times. *Cost:* a
-  timeout may be reported up to one back-off late.
+  round asks a known owner at once (`proto_db` backs off once first); a waiter that is not the
+  head of the acquisition times out at the end of the first round after its deadline (`proto_db`'s
+  thread, blocked on the node's local lock, at its deadline); a waiter queued at the node's own
+  ownership while a renewal runs times out when the renewal closes. A waiter queued at its own
+  node's ownership otherwise leaves the queue at its deadline with `PBTimeoutError`, as in
+  `proto_db`. No safety rule reads these times. *Cost:* such a timeout may be reported up to
+  one round late.
 - **The done carries the committed root (representation only).** `proto_db`'s `finish` reads the
   committed root from the permission object, which the commit path set; protoBaseST's
   `PBDoneReport` carries it (`permission:outcome:root:`), since a `PBPermission` is immutable. The
   `done` message is the same. *Cost:* none.
-- **Permits naming a proposal (`after`, interoperability).** At DEPTH 0 protoBaseST never sends
-  `after`; a received permit whose `after` is not nil (a DEPTH-1 `proto_db` owner) is held as
-  uncertain, as H2 requires, but its proposal is not tracked. *Cost:* a mixed cluster with a
-  pipelining `proto_db` owner commits correctly but never on a certain base under such permits.
+- **Permits naming a proposal (`after`).** Mixed clusters with `proto_db` nodes are not a goal
+  (design spec section 4), and a protoBaseST cluster never sends `after` (DEPTH 0). A received
+  permit whose `after` is not nil is held as uncertain (H2, tested); its proposal and the gate
+  H5 are not tracked, and that case is untested. *Cost:* none in a protoBaseST cluster.
+- **A certain permit teaches nothing yet (until Task 13).** `proto_db`'s holder records the base
+  of a certain permit as committed (`_observe_committed`); protoBaseST's does not until committed
+  knowledge reaches the acceptor (Task 13). *Cost:* freshness only: a holder that later owns
+  sees its lease root as not known committed, and its first permit is uncertain.
+- **The base issued twice, tested in its stand-in form (until Task 14).** `proto_db` keeps R79/L28
+  (an owner issuing one base twice) as an expected failure at convergence (S4). With the
+  stand-in replication of Task 12 the plant `PlantBaseTwice` is caught earlier, by the
+  simulator checker's sibling-roots rule (two roots of one label and epoch); the strict S4 form
+  is Task 14's. *Cost:* none in the product; the test is weaker until then.
 - **Suspicion stays until committed knowledge (until Task 13).** An abandoned term sets the
   node's `suspectTerm`; `proto_db` clears it when it learns a committed label above it
   (`_learn_label`), which arrives with Task 13. Until then only later leases are reported

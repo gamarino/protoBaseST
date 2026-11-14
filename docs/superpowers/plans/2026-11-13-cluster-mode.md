@@ -808,6 +808,14 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   never count`; `vs mismatch` (a member configured with another voter set never helps a
   quorum); `release-carried certainty is never a commit point` (L8, the four certainty
   schedules of `test_cluster_root_certainty` as fixed schedules).
+- Carried from Task 12 (review m3, m5): port `_learn_label` (`coordinator.py` 1684-1688): a
+  known committed label at or above it clears the dispatcher's `suspectTerm` (set by
+  `_abandon:why:now:effects:`) and the acceptor's `suspectTerm` (set at grant expiry, Task 10);
+  until then every lease after an abandon stays uncertain. Port `_observe_committed` on a
+  certain permit (`_permission_from_owner`: `if reply.root_certain: self._observe_committed(...)`):
+  `receivedPermit:in:now:` hands the permit's root, certain, to the acceptor as committed
+  knowledge (a `PBToAcceptor` learn-committed event), so that a holder that later owns sees its
+  lease root committed (`_own:` reads `acceptorView committed`).
 
 - [ ] **Step 1: write the failing test** `sim_acceptance.st` (`"EXPECT: ok 7"`, one check per
   family).
@@ -846,6 +854,12 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   725-780 (slow timer + delayed message) as a fixed schedule — an acknowledged R' is never
   dropped; I1 unreachable floor abandons the term; M6 `every` waits for the holder that knows the
   commit; refound only when nothing is known; seeds 1-200 under drops and clock skew.
+- Carried from Task 12 (review m2): the strict form of R79/L28 (`proto_db` keeps it as an
+  expected failure). Task 12's family 5 only shows its stand-in form, the checker's sibling-roots
+  rule on two roots of one label and epoch. With the real replication and base choice, a faulty
+  owner issuing one base twice (`PlantBaseTwice`) must let phase 1 rank the uncommitted sibling
+  of a higher epoch above the commit, and the run must then fail S4 at convergence
+  (`converge:`), with the sibling-roots rule disabled for that check.
 
 - [ ] **Step 1: write the failing test** `sim_base_choice.st` (`"EXPECT: ok 9"`: the five
   families, plus one check per plant `PlantRecoveryWaitsAll`, `PlantRecoveryEveryIgnored`,

@@ -61,18 +61,20 @@ Nothing here reads a clock: t is the node's clock (CC3).
     waiter's deadline, the hint forgets the owner only if it still names the term asked under
     and that member (_silenceForgets:, re-review 1 N4). A refused or silent waiter then tries
     to own (proposer.st), and every new round asks a known owner first.
-  acquireTimeout (proposer.st): a waiter of the acquisition whose deadline passed ends in
-    PBTimeoutError after a lost round, a deferral that yields to an owner, or while the acceptor
-    rejoins; the turn's deferral ends at the earliest deadline, and the back-off never lasts past
-    it.
+  acquireTimeout: a waiter queued at this node's own ownership whose deadline passed leaves the
+    queue and ends in PBTimeoutError (_expireQueued:now:effects:, run before every issue and by
+    the ownership loop, whose timer includes the earliest such deadline; proto_db: the thread
+    leaves the queue at its deadline and permit raises, the ownership holding _local). A waiter
+    of the acquisition (proposer.st) whose deadline passed ends in PBTimeoutError after a lost
+    round, a deferral that yields to an owner, or while the acceptor rejoins; the turn's deferral
+    ends at the earliest deadline, and the back-off never lasts past it.
 
 Timing differences from proto_db (no safety rule reads them): proto_db's threads ask an owner
 each on their own; here a waiter refused or silent rejoins the node's acquisition, whose next
-round asks a known owner at once (proto_db backs off once first); a waiter queued at this node's
-own ownership keeps its place until served or the term ends (proto_db's thread re-queues at the
-back past its deadline, and times out once the ownership ends); a waiter that is not the head of
-the acquisition times out at the first lost round after its deadline (proto_db's thread, blocked
-on the local lock, at its deadline).
+round asks a known owner at once (proto_db backs off once first); a waiter that is not the head
+of the acquisition times out at the end of the first round after its deadline (proto_db's
+thread, blocked on the local lock, at its deadline); a waiter queued at the ownership while a
+renewal runs times out when the renewal closes.
 
 Every value here is immutable: built once by its class-side constructor; with: answers a new
 value."
@@ -246,16 +248,49 @@ PBCoordinatorCore >> _deadlineIn: s
 "Every waiter of the acquisition whose deadline passed at t ends in PBTimeoutError (proto_db
  permit, _await_rejoin: ProtoTimeoutError), for aReason."
 PBCoordinatorCore >> _expire: s because: aReason now: t effects: fx
-  | h state late |
-  h := self _holderIn: s.
-  late := s waiters select: [:w | | d | d := h deadlineOf: w. d notNil and: [t >= d]].
+  | late |
+  late := self _late: s waiters in: s now: t.
   late isEmpty ifTrue: [^ s].
-  state := s with: { #waiters -> (s waiters reject: [:w | late includes: w]) }.
-  late do: [:w |
+  ^ self _timeOut: late because: aReason in: (s with: { #waiters -> (s waiters reject: [:w | late includes: w]) }) effects: fx.
+
+"The waiters of someWaiters whose deadline passed at t."
+PBCoordinatorCore >> _late: someWaiters in: s now: t
+  | h |
+  h := self _holderIn: s.
+  ^ someWaiters select: [:w | | d | d := h deadlineOf: w. d notNil and: [t >= d]].
+
+"someWaiters settled with PBTimeoutError, for aReason."
+PBCoordinatorCore >> _timeOut: someWaiters because: aReason in: s effects: fx
+  | state |
+  state := s.
+  someWaiters do: [:w |
     state := self _settle: w with: (PBTimeoutError new messageText: 'Node ' , s config nodeId
       , ' could not obtain a write permission within ' , (s config acquireTimeout // 1000) printString , ' ms ('
       , aReason , ')'; yourself) in: state effects: fx].
   ^ state.
+
+"Every local waiter queued at the ownership whose deadline passed at t leaves the queue and ends
+ in PBTimeoutError (proto_db _permission_from_owner, own branch: the thread leaves the queue at
+ its deadline, and permit raises, since the ownership holds _local)."
+PBCoordinatorCore >> _expireQueued: s now: t effects: fx
+  | own late |
+  own := s ownership.
+  own isNil ifTrue: [^ s].
+  late := self _late: ((own queue collect: [:e | e at: 4]) reject: [:w | w isNil]) in: s now: t.
+  late isEmpty ifTrue: [^ s].
+  ^ self _timeOut: late because: 'its turn at this node''s ownership did not come'
+    in: (s with: { #ownership -> (own with: { #queue -> (own queue reject: [:e | (e at: 4) notNil and: [late includes: (e at: 4)]]) }) })
+    effects: fx.
+
+"The earliest deadline of the local waiters queued at the ownership, nil when none has one."
+PBCoordinatorCore >> _queuedDeadlineIn: s
+  | h deadline |
+  h := self _holderIn: s.
+  deadline := nil.
+  s ownership queue do: [:e | | d |
+    d := (e at: 4) isNil ifTrue: [nil] ifFalse: [h deadlineOf: (e at: 4)].
+    (d notNil and: [deadline isNil or: [d < deadline]]) ifTrue: [deadline := d]].
+  ^ deadline.
 
 "The member the owner hint names, when it is another member of a term above 0 (proto_db
  _permission_from_owner: target is None or target == self or term == 0 asks nobody), else nil."
@@ -428,8 +463,9 @@ PBCoordinatorCore >> _pipelineFull: anOwnership in: s
 
 "Rule O1 (proto_db _dispatch at DEPTH 0): the permission of the head of the queue, when the term
  serves, the pipeline is empty, the R80 drain allows it and a quarter of the belief is left."
-PBCoordinatorCore >> _issue: s now: t effects: fx
-  | own c entry seq valid base certain permit state issued |
+PBCoordinatorCore >> _issue: aState now: t effects: fx
+  | s own c entry seq valid base certain permit state issued |
+  s := self _expireQueued: aState now: t effects: fx.
   own := s ownership.
   (own isNil or: [own queue isEmpty or: [(own isServingAt: t) not or: [self _pipelineFull: own in: s]]]) ifTrue: [^ s].
   c := s config.

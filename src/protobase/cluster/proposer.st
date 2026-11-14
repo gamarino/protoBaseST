@@ -758,11 +758,12 @@ PBCoordinatorCore >> dispatchAcceptorDiscarded: anEvent in: s now: t
  out (O6); the term ends idle only with an empty pipeline (O8); else it renews, or sleeps until
  the next of its deadlines. Nothing while a renewal runs."
 PBCoordinatorCore >> _ownLoop: s now: t effects: fx
-  | own c lease idle release remaining demand waits pair state late |
+  | own c lease idle release remaining demand waits pair state late queued |
   own := s ownership.
   (own isNil or: [own renewal notNil]) ifTrue: [^ s].
   c := s config.
-  state := s.
+  state := self _expireQueued: s now: t effects: fx.
+  own := state ownership.
   late := own pipeline detect: [:e | t > e deadline] ifNone: [nil].
   late notNil ifTrue: [
     state := self _abandon: state why: 'permission ' , late seq printString , ' of ' , late node , ' timed out' now: t effects: fx.
@@ -795,6 +796,8 @@ PBCoordinatorCore >> _ownLoop: s now: t effects: fx
     ifTrue: [waits add: (1000 max: (own pipeline inject: own pipeline first deadline into: [:m :e | m min: e deadline]) - t)]
     ifFalse: [own queue isEmpty ifTrue: [waits add: (1000 max: idle - (t - own lastDemand))]].
   (release notNil and: [own pipeline isEmpty]) ifTrue: [waits add: (1000 max: release - (t - own lastLocal))].
+  queued := self _queuedDeadlineIn: state.
+  queued notNil ifTrue: [waits add: queued - t].
   pair := self _token: #owner in: state.
   state := pair first.
   fx add: (PBTimer after: (waits inject: waits first into: [:m :w | m min: w]) token: pair last event: #owner).

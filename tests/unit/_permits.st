@@ -275,6 +275,33 @@ PermitFamilies class >> lateDone: aRulesClass seeds: someSeeds
         and: [releases notEmpty and: [releases allSatisfy: [:m | (m at: 'certain') not]]]]]) ifFalse: [expiry := expiry + 1]].
   ^ { failed. noAbandon. certain. third. changed. expiry }.
 
+"{ seeds failed. seeds where n0's own commit did not end in PBTimeoutError within 1 ms of its
+ deadline. seeds where it was issued a permission }: a waiter queued at its own node's ownership
+ (proto_db: _permission_from_owner leaves the queue at the deadline and permit raises, the
+ ownership holding _local). acquireTimeout 300 ms; n0 owns; n1 holds a permission for 2 s, so
+ the pipeline is full; n0 then commits 'x'."
+PermitFamilies class >> localTimeout: aRulesClass seeds: someSeeds
+  | failed late issued |
+  failed := 0. late := 0. issued := 0.
+  someSeeds do: [:seed | | rules run sim bad arrival settles start |
+    rules := aRulesClass new.
+    run := self owned: rules seed: seed options: (Dictionary new at: #acquireTimeout put: 300; yourself).
+    sim := run sim.
+    rules hold: 'n1' for: 2000000.
+    bad := LeaseFamilies violates: [
+      sim commit: 'b' at: 'n1'.
+      sim runUntil: [(self sent: 'permit' by: 'n0' in: rules) notEmpty] steps: 100000.
+      start := sim now.
+      sim commit: 'x' at: 'n0'.
+      sim runUntil: [(sim outcomeOf: 'x') ~= #pending or: [sim now > (start + 2000000)]] steps: 100000].
+    bad ifTrue: [failed := failed + 1].
+    arrival := ((self log: rules kind: #arrival at: 'n0') select: [:e | (e at: 4) = 'n0']) last at: 2.
+    settles := self settles: 'x' at: 'n0' in: rules.
+    (bad not and: [settles size = 1 and: [((settles first at: 4) isKindOf: PBTimeoutError)
+        and: [((settles first at: 2) - arrival) between: 300000 and: 301000]]]) ifFalse: [late := late + 1].
+    (settles anySatisfy: [:e | (e at: 4) isKindOf: PBPermission]) ifTrue: [issued := issued + 1]].
+  ^ { failed. late. issued }.
+
 "{ seeds where the minority side did not end in PBTimeoutError without a commit. seeds where
  a refusal of an older term's request forgot the owner learnt since. seeds where silence about
  an older term forgot the owner learnt since. seeds where silence did not forget the owner of
@@ -337,21 +364,29 @@ PermitFamilies class >> asks: aTerm at: anId in: aSim
   state holder isNil ifTrue: [^ #()].
   ^ state holder asks select: [:a | a term = aTerm].
 
-"Seeds where the checker reported a violation: n0 owns; every holder takes 5 ms; n1 asks, and n2
- 1 ms later (R79, L28: an owner issuing one base twice gives two different roots of one label and
- epoch, which S4 then rests on)."
+"{ seeds where the checker reported a violation. seeds where it was the sibling-roots rule (two
+ different roots carry one label and epoch) }: n0 owns; every holder takes 5 ms; n1 asks, and n2
+ 1 ms later. This is the stand-in form of R79/L28: an owner issuing one base twice gives two
+ roots of one label and epoch (the simulator builds each at the base's epoch + 1), which the
+ checker reports at once. proto_db's strict form (phase 1 ranks the uncommitted sibling of a
+ higher epoch above the commit, S4 at convergence) needs the replication and base choice of
+ Tasks 13-14."
 PermitFamilies class >> baseTwice: aRulesClass seeds: someSeeds
-  | failed |
+  | failed siblings |
   failed := 0.
-  someSeeds do: [:seed | | rules run sim t1 |
+  siblings := 0.
+  someSeeds do: [:seed | | rules run sim t1 text |
     rules := aRulesClass new.
     run := self owned: rules seed: seed options: Dictionary new.
     sim := run sim.
     sim ids do: [:id | rules hold: id for: 5000].
-    (LeaseFamilies violates: [
+    text := [
       t1 := sim now + 10000.
       sim commit: 'b' at: 'n1' time: t1.
       sim commit: 'c' at: 'n2' time: t1 + 1000.
       sim runUntil: [(sim outcomeOf: 'b') ~= #pending and: [(sim outcomeOf: 'c') ~= #pending]] steps: 100000.
-      self run: sim until: sim now + 10000]) ifTrue: [failed := failed + 1]].
-  ^ failed.
+      self run: sim until: sim now + 10000.
+      nil] on: Error do: [:e | (e messageText beginsWith: 'PBSim seed') ifTrue: [e messageText] ifFalse: [e pass]].
+    text notNil ifTrue: [failed := failed + 1].
+    (text notNil and: [text includesSubstring: 'two different roots carry label']) ifTrue: [siblings := siblings + 1]].
+  ^ { failed. siblings }.
