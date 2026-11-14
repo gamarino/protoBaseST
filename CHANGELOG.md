@@ -2,6 +2,26 @@
 
 ## 0.2.0 (unreleased)
 
+- The rejoin of an empty acceptor log (`src/protobase/cluster/rejoin.st`, CP 'A node that lost
+  its disk', R51, R78a, L13, L14, L18): `proto_db`'s `_rejoin`, `_rejoin_round`, `_gather`,
+  `_rejoin_decision`, `_complete_rejoin`, `_on_ballot_query` and `force_rejoin` as rule methods
+  of `PBCoordinatorCore` over the values `PBRejoin` (kept in `PBNodeState rejoin`) and
+  `PBRejoinAnswer`. A voter whose log lacks the rejoined marker starts a rejoin from its start
+  step: a plain gather (re-asked up to `gatherAttempts`), then the decision `new` (complete at
+  once, termsSeen left 0), `rootless` or `witnesses`, which take a ballot round above everything
+  reported, counted only from answers that echo the ballot; an unreadable adopted root blocks
+  the rejoin (`rejoinBlockedIn:`) and it retries; the acceptor event `PBRejoinLearnt` appends the
+  promise, the accepted root and the marker, in that order, and sets `rejoinBallot` (closing the
+  L14 interim: the ballot now comes from a real rejoin). A ballot query to an 'ok' acceptor is a
+  durable promise answered echoing the ballot. `PBRejoinWanted` (forceRejoin) completes a rejoin
+  on majority - 1 loaded answers and, on a survivor (`PBForceRejoin`), forgets a committed root
+  above the accepted one. `PBAcceptorState needsConfirmation` is true at every attach, cleared by
+  `PBConfirmed`; `with:` also takes `#rejoinBallot` and `#confirmed`. Tested by
+  `tests/unit/sim_rejoin.st` (the R78a schedule at three wiped-timer rates, the holder's timer
+  running or stalled, with `PlantRejoinByWaiting` caught; first and late first start; L14 with
+  `PlantReplicateBelowBallot` caught; a majority log loss detected by the guard naming
+  forceRejoin; families and plants in `tests/unit/_rejoin.st`) and
+  `tests/unit/cluster_rejoin_rules.st` (one guard per check).
 - The commit round (`src/protobase/cluster/holder.st`, spec 5.6): `proto_db`'s `_run_round`,
   `_permit_round`, `_keep`, `_take_kept` and `_await_retries` as a pure state machine,
   `PBCoordinatorCore >> round:in:now:` over a `PBRoundState` of `PBRoundEntry` commits, with the

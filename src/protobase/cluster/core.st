@@ -880,7 +880,7 @@ PBNodeState >> printOn: aStream
 
 "=== PBAcceptorState ========================================================="
 
-Object subclass: #PBAcceptorState instanceVariableNames: 'config grants accepted committed seqSeen suspectTerm rejoined rejoinBallot tierFailed fenced log loggedPromise'.
+Object subclass: #PBAcceptorState instanceVariableNames: 'config grants accepted committed seqSeen suspectTerm rejoined rejoinBallot tierFailed fenced log loggedPromise confirmed'.
 
 "The acceptor of the node of aConfig started at t over aLoggedRoots (what its acceptor log holds,
  PBAcceptorLog load): the grant state refuses every request until t + startupGrace and honours
@@ -889,7 +889,8 @@ Object subclass: #PBAcceptorState instanceVariableNames: 'config grants accepted
  (proto_db _logged_promise = (tier, promised)), and aLoggedRoots is the log's identity. The
  accepted root is the higher, in root order, of the logged accepted and committed roots: a
  root known committed is accepted knowledge (proto_db _attach_locked observes the committed
- root with accept=True)."
+ root with accept=True). A new acceptor state needs a confirmation (L18, proto_db
+ needs_confirmation is reset at every attach)."
 PBAcceptorState class >> config: aConfig logged: aLoggedRoots now: t
   (aConfig isKindOf: PBClusterConfig) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorState: a config is a PBClusterConfig, not ' , aConfig printString].
@@ -901,6 +902,12 @@ PBAcceptorState class >> config: aConfig logged: aLoggedRoots now: t
     loggedPromise: { aLoggedRoots. aLoggedRoots promise }.
 
 PBAcceptorState >> _setConfig: aConfig grants: aGrantState accepted: anAccepted committed: aCommitted seqSeen: aPair suspectTerm: aTerm rejoined: aBoolean rejoinBallot: aBallot tierFailed: aFailure fenced: aReason log: aLog loggedPromise: aPromise
+  "Runs once, on a fresh instance: not confirmed yet."
+  ^ self _setConfig: aConfig grants: aGrantState accepted: anAccepted committed: aCommitted seqSeen: aPair
+    suspectTerm: aTerm rejoined: aBoolean rejoinBallot: aBallot tierFailed: aFailure fenced: aReason log: aLog
+    loggedPromise: aPromise confirmed: false.
+
+PBAcceptorState >> _setConfig: aConfig grants: aGrantState accepted: anAccepted committed: aCommitted seqSeen: aPair suspectTerm: aTerm rejoined: aBoolean rejoinBallot: aBallot tierFailed: aFailure fenced: aReason log: aLog loggedPromise: aPromise confirmed: isConfirmed
   "Runs once, on a fresh instance."
   config isNil ifFalse: [^ PBUserError signal: 'PBAcceptorState is immutable'].
   config := aConfig.
@@ -915,6 +922,7 @@ PBAcceptorState >> _setConfig: aConfig grants: aGrantState accepted: anAccepted 
   fenced := aReason.
   log := aLog.
   loggedPromise := aPromise.
+  confirmed := isConfirmed.
   ^ self.
 
 PBAcceptorState >> config
@@ -955,6 +963,12 @@ PBAcceptorState >> tierFailed
 PBAcceptorState >> fenced
   ^ fenced.
 
+"Whether this node has still to confirm its storage root (L18, proto_db needs_confirmation):
+ true from the attach (a new acceptor state) until the space starts its confirmation round
+ (PBConfirmed), and again after forceRejoin."
+PBAcceptorState >> needsConfirmation
+  ^ confirmed not.
+
 "The PBLoggedRoots of the log this acceptor is attached to: the identity of that log."
 PBAcceptorState >> log
   ^ log.
@@ -972,20 +986,22 @@ PBAcceptorState >> loggedPromise
 PBAcceptorState >> withGrants: aGrantState suspectTerm: aTerm rejoined: aBoolean tierFailed: aFailure loggedPromise: aPromise
   ^ self class basicNew _setConfig: config grants: aGrantState accepted: accepted committed: committed seqSeen: seqSeen
     suspectTerm: aTerm rejoined: aBoolean rejoinBallot: rejoinBallot tierFailed: aFailure fenced: fenced log: log
-    loggedPromise: { log. aPromise }.
+    loggedPromise: { log. aPromise } confirmed: confirmed.
 
 "This state with the fields someAssociations name (#accepted, #committed, #seqSeen,
- #suspectTerm) replaced by their values; the rest unchanged. Another name is PBValidationError."
+ #suspectTerm, #rejoinBallot, #confirmed) replaced by their values; the rest unchanged. Another
+ name is PBValidationError."
 PBAcceptorState >> with: someAssociations
   | d |
   d := Dictionary new.
-  d at: #accepted put: accepted; at: #committed put: committed; at: #seqSeen put: seqSeen; at: #suspectTerm put: suspectTerm.
+  d at: #accepted put: accepted; at: #committed put: committed; at: #seqSeen put: seqSeen; at: #suspectTerm put: suspectTerm;
+    at: #rejoinBallot put: rejoinBallot; at: #confirmed put: confirmed.
   someAssociations do: [:a |
     (d includesKey: a key) ifFalse: [^ PBValidationError signal: 'PBAcceptorState has no field ' , a key printString].
     d at: a key put: a value].
   ^ self class basicNew _setConfig: config grants: grants accepted: (d at: #accepted) committed: (d at: #committed)
-    seqSeen: (d at: #seqSeen) copy suspectTerm: (d at: #suspectTerm) rejoined: rejoined rejoinBallot: rejoinBallot
-    tierFailed: tierFailed fenced: fenced log: log loggedPromise: loggedPromise.
+    seqSeen: (d at: #seqSeen) copy suspectTerm: (d at: #suspectTerm) rejoined: rejoined rejoinBallot: (d at: #rejoinBallot)
+    tierFailed: tierFailed fenced: fenced log: log loggedPromise: loggedPromise confirmed: (d at: #confirmed).
 
 PBAcceptorState >> printOn: aStream
   aStream nextPutAll: 'PBAcceptorState('; nextPutAll: config nodeId; nextPutAll: ', '; print: grants; nextPut: $).
@@ -1098,9 +1114,6 @@ PBCoordinatorCore >> dispatchReplicateWanted: anEvent in: aNodeState now: t
   ^ self _unchanged: aNodeState.
 
 PBCoordinatorCore >> dispatchDoneReport: anEvent in: aNodeState now: t
-  ^ self _unchanged: aNodeState.
-
-PBCoordinatorCore >> dispatchRejoinWanted: anEvent in: aNodeState now: t
   ^ self _unchanged: aNodeState.
 
 PBCoordinatorCore >> dispatchAcceptorDecided: anEvent in: aNodeState now: t

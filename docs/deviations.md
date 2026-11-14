@@ -402,8 +402,38 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   sent and the commits get a retryable conflict naming the ballot, as `proto_db`'s. Because the
   shell performs the `PBReplicate` later, `dispatchReplicateWanted:` checks again against its
   acceptor's ballot at the send, and then sends nothing (`#none`: the same retryable conflict,
-  with the generic text). Setting the ballot is rejoining (Task 16). *Cost:* none until rejoining
-  exists: a node that never rejoined has ballot 0.
+  with the generic text). The ballot is set when the node's rejoin completes (the acceptor's
+  adoption, `acceptRejoinLearnt:in:now:`, `cluster/rejoin.st`, never lowered); a node that never
+  rejoined by ballot has ballot 0. *Cost:* none: the second check refuses only what the first
+  would have refused had the ballot been known when the round asked.
+- **The rejoin is a state machine (representation and timing, CC2, L13).** `proto_db`'s `_rejoin`
+  is a thread that blocks on its gathers and sleeps `request_timeout` between rounds. protoBaseST's
+  rejoin (`cluster/rejoin.st`) is a `PBRejoin` value in the node state: each gather attempt is a
+  `PBTimer` of `requestTimeout`, each retry another; the rules, the decision, the ballot round,
+  the order of the three appends and what is adopted are `proto_db`'s. No wait makes anything
+  safe: a timer only retries a query (L13). *Cost:* none.
+- **A rejoin probes the root it adopts (protoBaseST addition).** `proto_db`'s `_secure_chain`
+  fetches the chain of the adopted root from a peer for a local tier and is a no-op on a shared
+  storage. protoBaseST has only shared storage (L11), so it fetches nothing, and it probes the
+  adopted root's SpaceRoot (`PBProbeRoot`) before it logs it: an unreadable one leaves the node
+  rejoining, with the reason in `rejoinBlockedIn:` (`proto_db`'s `rejoin_blocked`), and the round
+  is retried. Under the failure model it does not arise (records are synced before a round
+  replicates). *Cost:* one storage probe per rejoin that adopts a root; a damaged storage object
+  keeps a wiped node rejoining instead of serving with an unreadable accepted root.
+- **The witness raises its hint on the dispatcher (timing).** `proto_db`'s `_on_ballot_query`
+  raises the fairness hint to the ballot on the acceptor lane. Here the hint is dispatcher state
+  (CC2): the dispatcher raises it when it hands a ballot query to an acceptor it last saw 'ok'
+  and not fenced (`_queryHint:in:`), before the acceptor promises. *Cost:* none: the hint only
+  steers which term this node asks for next.
+- **forceRejoin before the first attach report (representation).** `proto_db`'s `force_rejoin`
+  on a node not attached yet sets `_rejoin_forced` for the next attach. protoBaseST's
+  `PBRejoinWanted` marks the rejoin forced whenever the acceptor's last report (or none yet) is
+  not rejoined; the space's attach is Task 20's. On a survivor the acceptor forgets a committed
+  root above its accepted root (memory only: such a root was learnt, never logged) and asks for
+  a confirmation again; a committed root already published to the space's readers is not
+  withdrawn here (the space's confirmation round, Task 24, is what re-reads it). *Cost:* none
+  under the failure model; outside it (a majority of logs lost), readers may have seen the lost
+  root until the confirmation round.
 - **The commit round is a state machine (representation and timing, CC2, CC10).** `proto_db`'s
   `_run_round` is a thread that blocks on the permit, the base, each build and the replication,
   and waits on a condition for held retries. protoBaseST's `round:in:now:` is pure: each answer

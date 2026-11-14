@@ -14,7 +14,7 @@
  node suspect: certain false. (7) A release frees the grant and closes the term; one held and
  not certain makes the node suspect. (8) The plain query: ok with promised max(termsSeen,
  accepted label), empty while rejoining, learner, unknown once the tier failed (no roots,
- promised 0); a ballot query is not answered here. (9) acceptStart: marks a learner's or a
+ promised 0); a ballot query is the rejoin's witness rule (cluster_rejoin_rules.st). (9) acceptStart: marks a learner's or a
  lone voter's empty log rejoined (synced), leaves a voter with other voters rejoining, and a
  start delivered again rebuilds nothing (the grace keeps its end). (10) PBSuspect raises the
  suspicion. (11) An append failure fails the tier (the first reason kept). (12) In the
@@ -176,13 +176,14 @@ c that: 'a release frees its grant and closes the term; uncertain or after expir
 s := (core accept: (request value: 'n0' value: 8192 value: 1) in: (stateOf value: 'n1' value: three value: { marker. accepted }) now: g) state.
 pair := [:aState | | m | m := reply value: (core accept: (query value: 'n2' value: 0) in: aState now: g).
   { m at: 'state'. m at: 'promised'. m at: 'certain'. (m at: 'root') notNil. (m at: 'committed') notNil. m at: 'ballot' }].
-c that: 'a plain query answers ok, empty, learner or unknown with promised max(termsSeen, accepted label); a ballot query is not answered'
+c that: 'a plain query answers ok, empty, learner or unknown with promised max(termsSeen, accepted label); a ballot query is the rejoin witness rule'
   is: { pair value: s. pair value: (stateOf value: 'n1' value: three value: { marker. accepted }).
     pair value: (stateOf value: 'n1' value: three value: { accepted }). pair value: (stateOf value: 'n3' value: four value: { marker }).
     pair value: (core accept: (PBAppendFailed reason: 'disk') in: s now: g) state.
-    (core accept: (query value: 'n2' value: 8194) in: s now: g) reply }
+    [:st | { st appends collect: [:a | { a kind. a label }]. (reply value: st) at: 'ballot' }]
+      value: (core accept: (query value: 'n2' value: 8194) in: s now: g) }
   equals: { #('ok' 8192 true true false 0). #('ok' 4097 true true false 0). #('empty' 4097 true true false 0).
-    #('learner' 0 true false false 0). #('unknown' 0 false false false 0). #() }.
+    #('learner' 0 true false false 0). #('unknown' 0 false false false 0). { #(#(#promise 8194)). 8194 } }.
 
 "(9) acceptStart."
 one := PBAcceptorState config: (config value: 'n0' value: #('n0')) logged: (logged value: #()) now: 0.

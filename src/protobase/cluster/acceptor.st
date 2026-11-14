@@ -28,7 +28,7 @@ durable before it performs the reply (R55, R81).
   acceptQuery:in:now: (the plain query of proto_db _route, ballot 0): the answer of state
     'unknown' (tier failed: root, committed nil, certain false, promised 0), 'learner',
     'empty' (rejoining) or 'ok', promised max(termsSeen, accepted label) (coordinator.py:1852,
-    1884). A ballot query is the rejoin's (Task 16, R78a).
+    1884). A ballot query is the rejoin's: rejoin.st's witness rule (R78a).
   acceptStart:in:now: (proto_db _attach_locked after the restore): a log without the rejoined
     marker on a learner or the only voter gets the marker (synced): there is nobody to learn
     from. The startup grace and the restore are PBAcceptorState config:logged:now:'s, once,
@@ -179,7 +179,17 @@ PBCoordinatorCore class >> wireSeconds: someMicros
  dispatcher; here the acceptor answers it from its own state (CC2), after the steps queued
  before it: a timing difference only, and its answer reports durable state only."
 PBCoordinatorCore >> receivedQuery: anEvent in: aNodeState now: t
-  ^ PBStep state: aNodeState effects: { PBToAcceptor event: anEvent }.
+  ^ PBStep state: (self _queryHint: anEvent message in: aNodeState) effects: { PBToAcceptor event: anEvent }.
+
+"proto_db _on_ballot_query raises the hint to the ballot it promises: here the dispatcher does,
+ when its view of the acceptor is a witness ('ok', not fenced) that will promise it."
+PBCoordinatorCore >> _queryHint: aMessage in: s
+  | ballot view h |
+  ballot := aMessage at: 'ballot'.
+  view := s acceptorView.
+  (ballot > 0 and: [view notNil and: [view fenced isNil and: [(self _witnessStateIn: view) = 'ok']]]) ifFalse: [^ s].
+  h := self _hintsIn: s.
+  ^ s with: { #hints -> (h with: { #hint -> (h hint max: ballot) }) }.
 
 "=== PBCoordinatorCore: the acceptor's rules ================================="
 
@@ -296,30 +306,40 @@ PBCoordinatorCore >> _witnessStateIn: s
   s isRejoined ifFalse: [^ 'empty'].
   ^ 'ok'.
 
-"The answer of a plain query (proto_db _route, ballot 0). A ballot query is the rejoin's
- promise (R78a, Task 16): not answered here."
+"The answer of a query (proto_db _route): a plain one (ballot 0) here, a ballot one is the
+ rejoin's witness rule (rejoin.st _ballotQuery:in:now:, R78a)."
 PBCoordinatorCore >> acceptQuery: anEvent in: s now: t
-  | m state known answer |
+  | m |
   m := anEvent message.
-  (m at: 'ballot') = 0 ifFalse: [^ self _unchangedAcceptor: s].
-  state := self _witnessStateIn: s.
-  known := state ~= 'unknown'.
+  (m at: 'ballot') = 0 ifFalse: [^ self _ballotQuery: m in: s now: t].
+  ^ self _plainQuery: m in: s.
+
+"The plain answer to the query aMessage (proto_db _route, ballot 0): what this acceptor's
+ state is worth (_witnessStateIn:), its roots and promise unless 'unknown'."
+PBCoordinatorCore >> _plainQuery: aMessage in: s
+  ^ PBAcceptorStep state: s appends: #()
+    reply: { PBSend to: aMessage from message: (self _answer: aMessage state: (self _witnessStateIn: s) ballot: 0 in: s) }.
+
+"The answer to the query aMessage in aState, echoing aBallot (proto_db _on_answer's fields):
+ 'unknown' reports no root, certain false, promised 0."
+PBCoordinatorCore >> _answer: aMessage state: aState ballot: aBallot in: s
+  | known |
+  known := aState ~= 'unknown'.
   "promised: the lease activity this node knows of and the accepted root's label, not the
    committed root's label nor a floor restored from such labels (R51)."
-  answer := PBClusterMessage type: 'answer' from: s config nodeId fields: {
-    'rid' -> (m at: 'rid'). 'inc' -> (m at: 'inc').
+  ^ PBClusterMessage type: 'answer' from: s config nodeId fields: {
+    'rid' -> (aMessage at: 'rid'). 'inc' -> (aMessage at: 'inc').
     'root' -> (known ifTrue: [PBClusterMessage rootValue: s accepted] ifFalse: [nil]).
     'committed' -> (known ifTrue: [PBClusterMessage rootValue: s committed] ifFalse: [nil]).
     'certain' -> (known and: [s suspectTerm = 0]).
     'promised' -> (known
       ifTrue: [s grants termsSeen max: (s accepted isNil ifTrue: [0] ifFalse: [s accepted label])]
       ifFalse: [0]).
-    'state' -> state. 'ballot' -> 0 }.
-  ^ PBAcceptorStep state: s appends: #() reply: { PBSend to: m from message: answer }.
+    'state' -> aState. 'ballot' -> aBallot }.
 
 "proto_db _attach_locked: a learner, or a voter without another voter, has nothing to learn
  before it serves (D54), so a log without the rejoined marker gets it. A voter with other
- voters rejoins (Task 16). The grace and the restore are not rebuilt (Task 9 ruling)."
+ voters rejoins (rejoin.st). The grace and the restore are not rebuilt (Task 9 ruling)."
 PBCoordinatorCore >> acceptStart: anEvent in: s now: t
   | membership id published |
   "proto_db _attach_locked restores _committed from the log: the node knows it committed from

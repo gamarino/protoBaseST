@@ -15,8 +15,9 @@
  decided after the stale-term rule, proto_db's renew_stale) makes family 7 fail. (10) Started
  over empty logs (proto_db start then _attach_locked): a one-member cluster's node and the
  learner of four members each take one start step and log the rejoined marker, synced, and
- serve; the three voters of four log nothing, take one start step each and refuse requests as
- rejoining (their rejoin is Task 16's)."
+ serve; the three voters of four, partitioned so that none hears every other voter, log
+ nothing, take one start step each, answer rejoin queries 'empty' and refuse requests as
+ rejoining (their rejoin itself: sim_rejoin.st)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_sim'.
@@ -231,17 +232,21 @@ family at: 9 put: [:seed :rules |
   run value: solo.
   t := PBSim seed: seed ids: four rules: rules options: Dictionary new.
   t faults: faults.
-  run value: t.
+  "No voter can hear every other voter, so none completes its rejoin (sim_rejoin.st): each
+   stays rejoining, answering n0's and n1's rejoin queries 'empty'."
+  t partition: #(#('n0' 'n1') #('n2' 'n3')).
+  "Their rejoins retry every requestTimeout: the run is bounded in time, not by an empty queue."
+  t runUntil: [t now >= g] steps: 5000.
   t inject: (request value: t value: 'n0' value: 4096 value: 7) to: 'n1' at: g.
   t inject: (request value: t value: 'n2' value: 4098 value: 9) to: 'n3' at: g + 100000.
-  run value: t.
+  t runUntil: [t now >= (g + 300000)] steps: 5000.
   ({ starts value: solo value: 'n0'. entries value: solo value: 'n0'. (solo diskOf: 'n0') syncedSize.
      (solo nodeAt: 'n0') acceptor isRejoined.
      four collect: [:id | starts value: t value: id]. four collect: [:id | entries value: t value: id].
      (t diskOf: 'n3') syncedSize. four collect: [:id | (t nodeAt: id) acceptor isRejoined].
      reasons value: rules value: 'n0' value: 'n1'. reasons value: rules value: 'n2' value: 'n3' }
     = { 1. #(4). 1. true. #(1 1 1 1). #(#() #() #() #(4)). 1. #(false false false true).
-        #('rejoining') asSet. #('learner') asSet })
+        #('rejoining' 'empty') asSet. #('learner') asSet })
     ifTrue: [nil] ifFalse: ['seed ' , seed printString , ': ' , (entries value: t value: 'n3') printString , ' '
       , (four collect: [:id | starts value: t value: id]) printString]].
 

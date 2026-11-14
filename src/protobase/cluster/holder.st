@@ -83,7 +83,7 @@ no proposal). Nothing here reads a clock: t is the node's clock (CC3).
     retryWait), until every held caller (PBRoundEntry caller) has queued its retry. PBReportDone
     ends each permission with its outcome.
 
-Not here: the rejoin ballot itself (set by rejoining, Task 16), bounded replication, copies and
+Not here: the rejoin ballot itself (rejoin.st sets it when a rejoin completes), bounded replication, copies and
 the gate (Phase D).
 
 Every value here is immutable: built once by its class-side constructor; with: answers a new
@@ -841,7 +841,7 @@ PBCoordinatorCore >> receivedAnswer: anEvent in: s now: t
     m := anEvent message.
     (self _isStale: m in: s)
       ifTrue: [fx add: (PBCount stat: 'stale_replies'). s]
-      ifFalse: [
+      ifFalse: [(self rejoinAnswered: m in: s now: t effects: fx) ifNil: [
         choice := (self _choicesIn: s) detect: [:c | c phase = #recovery and: [c rid = (m at: 'rid')]] ifNone: [nil].
         choice isNil
           ifTrue: [s]
@@ -851,7 +851,7 @@ PBCoordinatorCore >> receivedAnswer: anEvent in: s now: t
             state := self _replaceChoice: choice in: s.
             (self recoveryDone: choice in: state)
               ifTrue: [self _recovered: choice in: state now: t effects: fx]
-              ifFalse: [state]]]].
+              ifFalse: [state]]]]].
 
 "The timer of a recovery round: requestTimeout passed, it ends with the answers it has."
 PBCoordinatorCore >> _recoveryTimer: anEvent in: s now: t effects: fx
@@ -1020,6 +1020,7 @@ PBCoordinatorCore >> _probe: aChoice in: s effects: fx
 "The shell probed a base that needs a commit first: readable, it is the base; else #unreachable."
 PBCoordinatorCore >> dispatchRootProbed: anEvent in: s now: t
   ^ self _step: [:fx | | choice state |
+    (self rejoinProbed: anEvent in: s now: t effects: fx) ifNil: [
     choice := self _choiceWithToken: anEvent token phases: #(#probe) in: s.
     choice isNil
       ifTrue: [s]
@@ -1027,7 +1028,7 @@ PBCoordinatorCore >> dispatchRootProbed: anEvent in: s now: t
         state := self _removeChoice: choice in: s.
         anEvent isReadable
           ifTrue: [self _decide: (PBBaseDecision base: choice current needsCommit: true outcome: #ok) for: choice in: state effects: fx]
-          ifFalse: [self _unreachable: choice in: state effects: fx]]].
+          ifFalse: [self _unreachable: choice in: state effects: fx]]]].
 
 "R133 (proto_db _BaseUnreachable, re-review 3 of 8.3n, I1): a base that must be committed first and
  cannot be read is #unreachable: nothing is sent, the commits get a retryable conflict and the

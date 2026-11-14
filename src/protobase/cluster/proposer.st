@@ -749,10 +749,12 @@ PBCoordinatorCore >> receivedReject: anEvent in: s now: t
 "The acceptor's step is durable: its state is the dispatcher's view (CC2), the label it learnt
  answers a suspicion of the dispatcher's (holder.st _learnt:in:), and its vote, if any, is this
  node's own reply: a grant or reject of its own request or renewal, or the ack of its own
- replication (holder.st _ownAck:in:now:effects:)."
+ replication (holder.st _ownAck:in:now:effects:). A view still rejoining starts the rejoin, a
+ rejoined one ends it (rejoin.st rejoinCheck:now:effects:)."
 PBCoordinatorCore >> dispatchAcceptorDecided: anEvent in: s now: t
   ^ self _step: [:fx | | state vote |
     state := self _learnt: anEvent step learnt in: (s with: { #acceptorView -> anEvent step state }).
+    state := self rejoinCheck: state now: t effects: fx.
     vote := anEvent step vote.
     vote notNil ifTrue: [
       state := vote type = 'ack'
@@ -762,7 +764,8 @@ PBCoordinatorCore >> dispatchAcceptorDecided: anEvent in: s now: t
 
 "The acceptor could not make the promise of this node's own grant durable (proto_db _promise
  failing): the own vote is the refusal 'promise_failed' (highest the term, remaining 0). An own
- acceptance that could not be made durable ends its replication unknown (holder.st)."
+ acceptance that could not be made durable ends its replication unknown (holder.st); the
+ rejoin's adoption that could not be made durable blocks the rejoin for good (rejoin.st)."
 PBCoordinatorCore >> dispatchAcceptorDiscarded: anEvent in: s now: t
   ^ self _step: [:fx | | vote |
     vote := anEvent step vote.
@@ -774,7 +777,7 @@ PBCoordinatorCore >> dispatchAcceptorDiscarded: anEvent in: s now: t
       ifFalse: [
         (vote notNil and: [vote type = 'ack'])
           ifTrue: [self _ownAckFailed: vote in: s now: t effects: fx]
-          ifFalse: [s]]].
+          ifFalse: [self rejoinDiscarded: anEvent step in: s]]].
 
 "=== PBCoordinatorCore: owning ==============================================="
 
@@ -1025,4 +1028,7 @@ PBCoordinatorCore >> dispatchTimerFired: anEvent in: s now: t
                   ifFalse: [
                     anEvent event = #recovery
                       ifTrue: [self _recoveryTimer: anEvent in: s now: t effects: fx]
-                      ifFalse: [s]]]]]].
+                      ifFalse: [
+                        anEvent event = #rejoin
+                          ifTrue: [self rejoinTimer: anEvent in: s now: t effects: fx]
+                          ifFalse: [s]]]]]]].

@@ -33,7 +33,7 @@
  acceptor reported the commit, and the pred is that root. (29) A round that sent nothing
  (#none, under sendReserve) does not move the pred. (30) This node's own accepted root is in the
  recovery result. (31) An answer to another recovery round (its rid) is ignored. (32) L14 at the
- send: a term below the acceptor's rejoin ballot sends nothing."
+ send: a term below the acceptor's rejoin ballot (set by its rejoin's adoption) sends nothing."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_base'.
@@ -336,8 +336,13 @@ c that: 'an answer to another recovery round is ignored ({ settled }, answers re
 "(32) L14 at the send"
 p := perm value: r1 value: true.
 s := (decision value: core value: (stateOf value: k) value: p value: #() value: nil value: true) at: 3.
-"s with its acceptor's rejoin ballot set to n (set by rejoining, Task 16: written here directly)."
-st := [:n | | v | v := s acceptorView with: #(). v instVarNamed: 'rejoinBallot' put: n. s with: { #acceptorView -> v }].
+"s with its acceptor's rejoin ballot n: the state a rejoin that confirmed ballot n leaves (the
+ acceptor's adoption, rejoin.st acceptRejoinLearnt:in:now:, of r1 accepted and committed, on a
+ log without the rejoined marker)."
+st := [:n | | v |
+  v := (core accept: (PBRejoinLearnt learnt: n seen: 0 accepted: r1 committed: r1 ballot: n)
+    in: (viewOf value: { acc value: r1. count value: r1 }) now: 1000) state.
+  s with: { #acceptorView -> v }].
 c that: 'L14 at the send: a term below the acceptor''s rejoin ballot sends nothing (#none); equal to it, sent'
   is: { (core dispatch: (PBReplicateWanted permission: p root: rT pred: r1 waiter: #x) in: (st value: T + 1) now: 1000) effects
       collect: [:f | f class name].

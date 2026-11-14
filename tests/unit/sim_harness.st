@@ -28,6 +28,11 @@ Import from: '_sim'.
 
 PBCoordinatorCore subclass: #EchoRules.
 
+"The harness rules test the simulator, not the rejoin (sim_rejoin.st): an acceptor report of an
+ empty log starts none."
+EchoRules >> rejoinCheck: s now: t effects: fx
+  ^ s.
+
 EchoRules >> _others: s
   ^ s config membership ids reject: [:id | id = s config nodeId].
 
@@ -75,6 +80,11 @@ ReplyLostRules >> acceptStart: anEvent in: s now: t
 "Two acceptor steps per start: a synced promise, then one that appends nothing and replies."
 PBCoordinatorCore subclass: #LaneRules.
 
+"The harness rules test the simulator, not the rejoin (sim_rejoin.st): an acceptor report of an
+ empty log starts none."
+LaneRules >> rejoinCheck: s now: t effects: fx
+  ^ s.
+
 LaneRules >> dispatchStartNode: anEvent in: s now: t
   ^ PBStep state: s effects: { PBToAcceptor event: anEvent.
     PBToAcceptor event: (PBReceived message: (PBClusterMessage type: 'want' from: s config nodeId fields: #())) }.
@@ -95,6 +105,11 @@ NoteEvent >> acceptWith: aCore in: anAcceptorState now: t
   ^ aCore acceptNote: self in: anAcceptorState now: t.
 
 PBCoordinatorCore subclass: #NoteRules.
+
+"The harness rules test the simulator, not the rejoin (sim_rejoin.st): an acceptor report of an
+ empty log starts none."
+NoteRules >> rejoinCheck: s now: t effects: fx
+  ^ s.
 
 NoteRules >> dispatchStartNode: anEvent in: s now: t
   ^ PBStep state: s effects: { PBToAcceptor event: NoteEvent new }.

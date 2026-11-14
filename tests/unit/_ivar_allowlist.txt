@@ -85,7 +85,7 @@ PBStep>>_setState:effects:
 PBAcceptorStep>>_setState:appends:reply:vote:learnt:
 PBLearnCommitted>>_setRoot:accept:logged:
 PBNodeState>>_setConfig:inc:acceptorView:hints:proposer:ownership:waiters:suspectTerm:fenced:rejoin:nextRid:holder:
-PBAcceptorState>>_setConfig:grants:accepted:committed:seqSeen:suspectTerm:rejoined:rejoinBallot:tierFailed:fenced:log:loggedPromise:
+PBAcceptorState>>_setConfig:grants:accepted:committed:seqSeen:suspectTerm:rejoined:rejoinBallot:tierFailed:fenced:log:loggedPromise:confirmed:
 PBCount>>_setStat:
 PBSuspect>>_setTerm:
 PBAppendFailed>>_setReason:
@@ -111,3 +111,4 @@ PBBuild>>_setEntry:base:stamp:
 PBReplicate>>_setPermission:root:pred:
 PBReportDone>>_setPermission:outcome:root:
 PBDropKept>>_setCaller:
+PBRejoinLearnt>>_setLearnt:seen:accepted:committed:ballot:

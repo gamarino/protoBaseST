@@ -440,7 +440,8 @@ For tests, tools and readers of the format. An application does not need them.
   grant state starts its grace at that time and restores the logged promise; the accepted root
   is the higher in root order of the logged accepted and committed roots) answers `config`,
   `grants`, `accepted`, `committed`, `seqSeen`, `suspectTerm`, `isRejoined`, `rejoinBallot`,
-  `tierFailed` and `fenced`, and `with:` (`#accepted`, `#committed`, `#seqSeen`, `#suspectTerm`).
+  `tierFailed`, `fenced` and `needsConfirmation` (true for a new acceptor state, L18), and `with:`
+  (`#accepted`, `#committed`, `#seqSeen`, `#suspectTerm`, `#rejoinBallot`, `#confirmed`).
   Nothing in the core reads a clock; constructors refuse ill-typed
   arguments (`PBValidationError`). The deterministic simulator that drives it in the tests is
   test support (`tests/unit/_sim.st`), not part of the module.
@@ -461,7 +462,8 @@ For tests, tools and readers of the format. An application does not need them.
   when fenced; frees the grant, closes the term, suspect for an uncertain held release) and
   `acceptQuery:in:now:` (a plain query's answer: the state `'ok'`, `'empty'`, `'learner'` or
   `'unknown'`, promised max(`termsSeen`, accepted label), 0 when unknown; answered by the
-  acceptor, see [deviations.md](deviations.md#cluster-mode)). `acceptStart:in:now:` appends the
+  acceptor, see [deviations.md](deviations.md#cluster-mode); a ballot query is the rejoin's
+  witness rule, below). `acceptStart:in:now:` appends the
   rejoined marker for a learner or a lone voter whose log lacks it, rebuilds neither the grace
   nor the restore, and publishes the restored committed root (`PBPublishCommitted`).
   `acceptReplicate:in:now:` (CP 1.7 step 8, `proto_db` `_apply_replicate` over a shared storage)
@@ -648,6 +650,39 @@ For tests, tools and readers of the format. An application does not need them.
   every held caller has a commit queued (with none held, as many commits as the round's
   conflicts), or a `PBDropKept caller:` says an awaited one is not coming, the next round runs
   under it; its `PBHoldExpired` ends the wait (what is queued runs, else the permission ends).
+- **Rejoin rules** (`cluster/rejoin.st`, CP 'A node that lost its disk', R51, R78a, L13, L14,
+  L18): `proto_db`'s `_rejoin`, `_rejoin_round`, `_gather`, `_rejoin_decision`,
+  `_complete_rejoin`, `_on_ballot_query` and `force_rejoin` as rule methods of
+  `PBCoordinatorCore` over `PBRejoin` (`idle`; `phase`: `#idle`, `#gather`, `#probe`, `#adopt`,
+  `#retry` or `#failed`; `isForced`, `blocked`, `ballot`, `attempt`, `answers`, `pending`), kept
+  in `PBNodeState rejoin`, and `PBRejoinAnswer from:` (`state`, `accepted`, `committed`,
+  `promised`, `ballot`, `highestLabel`). An acceptor report still rejoining starts the rejoin
+  (`rejoinCheck:now:effects:`, from `dispatchAcceptorDecided:in:now:`) unless its tier failed or
+  the node is fenced. A round (`rejoinRound:now:effects:`) is a plain gather: a `'query'` to
+  every other voter, re-asked up to `gatherAttempts` times, each attempt a new rid and a
+  `requestTimeout` timer (`rejoinAnswered:in:now:effects:`, `rejoinTimer:in:now:effects:`).
+  `rejoinDecision:forced:in:` answers `{ ids. how }` or nil: `#new` (every other voter loaded,
+  none with an accepted root or a promised term), `#rootless`, `#witnesses` (at least
+  `rejoinAnswersNeeded:forced:`, min(V - 1, V - majority + 1) `'ok'` answers) or `#forced`
+  (majority - 1 loaded). `#witnesses` and `#rootless` take the ballot round: a gather with
+  `rejoinBallotFor:in:` (above every promise and label reported, the highest term seen and the
+  hint, at this node's rank), whose `'ok'` answers count only when they echo it, and that must
+  decide `#witnesses` or `#rootless` again (counted `'rejoin_ballots'`), else the rejoin is
+  blocked and retried. The adopted root is probed (`rejoinProbed:in:now:effects:`; unreadable:
+  blocked, retried); then the acceptor takes `PBRejoinLearnt learnt:seen:accepted:committed:ballot:`
+  (`acceptRejoinLearnt:in:now:`): it appends the promise of learnt, the accepted root and the
+  rejoined marker, in that order, synced, and adopts them (`restore:seen:`), the committed root
+  as committed knowledge and the ballot as `rejoinBallot`; its step coming back ends the rejoin
+  (counted `'rejoins'`, the hint raised), its append failing fails it (`rejoinDiscarded:in:`).
+  `rejoinBlockedIn:` is why a rejoining node cannot complete (`proto_db`'s `rejoin_blocked`).
+  The witness: a ballot query to an `'ok'` acceptor promises the ballot (`promise:`, suspect for
+  a grant it ends), appends it synced when above `loggedPromise`, and answers echoing it; any
+  other state answers as a plain query; a fenced node answers none. `PBRejoinWanted`
+  (`dispatchRejoinWanted:in:now:`, the operator's forceRejoin) forces a rejoin not completed
+  yet and hands the acceptor `PBForceRejoin` (`acceptForceRejoin:in:now:`): a survivor forgets a
+  committed root above its accepted root and needs a confirmation again. `PBConfirmed`
+  (`dispatchConfirmed:in:now:`, `acceptConfirmed:in:now:`) clears `needsConfirmation`. See
+  [deviations.md](deviations.md#cluster-mode).
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
   `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered
