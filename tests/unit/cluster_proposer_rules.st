@@ -5,10 +5,10 @@
  (1) ballotFor: is the ballot of the node's rank above the highest term its acceptor saw, the
  hint and the labels of its accepted and committed roots. (2) microsFromWire: is the exact
  inverse of wireSeconds:. (3) A permit wanted waits while the acceptor has not reported or
- rejoins, then opens an attempt: its own request to its own acceptor, the request with vs to the
+ rejoins (a timer at the waiter's deadline, acquireTimeout), then opens an attempt: its own request to its own acceptor, the request with vs to the
  other voters, a timer of requestTimeout. (4) The own vote travels in the acceptor step's vote;
  a majority with it wins: an ownership whose lease ends at the send + the belief, its waiter
- queued, counted acquired and ownerships. (5) A reply of another incarnation is counted
+ issued the first permission at once (owner.st, O1), counted acquired and ownerships. (5) A reply of another incarnation is counted
  stale_replies and never recorded; a learner's reply is never recorded; every reply raises the
  hint. (6) A discarded own grant is the refusal promise_failed. (7) A majority of replies to an
  undecided attempt waits max(minStraggle, straggleFactor x elapsed) for the rest (R39). (8) A
@@ -28,8 +28,9 @@
  win: a lost round, a cancel, no ownership (L5). (17) Likewise a renewal: counted
  renewal_failures, the lease not extended. (18) The plant PlantLateWin (the win check t <
  validUntil dropped) fails checks 16 and 17. (19) A waiter that arrives while the lease has
- lapsed during a renewal joins the queue of the renewed lease (proto_db permit loops back to the
- owner)."
+ lapsed during a renewal joins the queue of the renewed lease and is issued its permission
+ (proto_db permit loops back to the owner). The seams that end the demand clear the queue and the
+ pipeline of issued permissions (owner.st)."
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -91,10 +92,10 @@ c that: 'microsFromWire: inverts wireSeconds: (to 2^51; near 2^52 one off, a doc
 pair := step value: (PBPermitWanted waiter: #w1) value: (PBNodeState config: (config value: 'n1' value: three value: Dictionary new) inc: 5) value: t0.
 att := step value: (PBPermitWanted waiter: #w1) value: (ready value: 'n1') value: t0.
 c that: 'a permit wanted waits for the acceptor''s report, then opens an attempt'
-  is: { pair effects. pair state proposer phase. pair state waiters.
+  is: { eff value: pair. (pair effects collect: [:e | e after]). pair state proposer phase. pair state waiters.
     eff value: att. sends value: att. ((att effects at: 2) event message at: 'term').
     ((att effects at: 3) message at: 'vs') = vs. (att effects last) after. att state proposer phase. att state proposer attempt term }
-  equals: { #(). #rejoin. #(#w1). #(#PBCount #PBToAcceptor #PBSend #PBSend #PBTimer). #(#('n0' 'request') #('n2' 'request')).
+  equals: { #(#PBTimer). #(30000000). #rejoin. #(#w1). #(#PBCount #PBToAcceptor #PBSend #PBSend #PBTimer). #(#('n0' 'request') #('n2' 'request')).
     1. true. 250000. #attempt. 1 }.
 
 "(4) The own vote in the step, then a peer's grant: the win."
@@ -104,8 +105,8 @@ pair := step value: (PBAcceptorDecided step: own) value: s value: t0 + 3000.
 s := (step value: (granted value: 'n2' value: 1 value: 1 value: 5) value: pair state value: t0 + 4000) state.
 c that: 'the own vote travels in the step; a majority wins an ownership valid from the send'
   is: { own reply. own vote type. pair state proposer attempt replies. s proposer. s ownership term.
-    s ownership lease validUntil. s ownership queue. s waiters. s hints ownerNode }
-  equals: { #(). 'grant'. 1. nil. 1. t0 + 666666. #(#w1). #(). 'n1' }.
+    s ownership lease validUntil. s ownership queue. s ownership pipeline collect: [:e | { e node. e seq }]. s waiters. s hints ownerNode }
+  equals: { #(). 'grant'. 1. nil. 1. t0 + 666666. #(). #(#('n1' 1)). #(). 'n1' }.
 
 "(5) Stale and learner replies."
 s := (step value: (PBPermitWanted waiter: #w1) value: (stateIn value: 'n0' value: four value: { marker } value: Dictionary new) value: t0) state.
@@ -157,7 +158,7 @@ c that: 'a cancel ends only the busy extension; a held release ends the back-off
 "(9-10) Owning: renewal at half the belief, idle end."
 s := (step value: (PBAcceptorDecided step: own) value: att state value: t0 + 3000) state.
 s := (step value: (granted value: 'n2' value: 1 value: 1 value: 5) value: s value: t0 + 4000) state.
-s := s with: { #ownership -> (s ownership with: { #queue -> #() }) }.
+s := s with: { #ownership -> (s ownership with: { #queue -> #(). #pipeline -> #() }) }.
 owned := s.
 pair := step value: (PBTimerFired token: s ownership token event: #owner) value: s value: t0 + 333334.
 renewing := pair state.
@@ -179,7 +180,7 @@ s := (step value: (msg value: 'want' value: 'n2' value: #()) value: sim state va
 s := (step value: (msg value: 'request' value: 'n0' value: { 'term' -> 8192. 'rid' -> 3. 'inc' -> 1. 'vs' -> vs }) value: s value: t0 + 410000) state.
 s := (step value: (PBPermitWanted waiter: #w2) value: s value: t0 + 420000) state.
 "The waiter waits for the next term (a test seam: out of the queue, among the waiters)."
-s := s with: { #ownership -> (s ownership with: { #queue -> #() }). #waiters -> #(#w2) }.
+s := s with: { #ownership -> (s ownership with: { #queue -> #(). #pipeline -> #() }). #waiters -> #(#w2) }.
 pair := step value: (PBTimerFired token: s ownership token event: #owner) value: s value: t0 + 920001.
 c that: 'a release names the member waiting longest, says more, and its releaser defers, saying want'
   is: { (pair effects select: [:e | e isKindOf: PBSend]) collect: [:e | { e to. e message type. (e message type = 'release') ifTrue: [e message at: 'next'] ifFalse: [nil].
@@ -209,7 +210,7 @@ s := (step value: (PBPermitWanted waiter: #w1) value: (stateIn value: 'n1' value
 s := (step value: (PBAcceptorDecided step: (core accept: (PBReceived message: (PBClusterMessage type: 'request' from: 'n1' fields: {
   'term' -> 1. 'rid' -> 1. 'inc' -> 5. 'vs' -> vs })) in: (view value: 'n1' value: three value: { marker }) now: t0)) value: s value: t0) state.
 s := (step value: (granted value: 'n0' value: 1 value: 1 value: 5) value: s value: t0) state.
-s := s with: { #ownership -> (s ownership with: { #queue -> #() }) }.
+s := s with: { #ownership -> (s ownership with: { #queue -> #(). #pipeline -> #() }) }.
 pair := step value: (PBTimerFired token: s ownership token event: #owner) value: s value: t0 + 100001.
 c that: 'ownerIdleRelease ends a term without local demand'
   is: { (s ownership token) notNil. pair state ownership. (pair effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat] }
@@ -259,14 +260,14 @@ pair := step value: (PBPermitWanted waiter: #w1) value: s value: t0.
 s := (step value: (PBAcceptorDecided step: (core accept: (pair effects at: 2) event
   in: (view value: 'n1' value: three value: { marker }) now: t0)) value: pair state value: t0 + 1000) state.
 s := (step value: (granted value: 'n2' value: 1 value: 1 value: 5) value: s value: t0 + 2000) state.
-s := s with: { #ownership -> (s ownership with: { #queue -> #() }) }.
+s := s with: { #ownership -> (s ownership with: { #queue -> #(). #pipeline -> #() }) }.
 s := (step value: (PBTimerFired token: s ownership token event: #owner) value: s value: t0 + 333334) state.
 lapsed := (step value: (PBPermitWanted waiter: #w2) value: s value: t0 + 700000) state.
 pair := step value: (granted value: 'n0' value: 1 value: lapsed ownership renewal rid value: 5) value: lapsed value: t0 + 800000.
 pair := step value: (granted value: 'n2' value: 1 value: lapsed ownership renewal rid value: 5) value: pair state value: t0 + 800000.
 c that: 'a waiter that arrived while the lease lapsed joins the renewed lease''s queue'
   is: { s ownership renewal notNil. lapsed waiters. lapsed ownership queue. pair state ownership lease validUntil.
-    pair state ownership queue. pair state waiters. pair state ownership lastDemand }
-  equals: { true. #(#w2). #(). t0 + 1000000. #(#w2). #(). t0 + 800000 }.
+    pair state ownership queue. pair state ownership pipeline collect: [:e | e seq]. pair state waiters. pair state ownership lastDemand }
+  equals: { true. #(#w2). #(). t0 + 1000000. #(). #(2). #(). t0 + 800000 }.
 
 c report displayNl.

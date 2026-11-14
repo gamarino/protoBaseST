@@ -2,9 +2,10 @@
  that prove each family can fail (a helper: the runner never runs files whose name starts with
  _). Test support, not product (CC13): each plant is a subclass overriding one rule method.
 
-  LeaseRules            the product rules, with a stand-in for owner.st's permissions (Task 12):
-                        an owner settles each queued local waiter at once with #leased, so its
-                        demand ends and terms change hands; it records every request sent.
+  LeaseRules            the product rules, with owner.st's permissions replaced: an owner settles
+                        each queued local waiter at once with #leased, so its demand ends and
+                        terms change hands, and no waiter asks an owner for a permission (every
+                        one acquires); it records every request sent.
   PlantMinorityWins     an attempt not lost counts as won at its close (one owner per term
                         under drop/dup/reorder: two valid leases at once).
   PlantSharedBallot     every proposer asks the ballots of rank 0 (two proposers never share
@@ -43,13 +44,20 @@ LeaseRules >> dispatch: anEvent in: aNodeState now: t
         requests add: { e message from. e message at: 'term' }]]].
   ^ step.
 
-"A stand-in for owner.st (Task 12): every local waiter queued at the ownership is served."
+"In place of owner.st's permissions (the lease families need terms to change hands): every local
+ waiter queued at the ownership is served at once with #leased."
 LeaseRules >> _issue: s now: t effects: fx
-  | own |
+  | own state |
   own := s ownership.
   own queue isEmpty ifTrue: [^ s].
-  own queue do: [:w | fx add: (PBSettle waiter: w outcome: #leased)].
-  ^ s with: { #ownership -> (own with: { #queue -> #() }) }.
+  state := s.
+  own queue do: [:e | (e at: 4) notNil ifTrue: [state := self _settle: (e at: 4) with: #leased in: state effects: fx]].
+  ^ state with: { #ownership -> (state ownership with: { #queue -> #() }) }.
+
+"Nobody asks an owner for a permission (owner.st's holder side): every waiter acquires, as the
+ lease families of Task 11 measure."
+LeaseRules >> _ownerToAsk: s
+  ^ nil.
 
 LeaseRules subclass: #PlantMinorityWins.
 

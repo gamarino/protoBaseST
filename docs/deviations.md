@@ -287,6 +287,26 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   release to its acceptor (`receivedRelease:in:now:`, `cluster/proposer.st`). The acceptor still
   takes the release before any request of the same step, and no grant rule reads the hints.
   *Cost:* a back-off or a deferral may end one acceptor-lane latency earlier.
+- **Permission waiters (timing only, `cluster/owner.st`).** `proto_db` runs one thread per
+  commit, each asking an owner, backing off and timing out on its own. protoBaseST's waiters
+  share the node's acquisition: a waiter refused or met with silence rejoins it, and the next
+  round asks a known owner at once (`proto_db` backs off once first); a waiter queued at the
+  node's own ownership keeps its place until served or the term ends (`proto_db` re-queues it at
+  the back once its deadline passes); a waiter that is not the head of the acquisition times out
+  at the first lost round after its deadline. No safety rule reads these times. *Cost:* a
+  timeout may be reported up to one back-off late.
+- **The done carries the committed root (representation only).** `proto_db`'s `finish` reads the
+  committed root from the permission object, which the commit path set; protoBaseST's
+  `PBDoneReport` carries it (`permission:outcome:root:`), since a `PBPermission` is immutable. The
+  `done` message is the same. *Cost:* none.
+- **Permits naming a proposal (`after`, interoperability).** At DEPTH 0 protoBaseST never sends
+  `after`; a received permit whose `after` is not nil (a DEPTH-1 `proto_db` owner) is held as
+  uncertain, as H2 requires, but its proposal is not tracked. *Cost:* a mixed cluster with a
+  pipelining `proto_db` owner commits correctly but never on a certain base under such permits.
+- **Suspicion stays until committed knowledge (until Task 13).** An abandoned term sets the
+  node's `suspectTerm`; `proto_db` clears it when it learns a committed label above it
+  (`_learn_label`), which arrives with Task 13. Until then only later leases are reported
+  uncertain. *Cost:* uncertain releases, and so a phase-1 recovery, after an abandon.
 
 ## Errors and messages
 

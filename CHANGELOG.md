@@ -2,6 +2,21 @@
 
 ## 0.2.0 (unreleased)
 
+- The owner's rules O1-O8 at DEPTH 0 and abandoned terms (`src/protobase/cluster/owner.st`):
+  `proto_db`'s `_dispatch`, `_on_permit_req`, `_permit_outcome`, `_abandon`, `_refuse_queue`,
+  `_on_done_owner` and `finish`, and the holder side of a permit request
+  (`_permission_from_owner`, `_on_permit_reply`), as rule methods of `PBCoordinatorCore` over the
+  immutable values `PBIssued`, `PBPermitAsk` and `PBHolder`. An owner issues one permission at a
+  time in arrival order, its own commits among the members'; a committed done retires it, a
+  'none' from the only entry removes it, anything else (an unknown outcome, a done of another
+  incarnation, no done by valid + `requestTimeout`, the lease expiring with a permission out)
+  abandons the term: suspect, the queue refused 'abandoned', an uncertain release. A waiter has
+  a deadline of `acquireTimeout` and ends in `PBTimeoutError`; a refusal or a silence forgets an
+  owner only for the term asked under. `PBOwnership` is now `lease:base:committed:now:` with a
+  queue of requests and a pipeline; `PBNodeState` gains `holder`; `PBDoneReport` gains `root`
+  (`permission:outcome:root:`). Tested by `tests/unit/sim_permits.st` (scenarios and plants in
+  `tests/unit/_permits.st`); `tests/unit/cluster_proposer_rules.st` now sees the first
+  permission issued at once.
 - The proposer's rules (`src/protobase/cluster/proposer.st`): acquiring, owning, renewing,
   releasing and the fairness hints of `proto_db`'s coordinator (`permit`, `_become_owner`,
   `_open_attempt`, `_on_reply`, `_close_attempt`, `_back_off`, `_own_loop_body`, `_renew`,

@@ -473,10 +473,12 @@ For tests, tools and readers of the format. An application does not need them.
   `seed:`), `PBProposer` (`phase`: `#rejoin`, `#turn`, `#attempt`, `#backoff`, `#busy` or
   `#spread`; `attempt`, `failures`, `marks`, `token`, `wakeAt`, `startedAt`, `straggling`,
   `backoffEnd`, `busyEnd`, `waited`; `start`) and `PBOwnership` (`lease`, `term`, `queue`,
-  `lastDemand`, `lastLocal`, `renewal`, `renewStarted`, `straggling`, `token`;
-  `lease:queue:now:`), each answering `with:` (an Array of field -> value associations).
-  `dispatchPermitWanted:in:now:` queues the waiter at a valid ownership, else among the
-  waiters, and starts an acquisition: it waits while the acceptor rejoins, defers to the member a
+  `lastDemand`, `lastLocal`, `renewal`, `renewStarted`, `straggling`, `token`, `seq`, `pipeline`,
+  `base`, `isCommitted`, `isAbandoned`, `isServingAt:`, `entryOf:seq:`;
+  `lease:base:committed:now:`), each answering `with:` (an Array of field -> value associations).
+  `dispatchPermitWanted:in:now:` records the waiter's deadline (`acquireTimeout`), queues it at a
+  serving ownership, else asks the owner the hint names (`cluster/owner.st`), else adds it to the
+  waiters and starts an acquisition: it waits while the acceptor rejoins, defers to the member a
   release named until `turnSilence` (`'deferrals'`, `'deferral_timeouts'`, a `'want'` broadcast when
   nobody queues it), then opens an attempt (`'attempts'`, `'turns_taken'`): its own request to its
   own acceptor (`PBToAcceptor`, unless a learner) and the request to the other voters, with the
@@ -498,9 +500,34 @@ For tests, tools and readers of the format. An application does not need them.
   certain), naming the member seen waiting longest (`'turns_named'`) and saying `'more'` while local
   waiters remain. `receivedRequest:in:now:`, `receivedRenew:in:now:` (the owner hint),
   `receivedRelease:in:now:` and `receivedWant:in:now:` keep the hints;
-  `dispatchTimerFired:in:now:` ignores a timer whose token is not the current one. The owner's
-  permissions are Task 12's (`_issue:now:effects:` issues none here). `PBCoordinatorCore class
-  >> drawRange` is the Park-Miller range of the seeded draws.
+  `dispatchTimerFired:in:now:` ignores a timer whose token is not the current one. A waiter whose
+  deadline passed ends in `PBTimeoutError` after a lost round, a deferral that yields to a known
+  owner, or while the acceptor rejoins; the back-off never lasts past the earliest deadline.
+  `PBCoordinatorCore class >> drawRange` is the Park-Miller range of the seeded draws.
+- **Owner rules** (`cluster/owner.st`): rules O1-O8 at DEPTH 0 and abandoned terms (`proto_db`'s
+  `_dispatch`, `_on_permit_req`, `_permit_outcome`, `_abandon`, `_refuse_queue`, `_on_done_owner`,
+  'finish') and the holder side of a permit request (`_permission_from_owner`,
+  `_on_permit_reply`), over the immutable values `PBIssued` (`node`, `seq`, `inc`, `rid`,
+  `deadline`, `permit`, `base`), `PBPermitAsk` (`waiter`, `rid`, `sentAt`, `term`, `target`,
+  `request`, `retryAt`, `endAt`, `token`) and `PBHolder` (`asks`, `deadlines`, `seen`,
+  `deadlineOf:`, `askWithRid:`; `empty`, `permitsSeenLimit`, 64), kept in `PBNodeState holder`.
+  An owner issues one permission at a time (`'permits_issued'`): to a local waiter a
+  `PBPermission` settled at once, to a member a `'permit'` valid for the lease's remaining time,
+  certain when its base is known committed; its deadline is valid + `requestTimeout`. A
+  `'committed'` done retires it and makes its root the base (O3), a `'none'` from the only entry
+  removes it (O5), anything else, a done of another incarnation, a missed deadline or a lease
+  expiring with a permission out abandons the term (`'terms_abandoned'`, `PBSuspect` to the
+  acceptor, `'permit_no'` `'abandoned'` to the queue, an uncertain release). A retried request gets
+  the same permit again (O7); the term ends idle only with an empty pipeline (O8); a request for
+  a term the node does not serve gets `'permit_no'` (`'not_owner'` or `'ending'`, term the highest
+  seen). `receivedDone:in:now:` counts a wake-up and progress, sequences the owner's outcome and
+  forwards the done to the acceptor; `dispatchDoneReport:in:now:` broadcasts the holder's done
+  (`PBDoneReport permission:outcome:root:`). A holder asks with `'permit_req'`
+  (`'permit_requests_sent'`, retried every `requestTimeout`, `'permit_requests_retried'`); a
+  permit of another incarnation is dropped (`'permits_foreign_dropped'`), one nobody waits for
+  handed back with done `'none'`, else held (`'permits_held'`, valid from the request's send); a
+  refusal (`'permits_refused'`) or a silence of `leaseDuration` forgets the owner only while the
+  hint names the term asked under.
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
   `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered
@@ -580,6 +607,6 @@ For tests, tools and readers of the format. An application does not need them.
 ## The module and its files
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
-`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
+`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
 `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar` and `uuid`.

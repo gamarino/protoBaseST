@@ -49,7 +49,7 @@ applyTo:).
                  epoch the base's + 1, a fresh offset; its pred link is the base) and
                  replicates it (PBReplicateWanted). The replication's outcome is the commit's
                  (#committed: #acknowledged, #unknown, #none; anything else: #failed) and the
-                 node gets it as a PBDoneReport.
+                 node gets it as a PBDoneReport (with the built root when #committed).
   PBPublishCommitted sets the root the node's readers see; PBPublishAcceptor and PBFence are
                  recorded by their trace lines; PBCount adds one to the node's counter
                  (countOf:at:).
@@ -857,7 +857,8 @@ PBSim >> _settle: aWaiter outcome: anOutcome at: aNode
       ifFalse: [#failed]).
     ^ self _schedule: #dispatch node: aNode
       payload: (PBDoneReport permission: permission
-        outcome: ((PBDoneReport outcomes includes: anOutcome) ifTrue: [anOutcome] ifFalse: [#none])) at: now].
+        outcome: ((PBDoneReport outcomes includes: anOutcome) ifTrue: [anOutcome] ifFalse: [#none])
+        root: (anOutcome = #committed ifTrue: [commitRoots at: token] ifFalse: [nil])) at: now].
   ^ Error signal: 'PBSim: settled an unknown waiter ' , aWaiter printString.
 
 PBSim >> _end: aToken as: aStatus

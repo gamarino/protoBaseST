@@ -149,6 +149,11 @@ CommitRules >> dispatchReplicateWanted: anEvent in: s now: t
   ^ PBStep state: s effects: { PBSettle waiter: anEvent waiter outcome: self outcome. PBPublishCommitted root: anEvent root }
     , ((self _others: s) collect: [:id | PBSend to: id message: (self _done: anEvent in: s)]).
 
+"The done travels in dispatchReplicateWanted:in:now:; owner.st's done broadcast would teach the
+ members a root the plants below must keep from them."
+CommitRules >> dispatchDoneReport: anEvent in: s now: t
+  ^ PBStep state: s effects: #().
+
 CommitRules >> dispatchReceived: anEvent in: s now: t
   anEvent message type = 'done' ifFalse: [^ super dispatchReceived: anEvent in: s now: t].
   ^ PBStep state: s effects: { PBPublishCommitted root: (PBClusterMessage rootFrom: (anEvent message at: 'root')) }.

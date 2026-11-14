@@ -11,8 +11,8 @@ clock, a socket or a file, sends, logs or waits.
     token: event: (a PBTimer came due), PBStartNode, PBStopNode, PBPermitWanted waiter: (a
     local commit wants a write permission), PBBaseWanted permission: waiter: (the base of a
     commit under a permission), PBReplicateWanted permission: root: waiter: (replicate a built
-    root), PBDoneReport permission: outcome: (the outcome a holder reports, #committed,
-    #unknown or #none: proto_db's done outcomes), PBRejoinWanted (the operator's forceRejoin)
+    root), PBDoneReport permission: outcome: root: (the outcome a holder reports, #committed,
+    #unknown or #none: proto_db's done outcomes, and the root it committed), PBRejoinWanted (the operator's forceRejoin)
     PBAcceptorDecided step: (an acceptor step whose appends are durable, handed back to the
     dispatcher: the reply to this node's own vote and acceptance travels this way, CC1) and
     PBAcceptorDiscarded step: (an acceptor step whose append failed, discarded by the shell:
@@ -45,7 +45,8 @@ clock, a socket or a file, sends, logs or waits.
   PBNodeState      the dispatcher's state of one node: config, inc (this incarnation, as
                    proto_db's random _inc), acceptorView (the acceptor state last handed back,
                    for hints only: CC2), hints, proposer, ownership, waiters, suspectTerm,
-                   fenced, rejoin, nextRid (proto_db _rids starts at 1); with: answers a copy
+                   fenced, rejoin, nextRid (proto_db _rids starts at 1), holder (the
+                   holder side of permissions, owner.st); with: answers a copy
                    with some of them replaced.
   PBAcceptorState  the acceptor's state of one node (spec 5.3): config, grants (a PBGrantState:
                    promises are durable acceptor state, CC2), accepted and committed (a
@@ -297,25 +298,34 @@ PBReplicateWanted >> printOn: aStream
 
 "--- PBDoneReport ---"
 
-PBCoreEvent subclass: #PBDoneReport instanceVariableNames: 'permission outcome'.
+PBCoreEvent subclass: #PBDoneReport instanceVariableNames: 'permission outcome root'.
 
 "The holder of aPermission reports its outcome: #committed, #unknown or #none (proto_db done's
  outcome strings)."
 PBDoneReport class >> outcomes
   ^ #(#committed #unknown #none).
 
+"As permission:outcome:root:, with no root."
 PBDoneReport class >> permission: aPermission outcome: anOutcome
+  ^ self permission: aPermission outcome: anOutcome root: nil.
+
+"The holder of aPermission reports anOutcome and aRoot (a PBLabeledRoot or nil), the root it
+ committed: proto_db finish(permission) reads permission.committed, which the caller set."
+PBDoneReport class >> permission: aPermission outcome: anOutcome root: aRoot
   (aPermission isKindOf: PBPermission) ifFalse: [
     ^ PBValidationError signal: 'PBDoneReport: a permission is a PBPermission, not ' , aPermission printString].
   (self outcomes includes: anOutcome) ifFalse: [
     ^ PBValidationError signal: 'PBDoneReport: an outcome is #committed, #unknown or #none, not ' , anOutcome printString].
-  ^ self basicNew _setPermission: aPermission outcome: anOutcome.
+  (aRoot isNil or: [aRoot isClassObject not and: [aRoot class == PBLabeledRoot]]) ifFalse: [
+    ^ PBValidationError signal: 'PBDoneReport: a root is a PBLabeledRoot or nil, not ' , aRoot printString].
+  ^ self basicNew _setPermission: aPermission outcome: anOutcome root: aRoot.
 
-PBDoneReport >> _setPermission: aPermission outcome: anOutcome
+PBDoneReport >> _setPermission: aPermission outcome: anOutcome root: aRoot
   "Runs once, on a fresh instance."
   permission isNil ifFalse: [^ PBUserError signal: 'PBDoneReport is immutable'].
   permission := aPermission.
   outcome := anOutcome.
+  root := aRoot.
   ^ self.
 
 PBDoneReport >> permission
@@ -323,6 +333,10 @@ PBDoneReport >> permission
 
 PBDoneReport >> outcome
   ^ outcome.
+
+"The root committed under the permission (a PBLabeledRoot), or nil."
+PBDoneReport >> root
+  ^ root.
 
 PBDoneReport >> dispatchWith: aCore in: aNodeState now: t
   ^ aCore dispatchDoneReport: self in: aNodeState now: t.
@@ -734,7 +748,7 @@ PBAcceptorStep >> vote
 
 "=== PBNodeState ============================================================="
 
-Object subclass: #PBNodeState instanceVariableNames: 'config inc acceptorView hints proposer ownership waiters suspectTerm fenced rejoin nextRid'.
+Object subclass: #PBNodeState instanceVariableNames: 'config inc acceptorView hints proposer ownership waiters suspectTerm fenced rejoin nextRid holder'.
 
 "The state of the node of aConfig (a PBClusterConfig) at the start of its incarnation anInteger
  (>= 0, below 2^62 as proto_db's _inc): no acceptor view, hint, attempt, ownership, waiter or
@@ -745,9 +759,9 @@ PBNodeState class >> config: aConfig inc: anInteger
   (anInteger isInteger and: [anInteger >= 0 and: [anInteger < (2 raisedTo: 62)]]) ifFalse: [
     ^ PBValidationError signal: 'PBNodeState: an incarnation is an Integer in [0, 2^62), not ' , anInteger printString].
   ^ self basicNew _setConfig: aConfig inc: anInteger acceptorView: nil hints: nil proposer: nil ownership: nil
-    waiters: #() suspectTerm: 0 fenced: nil rejoin: nil nextRid: 1.
+    waiters: #() suspectTerm: 0 fenced: nil rejoin: nil nextRid: 1 holder: nil.
 
-PBNodeState >> _setConfig: aConfig inc: anInteger acceptorView: aView hints: someHints proposer: aProposer ownership: anOwnership waiters: anArray suspectTerm: aTerm fenced: aReason rejoin: aRejoin nextRid: aRid
+PBNodeState >> _setConfig: aConfig inc: anInteger acceptorView: aView hints: someHints proposer: aProposer ownership: anOwnership waiters: anArray suspectTerm: aTerm fenced: aReason rejoin: aRejoin nextRid: aRid holder: aHolder
   "Runs once, on a fresh instance."
   config isNil ifFalse: [^ PBUserError signal: 'PBNodeState is immutable'].
   config := aConfig.
@@ -761,6 +775,7 @@ PBNodeState >> _setConfig: aConfig inc: anInteger acceptorView: aView hints: som
   fenced := aReason.
   rejoin := aRejoin.
   nextRid := aRid.
+  holder := aHolder.
   ^ self.
 
 PBNodeState >> config
@@ -805,19 +820,24 @@ PBNodeState >> rejoin
 PBNodeState >> nextRid
   ^ nextRid.
 
+"The holder side of permissions (owner.st PBHolder: the permit requests out, the waiters'
+ deadlines, the permits seen), nil until used."
+PBNodeState >> holder
+  ^ holder.
+
 "This state with anOwnership (nil: none)."
 PBNodeState >> withOwnership: anOwnership
   ^ self with: { #ownership -> anOwnership }.
 
 "This state with the fields someAssociations name (#acceptorView, #hints, #proposer,
- #ownership, #waiters, #suspectTerm, #fenced, #rejoin, #nextRid) replaced by their values; the
+ #ownership, #waiters, #suspectTerm, #fenced, #rejoin, #nextRid, #holder) replaced by their values; the
  rest unchanged. Another name, or waiters that are not an Array, is PBValidationError."
 PBNodeState >> with: someAssociations
   | d |
   d := Dictionary new.
   d at: #acceptorView put: acceptorView; at: #hints put: hints; at: #proposer put: proposer;
     at: #ownership put: ownership; at: #waiters put: waiters; at: #suspectTerm put: suspectTerm;
-    at: #fenced put: fenced; at: #rejoin put: rejoin; at: #nextRid put: nextRid.
+    at: #fenced put: fenced; at: #rejoin put: rejoin; at: #nextRid put: nextRid; at: #holder put: holder.
   someAssociations do: [:a |
     (d includesKey: a key) ifFalse: [^ PBValidationError signal: 'PBNodeState has no field ' , a key printString].
     d at: a key put: a value].
@@ -825,7 +845,8 @@ PBNodeState >> with: someAssociations
     ^ PBValidationError signal: 'PBNodeState: the waiters are an Array, not ' , (d at: #waiters) printString].
   ^ self class basicNew _setConfig: config inc: inc acceptorView: (d at: #acceptorView) hints: (d at: #hints)
     proposer: (d at: #proposer) ownership: (d at: #ownership) waiters: (d at: #waiters) copy
-    suspectTerm: (d at: #suspectTerm) fenced: (d at: #fenced) rejoin: (d at: #rejoin) nextRid: (d at: #nextRid).
+    suspectTerm: (d at: #suspectTerm) fenced: (d at: #fenced) rejoin: (d at: #rejoin) nextRid: (d at: #nextRid)
+    holder: (d at: #holder).
 
 PBNodeState >> printOn: aStream
   aStream nextPutAll: 'PBNodeState('; nextPutAll: config nodeId; nextPutAll: ', inc '; print: inc; nextPut: $).

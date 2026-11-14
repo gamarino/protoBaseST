@@ -251,23 +251,30 @@ PBProposer >> printOn: aStream
 
 "=== PBOwnership ============================================================="
 
-"This node's ownership of a won term (proto_db _Ownership, at DEPTH 0 and before Task 12's
- permissions): the lease, the queue of local waiters, the last demand and the last local demand,
- the running renewal (a PBAttempt, or nil) with its start and straggling, and the token of its
- timer."
+"This node's ownership of a won term (proto_db _Ownership at DEPTH 0): the lease; the FIFO of
+ permission requests, each { node. rid. inc. waiter } (waiter: the local waiter of one of this
+ node's own commits, nil for a member's permit_req); the last demand and the last local demand;
+ the running renewal (a PBAttempt, or nil) with its start and straggling; the token of its timer;
+ the last permission number issued (seq), the pipeline of issued permissions not yet retired
+ (PBIssued, oldest first: at most one at DEPTH 0), the base (the newest root it knows committed
+ in its term, nil when unknown) and whether that base is known committed; and whether the term
+ was abandoned (owner.st)."
 PBProposerValue subclass: #PBOwnership.
 
 PBOwnership class >> fieldNames
-  ^ #(#lease #queue #lastDemand #lastLocal #renewal #renewStarted #straggling #token).
+  ^ #(#lease #queue #lastDemand #lastLocal #renewal #renewStarted #straggling #token #seq #pipeline #base #committed
+      #abandoned).
 
-"The ownership of aLease from t, with the local waiters anArray queued (their demand is now)."
-PBOwnership class >> lease: aLease queue: anArray now: t
+"The ownership of aLease from t, with no request queued, aRoot as its base (the lease's phase-1
+ value, a PBLabeledRoot or nil: unknown), known committed when isCommitted."
+PBOwnership class >> lease: aLease base: aRoot committed: isCommitted now: t
   (aLease isKindOf: PBLease) ifFalse: [
     ^ PBValidationError signal: 'PBOwnership: a lease is a PBLease, not ' , aLease printString].
-  anArray isArray ifFalse: [^ PBValidationError signal: 'PBOwnership: the queue is an Array'].
   ^ self _from: (Dictionary new
-    at: #lease put: aLease; at: #queue put: anArray copy; at: #lastDemand put: t; at: #lastLocal put: t;
-    at: #renewal put: nil; at: #renewStarted put: 0; at: #straggling put: false; at: #token put: nil; yourself).
+    at: #lease put: aLease; at: #queue put: #(); at: #lastDemand put: t; at: #lastLocal put: t;
+    at: #renewal put: nil; at: #renewStarted put: 0; at: #straggling put: false; at: #token put: nil;
+    at: #seq put: 0; at: #pipeline put: #(); at: #base put: aRoot; at: #committed put: isCommitted;
+    at: #abandoned put: false; yourself).
 
 PBOwnership >> lease
   ^ self _at: #lease.
@@ -275,9 +282,9 @@ PBOwnership >> lease
 PBOwnership >> term
   ^ self lease term.
 
-"The local waiters not yet given a permission, a fresh Array."
+"The permission requests not yet issued, { node. rid. inc. waiter or nil } each, a fresh Array."
 PBOwnership >> queue
-  ^ (self _at: #queue) copy.
+  ^ (self _at: #queue) collect: [:e | e copy].
 
 PBOwnership >> lastDemand
   ^ self _at: #lastDemand.
@@ -298,6 +305,33 @@ PBOwnership >> token
   | token |
   token := self _at: #token.
   ^ token isNil ifTrue: [nil] ifFalse: [token copy].
+
+"The number of the last permission issued in the term, 0 before the first."
+PBOwnership >> seq
+  ^ self _at: #seq.
+
+"The issued permissions not yet retired (PBIssued), oldest first, a fresh Array."
+PBOwnership >> pipeline
+  ^ (self _at: #pipeline) copy.
+
+"The newest root the owner knows committed in its term (a PBLabeledRoot), nil when unknown."
+PBOwnership >> base
+  ^ self _at: #base.
+
+"Whether the base is known committed (a permit on it is then certain)."
+PBOwnership >> isCommitted
+  ^ self _at: #committed.
+
+PBOwnership >> isAbandoned
+  ^ self _at: #abandoned.
+
+"Whether permissions may be issued at t (proto_db serving): not abandoned, the lease valid."
+PBOwnership >> isServingAt: t
+  ^ self isAbandoned not and: [self lease isValidAt: t].
+
+"The issued permission aSeq of aNode in the pipeline, or nil (proto_db entry)."
+PBOwnership >> entryOf: aNode seq: aSeq
+  ^ (self _at: #pipeline) detect: [:e | e node = aNode and: [e seq = aSeq]] ifNone: [nil].
 
 PBOwnership >> printOn: aStream
   aStream nextPutAll: 'PBOwnership('; print: self lease; nextPut: $).
@@ -394,20 +428,21 @@ PBCoordinatorCore >> _leaseEnd: anAttempt in: s now: t
 
 "=== PBCoordinatorCore: the local demand ====================================="
 
-"A local commit wants a permission (proto_db permit): queued at this node's ownership while its
- lease is valid, else among the waiters, the first of which starts an acquisition."
+"A local commit wants a permission (proto_db permit, then _permission_from_owner): its deadline
+ is acquireTimeout from now; it is queued at this node's ownership while that one serves, else
+ it asks the owner the hint names (owner.st _ask:), else it joins the waiters, the first of
+ which starts an acquisition."
 PBCoordinatorCore >> dispatchPermitWanted: anEvent in: s now: t
-  ^ self _step: [:fx | | own |
-    own := s ownership.
-    (own notNil and: [own lease isValidAt: t])
-      ifTrue: [
-        self _ownLoop: (self _issue: (s with: { #ownership -> (own with: { #queue -> (own queue copyWith: anEvent waiter).
-          #lastDemand -> t. #lastLocal -> t }) }) now: t effects: fx) now: t effects: fx]
-      ifFalse: [self _wantLease: (s with: { #waiters -> (s waiters copyWith: anEvent waiter) }) now: t effects: fx]].
-
-"Issues the permissions of the ownership's queue under rule O1 (owner.st, Task 12): none here."
-PBCoordinatorCore >> _issue: s now: t effects: fx
-  ^ s.
+  ^ self _step: [:fx | | own state |
+    state := self _expect: anEvent waiter in: s now: t.
+    own := state ownership.
+    (own notNil and: [own isServingAt: t])
+      ifTrue: [self _ownLoop: (self _issue: (self _queueLocal: { anEvent waiter } in: state now: t) now: t effects: fx)
+        now: t effects: fx]
+      ifFalse: [
+        (self _ownerToAsk: state) notNil
+          ifTrue: [self _ask: anEvent waiter in: state now: t effects: fx]
+          ifFalse: [self _wantLease: (state with: { #waiters -> (state waiters copyWith: anEvent waiter) }) now: t effects: fx]]].
 
 "Starts an acquisition when waiters wait, no term is owned and none runs."
 PBCoordinatorCore >> _wantLease: s now: t effects: fx
@@ -417,19 +452,37 @@ PBCoordinatorCore >> _wantLease: s now: t effects: fx
 "=== PBCoordinatorCore: one round of the acquisition ========================="
 
 "proto_db permit's loop: not while the acceptor rejoins (_await_rejoin; nor before it reported),
- then the turn (the wake marks taken first, as permit takes them before _become_owner)."
+ then the permission of the owner the hint names (_permission_from_owner: the waiters ask it,
+ owner.st, and the acquisition ends), then the turn (the wake marks taken first, as permit
+ takes them before _become_owner)."
 PBCoordinatorCore >> _round: s now: t effects: fx
   | p view |
   p := s proposer.
   view := s acceptorView.
-  (view isNil or: [view isRejoined not]) ifTrue: [
-    ^ s with: { #proposer -> (p with: { #phase -> #rejoin. #token -> nil. #wakeAt -> nil }) }].
+  (view isNil or: [view isRejoined not]) ifTrue: [^ self _awaitRejoin: s now: t effects: fx].
+  (self _ownerToAsk: s) notNil ifTrue: [^ self _askAll: (s with: { #proposer -> nil }) now: t effects: fx].
   ^ self _awaitTurn: (s with: { #proposer -> (p with: { #marks -> (self _hintsIn: s) marks. #waited -> false }) })
     now: t effects: fx.
 
-"proto_db _await_turn: defer while a release named another member's turn."
+"proto_db _await_rejoin: the waiters wait while the acceptor rejoins (nor before it reported); one
+ whose deadline passed meanwhile ends in PBTimeoutError. Woken by the acceptor's report, or by a
+ timer at the earliest deadline."
+PBCoordinatorCore >> _awaitRejoin: s now: t effects: fx
+  | state deadline p |
+  state := self _expire: s because: 'its acceptor log was empty' now: t effects: fx.
+  state waiters isEmpty ifTrue: [^ state with: { #proposer -> nil }].
+  p := state proposer with: { #phase -> #rejoin }.
+  deadline := self _deadlineIn: state.
+  deadline isNil ifTrue: [^ state with: { #proposer -> (p with: { #token -> nil. #wakeAt -> nil }) }].
+  ^ self _sleep: (state with: { #proposer -> p }) until: deadline now: t effects: fx.
+
+"proto_db _await_turn with yield_to_owner (a permission request): defer while a release named
+ another member's turn; once another member is known to own a term, stop deferring and back off
+ (proto_db _become_owner answers (False, 0)), so that the next round asks that owner; at the
+ earliest waiter's deadline, attempt (the attempt that follows reports the timeout)."
 PBCoordinatorCore >> _awaitTurn: s now: t effects: fx
-  | h p turn end |
+  | h p turn end deadline |
+  (self _ownerToAsk: s) notNil ifTrue: [^ self _retry: s busy: 0 now: t effects: fx].
   h := self _hintsIn: s.
   p := s proposer.
   turn := h turn.
@@ -440,6 +493,9 @@ PBCoordinatorCore >> _awaitTurn: s now: t effects: fx
   t >= end ifTrue: [
     fx add: (PBCount stat: 'deferral_timeouts').
     ^ self _openAttempt: (s with: { #hints -> (h with: { #turn -> nil }) }) now: t effects: fx].
+  deadline := self _deadlineIn: s.
+  (deadline notNil and: [t >= deadline]) ifTrue: [^ self _openAttempt: s now: t effects: fx].
+  deadline notNil ifTrue: [end := end min: deadline].
   p waited ifFalse: [
     fx add: (PBCount stat: 'deferrals').
     p := p with: { #waited -> true }].
@@ -518,14 +574,19 @@ PBCoordinatorCore >> _closeAttempt: s now: t effects: fx
     state := state with: { #hints -> (h with: { #hint -> (h hint max: label) }) }].
   ^ self _lose: state now: t effects: fx.
 
-"The won attempt makes this node the owner of its term (proto_db _become_owner)."
+"The won attempt makes this node the owner of its term (proto_db _become_owner): the base is
+ the lease's root, known committed when the lease is certain and this node knows that very root
+ committed; its waiters are queued (proto_db's threads loop back to _permission_from_owner)."
 PBCoordinatorCore >> _own: anAttempt root: aRoot certain: isCertain in: s now: t effects: fx
-  | lease state |
+  | lease view committed state |
   lease := PBLease term: anAttempt term validUntil: (self _leaseEnd: anAttempt in: s now: t) root: aRoot certain: isCertain.
+  view := s acceptorView.
+  committed := isCertain and: [aRoot notNil and: [view notNil and: [view committed notNil and: [view committed key = aRoot key]]]].
   fx add: (PBCount stat: 'acquired'); add: (PBCount stat: 'ownerships').
   state := s with: { #proposer -> nil. #waiters -> #().
-    #ownership -> (PBOwnership lease: lease queue: s waiters now: t).
+    #ownership -> (PBOwnership lease: lease base: aRoot committed: committed now: t).
     #hints -> ((self _hintsIn: s) with: { #ownerTerm -> anAttempt term. #ownerNode -> s config nodeId }) }.
+  state := self _queueLocal: s waiters in: state now: t.
   ^ self _ownLoop: (self _issue: state now: t effects: fx) now: t effects: fx.
 
 "A lost round: the cancel of its term, then the back-off (proto_db _close_attempt, _back_off)."
@@ -537,17 +598,32 @@ PBCoordinatorCore >> _lose: s now: t effects: fx
   "Its own grant of the term ends (proto_db PeerGrants.on_release of its own vote)."
   fx add: (PBToAcceptor event: (PBReceived message: cancel)).
   self _broadcast: cancel in: s effects: fx.
-  ^ self _backOff: s busy: (a busyRemaining min: s config leaseDuration) now: t effects: fx.
+  ^ self _retry: s busy: (a busyRemaining min: s config leaseDuration) now: t effects: fx.
 
-"proto_db _back_off: the jittered exponential delay, extended to the refusals' busy remaining."
+"After a lost round, or a deferral that yielded to a known owner (proto_db permit): every waiter
+ whose deadline passed ends in PBTimeoutError; the rest back off, or the acquisition ends when
+ none is left."
+PBCoordinatorCore >> _retry: s busy: someMicros now: t effects: fx
+  | state |
+  state := self _expire: s because: 'no majority granted it' now: t effects: fx.
+  state waiters isEmpty ifTrue: [^ state with: { #proposer -> nil }].
+  ^ self _backOff: state busy: someMicros now: t effects: fx.
+
+"proto_db _back_off: the jittered exponential delay, extended to the refusals' busy remaining,
+ never past the earliest waiter's deadline (remaining)."
 PBCoordinatorCore >> _backOff: s busy: someMicros now: t effects: fx
-  | p pair base delay |
+  | p pair base delay busy deadline |
   p := s proposer.
   pair := self _draw: (self _hintsIn: s).
   base := s config backoffHigh min: s config backoffLow * (2 raisedTo: (p failures min: 30)).
   delay := base * (self class drawRange + pair first) // (2 * self class drawRange).
+  busy := delay max: someMicros.
+  deadline := self _deadlineIn: s.
+  deadline notNil ifTrue: [
+    delay := delay min: (0 max: deadline - t).
+    busy := busy min: (0 max: deadline - t)].
   ^ self _backingOff: (s with: { #hints -> pair last. #proposer -> (p with: { #phase -> #backoff. #attempt -> nil.
-      #backoffEnd -> (t + delay). #busyEnd -> (t + (delay max: someMicros)) }) }) now: t effects: fx.
+      #backoffEnd -> (t + delay). #busyEnd -> (t + busy) }) }) now: t effects: fx.
 
 "Whether what arrived since the marks ends the back-off itself: progress (a held release, a
  newly learnt owner), never a cancel (N7, M2)."
@@ -677,31 +753,49 @@ PBCoordinatorCore >> dispatchAcceptorDiscarded: anEvent in: s now: t
 
 "=== PBCoordinatorCore: owning ==============================================="
 
-"proto_db _own_loop_body at DEPTH 0, before the permissions of Task 12: ends the term, renews
- it, or sleeps until the next of its deadlines. Nothing while a renewal runs."
+"proto_db _own_loop_body at DEPTH 0: a permission past its deadline abandons the term (O6); an
+ abandoned term ends; the lease expiring ends the term, abandoning it first when a permission is
+ out (O6); the term ends idle only with an empty pipeline (O8); else it renews, or sleeps until
+ the next of its deadlines. Nothing while a renewal runs."
 PBCoordinatorCore >> _ownLoop: s now: t effects: fx
-  | own c lease idle release remaining demand waits pair state |
+  | own c lease idle release remaining demand waits pair state late |
   own := s ownership.
   (own isNil or: [own renewal notNil]) ifTrue: [^ s].
   c := s config.
+  state := s.
+  late := own pipeline detect: [:e | t > e deadline] ifNone: [nil].
+  late notNil ifTrue: [
+    state := self _abandon: state why: 'permission ' , late seq printString , ' of ' , late node , ' timed out' now: t effects: fx.
+    own := state ownership].
+  own isAbandoned ifTrue: [^ self _endOwnership: state now: t effects: fx].
   lease := own lease.
   idle := c idleEnd.
   release := c ownerIdleRelease.
-  (lease isValidAt: t) ifFalse: [^ self _endOwnership: s now: t effects: fx].
-  (own queue isEmpty and: [t - own lastDemand > idle]) ifTrue: [^ self _endOwnership: s now: t effects: fx].
-  (release notNil and: [t - own lastLocal > release]) ifTrue: [
-    "Serving only other members (R80): one of them takes the term."
+  (lease isValidAt: t) ifFalse: [
+    own pipeline isEmpty ifFalse: [
+      "The lease ended with a permission whose outcome this owner does not know yet: abandoned,
+       so the release is uncertain (proto_db review I3)."
+      state := self _abandon: state why: 'lease expired with permission ' , own pipeline first seq printString , ' of '
+        , own pipeline first node , ' outstanding' now: t effects: fx].
+    ^ self _endOwnership: state now: t effects: fx].
+  (own pipeline isEmpty and: [own queue isEmpty and: [t - own lastDemand > idle]]) ifTrue: [
+    ^ self _endOwnership: state now: t effects: fx].
+  (own pipeline isEmpty and: [release notNil and: [t - own lastLocal > release]]) ifTrue: [
+    "Serving only other members (R80): one of them takes the term. _issue: issues nothing new
+     past the threshold, so the outstanding permission drains first."
     fx add: (PBCount stat: 'terms_released_idle_local').
-    ^ self _endOwnership: s now: t effects: fx].
+    ^ self _endOwnership: state now: t effects: fx].
   remaining := lease remainingAt: t.
-  demand := own queue notEmpty or: [2 * (t - own lastDemand) <= c leaseDuration].
+  demand := own pipeline notEmpty or: [own queue notEmpty or: [2 * (t - own lastDemand) <= c leaseDuration]].
   "Renewed when half of the belief is left (R78b)."
-  (demand and: [2 * remaining < c belief]) ifTrue: [^ self _renew: s now: t effects: fx].
+  (demand and: [2 * remaining < c belief]) ifTrue: [^ self _renew: state now: t effects: fx].
   waits := OrderedCollection new.
   waits add: (demand ifTrue: [1000 max: (2 * remaining - c belief + 1) // 2] ifFalse: [idle]).
-  own queue isEmpty ifTrue: [waits add: (1000 max: idle - (t - own lastDemand))].
-  release notNil ifTrue: [waits add: (1000 max: release - (t - own lastLocal))].
-  pair := self _token: #owner in: s.
+  own pipeline notEmpty
+    ifTrue: [waits add: (1000 max: (own pipeline inject: own pipeline first deadline into: [:m :e | m min: e deadline]) - t)]
+    ifFalse: [own queue isEmpty ifTrue: [waits add: (1000 max: idle - (t - own lastDemand))]].
+  (release notNil and: [own pipeline isEmpty]) ifTrue: [waits add: (1000 max: release - (t - own lastLocal))].
+  pair := self _token: #owner in: state.
   state := pair first.
   fx add: (PBTimer after: (waits inject: waits first into: [:m :w | m min: w]) token: pair last event: #owner).
   ^ state with: { #ownership -> (state ownership with: { #token -> pair last }) }.
@@ -748,20 +842,21 @@ PBCoordinatorCore >> _closeRenewal: s now: t effects: fx
       own := own with: { #renewal -> nil.
         #lease -> (PBLease term: lease term validUntil: (lease validUntil max: (self _leaseEnd: a in: s now: t))
           root: lease root certain: lease isCertain) }.
-      s waiters isEmpty ifFalse: [
-        own := own with: { #queue -> (own queue , s waiters). #lastDemand -> t. #lastLocal -> t }].
-      state := self _issue: (s with: { #ownership -> own. #waiters -> #() }) now: t effects: fx]
+      state := self _queueLocal: s waiters in: (s with: { #ownership -> own. #waiters -> #() }) now: t.
+      state := self _issue: state now: t effects: fx]
     ifFalse: [
       fx add: (PBCount stat: 'renewal_failures').
       state := s with: { #ownership -> (own with: { #renewal -> nil }) }].
   ^ self _ownLoop: state now: t effects: fx.
 
-"The ownership ends: its queued local waiters wait again (proto_db _refuse_queue: they see the
- ownership end), the lease is released, and they start a new acquisition."
+"The ownership ends (proto_db _refuse_queue with 'ending'): the members queued are refused, its
+ queued local waiters wait again (they see the ownership end), the lease is released, and they
+ start a new acquisition."
 PBCoordinatorCore >> _endOwnership: s now: t effects: fx
-  | own state |
+  | own state locals |
   own := s ownership.
-  state := s with: { #ownership -> nil. #waiters -> (own queue , s waiters) }.
+  locals := self _refuse: own queue reason: 'ending' term: own term in: s effects: fx.
+  state := s with: { #ownership -> nil. #waiters -> (locals , s waiters) }.
   state := self _releaseLease: own lease in: state now: t effects: fx.
   ^ self _wantLease: state now: t effects: fx.
 
@@ -770,7 +865,8 @@ PBCoordinatorCore >> _endOwnership: s now: t effects: fx
 PBCoordinatorCore >> _releaseLease: aLease in: s now: t effects: fx
   | h more pair successor release |
   h := self _hintsIn: s.
-  more := s waiters notEmpty.
+  "proto_db _acquirers > 0: a thread of this node still in permit."
+  more := s waiters notEmpty or: [s holder notNil and: [s holder asks notEmpty]].
   pair := self _nextTurn: h.
   successor := pair first.
   h := pair last with: { #registered -> more. #myTurn -> false.
@@ -888,8 +984,11 @@ PBCoordinatorCore >> dispatchTimerFired: anEvent in: s now: t
         p phase = #turn ifTrue: [self _awaitTurn: s now: t effects: fx] ifFalse: [
         p phase = #attempt ifTrue: [self _closeAttempt: s now: t effects: fx] ifFalse: [
         (p phase = #backoff or: [p phase = #busy]) ifTrue: [self _backingOff: s now: t effects: fx] ifFalse: [
-        p phase = #spread ifTrue: [self _round: s now: t effects: fx] ifFalse: [s]]]]]
+        (p phase = #spread or: [p phase = #rejoin]) ifTrue: [self _round: s now: t effects: fx] ifFalse: [s]]]]]
       ifFalse: [
         (anEvent event = #owner and: [own notNil and: [own token = anEvent token]])
           ifTrue: [own renewal notNil ifTrue: [self _closeRenewal: s now: t effects: fx] ifFalse: [self _ownLoop: s now: t effects: fx]]
-          ifFalse: [s]]].
+          ifFalse: [
+            anEvent event = #ask
+              ifTrue: [self _askTimer: anEvent in: s now: t effects: fx]
+              ifFalse: [s]]]].
