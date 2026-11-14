@@ -364,29 +364,35 @@ PBClusterFrame class >> tagSize
 
 "The frame of aMessage (a PBClusterMessage) sent to the node aNodeId: the 4-byte big-endian
  length of the body, then the body: the msgpack bytes of the message, followed by their tag when
- aKeyOrNil is a key (CC4). PBClusterProtocolError when the body exceeds maxFrameBytes (proto_db
- check_frame_size); PBValidationError for anything that is not a message, a node id or a key."
+ aKeyOrNil is a key (CC4). PBClusterProtocolError, with proto_db check_frame_size's text, when
+ the body would exceed maxFrameBytes, checked before the tag is computed; PBValidationError for
+ anything that is not a message, a node id or a key."
 PBClusterFrame class >> encode: aMessage to: aNodeId key: aKeyOrNil
-  | payload body |
+  | payload size body |
   (aMessage isClassObject not and: [aMessage class == PBClusterMessage]) ifFalse: [
     ^ PBValidationError signal: 'PBClusterFrame encode: a PBClusterMessage, not ' , aMessage printString].
   self _checkReceiver: aNodeId key: aKeyOrNil.
   payload := aMessage encode.
+  size := payload size + (aKeyOrNil isNil ifTrue: [0] ifFalse: [self tagSize]).
+  size > self maxFrameBytes ifTrue: [
+    ^ PBClusterProtocolError signal: 'A message of ' , size printString , ' bytes exceeds the frame limit of '
+      , self maxFrameBytes printString].
   body := aKeyOrNil isNil
     ifTrue: [payload]
     ifFalse: [payload , (self _tagOf: payload to: aNodeId key: aKeyOrNil)].
-  self _checkSize: body size.
   ^ (ByteArray withAll: (#(24 16 8 0) collect: [:shift | (body size bitShift: shift negated) bitAnd: 255])) , body.
 
 "The body length a frame announces in aFourByteArray, its first 4 bytes (big endian).
- PBClusterProtocolError above maxFrameBytes: the caller reads nothing more and drops the
- connection."
+ PBClusterProtocolError above maxFrameBytes, with proto_db FrameDecoder's text: the caller reads
+ nothing more and drops the connection."
 PBClusterFrame class >> lengthFrom: aFourByteArray
   | size |
   ((aFourByteArray isKindOf: ByteArray) and: [aFourByteArray size = 4]) ifFalse: [
     ^ PBValidationError signal: 'PBClusterFrame lengthFrom: 4 bytes, not ' , aFourByteArray printString].
   size := aFourByteArray unsignedLongAt: 1 bigEndian: true.
-  self _checkSize: size.
+  size > self maxFrameBytes ifTrue: [
+    ^ PBClusterProtocolError signal: 'A frame of ' , size printString , ' bytes exceeds the limit of '
+      , self maxFrameBytes printString].
   ^ size.
 
 "The message of aByteArray, the body of a frame received by the node aNodeId. With a key, the
@@ -424,17 +430,13 @@ PBClusterFrame class >> decode: aFrame to: aNodeId key: aKeyOrNil
       , (aFrame size - 4) printString , ' bytes'].
   ^ self decodeBody: (aFrame copyFrom: 5 to: aFrame size) to: aNodeId key: aKeyOrNil.
 
-"PBClusterProtocolError when a body of aSize bytes exceeds maxFrameBytes."
-PBClusterFrame class >> _checkSize: aSize
-  aSize > self maxFrameBytes ifTrue: [
-    ^ PBClusterProtocolError signal: 'A frame of ' , aSize printString , ' bytes exceeds the limit of '
-      , self maxFrameBytes printString].
-
-"PBValidationError unless aNodeId is a String and aKeyOrNil is nil or a ByteArray of at least
- tagSize bytes (CC4)."
+"PBValidationError unless aNodeId is a non-empty String without NUL (so UTF-8(id) || 0x00 ||
+ msgpack names one pair; docs/deviations.md, 'Cluster mode') and aKeyOrNil is nil or a ByteArray
+ of at least tagSize bytes (CC4)."
 PBClusterFrame class >> _checkReceiver: aNodeId key: aKeyOrNil
-  aNodeId isString ifFalse: [
-    ^ PBValidationError signal: 'A frame names its receiver with a String, not ' , aNodeId printString].
+  (aNodeId isString and: [aNodeId notEmpty and: [(aNodeId includes: (Character value: 0)) not]]) ifFalse: [
+    ^ PBValidationError signal: 'A frame names its receiver with a non-empty String without NUL, not '
+      , aNodeId printString].
   (aKeyOrNil isNil or: [(aKeyOrNil isKindOf: ByteArray) and: [aKeyOrNil size >= self tagSize]]) ifFalse: [
     ^ PBValidationError signal: 'A cluster key is nil or a ByteArray of at least ' , self tagSize printString
       , ' bytes, not ' , ((aKeyOrNil isKindOf: ByteArray) ifTrue: [aKeyOrNil size printString , ' bytes'] ifFalse: [aKeyOrNil class name])].
@@ -444,7 +446,7 @@ PBClusterFrame class >> _tagOf: aPayload to: aNodeId key: aKey
   ^ HMAC sha256Key: aKey message: aNodeId utf8Encoded , #[0] , aPayload.
 
 "Whether two tags of tagSize bytes are equal: the XOR of every pair of bytes is accumulated and
- tested once, so the time taken does not depend on where they first differ. protoST has no
+ tested once, with no early exit (best effort: the timing is not measured). protoST has no
  constant-time comparison of its own."
 PBClusterFrame class >> _tag: aTag matches: anExpectedTag
   | difference |

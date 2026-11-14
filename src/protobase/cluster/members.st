@@ -24,13 +24,16 @@ Import from: 'protobase/errors'.
 Object subclass: #PBPeer instanceVariableNames: 'nodeId host port'.
 
 "A member of a cluster, as proto_db's Peer(node_id, host, port): the id a non-empty String (a
- Symbol is kept as its String), the host a String, the port an Integer from 0 to 65535;
- PBValidationError otherwise."
+ Symbol is kept as its String) without NUL, stricter than proto_db (docs/deviations.md, 'Cluster
+ mode': the id is NUL-terminated in a frame tag), the host a String, the port an Integer from 0
+ to 65535; PBValidationError otherwise."
 PBPeer class >> nodeId: anId host: aHost port: aPort
   ((anId isString and: [anId notEmpty]) and: [aHost isString
       and: [aPort isInteger and: [aPort between: 0 and: 65535]]]) ifFalse: [
     ^ PBValidationError signal: 'Invalid peer ' , { anId. aHost. aPort } printString
       , ': a peer is a non-empty String id, a String host and a port from 0 to 65535'].
+  (anId includes: (Character value: 0)) ifTrue: [
+    ^ PBValidationError signal: 'Invalid peer id ' , anId printString , ': a node id holds no NUL character'].
   ^ self basicNew _setNodeId: anId asString host: aHost asString port: aPort.
 
 PBPeer >> _setNodeId: anId host: aHost port: aPort

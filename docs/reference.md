@@ -350,8 +350,8 @@ For tests, tools and readers of the format. An application does not need them.
   `PBLogScan` (`payloads`, `validEnd`, `isTorn`). A torn tail is dropped; a damaged frame
   followed by a valid one is `PBCorruptionError` ("mid-log"); another format version is
   `PBNotSupportedError`. The search for a later valid frame is linear in the file size.
-- **Membership** (`cluster/members.st`): `PBPeer` (`nodeId:host:port:`; `nodeId`, `host`,
-  `port`) and `PBMembership` (`peers:voters:`, voters `nil` for the default: the first three ids
+- **Membership** (`cluster/members.st`): `PBPeer` (`nodeId:host:port:`, the id a non-empty String without NUL; `nodeId`,
+  `host`, `port`) and `PBMembership` (`peers:voters:`, voters `nil` for the default: the first three ids
   in code point order, every member of a smaller cluster; an explicit set has distinct members,
   odd and at least three when the cluster has three or more). It answers `ids` (code point
   order), `rankOf:`, `voters`, `isVoter:`, `majority` (`V // 2 + 1`), `fingerprint` (CRC-32 of
@@ -408,7 +408,8 @@ For tests, tools and readers of the format. An application does not need them.
   length from the first 4 bytes alone and refuses one above `maxFrameBytes`;
   `decodeBody:to:key:` answers the message of a body; `decode:to:key:` that of a whole frame
   (its length must be the size of its body). Without a key (`nil`) the frame is protocol 13 byte
-  for byte. With a key (a `ByteArray` of at least 32 bytes, else `PBValidationError`) the body
+  for byte. The receiver is a non-empty String without NUL, else `PBValidationError`. With a key
+  (a `ByteArray` of at least 32 bytes, else `PBValidationError`) the body
   is the msgpack bytes followed by the tag HMAC-SHA-256(key, UTF-8(receiver id) ‖ 0x00 ‖
   msgpack bytes); the length covers both and the 64 MiB limit is unchanged. A tag that does
   not match (another key, another receiver, a changed byte, an unkeyed frame) is

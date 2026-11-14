@@ -24,7 +24,7 @@ oversized do: [:e |
   outcome := [PBClusterFrame lengthFrom: (Vectors bytesOf: (e at: 'file')). 'accepted']
     on: PBDBError do: [:x | (x isKindOf: PBClusterProtocolError) ifTrue: [nil] ifFalse: [x class name , ': ' , x messageText]].
   outcome isNil ifFalse: [('FAIL message-oversized: ' , outcome) displayNl. Smalltalk exit: 1]].
-"The section must hold exactly the items skipped above or verified elsewhere."
+"The section must hold exactly the items verified elsewhere (the files listed above)."
 (cluster keys asSortedCollection asArray = #('messages' 'ranges_log' 'roots_log' 'roots_log_torn' 'segment' 'segments_log'))
   ifFalse: [('FAIL the cluster section holds ' , cluster keys asSortedCollection asArray printString) displayNl. Smalltalk exit: 1].
 base := FileSystem temp / ('pbst-cluster-' , Smalltalk pid printString).

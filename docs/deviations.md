@@ -257,6 +257,13 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   no constant-time comparison: the tag is compared by accumulating the XOR of all 32 byte pairs
   and testing the result once, with no early exit. *Cost:* a keyed cluster cannot mix with
   `proto_db` nodes; with the key, a frame costs 32 bytes and one HMAC each way.
+- **Node ids (stricter than `proto_db`).** `proto_db`'s `Peer` takes any non-empty `str` as a
+  node id, NUL included, and its frame layer names no receiver. protoBaseST refuses
+  (`PBValidationError`) an id holding NUL in `PBPeer nodeId:host:port:`, and an empty id or one
+  holding NUL as the receiver of `PBClusterFrame`. With no NUL in the id, the tag input
+  UTF-8(id) ‖ 0x00 ‖ msgpack bytes names exactly one (id, message) pair, by construction rather
+  than by an argument about msgpack's first byte. The cluster is protoBaseST-only, so no
+  `proto_db` node is refused by this. *Cost:* none known; an id with NUL is not a useful id.
 - **Trusted network (both cases).** The cluster transport is plaintext. Without a key it is
   unauthenticated, exactly as `proto_db`'s: anyone who can reach a member's port can send it any
   message, so the network must be trusted. With a key, frames are authenticated but **not

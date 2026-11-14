@@ -1,4 +1,4 @@
-"EXPECT: ok 20"
+"EXPECT: ok 22"
 "PBPeer and PBMembership (cluster/members.st): the values every member of a cluster computes
  like the others (format spec, 'Values a member must compute'; proto_db cluster/coordinator.py
  _voter_set, ballot_after, the fingerprint). Ranks are indices in the ids sorted in code point
@@ -56,4 +56,7 @@ c that: 'code point order and fingerprint beyond ASCII' is: [| e ffff emoji m |
   equals: #(true true 3464710033).
 c that: 'a voter given as Symbol and String is a duplicate' signals: PBValidationError containing: 'distinct'
   during: [PBMembership peers: (peers value: #('n0' 'n1' 'n2')) voters: { 'n0' asSymbol. 'n0'. 'n1' }].
+c that: 'an empty node id is refused' signals: PBValidationError during: [PBPeer nodeId: '' host: 'h' port: 1].
+c that: 'a node id holding NUL is refused' signals: PBValidationError containing: 'NUL'
+  during: [PBPeer nodeId: 'n' , (String with: (Character value: 0)) host: 'h' port: 1].
 c report displayNl.
