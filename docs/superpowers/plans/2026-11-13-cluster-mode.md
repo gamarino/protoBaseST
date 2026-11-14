@@ -1096,7 +1096,8 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     log write, safety unaffected. Decide here, with real timers and RTTs: keep `proto_db`'s
     behaviour, adopt a lost-renewal back-off as a recorded timing-only deviation (for example
     wait min(requestTimeout, remaining - belief / 4) before the next attempt), or propose it to
-    `proto_db` upstream (preferred, since the behaviour is `proto_db`'s); record the decision in
+    `proto_db` upstream (preferred, since the behaviour is `proto_db`'s; proposed as
+    gamarino/ProtoDB#1); record the decision in
     docs/deviations.md. Its cost so far: the simulator families of Task 16 cut the holder off
     before its timer resumes (`tests/unit/_rejoin.st` r78a) or run with 1 ms links (`lagged:`,
     belowBallot and majorityLoss), or the storm makes the run intractable; Tasks 17-19 will need
@@ -1118,7 +1119,12 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     `_rejoin_forced` dropped), and a re-attach reports an acceptor state over the new log; the
     core then drops the rejoin (`rejoinDetached:`, and `rejoinCheck:now:effects:` starts a fresh
     one when the reported log is not the one the rejoin ran on), so a forced rejoin never
-    outlives the log it was forced for and a failed rejoin restarts over a replaced tier. Test:
+    outlives the log it was forced for and a failed rejoin restarts over a replaced tier. The
+    check is by identity (`r log == view log`, and `PBRejoinLearnt log` against the acceptor's
+    log at the adoption): the shell must hand the dispatcher the acceptor's own
+    `PBAcceptorState`, whose `log` object stays the same across every report of one attach, and
+    build a new `PBLoggedRoots` only at an attach (a rebuilt one would drop a legitimate rejoin;
+    conservative, but the operator would have to force again). Test:
     proto_db's `test_c2_audit_a_forced_rejoin_does_not_outlive_the_log_it_was_forced_for` over
     the shell (forceRejoin, detach before completion, re-attach over a new empty log: the new
     rejoin is not forced).

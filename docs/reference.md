@@ -669,7 +669,8 @@ For tests, tools and readers of the format. An application does not need them.
   hint, at this node's rank), whose `'ok'` answers count only when they echo it, and that must
   decide `#witnesses` or `#rootless` again (counted `'rejoin_ballots'`), else the rejoin is
   blocked and retried. The adopted root is probed (`rejoinProbed:in:now:effects:`; unreadable:
-  blocked, retried); then the acceptor takes `PBRejoinLearnt learnt:seen:accepted:committed:ballot:`
+  blocked, retried); then the acceptor takes `PBRejoinLearnt learnt:seen:accepted:committed:ballot:log:`
+  (refused by an acceptor attached to another log)
   (`acceptRejoinLearnt:in:now:`): it appends the promise of learnt, the accepted root and the
   rejoined marker, in that order, synced, and adopts them (`restore:seen:`), the committed root
   as committed knowledge and the ballot as `rejoinBallot`; its step coming back ends the rejoin
@@ -681,7 +682,8 @@ For tests, tools and readers of the format. An application does not need them.
   (`dispatchRejoinWanted:in:now:`, the operator's forceRejoin) forces a rejoin not completed
   yet and hands the acceptor `PBForceRejoin` (`acceptForceRejoin:in:now:`): a survivor forgets a
   committed root above its accepted root and needs a confirmation again. `PBLogDetached`
-  (`rejoinDetached:in:now:`, `proto_db`'s detach) drops the rejoin and its forced flag, and a
+  (`rejoinDetached:in:now:`, `proto_db`'s detach) drops the rejoin and its forced flag (a late
+  report of the detached log starts nothing; a forceRejoin meanwhile is for the next log), and a
   report over another log than the one a rejoin runs for starts a fresh one. `PBConfirmed`
   (`dispatchConfirmed:in:now:`, `acceptConfirmed:in:now:`) clears `needsConfirmation`. See
   [deviations.md](deviations.md#cluster-mode).

@@ -435,8 +435,11 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   with the rest of the rejoin (coordinator.py 1644). protoBaseST's `PBRejoinWanted` marks the
   rejoin forced whenever the acceptor's last report (or none yet) is not rejoined, and the
   forced flag is dropped at detach, as in `proto_db`: `PBLogDetached` drops the rejoin
-  (`rejoinDetached:`), and a report over another log than the one a rejoin ran on starts a fresh,
-  unforced rejoin (`rejoinCheck:now:effects:`); the shell's attach and detach are Task 20's
+  (`rejoinDetached:`, leaving a marker of the detached log, so a late report of it starts
+  nothing), a report over another log than the one a rejoin ran on starts a fresh, unforced
+  rejoin (`rejoinCheck:now:effects:`), and an adoption in flight for the detached log is
+  refused by an acceptor over another log (`PBRejoinLearnt log`, `proto_db`'s `self._tier is
+  not tier` in `_complete_rejoin`); the shell's attach and detach are Task 20's
   (carry-over (k)). On a survivor the acceptor forgets a committed root above its accepted
   root (memory only: such a root was learnt, never logged) and asks for a confirmation again;
   a committed root already published to the space's readers is not withdrawn by the core

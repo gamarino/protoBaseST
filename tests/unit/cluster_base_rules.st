@@ -339,9 +339,10 @@ s := (decision value: core value: (stateOf value: k) value: p value: #() value: 
 "s with its acceptor's rejoin ballot n: the state a rejoin that confirmed ballot n leaves (the
  acceptor's adoption, rejoin.st acceptRejoinLearnt:in:now:, of r1 accepted and committed, on a
  log without the rejoined marker)."
-st := [:n | | v |
-  v := (core accept: (PBRejoinLearnt learnt: n seen: 0 accepted: r1 committed: r1 ballot: n)
-    in: (viewOf value: { acc value: r1. count value: r1 }) now: 1000) state.
+st := [:n | | v v0 |
+  v0 := viewOf value: { acc value: r1. count value: r1 }.
+  v := (core accept: (PBRejoinLearnt learnt: n seen: 0 accepted: r1 committed: r1 ballot: n log: v0 log)
+    in: v0 now: 1000) state.
   s with: { #acceptorView -> v }].
 c that: 'L14 at the send: a term below the acceptor''s rejoin ballot sends nothing (#none); equal to it, sent'
   is: { (core dispatch: (PBReplicateWanted permission: p root: rT pred: r1 waiter: #x) in: (st value: T + 1) now: 1000) effects

@@ -1,4 +1,4 @@
-"EXPECT: ok 21"
+"EXPECT: ok 23"
 "The rejoin's rules (cluster/rejoin.st) called directly, one guard per check (proto_db
  coordinator.py _rejoin_answers, _rejoin_decision, _rejoin_round, _gather, _complete_rejoin,
  _publish_rejoin, _on_ballot_query, force_rejoin, needs_confirmation, confirmed). drive runs a
@@ -32,12 +32,15 @@
  raises the dispatcher's hint only toward an 'ok', unfenced view. (19) PBLogDetached and a
  report over another log drop the rejoin and its forced flag; one forced before any report
  runs for the first log. (20) A failed rejoin restarts over a new log; an adoption the failed
- tier refused fails it, with the reason. (21) A forceRejoin during a ballot round blocks it."
+ tier refused fails it, with the reason. (21) A forceRejoin during a ballot round blocks it.
+ (22) An adoption for a detached log changes nothing on the log attached next; a late report of
+ the detached log starts no rejoin; a forceRejoin while detached carries to the next log. (23)
+ A forceRejoin is bound to the log reported then."
 Import from: 'protobase'.
 Import from: '_check'.
 
 | c core peers cfg three five marker logged viewOf rec r1 r2 acc count rejoining witness queryOf ans retag drive run
-  out s v step B ids fenced msgs ballotOf phaseOf blockedOf |
+  out s v step B ids fenced msgs ballotOf phaseOf blockedOf v2 forcedOf |
 c := Check new.
 core := PBCoordinatorCore new.
 peers := [:someIds | (1 to: someIds size) asArray collect: [:i | PBPeer nodeId: (someIds at: i) host: '127.0.0.1' port: 7000 + i]].
@@ -108,6 +111,7 @@ run := [:somePairs :aTamper | drive value: (PBNodeState config: (cfg value: 'n0'
 "The phase of aState's rejoin and why it is blocked ('' when none), nil-safe."
 phaseOf := [:aState | aState rejoin isNil ifTrue: [nil] ifFalse: [aState rejoin phase]].
 blockedOf := [:aState | (aState rejoin isNil or: [aState rejoin blocked isNil]) ifTrue: [''] ifFalse: [aState rejoin blocked]].
+forcedOf := [:aState | aState rejoin notNil and: [aState rejoin isForced]].
 msgs := [:effects | (effects select: [:e | (e isKindOf: PBSend) and: [e message type = 'query']]) collect: [:e | { e to. e message at: 'ballot' }]].
 ballotOf := [:effects | ((effects select: [:e | (e isKindOf: PBSend) and: [e message type = 'query' and: [(e message at: 'ballot') > 0]]])
   collect: [:e | e message at: 'ballot']) asSet asArray].
@@ -182,15 +186,15 @@ c that: 'the witness promises, logs once, echoes, answers after the promise; ref
 
 "(6) The adoption."
 v := rejoining value: 'n0'.
-step := core accept: (PBRejoinLearnt learnt: 20481 seen: 8192 accepted: r1 committed: r2 ballot: 20481) in: v now: 1000.
+step := core accept: (PBRejoinLearnt learnt: 20481 seen: 8192 accepted: r1 committed: r2 ballot: 20481 log: v log) in: v now: 1000.
 out := { step appends collect: [:a | { a kind. a label. a sync }]. step state isRejoined. step state rejoinBallot.
   step state accepted key = r1 key. step state committed key = r2 key. step state grants termsSeen. step state grants highestSeen.
   (core accept: (PBReceived message: (PBClusterMessage type: 'request' from: 'n2' fields: { 'term' -> 20481. 'rid' -> 1. 'inc' -> 1.
     'vs' -> v config membership fingerprint })) in: step state now: 1000) reply first message type.
-  [:w | (core accept: (PBRejoinLearnt learnt: 0 seen: 0 accepted: nil committed: nil ballot: 0) in: w now: 1000) state == w]
+  [:w | (core accept: (PBRejoinLearnt learnt: 0 seen: 0 accepted: nil committed: nil ballot: 0 log: w log) in: w now: 1000) state == w]
     value: (witness value: 'n0').
   [:st | { st appends collect: [:a | a kind]. st state grants termsSeen. st state isRejoined }]
-    value: (core accept: (PBRejoinLearnt learnt: 0 seen: 0 accepted: nil committed: nil ballot: 0) in: v now: 1000) }.
+    value: (core accept: (PBRejoinLearnt learnt: 0 seen: 0 accepted: nil committed: nil ballot: 0 log: v log) in: v now: 1000) }.
 c that: 'the adoption: promise, accepted, marker in order, synced; floor, seen, ballot, committed; first start'
   is: { out first. out at: 2. out at: 3. out at: 4. out at: 5. out at: 6. out at: 7. out at: 8. out at: 9. out at: 10 }
   equals: { #(#(#promise 20481 true) #(#accepted 4096 true) #(#rejoined 0 true)). true. 20481. true. true. 8192. 20481. 'reject'.
@@ -306,7 +310,7 @@ v := rejoining value: 'n0'.
 s := (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v now: 0)) in: (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) now: 0) state.
 s := (core dispatch: PBRejoinWanted new in: s now: 0) state.
 out := { s rejoin isForced. s rejoin log == v log.
-  (core dispatch: PBLogDetached new in: s now: 0) state rejoin.
+  [:st | { phaseOf value: st. forcedOf value: st }] value: (core dispatch: PBLogDetached new in: s now: 0) state.
   [:st | { st rejoin isForced. st rejoin phase. st rejoin log == v log }]
     value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: (rejoining value: 'n0') now: 0)) in: s now: 0) state.
   [:st | | v2 st2 | v2 := rejoining value: 'n0'.
@@ -315,7 +319,7 @@ out := { s rejoin isForced. s rejoin log == v log.
     value: (core dispatch: PBRejoinWanted new in: (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) now: 0) state }.
 c that: 'a forced rejoin is dropped at detach and by a report over another log; forced before any report, it runs for the first'
   is: out
-  equals: { true. true. nil. { false. #gather. false }. #(true true) }.
+  equals: { true. true. { #detached. false }. { false. #gather. false }. #(true true) }.
 
 "(20) A failed rejoin restarts over a replaced tier; an adoption the failed tier refused fails it."
 out := drive value: (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) value: (rejoining value: 'n0')
@@ -324,7 +328,7 @@ out := drive value: (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) 
 v := rejoining value: 'n0'.
 s := (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) with: { #acceptorView -> v.
   #rejoin -> (PBRejoin idle with: { #phase -> #adopt. #log -> v log.
-    #pending -> (PBRejoinLearnt learnt: 0 seen: 0 accepted: nil committed: nil ballot: 0) }) }.
+    #pending -> (PBRejoinLearnt learnt: 0 seen: 0 accepted: nil committed: nil ballot: 0 log: v log) }) }.
 step := core dispatch: (PBAcceptorDecided step: (core accept: (PBAppendFailed reason: 'disk') in: v now: 0)) in: s now: 0.
 c that: 'a failed rejoin restarts on a new log; an adoption refused by a failed tier fails with the reason'
   is: { phaseOf value: out first.
@@ -347,5 +351,37 @@ s := (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) with: { #accept
 c that: 'a forceRejoin during the ballot round blocks it (forced is not witnesses), then retries'
   is: { phaseOf value: s. (blockedOf value: s) includesSubstring: 'too few members confirmed' }
   equals: { #retry. true }.
+
+"(22) An adoption in flight across a detach and a re-attach writes nothing to the new log
+ (proto_db _complete_rejoin's 'self._tier is not tier'); a late report of the detached log
+ starts no rejoin; a forceRejoin while detached is for the next log only."
+v := rejoining value: 'n0'.
+s := (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v now: 0)) in: (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) now: 0) state.
+s := (core dispatch: PBRejoinWanted new in: s now: 0) state.
+s := (core dispatch: PBLogDetached new in: s now: 0) state.
+v2 := rejoining value: 'n0'.
+out := { [:st | { st appends. st state isRejoined. st state == v2 }]
+    value: (core accept: (PBRejoinLearnt learnt: 4096 seen: 0 accepted: r1 committed: nil ballot: 0 log: v log) in: v2 now: 1000).
+  [:st | { phaseOf value: st state. st effects size }]
+    value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v now: 0)) in: s now: 0).
+  [:st | { phaseOf value: st. forcedOf value: st. st rejoin notNil and: [st rejoin log == v2 log] }]
+    value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v2 now: 0)) in: s now: 0) state.
+  [:st | { st effects size. [:st2 | { phaseOf value: st2. forcedOf value: st2. st2 rejoin notNil and: [st2 rejoin log == v2 log] }]
+      value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v2 now: 0)) in: st state now: 0) state }]
+    value: (core dispatch: PBRejoinWanted new in: s now: 0) }.
+c that: 'an adoption for the detached log changes nothing on the new log; a late old-log report starts nothing; forced while detached carries to the next log'
+  is: out
+  equals: { { #(). false. true }. { #detached. 0 }. { #gather. false. true }. { 0. { #gather. true. true } } }.
+
+"(23) A forceRejoin binds the rejoin to the log reported then: on a tier-failed view (no rejoin
+ runs), a later report over another log leaves the new rejoin unforced."
+v := (core accept: (PBAppendFailed reason: 'disk') in: (rejoining value: 'n0') now: 0) state.
+s := (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v now: 0)) in: (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) now: 0) state.
+s := (core dispatch: PBRejoinWanted new in: s now: 0) state.
+c that: 'forceRejoin on a tier-failed view is bound to that log: a report over another log starts an unforced rejoin'
+  is: { s rejoin isForced. s rejoin log == v log.
+    [:st | { phaseOf value: st. forcedOf value: st }]
+      value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: (rejoining value: 'n0') now: 0)) in: s now: 0) state }
+  equals: { true. true. { #gather. false } }.
 
 c report displayNl.

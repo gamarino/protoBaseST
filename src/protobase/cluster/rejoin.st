@@ -84,23 +84,28 @@ Import from: 'protobase/cluster/holder'.
 
 "--- PBRejoinLearnt (an acceptor event) ---"
 
-PBCoreEvent subclass: #PBRejoinLearnt instanceVariableNames: 'learnt seen accepted committed ballot'.
+PBCoreEvent subclass: #PBRejoinLearnt instanceVariableNames: 'learnt seen accepted committed ballot log'.
 
 "What a rejoin learnt (proto_db _complete_rejoin): aLearnt, the highest promise and label of the
  counted answers and the ballot; aSeen, the highest of their promises only; anAccepted, the
  highest accepted root (a PBLabeledRoot or nil); aCommitted, the highest committed root (or nil);
- aBallot, the ballot its answers confirmed (0 for 'new' and 'forced'). Integers >= 0."
-PBRejoinLearnt class >> learnt: aLearnt seen: aSeen accepted: anAccepted committed: aCommitted ballot: aBallot
+ aBallot, the ballot its answers confirmed (0 for 'new' and 'forced'), Integers >= 0; aLog, the
+ PBLoggedRoots of the acceptor log the rejoin ran for: an acceptor attached to another log takes
+ nothing (proto_db _complete_rejoin: 'self._tier is not tier', an abandoned rejoin writes
+ nothing, R55)."
+PBRejoinLearnt class >> learnt: aLearnt seen: aSeen accepted: anAccepted committed: aCommitted ballot: aBallot log: aLog
   ({ aLearnt. aSeen. aBallot } allSatisfy: [:n | n isInteger and: [n >= 0]]) ifFalse: [
     ^ PBValidationError signal: 'PBRejoinLearnt: learnt, seen and ballot are Integers >= 0'].
   ({ anAccepted. aCommitted } allSatisfy: [:r | r isNil or: [r isClassObject not and: [r class == PBLabeledRoot]]]) ifFalse: [
     ^ PBValidationError signal: 'PBRejoinLearnt: the roots are PBLabeledRoots or nil'].
-  ^ self basicNew _setLearnt: aLearnt seen: aSeen accepted: anAccepted committed: aCommitted ballot: aBallot.
+  (aLog isKindOf: PBLoggedRoots) ifFalse: [
+    ^ PBValidationError signal: 'PBRejoinLearnt: a log is a PBLoggedRoots, not ' , aLog printString].
+  ^ self basicNew _setLearnt: aLearnt seen: aSeen accepted: anAccepted committed: aCommitted ballot: aBallot log: aLog.
 
 PBRejoinLearnt class >> isAcceptorEvent
   ^ true.
 
-PBRejoinLearnt >> _setLearnt: aLearnt seen: aSeen accepted: anAccepted committed: aCommitted ballot: aBallot
+PBRejoinLearnt >> _setLearnt: aLearnt seen: aSeen accepted: anAccepted committed: aCommitted ballot: aBallot log: aLog
   "Runs once, on a fresh instance."
   learnt isNil ifFalse: [^ PBUserError signal: 'PBRejoinLearnt is immutable'].
   learnt := aLearnt.
@@ -108,7 +113,12 @@ PBRejoinLearnt >> _setLearnt: aLearnt seen: aSeen accepted: anAccepted committed
   accepted := anAccepted.
   committed := aCommitted.
   ballot := aBallot.
+  log := aLog.
   ^ self.
+
+"The PBLoggedRoots of the acceptor log the rejoin ran for."
+PBRejoinLearnt >> log
+  ^ log.
 
 PBRejoinLearnt >> learnt
   ^ learnt.
@@ -216,7 +226,8 @@ PBRejoinAnswer >> highestLabel
 "=== PBRejoin ================================================================="
 
 "A rejoin of this node (proto_db _rejoin's thread and its state _rejoin_forced, _rejoin_blocked):
- phase (#idle: none runs, a forceRejoin waits for it; #gather; #probe: the adopted root's
+ phase (#idle: none runs, a forceRejoin waits for it; #detached: the log it names was detached,
+ no rejoin runs until another log reports; #gather; #probe: the adopted root's
  SpaceRoot is probed; #adopt: the acceptor takes what was learnt; #retry: the next round waits
  for its timer; #failed: the tier failed), forced, blocked (why it cannot complete, or nil),
  ballot (of the gather, 0 for a plain one), attempt (of the gather), rid and targets (of its
@@ -359,6 +370,12 @@ PBCoordinatorCore >> rejoinCheck: aState now: t effects: fx
   view isNil ifTrue: [^ aState].
   s := aState.
   r := s rejoin.
+  (r notNil and: [r phase = #detached]) ifTrue: [
+    "A late report of the detached log starts nothing; the next log's first report takes the
+     place of the detached marker, forced only by a forceRejoin made since the detach."
+    (r log notNil and: [r log == view log]) ifTrue: [^ s].
+    r := r with: { #phase -> #idle. #log -> view log }.
+    s := s with: { #rejoin -> r }].
   r notNil ifTrue: [
     r log isNil
       ifTrue: [r := r with: { #log -> view log }. s := s with: { #rejoin -> r }]
@@ -376,9 +393,12 @@ PBCoordinatorCore >> rejoinCheck: aState now: t effects: fx
   ^ self _rejoinStart: (s with: { #rejoin -> ((self _rejoinIn: s) with: { #log -> view log }) }) now: t effects: fx.
 
 "proto_db detach (coordinator.py 1621-1650): the tier is gone, and with it the rejoin running
- for it and a forced flag set for it (PBLogDetached, sent by the shell, Task 20)."
+ for it and a forced flag set for it (PBLogDetached, sent by the shell, Task 20). What is left is
+ a #detached PBRejoin naming the detached log, so a late report of that log starts no rejoin
+ (rejoinCheck:); a forceRejoin meanwhile is for the next log attached."
 PBCoordinatorCore >> rejoinDetached: anEvent in: s now: t
-  ^ PBStep state: (s with: { #rejoin -> nil }) effects: #().
+  ^ PBStep state: (s with: { #rejoin -> (PBRejoin idle with: { #phase -> #detached.
+      #log -> (s acceptorView isNil ifTrue: [nil] ifFalse: [s acceptorView log]) }) }) effects: #().
 
 "Why a rejoin whose adoption could not be written fails (proto_db _complete_rejoin)."
 PBCoordinatorCore >> _adoptFailed
@@ -504,7 +524,8 @@ PBCoordinatorCore >> _completeRejoin: aDecision answers: someAnswers ballot: aBa
   (aDecision last = #forced and: [committed notNil and: [(PBRootOrder compare: committed with: best) > 0]]) ifTrue: [
     "A majority loss may have lost the commits above the root the bare majority accepted."
     committed := nil].
-  learn := PBRejoinLearnt learnt: learnt seen: seen accepted: best committed: committed ballot: aBallot.
+  learn := PBRejoinLearnt learnt: learnt seen: seen accepted: best committed: committed ballot: aBallot
+    log: (self _rejoinIn: s) log.
   (best isNil or: [best record isNil]) ifTrue: [^ self _adopt: learn in: s effects: fx].
   pair := self _token: #rejoin in: s.
   fx add: (PBProbeRoot root: best token: pair last).
@@ -545,6 +566,10 @@ PBCoordinatorCore >> rejoinDiscarded: aStep in: s
  always follows, and acts on a survivor only."
 PBCoordinatorCore >> dispatchRejoinWanted: anEvent in: s now: t
   | view state |
+  "Detached: no log attached, so the flag is for the next attach (proto_db force_rejoin on an
+   unattached node), and no acceptor takes its half."
+  (s rejoin notNil and: [s rejoin phase = #detached]) ifTrue: [
+    ^ PBStep state: (s with: { #rejoin -> (s rejoin with: { #forced -> true }) }) effects: #()].
   view := s acceptorView.
   state := s.
   (view isNil or: [view isRejoined not]) ifTrue: [
@@ -579,9 +604,13 @@ PBCoordinatorCore >> acceptConfirmed: anEvent in: s now: t
 "proto_db _complete_rejoin's writes and _publish_rejoin: the promise of learnt, the accepted root
  and the rejoined marker, appended in that order and synced, then adopted: the floor learnt and
  the promises seen (restore:seen:), the accepted root, the committed root as committed knowledge
- only, the rejoin ballot (never lowered). A rejoined, failed or fenced acceptor takes nothing."
+ only, the rejoin ballot (never lowered). A rejoined, failed or fenced acceptor takes nothing, nor
+ one attached to another log than the rejoin ran for (proto_db _complete_rejoin's 'self._tier is
+ not tier' under the log lock: an adoption in flight across a detach and re-attach writes
+ nothing to the new log)."
 PBCoordinatorCore >> acceptRejoinLearnt: anEvent in: s now: t
   | appends state label reply triple |
+  anEvent log == s log ifFalse: [^ self _unchangedAcceptor: s].
   (s fenced notNil or: [s isRejoined or: [s tierFailed notNil]]) ifTrue: [^ self _unchangedAcceptor: s].
   appends := OrderedCollection new.
   anEvent learnt > 0 ifTrue: [appends add: (PBLogAppend kind: #promise label: anEvent learnt root: nil sync: true)].
