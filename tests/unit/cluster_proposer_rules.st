@@ -1,0 +1,207 @@
+"EXPECT: ok 15"
+"The proposer's rules (cluster/proposer.st) called directly, one rule per check (proto_db
+ coordinator.py permit, _become_owner, _open_attempt, _on_reply, _close_attempt, _back_off,
+ release, _own_loop_body, _renew, the fairness hints).
+ (1) ballotFor: is the ballot of the node's rank above the highest term its acceptor saw, the
+ hint and the labels of its accepted and committed roots. (2) microsFromWire: is the exact
+ inverse of wireSeconds:. (3) A permit wanted waits while the acceptor has not reported or
+ rejoins, then opens an attempt: its own request to its own acceptor, the request with vs to the
+ other voters, a timer of requestTimeout. (4) The own vote travels in the acceptor step's vote;
+ a majority with it wins: an ownership whose lease ends at the send + the belief, its waiter
+ queued, counted acquired and ownerships. (5) A reply of another incarnation is counted
+ stale_replies and never recorded; a learner's reply is never recorded; every reply raises the
+ hint. (6) A discarded own grant is the refusal promise_failed. (7) A majority of replies to an
+ undecided attempt waits max(minStraggle, straggleFactor x elapsed) for the rest (R39). (8) A
+ lost attempt cancels (held false, certain false, more true) to every other member and its own
+ acceptor, then backs off for [low / 2, low) at the first failure, extended to the refusals'
+ busy remaining in microseconds; a cancel ends only the busy extension, a held release ends it
+ all. (9) An owner with demand renews at half the belief left; a won renewal extends the lease.
+ (10) Without demand for idleEnd the owner releases (held, certain, next nil, more false). (11) A
+ release names the member seen waiting longest (want, request, cancel), more when local waiters
+ remain, and the releaser defers to it until turnSilence when its request is not seen; a member
+ nobody queues says want before it defers. (12) The named member takes its turn at once (no spread) and
+ counts turns_taken. (13) ownerIdleRelease ends a term without local demand
+ (terms_released_idle_local). (14) The owner hint is learnt from a renewal, not from a request."
+Import from: 'protobase'.
+Import from: '_check'.
+
+| c core peers config three four vs marker logged view stateIn ready step eff sends msg granted reject
+  request s own att t0 pair sim |
+c := Check new.
+core := PBCoordinatorCore new.
+peers := [:someIds | (1 to: someIds size) asArray collect: [:i | PBPeer nodeId: (someIds at: i) host: '127.0.0.1' port: 7000 + i]].
+config := [:id :someIds :opts | PBClusterConfig nodeId: id peers: (peers value: someIds) options: opts].
+three := #('n0' 'n1' 'n2').
+four := #('n0' 'n1' 'n2' 'n3').
+vs := (config value: 'n1' value: three value: Dictionary new) membership fingerprint.
+marker := PBLogAppend kind: #rejoined label: 0 root: nil sync: true.
+logged := [:appends | PBAcceptorLog decode: (appends collect: [:a | a payload]) path: 'test'].
+"The acceptor state of anId over appends, started at 0 with no startup grace."
+view := [:id :someIds :appends | PBAcceptorState config: (config value: id value: someIds value: (Dictionary new at: #startupGrace put: 0; yourself))
+  logged: (logged value: appends) now: 0].
+"A dispatcher state of anId (inc 5) whose acceptor reported the view of appends."
+stateIn := [:id :someIds :appends :opts | (PBNodeState config: (config value: id value: someIds value: opts) inc: 5)
+  with: { #acceptorView -> (view value: id value: someIds value: appends) }].
+ready := [:id | stateIn value: id value: three value: { marker } value: Dictionary new].
+eff := [:aStep | aStep effects collect: [:e | e class name]].
+sends := [:aStep | (aStep effects select: [:e | e isKindOf: PBSend]) collect: [:e | { e to. e message type }]].
+msg := [:type :from :fields | PBReceived message: (PBClusterMessage type: type from: from fields: fields)].
+granted := [:from :term :rid :inc | msg value: 'grant' value: from value: { 'term' -> term. 'rid' -> rid. 'inc' -> inc.
+  'root' -> nil. 'committed' -> nil. 'certain' -> true }].
+reject := [:from :term :rid :inc :reason :highest :remaining | msg value: 'reject' value: from value: { 'term' -> term.
+  'rid' -> rid. 'inc' -> inc. 'root' -> nil. 'certain' -> true. 'reason' -> reason. 'highest' -> highest. 'remaining' -> remaining }].
+"Dispatches anEvent in s at t; answers the step."
+step := [:anEvent :aState :t | core dispatch: anEvent in: aState now: t].
+t0 := 1000000.
+
+"(1) The ballot."
+s := (ready value: 'n1') with: { #hints -> ((PBHints seed: 1) with: { #hint -> 9000 }) }.
+c that: 'ballotFor: the ballot of the rank above the acceptor''s highest, the hint and the root labels'
+  is: { core ballotFor: (ready value: 'n1').
+    core ballotFor: s.
+    core ballotFor: (stateIn value: 'n2' value: three value: { marker. PBLogAppend kind: #accepted label: 20000
+      root: (PBRootRecord segment: (ByteArray new: 16) offset: 1 epoch: 1) sync: true } value: Dictionary new).
+    core ballotFor: (((ready value: 'n1') with: { #acceptorView -> (core accept: (request := msg value: 'request' value: 'n0'
+      value: { 'term' -> 12288. 'rid' -> 1. 'inc' -> 1. 'vs' -> vs }) in: (view value: 'n1' value: three value: { marker }) now: 0) state })) }
+  equals: { 1. 12289. 20482. 12289 }.
+
+"(2) The inbound remaining."
+c that: 'microsFromWire: inverts wireSeconds:'
+  is: (#(0 1 7 999999 1000000 1333334 3333334 123456789 4503599627370495) collect: [:m |
+    (PBCoordinatorCore microsFromWire: (PBCoordinatorCore wireSeconds: m)) = m]) asSet
+  equals: #(true) asSet.
+
+"(3) A permit wanted."
+pair := step value: (PBPermitWanted waiter: #w1) value: (PBNodeState config: (config value: 'n1' value: three value: Dictionary new) inc: 5) value: t0.
+att := step value: (PBPermitWanted waiter: #w1) value: (ready value: 'n1') value: t0.
+c that: 'a permit wanted waits for the acceptor''s report, then opens an attempt'
+  is: { pair effects. pair state proposer phase. pair state waiters.
+    eff value: att. sends value: att. ((att effects at: 2) event message at: 'term').
+    ((att effects at: 3) message at: 'vs') = vs. (att effects last) after. att state proposer phase. att state proposer attempt term }
+  equals: { #(). #rejoin. #(#w1). #(#PBCount #PBToAcceptor #PBSend #PBSend #PBTimer). #(#('n0' 'request') #('n2' 'request')).
+    1. true. 250000. #attempt. 1 }.
+
+"(4) The own vote in the step, then a peer's grant: the win."
+s := att state.
+own := core accept: (att effects at: 2) event in: (view value: 'n1' value: three value: { marker }) now: t0.
+pair := step value: (PBAcceptorDecided step: own) value: s value: t0 + 3000.
+s := (step value: (granted value: 'n2' value: 1 value: 1 value: 5) value: pair state value: t0 + 4000) state.
+c that: 'the own vote travels in the step; a majority wins an ownership valid from the send'
+  is: { own reply. own vote type. pair state proposer attempt replies. s proposer. s ownership term.
+    s ownership lease validUntil. s ownership queue. s waiters. s hints ownerNode }
+  equals: { #(). 'grant'. 1. nil. 1. t0 + 666666. #(#w1). #(). 'n1' }.
+
+"(5) Stale and learner replies."
+s := (step value: (PBPermitWanted waiter: #w1) value: (stateIn value: 'n0' value: four value: { marker } value: Dictionary new) value: t0) state.
+pair := step value: (granted value: 'n1' value: 4096 value: 1 value: 6) value: s value: t0.
+c that: 'a reply of another incarnation is counted and dropped; a learner''s reply is not a vote; replies raise the hint'
+  is: { (pair effects collect: [:e | e stat]). pair state proposer attempt replies. pair state hints hint.
+    (step value: (reject value: 'n3' value: 4096 value: 1 value: 5 value: 'learner' value: 9999 value: 0) value: s value: t0) state proposer attempt replies.
+    (step value: (reject value: 'n3' value: 4096 value: 1 value: 5 value: 'learner' value: 9999 value: 0) value: s value: t0) state hints hint }
+  equals: { #('stale_replies'). 0. 4096. 0. 9999 }.
+
+"(6) A discarded own grant."
+s := att state.
+pair := step value: (PBAcceptorDiscarded step: own) value: s value: t0 + 3000.
+c that: 'a discarded own grant is the refusal promise_failed'
+  is: { pair state proposer attempt replies. pair state proposer attempt state.
+    ((step value: (reject value: 'n2' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: 0.5) value: pair state value: t0 + 4000) effects
+      select: [:e | e isKindOf: PBCount]) collect: [:e | e stat] }
+  equals: { 1. #pending. #('lost_attempts') }.
+
+"(7) Stragglers."
+pair := step value: (PBAcceptorDecided step: own) value: att state value: t0 + 2000.
+pair := step value: (reject value: 'n2' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: 0.5) value: pair state value: t0 + 2000.
+s := (step value: (PBAcceptorDecided step: own) value: att state value: t0 + 1000) state.
+c that: 'a majority of replies to an undecided attempt waits for the stragglers'
+  is: { pair state proposer attempt state. pair state proposer straggling. (pair effects select: [:e | e isKindOf: PBTimer]) collect: [:e | e after].
+    ((step value: (reject value: 'n2' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: 0.5) value: s value: t0 + 1000) effects
+      select: [:e | e isKindOf: PBTimer]) collect: [:e | e after] }
+  equals: { #pending. true. #(8000). #(5000) }.
+
+"(8) A lost attempt: the cancel, the back-off, what ends it."
+s := (step value: (PBTimerFired token: pair state proposer token event: #proposer) value: pair state value: t0 + 10000) state.
+pair := step value: (PBTimerFired token: pair state proposer token event: #proposer) value: pair state value: t0 + 10000.
+c that: 'a lost attempt cancels to every member and its own acceptor, then backs off to the busy remaining'
+  is: { (pair effects select: [:e | e isKindOf: PBSend]) collect: [:e | { e to. e message at: 'held'. e message at: 'certain'. e message at: 'more' }].
+    ((pair effects detect: [:e | e isKindOf: PBToAcceptor]) event message) type. s proposer phase.
+    s proposer backoffEnd - (t0 + 10000) between: 500 and: 999. s proposer busyEnd - (t0 + 10000) }
+  equals: { #(#('n0' false false true) #('n2' false false true)). 'release'. #backoff. true. 500000 }.
+pair := step value: (PBTimerFired token: s proposer token event: #proposer) value: s value: s proposer backoffEnd.
+c that: 'a cancel ends only the busy extension; a held release ends the back-off'
+  is: { pair state proposer phase.
+    (step value: (msg value: 'release' value: 'n0' value: { 'term' -> 1. 'inc' -> 1. 'root' -> nil. 'committed' -> nil.
+      'certain' -> false. 'held' -> false. 'next' -> nil. 'more' -> true }) value: s value: s proposer backoffEnd - 100) state proposer phase.
+    (step value: (msg value: 'release' value: 'n0' value: { 'term' -> 1. 'inc' -> 1. 'root' -> nil. 'committed' -> nil.
+      'certain' -> false. 'held' -> false. 'next' -> nil. 'more' -> true }) value: pair state value: s proposer backoffEnd + 100) state proposer phase.
+    (step value: (msg value: 'release' value: 'n0' value: { 'term' -> 1. 'inc' -> 1. 'root' -> nil. 'committed' -> nil.
+      'certain' -> true. 'held' -> true. 'next' -> nil. 'more' -> false }) value: s value: s proposer backoffEnd - 100) state proposer phase }
+  equals: { #busy. #backoff. #spread. #spread }.
+
+"(9-10) Owning: renewal at half the belief, idle end."
+s := (step value: (PBAcceptorDecided step: own) value: att state value: t0 + 3000) state.
+s := (step value: (granted value: 'n2' value: 1 value: 1 value: 5) value: s value: t0 + 4000) state.
+s := s with: { #ownership -> (s ownership with: { #queue -> #() }) }.
+pair := step value: (PBTimerFired token: s ownership token event: #owner) value: s value: t0 + 333334.
+sim := step value: (granted value: 'n0' value: 1 value: pair state ownership renewal rid value: 5) value: pair state value: t0 + 340000.
+sim := step value: (granted value: 'n2' value: 1 value: pair state ownership renewal rid value: 5) value: sim state value: t0 + 341000.
+c that: 'an owner with demand renews at half the belief left; a won renewal extends the lease'
+  is: { (step value: (PBTimerFired token: s ownership token event: #owner) value: s value: t0 + 333332) state ownership renewal.
+    sends value: pair. eff value: pair. sim effects collect: [:e | e class name]. sim state ownership lease validUntil. sim state ownership renewal }
+  equals: { nil. #(#('n0' 'renew') #('n2' 'renew')). #(#PBToAcceptor #PBSend #PBSend #PBTimer). #(#PBCount #PBTimer). t0 + 333334 + 666666. nil }.
+pair := step value: (PBTimerFired token: sim state ownership token event: #owner) value: sim state value: t0 + 504001.
+c that: 'without demand for idleEnd the owner releases'
+  is: { pair state ownership. (pair effects select: [:e | e isKindOf: PBSend]) collect: [:e | | m | m := e message.
+      { e to. m at: 'term'. m at: 'held'. m at: 'certain'. m at: 'next'. m at: 'more' }].
+    ((pair effects detect: [:e | e isKindOf: PBToAcceptor]) event message) at: 'held' }
+  equals: { nil. #(#('n0' 1 true true nil false) #('n2' 1 true true nil false)). true }.
+
+"(11) The turn named, the deferral, want."
+s := (step value: (msg value: 'want' value: 'n2' value: #()) value: sim state value: t0 + 400000) state.
+s := (step value: (msg value: 'request' value: 'n0' value: { 'term' -> 8192. 'rid' -> 3. 'inc' -> 1. 'vs' -> vs }) value: s value: t0 + 410000) state.
+s := (step value: (PBPermitWanted waiter: #w2) value: s value: t0 + 420000) state.
+"The waiter waits for the next term (a test seam: out of the queue, among the waiters)."
+s := s with: { #ownership -> (s ownership with: { #queue -> #() }). #waiters -> #(#w2) }.
+pair := step value: (PBTimerFired token: s ownership token event: #owner) value: s value: t0 + 920001.
+c that: 'a release names the member waiting longest, says more, and its releaser defers, saying want'
+  is: { (pair effects select: [:e | e isKindOf: PBSend]) collect: [:e | { e to. e message type. (e message type = 'release') ifTrue: [e message at: 'next'] ifFalse: [nil].
+      (e message type = 'release') ifTrue: [e message at: 'more'] ifFalse: [nil] }].
+    pair state proposer phase. pair state hints turn. (pair effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat].
+    (pair effects select: [:e | e isKindOf: PBTimer]) collect: [:e | e after].
+    (step value: (PBTimerFired token: pair state proposer token event: #proposer) value: pair state value: t0 + 970001) state proposer phase.
+    sends value: (step value: (PBPermitWanted waiter: #w9) value: (pair state with: { #proposer -> nil. #waiters -> #().
+      #hints -> (pair state hints with: { #registered -> false }) }) value: t0 + 930000) }
+  equals: { #(#('n0' 'release' 'n2' true) #('n2' 'release' 'n2' true)).
+    #turn. { 'n2'. t0 + 920001. nil }. #('turns_named' 'deferrals'). #(50000). #attempt. #(#('n0' 'want') #('n2' 'want')) }.
+
+"(12) The named member takes its turn."
+s := (step value: (PBPermitWanted waiter: #w3) value: (ready value: 'n2') value: t0) state.
+s := (step value: (reject value: 'n0' value: 2 value: 1 value: 5 value: 'busy' value: 1 value: 1.0) value: s value: t0) state.
+s := (step value: (reject value: 'n1' value: 2 value: 1 value: 5 value: 'busy' value: 1 value: 1.0) value: s value: t0) state.
+pair := step value: (msg value: 'release' value: 'n1' value: { 'term' -> 1. 'inc' -> 1. 'root' -> nil. 'committed' -> nil.
+  'certain' -> true. 'held' -> true. 'next' -> 'n2'. 'more' -> true }) value: s value: t0 + 1000.
+c that: 'the named member asks at once and counts turns_taken'
+  is: { s proposer phase. pair state proposer phase. (pair effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat].
+    pair state hints myTurn. pair state hints waiting collect: [:e | e first] }
+  equals: { #backoff. #attempt. #('attempts' 'turns_taken'). false. #('n1') }.
+
+"(13) ownerIdleRelease."
+s := (step value: (PBPermitWanted waiter: #w1) value: (stateIn value: 'n1' value: three value: { marker }
+  value: (Dictionary new at: #ownerIdleRelease put: 100; yourself)) value: t0) state.
+s := (step value: (PBAcceptorDecided step: (core accept: (PBReceived message: (PBClusterMessage type: 'request' from: 'n1' fields: {
+  'term' -> 1. 'rid' -> 1. 'inc' -> 5. 'vs' -> vs })) in: (view value: 'n1' value: three value: { marker }) now: t0)) value: s value: t0) state.
+s := (step value: (granted value: 'n0' value: 1 value: 1 value: 5) value: s value: t0) state.
+s := s with: { #ownership -> (s ownership with: { #queue -> #() }) }.
+pair := step value: (PBTimerFired token: s ownership token event: #owner) value: s value: t0 + 100001.
+c that: 'ownerIdleRelease ends a term without local demand'
+  is: { (s ownership token) notNil. pair state ownership. (pair effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat] }
+  equals: { true. nil. #('terms_released_idle_local') }.
+
+"(14) The owner hint."
+s := ready value: 'n1'.
+c that: 'the owner hint is learnt from a renewal, not from a request'
+  is: { ((step value: (msg value: 'request' value: 'n2' value: { 'term' -> 8194. 'rid' -> 1. 'inc' -> 1. 'vs' -> vs }) value: s value: t0) state hints) ownerTerm.
+    ((step value: (msg value: 'renew' value: 'n2' value: { 'term' -> 8194. 'rid' -> 1. 'inc' -> 1. 'vs' -> vs }) value: s value: t0) state hints) ownerNode }
+  equals: { 0. 'n2' }.
+
+c report displayNl.

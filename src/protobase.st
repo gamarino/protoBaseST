@@ -21,6 +21,7 @@ Import from: 'protobase/cluster/config'.
 Import from: 'protobase/cluster/lease'.
 Import from: 'protobase/cluster/core'.
 Import from: 'protobase/cluster/acceptor'.
+Import from: 'protobase/cluster/proposer'.
 Import from: 'protobase/avl'.
 Import from: 'protobase/collections'.
 Import from: 'protobase/records'.

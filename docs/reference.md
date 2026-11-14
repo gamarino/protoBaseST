@@ -419,7 +419,8 @@ For tests, tools and readers of the format. An application does not need them.
   unchanged with no effect. Events: `PBReceived message:`, `PBTimerFired token:event:`,
   `PBStartNode`, `PBStopNode`, `PBPermitWanted waiter:`, `PBBaseWanted permission:waiter:`,
   `PBReplicateWanted permission:root:waiter:`, `PBDoneReport permission:outcome:` (`#committed`,
-  `#unknown` or `#none`), `PBRejoinWanted`, `PBAcceptorDecided step:`. Effects, each answering
+  `#unknown` or `#none`), `PBRejoinWanted`, `PBAcceptorDecided step:`, `PBAcceptorDiscarded
+  step:` (the step the shell discarded because its append failed; `dispatchAcceptorDiscarded:in:now:`). Effects, each answering
   `applyTo:` with one message the shell implements (applySend:, applyToAcceptor:, applyTimer:,
   applySettle:, applyPublishCommitted:, applyPublishAcceptor:, applyFence:): `PBSend
   to:message:`, `PBToAcceptor event:` (the node's own vote and acceptance, never through the
@@ -429,7 +430,10 @@ For tests, tools and readers of the format. An application does not need them.
   and `PBLogAppend kind:label:root:sync:` (`payload` is its `PBAcceptorLog` entry), allowed only
   in the appends of an acceptor step. `PBNodeState config:inc:` answers `config`, `inc`,
   `acceptorView`, `hints`, `proposer`, `ownership`, `waiters`, `suspectTerm`, `fenced`, `rejoin`,
-  `nextRid` and `withOwnership:`; `PBAcceptorState config:logged:now:` (a `PBLoggedRoots`: the
+  `nextRid`, `withOwnership:` and `with:` (an Array of field -> value associations, the fields
+  above from `acceptorView` on); `PBAcceptorStep state:appends:reply:vote:` adds `vote`: the
+  grant or reject of the node's own request, renewal or release, which the acceptor answers to
+  its dispatcher in the step instead of a `PBSend` (`state:appends:reply:` is the vote nil); `PBAcceptorState config:logged:now:` (a `PBLoggedRoots`: the
   grant state starts its grace at that time and restores the logged promise) answers `config`,
   `grants`, `accepted`, `committed`, `seqSeen`, `suspectTerm`, `isRejoined`, `rejoinBallot`,
   `tierFailed` and `fenced`. Nothing in the core reads a clock; constructors refuse ill-typed
@@ -440,8 +444,9 @@ For tests, tools and readers of the format. An application does not need them.
   whose sender is not another member, drops a type of `fingerprintedTypes` whose vs is not this
   voter set's fingerprint with `PBCount stat: 'config_mismatches'`, then calls the handler of the
   type (`handlerFor:prefix:`: received<Type>:in:now:) when a module defines one;
-  `acceptReceived:in:now:` drops a non-member and this node itself and calls
-  accept<Type>:in:now:; `dispatchStartNode:in:now:` hands the start to the acceptor. Here,
+  `acceptReceived:in:now:` drops a non-member and calls accept<Type>:in:now: (this node's own
+  messages included: its vote travels in the step's `vote`, never counts `'grants_given'`, and its
+  own release raises no suspicion); `dispatchStartNode:in:now:` hands the start to the acceptor. Here,
   `receivedRequest:in:now:`, `receivedRenew:in:now:`, `receivedRelease:in:now:` and
   `receivedQuery:in:now:` hand the message to the acceptor (`PBToAcceptor`), which answers in
   `acceptRequest:in:now:` and `acceptRenew:in:now:` (nothing when fenced; a refusal of the
@@ -460,6 +465,41 @@ For tests, tools and readers of the format. An application does not need them.
   (`stat`; the shell implements applyCount:), `PBAcceptorState >> log` (the identity of the
   attached log), `loggedPromise` (the promise written to that log, 0 for another log) and
   `withGrants:suspectTerm:rejoined:tierFailed:loggedPromise:` are in `core.st`.
+- **Proposer rules** (`cluster/proposer.st`): the proposer side of `proto_db`'s coordinator
+  (permit's acquisition loop, `_become_owner`, `_open_attempt`, `_on_reply`, `_close_attempt`,
+  `_back_off`, `_own_loop_body`, `_renew`, `release` and the fairness hints) as rule methods of
+  `PBCoordinatorCore`, over the immutable values `PBHints` (`hint`, `ownerTerm`, `ownerNode`,
+  `waiting`, `wantingSince`, `turn`, `myTurn`, `registered`, `wakeups`, `progress`, `draw`;
+  `seed:`), `PBProposer` (`phase`: `#rejoin`, `#turn`, `#attempt`, `#backoff`, `#busy` or
+  `#spread`; `attempt`, `failures`, `marks`, `token`, `wakeAt`, `startedAt`, `straggling`,
+  `backoffEnd`, `busyEnd`, `waited`; `start`) and `PBOwnership` (`lease`, `term`, `queue`,
+  `lastDemand`, `lastLocal`, `renewal`, `renewStarted`, `straggling`, `token`;
+  `lease:queue:now:`), each answering `with:` (an Array of field -> value associations).
+  `dispatchPermitWanted:in:now:` queues the waiter at a valid ownership, else among the
+  waiters, and starts an acquisition: it waits while the acceptor rejoins, defers to the member a
+  release named until `turnSilence` (`'deferrals'`, `'deferral_timeouts'`, a `'want'` broadcast when
+  nobody queues it), then opens an attempt (`'attempts'`, `'turns_taken'`): its own request to its
+  own acceptor (`PBToAcceptor`, unless a learner) and the request to the other voters, with the
+  ballot `ballotFor:` (the node's rank above the highest term its acceptor saw, the hint and the
+  labels of its accepted and committed roots). Replies of another incarnation are counted
+  `'stale_replies'` and dropped, a learner's reply is not a vote, every reply raises the hint; a
+  majority of replies to an undecided attempt waits max(`minStraggle`, `straggleFactor` x elapsed)
+  for the rest; the own vote arrives in `dispatchAcceptorDecided:in:now:` (a discarded own grant,
+  `dispatchAcceptorDiscarded:in:now:`, is the refusal `'promise_failed'`). A win (`'acquired'`,
+  `'ownerships'`) is an ownership whose lease ends at the send plus the belief (L5); a loss
+  (`'lost_attempts'`) cancels to every member and its own acceptor and backs off for the jittered
+  exponential delay, extended to the refusals' busy remaining (`microsFromWire:`, the inverse
+  of `wireSeconds:`): a held release or a newly learnt owner ends the back-off, any release only
+  its busy extension, after which a member the release did not name waits a random spread of up
+  to `wakeSpread`. An owner with demand renews at half the belief left (`'renewals'`,
+  `'renewal_failures'`; a failed renewal does not end the term); without demand for `idleEnd`, or
+  without local demand for `ownerIdleRelease` (`'terms_released_idle_local'`), it releases (held,
+  certain), naming the member seen waiting longest (`'turns_named'`) and saying `'more'` while local
+  waiters remain. `receivedRequest:in:now:`, `receivedRenew:in:now:` (the owner hint),
+  `receivedRelease:in:now:` and `receivedWant:in:now:` keep the hints;
+  `dispatchTimerFired:in:now:` ignores a timer whose token is not the current one. The owner's
+  permissions are Task 12's (`_issue:now:effects:` issues none here). `PBCoordinatorCore class
+  >> drawRange` is the Park-Miller range of the seeded draws.
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
   `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered
@@ -539,6 +579,6 @@ For tests, tools and readers of the format. An application does not need them.
 ## The module and its files
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
-`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
+`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
 `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar` and `uuid`.

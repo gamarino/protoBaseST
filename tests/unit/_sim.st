@@ -38,9 +38,10 @@ applyTo:).
                  proto_db's (coordinator.py:1791, 'each step decides, makes its write durable,
                  publishes, then replies, in arrival order'): one step at a time, in arrival
                  order, each in three events: decide (the rules' step; its appends written to
-                 the node's PBSimDisk), sync (through the last append that asks for one), reply
-                 (the reply effects, then PBAcceptorDecided to the dispatcher); the next step of
-                 the lane is decided only after that reply.
+                 the node's PBSimDisk), sync (through the last append that asks for one; it
+                 takes syncCost: microseconds of virtual time when the step asks for a sync,
+                 none by default), reply (the reply effects, then PBAcceptorDecided to the
+                 dispatcher); the next step of the lane is decided only after that reply.
   PBTimer        comes due when the node's clock has advanced by its after (above).
   PBSettle       advances the synthetic transaction of its waiter: commit: aToken at: id asks
                  the node for a permission (PBPermitWanted), then for the base under it
@@ -55,11 +56,13 @@ applyTo:).
 
 Script. inject: aMessage to: anId at: aTime delivers a message as if its sender had sent it
 (framed with the sender's key; the faults apply), to drive the acceptors without a proposer.
+delay: fromId to: toId by: someMicros adds a fixed delay to every message of that link sent
+from then on.
 seed:ids:rules:options:logs: starts each node over a synced log (id -> an Array of
 PBLogAppend), as a member of a cluster formed before. failAppends: anId makes every later
 append of that node's acceptor fail: the step is discarded (the acceptor keeps its state before
-it; nothing written, synced or replied), and the acceptor takes PBAppendFailed before the next
-event of its lane.
+it; nothing written, synced or replied), the acceptor takes PBAppendFailed before the next
+event of its lane, and the dispatcher takes PBAcceptorDiscarded with the step.
 
 Crashes. crash: id unsynced: aMode stops a node at once: its pending events and its acceptor
 lane are dropped (messages already sent stay in flight). The synced entries of its disk
@@ -75,7 +78,10 @@ what its disk holds.
 The checker. PBSimChecker runs after every step: at most one owner of a term (S1: an ownership
 seen in any node's state, by node and incarnation); two different roots with equal (label,
 epoch) appended, published or sent anywhere; an acceptor reply performed before every entry the
-node's acceptor asked to sync so far is synced. checkConverged (converge:): the committed
+node's acceptor asked to sync so far is synced. With watchLeases (off by default: a paused clock
+or a startup grace of 0 after a restart lets a lease outlive its grants by design, fenced by
+the term), at most one node holds an ownership whose lease is valid on its own clock (L5: the
+belief never outlives the granters' promise). checkConverged (converge:): the committed
 chains of the live nodes (from each one's published committed root through the pred links of
 the roots the simulator built) do not fork (of two heads, one is in the other's chain); every
 acknowledged commit is in every live node's chain (S4); every unknown commit in every live
@@ -297,7 +303,7 @@ PBSimNode >> segment
 
 "=== PBSimChecker ============================================================"
 
-Object subclass: #PBSimChecker instanceVariableNames: 'sim owners roots rootFields'.
+Object subclass: #PBSimChecker instanceVariableNames: 'sim owners roots rootFields leases'.
 
 PBSimChecker class >> sim: aSim
   ^ self basicNew setSim: aSim.
@@ -305,6 +311,7 @@ PBSimChecker class >> sim: aSim
 PBSimChecker >> setSim: aSim
   sim := aSim.
   owners := Dictionary new.
+  leases := false.
   roots := Dictionary new.
   rootFields := Dictionary new.
   PBClusterMessage schema keysAndValuesDo: [:type :fields |
@@ -314,8 +321,14 @@ PBSimChecker >> setSim: aSim
 PBSimChecker >> fail: aText
   ^ sim fail: aText.
 
-"After every step: at most one owner of each term (S1)."
+"Checks from now on that at most one node holds a valid lease at once."
+PBSimChecker >> watchLeases
+  leases := true.
+
+"After every step: at most one owner of each term (S1); with watchLeases, at most one valid
+ lease."
 PBSimChecker >> check
+  leases ifTrue: [self checkLeases].
   sim ids do: [:id |
     | node term who prior |
     node := sim nodeAt: id.
@@ -327,6 +340,18 @@ PBSimChecker >> check
         ifTrue: [owners at: term put: who]
         ifFalse: [prior = who ifFalse: [
           self fail: 'S1: term ' , term printString , ' is owned by ' , prior , ' and by ' , who]]]].
+
+"At most one node holds an ownership whose lease is valid on its own clock now."
+PBSimChecker >> checkLeases
+  | valid |
+  valid := sim ids select: [:id |
+    | node |
+    node := sim nodeAt: id.
+    node isUp and: [node state ownership notNil and: [node state ownership lease isValidAt: (sim localNowOf: id)]]].
+  valid size > 1 ifTrue: [
+    self fail: 'L5: valid leases at once: ' , (valid collect: [:id |
+      id , ' term ' , (sim nodeAt: id) state ownership term printString , ' until '
+        , (sim nodeAt: id) state ownership lease validUntil printString , ' at ' , (sim localNowOf: id) printString]) printString].
 
 "aRoot (a PBLabeledRoot or nil) was appended, published or sent: no other root may carry its
  label and epoch."
@@ -387,7 +412,7 @@ PBSimChecker >> checkConverged
 
 "=== PBSim ==================================================================="
 
-Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current counts failing'.
+Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current counts failing syncCost fixedLags'.
 
 "N nodes (anArray of ids) running aRules, each configured with aDictionary (PBClusterConfig
  options), all started at virtual time 0, every choice drawn from Random seed: n."
@@ -424,6 +449,8 @@ PBSim >> setSeed: n ids: anArray rules: aRules options: aDictionary logs: aLogs
   offsets := 0.
   counts := Dictionary new.
   failing := Set new.
+  syncCost := 0.
+  fixedLags := Dictionary new.
   aLogs keysAndValuesDo: [:id :appends |
     | disk |
     disk := (self nodeAt: id) disk.
@@ -459,6 +486,14 @@ PBSim >> rootOf: aToken
 
 PBSim >> commitOrder
   ^ commitOrder asArray.
+
+"The virtual time now."
+PBSim >> now
+  ^ now.
+
+"anId's clock now."
+PBSim >> localNowOf: anId
+  ^ (self nodeAt: anId) clock localAt: now.
 
 "How many PBCount stat: aName anId performed."
 PBSim >> countOf: aName at: anId
@@ -551,6 +586,18 @@ PBSim >> restart: anId
   node isUp ifTrue: [^ Error signal: 'PBSim: ' , anId , ' is running'].
   self _start: node.
 
+"Every acceptor step that asks for a sync takes someMicros of virtual time to sync (an fsync)."
+PBSim >> syncCost: someMicros
+  (someMicros isInteger and: [someMicros >= 0]) ifFalse: [^ Error signal: 'PBSim syncCost: an Integer >= 0'].
+  syncCost := someMicros.
+
+"Every message sent from fromId to toId from now on arrives someMicros later (on top of the
+ faults' delay)."
+PBSim >> delay: fromId to: toId by: someMicros
+  (someMicros isInteger and: [someMicros >= 0]) ifFalse: [^ Error signal: 'PBSim delay:to:by: an Integer >= 0'].
+  fixedLags at: fromId , '>' , toId put: someMicros.
+  self _trace: fromId , ' -> ' , toId , ' delayed by ' , someMicros printString.
+
 PBSim >> failAppends: anId
   failing add: anId.
   self _trace: anId , ' appends fail'.
@@ -574,14 +621,20 @@ PBSim >> tearLog: anId
 
 "A synthetic transaction aToken (a new token) at the running node anId."
 PBSim >> commit: aToken at: anId
+  ^ self commit: aToken at: anId time: now.
+
+"A synthetic transaction aToken at the running node anId, asked at aTime (not before now): a
+ commit of an incarnation that is gone by then is dropped and stays pending."
+PBSim >> commit: aToken at: anId time: aTime
   | node |
   node := self nodeAt: anId.
   node isUp ifFalse: [^ Error signal: 'PBSim: ' , anId , ' is not running'].
+  aTime < now ifTrue: [^ Error signal: 'PBSim commit: a time not before now'].
   (commits includesKey: aToken) ifTrue: [^ Error signal: 'PBSim: the token ' , aToken printString , ' is taken'].
   commits at: aToken put: #pending.
   commitOrder add: aToken.
-  self _trace: anId , ' commit ' , aToken printString.
-  self _schedule: #dispatch node: node payload: (PBPermitWanted waiter: { 'permit'. aToken }) at: now.
+  self _trace: anId , ' commit ' , aToken printString , (aTime = now ifTrue: [''] ifFalse: [' at ' , aTime printString]).
+  self _schedule: #dispatch node: node payload: (PBPermitWanted waiter: { 'permit'. aToken }) at: aTime.
 
 "Runs the earliest due event (one of those due at once, drawn), then the checker; false when
  nothing is due (the queue is empty, or holds only timers of paused clocks)."
@@ -674,6 +727,7 @@ PBSim >> _accept: anEvent at: aNode
     self _trace: aNode id , '   append failed, the step is discarded and not replied'.
     aNode lane addFirst: (PBAppendFailed reason: 'simulated append failure').
     aNode laneBusy: false.
+    self _schedule: #dispatch node: aNode payload: (PBAcceptorDiscarded step: step) at: now.
     ^ self _runLane: aNode].
   aNode acceptor: step state.
   last := 0.
@@ -684,7 +738,7 @@ PBSim >> _accept: anEvent at: aNode
     checker noteAppend: append.
     append sync ifTrue: [last := index]].
   aNode owe: last.
-  self _schedule: #sync node: aNode payload: { last. step } at: now.
+  self _schedule: #sync node: aNode payload: { last. step } at: now + (last > 0 ifTrue: [syncCost] ifFalse: [0]).
 
 "The sync of an acceptor step: the disk through anIndex; the reply is the next event."
 PBSim >> _syncThrough: anIndex step: aStep at: aNode
@@ -736,7 +790,7 @@ PBSim >> _send: aSend at: aTime
   copies := (faults duplicate > 0 and: [random next < faults duplicate]) ifTrue: [2] ifFalse: [1].
   copies timesRepeat: [
     | at |
-    at := aTime + (faults delay > 0 ifTrue: [random between: 0 and: faults delay] ifFalse: [0]).
+    at := aTime + (fixedLags at: link ifAbsent: [0]) + (faults delay > 0 ifTrue: [random between: 0 and: faults delay] ifFalse: [0]).
     faults reorder ifFalse: [
       at := at max: (links at: link ifAbsent: [-1]) + 1.
       links at: link put: at].

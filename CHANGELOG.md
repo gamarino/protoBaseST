@@ -2,6 +2,20 @@
 
 ## 0.2.0 (unreleased)
 
+- The proposer's rules (`src/protobase/cluster/proposer.st`): acquiring, owning, renewing,
+  releasing and the fairness hints of `proto_db`'s coordinator (`permit`, `_become_owner`,
+  `_open_attempt`, `_on_reply`, `_close_attempt`, `_back_off`, `_own_loop_body`, `_renew`,
+  `release`) as rule methods of `PBCoordinatorCore`, over the immutable values `PBHints`,
+  `PBProposer` and `PBOwnership`. A lease is valid from the send of its request plus the belief
+  (L5); replies of another incarnation are dropped (`stale_replies`); a lost attempt cancels and
+  backs off, and only a held release or a newly learnt owner ends the back-off itself; a release
+  names the member seen waiting longest and the others defer to it. The node's own vote now
+  travels in the acceptor step (`PBAcceptorStep vote`), `acceptReceived:in:now:` takes the
+  node's own messages, and `PBAcceptorDiscarded` reports a discarded step to the dispatcher.
+  The owner's permissions follow in Task 12. The simulator gains a sync cost, fixed link delays,
+  scheduled commits and the L5 lease check (`watchLeases`). Tested by `tests/unit/sim_leases.st`,
+  `tests/unit/sim_leases_plants.st` (the planted rules of `tests/unit/_plants.st`) and
+  `tests/unit/cluster_proposer_rules.st`.
 - The acceptor's phase-1 rules (`src/protobase/cluster/acceptor.st`), `proto_db`'s `_route`,
   `_on_request`, `_decide`, `_refusal`, `_on_release` and plain query as rule methods of
   `PBCoordinatorCore`: the dispatcher drops messages of non-members and counts voter-set

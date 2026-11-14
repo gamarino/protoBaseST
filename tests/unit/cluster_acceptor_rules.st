@@ -4,8 +4,9 @@
  _on_release, the plain query, _attach_locked's first-start marker, _tier_failed).
  (1) The dispatcher (core.st's checks, then the handlers of acceptor.st) drops a message from a non-member or from itself, drops and counts a voter-set
  mismatch on a fingerprinted type, hands request, renew, release and query to the acceptor
- lane and leaves the rest. (2) The acceptor drops a non-member and its own requests (CC1, Task
- 11). (3-4) The acceptor's refusals in proto_db's order: learner, tier_failed, rejoining, with
+ lane and leaves the rest. (2) The acceptor drops a non-member; this node's own request is
+ decided as a peer's and answered in the step's vote, never sent (CC1), a grant appending its
+ promise, uncounted; its own refusal is the vote too; its own release raises no suspicion. (3-4) The acceptor's refusals in proto_db's order: learner, tier_failed, rejoining, with
  the highest term, the accepted root and certain; a fenced node sends nothing for a request, a
  renewal or a release (proto_db _enqueue) and still answers a plain query. (5) bad_ballot, stale_term,
  term_taken; a grant of a new term appends one synced promise and carries the accepted and
@@ -91,13 +92,20 @@ c that: 'the dispatcher drops unknown senders and itself, counts a vs mismatch, 
     d value: (msg value: 'want' value: 'n0' value: #()) }
   equals: { #(). #(). #('config_mismatches'). #(#PBCount). #(#(#PBToAcceptor) #(#PBToAcceptor) #(#PBToAcceptor) #(#PBToAcceptor)). #() }.
 
-"(2) The acceptor drops a non-member and this node's own messages."
+"(2) The acceptor drops a non-member and decides this node's own messages (CC1)."
 s := stateOf value: 'n1' value: three value: { marker }.
-c that: 'the acceptor drops a non-member and its own request'
-  is: { (core accept: (PBReceived message: (PBClusterMessage type: 'request' from: 'zz' fields: { 'term' -> 4096. 'rid' -> 1. 'inc' -> 1. 'vs' -> vs })) in: s now: g) state == s.
-    (core accept: (request value: 'n1' value: 4097 value: 1) in: s now: g) state == s.
-    (core accept: (request value: 'n1' value: 4097 value: 1) in: s now: g) reply }
-  equals: { true. true. #() }.
+step := core accept: (request value: 'n1' value: 4097 value: 1) in: s now: g.
+pair := { (core accept: (PBReceived message: (PBClusterMessage type: 'request' from: 'zz' fields: { 'term' -> 4096. 'rid' -> 1. 'inc' -> 1. 'vs' -> vs })) in: s now: g) state == s.
+  step reply. step vote type. step vote from. step vote at: 'term'. step appends collect: [:a | { a kind. a label }].
+  step state grants activeGrant holder.
+  (core accept: (request value: 'n1' value: 4097 value: 1) in: s now: 0) vote at: 'reason'.
+  (core accept: (request value: 'n0' value: 4096 value: 1) in: s now: g) vote.
+  (core accept: (release value: 'n1' value: 4097 value: 1 value: false) in: step state now: g + 1000) state suspectTerm.
+  (core accept: (release value: 'n1' value: 4097 value: 1 value: true) in: step state now: g + 3000000) state suspectTerm.
+  (core accept: (release value: 'n1' value: 4097 value: 1 value: true) in: step state now: g + 1000) state grants activeGrant }.
+c that: 'the acceptor drops a non-member; its own request is decided and answered in the vote, never sent'
+  is: pair
+  equals: { true. #(). 'grant'. 'n1'. 4097. #(#(#promise 4097)). 'n1'. 'starting'. nil. 0. 0. nil }.
 
 "(3) Refusals of the acceptor's state, in proto_db _refusal's order; a fenced node sends nothing."
 fenced := [:aState | PBAcceptorState basicNew _setConfig: aState config grants: aState grants accepted: aState accepted

@@ -19,7 +19,7 @@ durable before it performs the reply (R55, R81).
     busy, term_taken). A grant of a term above loggedPromise appends a synced promise; a
     renewal or a duplicate of a term already logged appends nothing (D50). The reply is a
     grant (accepted root, committed root, certain) or a reject (accepted root, certain, reason,
-    highest, remaining) and every grant counts grants_given. A grant that ended another one
+    highest, remaining) and every grant to a peer counts grants_given. A grant that ended another one
     before its time makes the node suspect for that term.
   acceptRelease:in:now: (proto_db _on_release; dropped when fenced): PBGrantState release:inc:term:now:; suspect for
     an expired grant it ended, and for the term of a held release that is not certain. The
@@ -44,8 +44,14 @@ durable before it performs the reply (R55, R81).
 
 Not representable here: proto_db's no_storage refusal (no acceptor log attached). An acceptor
 state exists only over a loaded log (PBAcceptorState config:logged:now:); before the attach
-the shell has no acceptor (Task 20). A request from this node itself (its own vote, CC1) is
-the proposer's (Task 11) and is dropped here as proto_db's _route drops it.
+the shell has no acceptor (Task 20).
+
+This node's own messages (CC1, proposer.st): its own request and renewal are decided by
+_decide: as a peer's (proto_db _open_attempt and _renew decide the own vote with the same
+grant rules, after _refusal), and the step sends nothing: the grant or reject is the step's vote
+(PBAcceptorStep vote), which the dispatcher reads from the step handed back. Its own release or
+cancel frees its grant and closes the term (proto_db release and _close_attempt call
+PeerGrants.on_release) and raises no suspicion: proto_db discards what on_release answers there.
 
 Wire time: a reject's remaining is a number of seconds (#number, a Float in proto_db): the
 core's microseconds are converted when the message is built (wireSeconds:)."
@@ -117,7 +123,7 @@ PBAppendFailed >> printOn: aStream
 "=== PBCoordinatorCore: the dispatcher's handlers ==========================="
 
 "A wire number of seconds (#number) for someMicros, an Integer of microseconds. The inbound
- direction (a received reject's remaining) is the proposer's (Task 11)."
+ direction (a received reject's remaining) is microsFromWire: (proposer.st)."
 PBCoordinatorCore class >> wireSeconds: someMicros
   ^ (someMicros / 1000000) asFloat.
 
@@ -155,6 +161,13 @@ PBCoordinatorCore >> _refusalIn: s
   s isRejoined ifFalse: [^ 'rejoining'].
   ^ nil.
 
+"The step answering the request or renewal m with aReply (a grant or reject message) and
+ someCounts: sent to its sender, or, for this node's own request, the step's vote (CC1)."
+PBCoordinatorCore >> _answer: m with: aReply in: next appends: appends counts: someCounts
+  m from = next config nodeId ifTrue: [
+    ^ PBAcceptorStep state: next appends: appends reply: someCounts vote: aReply].
+  ^ PBAcceptorStep state: next appends: appends reply: { PBSend to: m from message: aReply } , someCounts.
+
 "The reject of the request or renewal aMessage (proto_db make_message 'reject')."
 PBCoordinatorCore >> _reject: aMessage reason: aReason highest: aHighest remaining: someMicros suspect: aSuspect in: s
   ^ PBClusterMessage type: 'reject' from: s config nodeId fields: {
@@ -171,8 +184,8 @@ PBCoordinatorCore >> _decide: anEvent in: s now: t renew: isRenew
   term := m at: 'term'.
   refusal := self _refusalIn: s.
   refusal notNil ifTrue: [
-    ^ PBAcceptorStep state: s appends: #() reply: { PBSend to: m from message: (self _reject: m reason: refusal
-      highest: s grants highestSeen remaining: 0 suspect: s suspectTerm in: s) }].
+    ^ self _answer: m with: (self _reject: m reason: refusal highest: s grants highestSeen remaining: 0
+      suspect: s suspectTerm in: s) in: s appends: #() counts: #()].
   decision := isRenew
     ifTrue: [s grants renew: m from inc: (m at: 'inc') term: term now: t config: s config]
     ifFalse: [s grants decideRequest: m from inc: (m at: 'inc') term: term now: t config: s config].
@@ -194,19 +207,27 @@ PBCoordinatorCore >> _decide: anEvent in: s now: t renew: isRenew
         'term' -> term. 'rid' -> (m at: 'rid'). 'inc' -> (m at: 'inc').
         'root' -> (PBClusterMessage rootValue: s accepted). 'committed' -> (PBClusterMessage rootValue: s committed).
         'certain' -> (suspect = 0) }.
-      "Every grant, renewals and duplicates included (proto_db _decide, grants_given)."
-      counts := { PBCount stat: 'grants_given' }].
+      "Every grant to a peer, renewals and duplicates included (proto_db _decide,
+       grants_given); this node's own vote is not counted (proto_db _open_attempt and _renew
+       decide it without _decide)."
+      counts := m from = s config nodeId ifTrue: [#()] ifFalse: [{ PBCount stat: 'grants_given' }]].
   next := s withGrants: decision newState suspectTerm: suspect rejoined: s isRejoined tierFailed: s tierFailed
     loggedPromise: (s loggedPromise max: (appends isEmpty ifTrue: [0] ifFalse: [decision promiseToLog])).
-  ^ PBAcceptorStep state: next appends: appends reply: { PBSend to: m from message: reply } , counts.
+  ^ self _answer: m with: reply in: next appends: appends counts: counts.
 
-"proto_db _on_release (its grant part): frees the sender's grant, closes the term here."
+"proto_db _on_release (its grant part): frees the sender's grant, closes the term here. This
+ node's own release raises no suspicion (proto_db release and _close_attempt discard what
+ PeerGrants.on_release answers)."
 PBCoordinatorCore >> acceptRelease: anEvent in: s now: t
   | m pair suspect |
   "A fenced node drops the lane's messages (proto_db _enqueue)."
   s fenced notNil ifTrue: [^ self _unchangedAcceptor: s].
   m := anEvent message.
   pair := s grants release: m from inc: (m at: 'inc') term: (m at: 'term') now: t.
+  m from = s config nodeId ifTrue: [
+    ^ PBAcceptorStep state: (s withGrants: pair first suspectTerm: s suspectTerm rejoined: s isRejoined
+        tierFailed: s tierFailed loggedPromise: s loggedPromise)
+      appends: #() reply: #()].
   suspect := s suspectTerm max: pair last.
   ((m at: 'held') and: [(m at: 'certain') not]) ifTrue: [
     "The holder may have published something it could not replicate: whatever its term

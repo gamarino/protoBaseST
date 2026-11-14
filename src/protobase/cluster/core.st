@@ -13,8 +13,10 @@ clock, a socket or a file, sends, logs or waits.
     commit under a permission), PBReplicateWanted permission: root: waiter: (replicate a built
     root), PBDoneReport permission: outcome: (the outcome a holder reports, #committed,
     #unknown or #none: proto_db's done outcomes), PBRejoinWanted (the operator's forceRejoin)
-    and PBAcceptorDecided step: (an acceptor step whose appends are durable, handed back to the
-    dispatcher: the reply to this node's own vote and acceptance travels this way, CC1).
+    PBAcceptorDecided step: (an acceptor step whose appends are durable, handed back to the
+    dispatcher: the reply to this node's own vote and acceptance travels this way, CC1) and
+    PBAcceptorDiscarded step: (an acceptor step whose append failed, discarded by the shell:
+    the dispatcher withdraws the own vote it carried).
   Effects (PBEffect): PBSend to: message:, PBToAcceptor event: (an event for this node's own
     acceptor, never through the transport: CC1), PBLogAppend kind: label: root: sync: (an
     acceptor-log entry: only in the appends of an acceptor step), PBTimer after: token: event:
@@ -30,18 +32,21 @@ clock, a socket or a file, sends, logs or waits.
     shell from its step, never applied.
   PBStep           state: effects: (the answer of dispatch:in:now:). A PBLogAppend among its
                    effects is PBValidationError: only the acceptor writes its log.
-  PBAcceptorStep   state: appends: reply: (the answer of accept:in:now:): the shell writes the
-                   appends in order, syncs, and only once every append that asks for a sync is
-                   durable performs the reply effects (atomic acceptor steps, R55, R81, R81b),
-                   then hands the step to the dispatcher (PBAcceptorDecided). A step whose
-                   append fails is discarded: the shell keeps the acceptor state it had before
-                   that step, performs none of its reply, and hands the acceptor PBAppendFailed
-                   (acceptor.st) before anything else, so the state never holds what the log
-                   does not.
+  PBAcceptorStep   state: appends: reply: vote: (the answer of accept:in:now:): the shell
+                   writes the appends in order, syncs, and only once every append that asks for
+                   a sync is durable performs the reply effects (atomic acceptor steps, R55,
+                   R81, R81b), then hands the step to the dispatcher (PBAcceptorDecided). vote
+                   is the grant or reject of this node's own request or renewal (CC1: a node
+                   never sends to itself), nil for any other step. A step whose append fails is
+                   discarded: the shell keeps the acceptor state it had before that step,
+                   performs none of its reply, hands the acceptor PBAppendFailed (acceptor.st)
+                   before anything else, so the state never holds what the log does not, and
+                   hands the dispatcher PBAcceptorDiscarded with the step.
   PBNodeState      the dispatcher's state of one node: config, inc (this incarnation, as
                    proto_db's random _inc), acceptorView (the acceptor state last handed back,
                    for hints only: CC2), hints, proposer, ownership, waiters, suspectTerm,
-                   fenced, rejoin, nextRid (proto_db _rids starts at 1).
+                   fenced, rejoin, nextRid (proto_db _rids starts at 1); with: answers a copy
+                   with some of them replaced.
   PBAcceptorState  the acceptor's state of one node (spec 5.3): config, grants (a PBGrantState:
                    promises are durable acceptor state, CC2), accepted and committed (a
                    PBLabeledRoot or nil), seqSeen ({ term. seq } of the highest permission
@@ -348,6 +353,29 @@ PBAcceptorDecided >> step
 
 PBAcceptorDecided >> dispatchWith: aCore in: aNodeState now: t
   ^ aCore dispatchAcceptorDecided: self in: aNodeState now: t.
+
+"--- PBAcceptorDiscarded ---"
+
+PBCoreEvent subclass: #PBAcceptorDiscarded instanceVariableNames: 'step'.
+
+"aStep, a PBAcceptorStep of this node's acceptor whose append failed: the shell discarded it
+ (nothing of it is durable, its reply was never performed)."
+PBAcceptorDiscarded class >> step: aStep
+  (aStep isKindOf: PBAcceptorStep) ifFalse: [
+    ^ PBValidationError signal: 'PBAcceptorDiscarded: a step is a PBAcceptorStep, not ' , aStep printString].
+  ^ self basicNew _setStep: aStep.
+
+PBAcceptorDiscarded >> _setStep: aStep
+  "Runs once, on a fresh instance."
+  step isNil ifFalse: [^ PBUserError signal: 'PBAcceptorDiscarded is immutable'].
+  step := aStep.
+  ^ self.
+
+PBAcceptorDiscarded >> step
+  ^ step.
+
+PBAcceptorDiscarded >> dispatchWith: aCore in: aNodeState now: t
+  ^ aCore dispatchAcceptorDiscarded: self in: aNodeState now: t.
 
 "=== Effects =================================================================="
 
@@ -659,26 +687,34 @@ PBStep >> state
 PBStep >> effects
   ^ effects copy.
 
-Object subclass: #PBAcceptorStep instanceVariableNames: 'state appends reply'.
+Object subclass: #PBAcceptorStep instanceVariableNames: 'state appends reply vote'.
 
 "The answer of an acceptor rule: aState (a PBAcceptorState), anArray of PBLogAppend written in
  order, and the reply effects (no PBLogAppend), performed only once every append that asks for
- a sync is durable."
+ a sync is durable; no own vote."
 PBAcceptorStep class >> state: aState appends: anArray reply: aReplyArray
+  ^ self state: aState appends: anArray reply: aReplyArray vote: nil.
+
+"As state:appends:reply:, with aVote: the grant or reject message of this node's own request or
+ renewal (CC1), nil for any other step. The dispatcher reads it from the step handed back."
+PBAcceptorStep class >> state: aState appends: anArray reply: aReplyArray vote: aVote
   (aState isKindOf: PBAcceptorState) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorStep: a state is a PBAcceptorState, not ' , aState printString].
   (anArray isArray and: [anArray allSatisfy: [:e | e isKindOf: PBLogAppend]]) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorStep: the appends are an Array of PBLogAppend, not ' , anArray printString].
   (aReplyArray isArray and: [aReplyArray allSatisfy: [:e | (e isKindOf: PBEffect) and: [(e isKindOf: PBLogAppend) not]]]) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorStep: the reply is an Array of effects other than PBLogAppend, not ' , aReplyArray printString].
-  ^ self basicNew _setState: aState appends: anArray copy reply: aReplyArray copy.
+  (aVote isNil or: [(aVote isKindOf: PBClusterMessage) and: [#('grant' 'reject') includes: aVote type]]) ifFalse: [
+    ^ PBValidationError signal: 'PBAcceptorStep: a vote is a grant or reject message or nil, not ' , aVote printString].
+  ^ self basicNew _setState: aState appends: anArray copy reply: aReplyArray copy vote: aVote.
 
-PBAcceptorStep >> _setState: aState appends: anArray reply: aReplyArray
+PBAcceptorStep >> _setState: aState appends: anArray reply: aReplyArray vote: aVote
   "Runs once, on a fresh instance."
   state isNil ifFalse: [^ PBUserError signal: 'PBAcceptorStep is immutable'].
   state := aState.
   appends := anArray.
   reply := aReplyArray.
+  vote := aVote.
   ^ self.
 
 PBAcceptorStep >> state
@@ -691,6 +727,10 @@ PBAcceptorStep >> appends
 "A fresh Array."
 PBAcceptorStep >> reply
   ^ reply copy.
+
+"The grant or reject of this node's own request or renewal, or nil."
+PBAcceptorStep >> vote
+  ^ vote.
 
 "=== PBNodeState ============================================================="
 
@@ -767,8 +807,25 @@ PBNodeState >> nextRid
 
 "This state with anOwnership (nil: none)."
 PBNodeState >> withOwnership: anOwnership
-  ^ self class basicNew _setConfig: config inc: inc acceptorView: acceptorView hints: hints proposer: proposer
-    ownership: anOwnership waiters: waiters suspectTerm: suspectTerm fenced: fenced rejoin: rejoin nextRid: nextRid.
+  ^ self with: { #ownership -> anOwnership }.
+
+"This state with the fields someAssociations name (#acceptorView, #hints, #proposer,
+ #ownership, #waiters, #suspectTerm, #fenced, #rejoin, #nextRid) replaced by their values; the
+ rest unchanged. Another name, or waiters that are not an Array, is PBValidationError."
+PBNodeState >> with: someAssociations
+  | d |
+  d := Dictionary new.
+  d at: #acceptorView put: acceptorView; at: #hints put: hints; at: #proposer put: proposer;
+    at: #ownership put: ownership; at: #waiters put: waiters; at: #suspectTerm put: suspectTerm;
+    at: #fenced put: fenced; at: #rejoin put: rejoin; at: #nextRid put: nextRid.
+  someAssociations do: [:a |
+    (d includesKey: a key) ifFalse: [^ PBValidationError signal: 'PBNodeState has no field ' , a key printString].
+    d at: a key put: a value].
+  (d at: #waiters) isArray ifFalse: [
+    ^ PBValidationError signal: 'PBNodeState: the waiters are an Array, not ' , (d at: #waiters) printString].
+  ^ self class basicNew _setConfig: config inc: inc acceptorView: (d at: #acceptorView) hints: (d at: #hints)
+    proposer: (d at: #proposer) ownership: (d at: #ownership) waiters: (d at: #waiters) copy
+    suspectTerm: (d at: #suspectTerm) fenced: (d at: #fenced) rejoin: (d at: #rejoin) nextRid: (d at: #nextRid).
 
 PBNodeState >> printOn: aStream
   aStream nextPutAll: 'PBNodeState('; nextPutAll: config nodeId; nextPutAll: ', inc '; print: inc; nextPut: $).
@@ -934,6 +991,10 @@ PBCoordinatorCore class >> handlerFor: aType prefix: aPrefix
 PBCoordinatorCore >> _fromPeer: aMessage in: aConfig
   ^ aMessage from ~= aConfig nodeId and: [aConfig membership ids includes: aMessage from].
 
+"Whether aMessage comes from a member of aConfig, this node included."
+PBCoordinatorCore >> _fromMember: aMessage in: aConfig
+  ^ aConfig membership ids includes: aMessage from.
+
 "A message of a peer (coordinator.py _route): a sender that is not another member is dropped; a
  fingerprinted type of another voter set is dropped and counted (config_mismatches, D54); the
  rest goes to the handler of its type (received<Type>:in:now:, defined by the module of its
@@ -981,15 +1042,20 @@ PBCoordinatorCore >> dispatchRejoinWanted: anEvent in: aNodeState now: t
 PBCoordinatorCore >> dispatchAcceptorDecided: anEvent in: aNodeState now: t
   ^ self _unchanged: aNodeState.
 
+PBCoordinatorCore >> dispatchAcceptorDiscarded: anEvent in: aNodeState now: t
+  ^ self _unchanged: aNodeState.
+
 "--- the acceptor's rule methods ---"
 
-"A message for the acceptor lane (proto_db _work): one from a sender that is not another member
- is dropped (the dispatcher drops it already; the lane does not trust that), the rest goes to
- the handler of its type (accept<Type>:in:now:), and a type no module handles is ignored. The
- drop of this node's own messages is lifted by the proposer (Task 11) for its own vote (CC1)."
+"A message for the acceptor lane (proto_db _work): one from a sender that is not a member is
+ dropped (the dispatcher drops it already; the lane does not trust that), the rest goes to the
+ handler of its type (accept<Type>:in:now:), and a type no module handles is ignored. A message
+ of this node itself is taken: the dispatcher never forwards one it received (it drops them,
+ as proto_db _route), so only its own vote, renewal and release reach the lane from it (CC1),
+ and they are decided by the rules that decide a peer's."
 PBCoordinatorCore >> acceptReceived: anEvent in: anAcceptorState now: t
   | handler |
-  (self _fromPeer: anEvent message in: anAcceptorState config) ifFalse: [^ self _unchangedAcceptor: anAcceptorState].
+  (self _fromMember: anEvent message in: anAcceptorState config) ifFalse: [^ self _unchangedAcceptor: anAcceptorState].
   handler := self class handlerFor: anEvent message type prefix: 'accept'.
   (self respondsTo: handler) ifFalse: [^ self _unchangedAcceptor: anAcceptorState].
   ^ self perform: handler with: anEvent with: anAcceptorState with: t.
