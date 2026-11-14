@@ -2,6 +2,23 @@
 
 ## 0.2.0 (unreleased)
 
+- Acceptance, the commit point and committed knowledge (`src/protobase/cluster/acceptor.st`, the
+  new `src/protobase/cluster/holder.st`): `proto_db`'s `_may_accept`, `_apply_replicate` over a
+  shared storage, `_on_done`, `_observe_accepted`, `_observe_committed`, `_learn_label`,
+  `replicate` and `_on_answer` for acks, as rule methods of `PBCoordinatorCore`. An acceptor
+  takes a root under the ballot rule and the chain rule (V2', log matching on roots), appends
+  one synced `#accepted` entry and only then acks; a holder sends nothing past its permission
+  or under `sendReserve` (`#none`), and a commit is `#committed` exactly when a majority of the
+  voters acked within the permission, else `#unknown` (suspect). Committed knowledge (dones,
+  held releases, certain permits, grants, the replicate's committed root) is learnt in
+  `proto_db`'s order and appended `#committed` without a sync; a learnt label clears a
+  suspicion at or below it. `PBReplicateWanted` is now `permission:root:pred:waiter:`,
+  `PBAcceptorStep` gains `learnt`, the new acceptor event `PBLearnCommitted`, `PBHolder` gains
+  `replications`, a restored acceptor accepts the higher of its logged accepted and committed
+  roots and publishes its committed root at start. The simulator gains `pause:`/`resume:` (a
+  paused process) and `reconfigure:options:`. Tested by `tests/unit/sim_acceptance.st`
+  (families, checks and plants in `tests/unit/_accept.st`) and
+  `tests/unit/cluster_acceptance_rules.st` (one guard per check, the chain-rule tests).
 - The owner's rules O1-O8 at DEPTH 0 and abandoned terms (`src/protobase/cluster/owner.st`):
   `proto_db`'s `_dispatch`, `_on_permit_req`, `_permit_outcome`, `_abandon`, `_refuse_queue`,
   `_on_done_owner` and `finish`, and the holder side of a permit request

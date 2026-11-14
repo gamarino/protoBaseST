@@ -10,8 +10,8 @@ clock, a socket or a file, sends, logs or waits.
   Events (PBCoreEvent): PBReceived message: (a PBClusterMessage that arrived), PBTimerFired
     token: event: (a PBTimer came due), PBStartNode, PBStopNode, PBPermitWanted waiter: (a
     local commit wants a write permission), PBBaseWanted permission: waiter: (the base of a
-    commit under a permission), PBReplicateWanted permission: root: waiter: (replicate a built
-    root), PBDoneReport permission: outcome: root: (the outcome a holder reports, #committed,
+    commit under a permission), PBReplicateWanted permission: root: pred: waiter: (replicate a
+    built root), PBDoneReport permission: outcome: root: (the outcome a holder reports, #committed,
     #unknown or #none: proto_db's done outcomes, and the root it committed), PBRejoinWanted (the operator's forceRejoin)
     PBAcceptorDecided step: (an acceptor step whose appends are durable, handed back to the
     dispatcher: the reply to this node's own vote and acceptance travels this way, CC1) and
@@ -36,8 +36,10 @@ clock, a socket or a file, sends, logs or waits.
                    writes the appends in order, syncs, and only once every append that asks for
                    a sync is durable performs the reply effects (atomic acceptor steps, R55,
                    R81, R81b), then hands the step to the dispatcher (PBAcceptorDecided). vote
-                   is the grant or reject of this node's own request or renewal (CC1: a node
-                   never sends to itself), nil for any other step. A step whose append fails is
+                   is the grant or reject of this node's own request or renewal, or the ack of
+                   its own replication (CC1: a node never sends to itself), nil for any other
+                   step; learnt is the highest label of a root the step observed accepted or
+                   committed (proto_db _learn_label), 0 when none. A step whose append fails is
                    discarded: the shell keeps the acceptor state it had before that step,
                    performs none of its reply, hands the acceptor PBAppendFailed (acceptor.st)
                    before anything else, so the state never holds what the log does not, and
@@ -261,22 +263,26 @@ PBBaseWanted >> printOn: aStream
 
 "--- PBReplicateWanted ---"
 
-PBCoreEvent subclass: #PBReplicateWanted instanceVariableNames: 'permission root waiter'.
+PBCoreEvent subclass: #PBReplicateWanted instanceVariableNames: 'permission root pred waiter'.
 
-"Replicate aRoot (a PBLabeledRoot, built under aPermission) to the voters (CP 1.7); aWaiter is
- settled with the outcome (#committed, #unknown or #none, H7)."
-PBReplicateWanted class >> permission: aPermission root: aRoot waiter: aWaiter
+"Replicate aRoot (a PBLabeledRoot, built under aPermission on aPred, the PBLabeledRoot it was
+ built on: the base, or the root last sent under the permission, proto_db lease.sent) to the
+ voters (CP 1.7); aWaiter is settled with the outcome (#committed, #unknown or #none, H7)."
+PBReplicateWanted class >> permission: aPermission root: aRoot pred: aPred waiter: aWaiter
   (aPermission isKindOf: PBPermission) ifFalse: [
     ^ PBValidationError signal: 'PBReplicateWanted: a permission is a PBPermission, not ' , aPermission printString].
   (aRoot isKindOf: PBLabeledRoot) ifFalse: [
     ^ PBValidationError signal: 'PBReplicateWanted: a root is a PBLabeledRoot, not ' , aRoot printString].
-  ^ self basicNew _setPermission: aPermission root: aRoot waiter: (self _present: aWaiter named: 'waiter').
+  (aPred isKindOf: PBLabeledRoot) ifFalse: [
+    ^ PBValidationError signal: 'PBReplicateWanted: a pred is a PBLabeledRoot, not ' , aPred printString].
+  ^ self basicNew _setPermission: aPermission root: aRoot pred: aPred waiter: (self _present: aWaiter named: 'waiter').
 
-PBReplicateWanted >> _setPermission: aPermission root: aRoot waiter: aWaiter
+PBReplicateWanted >> _setPermission: aPermission root: aRoot pred: aPred waiter: aWaiter
   "Runs once, on a fresh instance."
   permission isNil ifFalse: [^ PBUserError signal: 'PBReplicateWanted is immutable'].
   permission := aPermission.
   root := aRoot.
+  pred := aPred.
   waiter := aWaiter.
   ^ self.
 
@@ -286,6 +292,10 @@ PBReplicateWanted >> permission
 PBReplicateWanted >> root
   ^ root.
 
+"The root aRoot was built on."
+PBReplicateWanted >> pred
+  ^ pred.
+
 PBReplicateWanted >> waiter
   ^ waiter.
 
@@ -294,7 +304,8 @@ PBReplicateWanted >> dispatchWith: aCore in: aNodeState now: t
 
 PBReplicateWanted >> printOn: aStream
   aStream nextPutAll: 'PBReplicateWanted('; nextPutAll: (PBCoreValue textOf: permission); nextPutAll: ', ';
-    nextPutAll: (PBCoreValue textOf: root); nextPutAll: ', '; nextPutAll: (PBCoreValue textOf: waiter); nextPut: $).
+    nextPutAll: (PBCoreValue textOf: root); nextPutAll: ' on '; nextPutAll: (PBCoreValue textOf: pred); nextPutAll: ', ';
+    nextPutAll: (PBCoreValue textOf: waiter); nextPut: $).
 
 "--- PBDoneReport ---"
 
@@ -701,34 +712,44 @@ PBStep >> state
 PBStep >> effects
   ^ effects copy.
 
-Object subclass: #PBAcceptorStep instanceVariableNames: 'state appends reply vote'.
+Object subclass: #PBAcceptorStep instanceVariableNames: 'state appends reply vote learnt'.
 
 "The answer of an acceptor rule: aState (a PBAcceptorState), anArray of PBLogAppend written in
  order, and the reply effects (no PBLogAppend), performed only once every append that asks for
- a sync is durable; no own vote."
+ a sync is durable; no own vote, no label learnt."
 PBAcceptorStep class >> state: aState appends: anArray reply: aReplyArray
-  ^ self state: aState appends: anArray reply: aReplyArray vote: nil.
+  ^ self state: aState appends: anArray reply: aReplyArray vote: nil learnt: 0.
 
-"As state:appends:reply:, with aVote: the grant or reject message of this node's own request or
- renewal (CC1), nil for any other step. The dispatcher reads it from the step handed back."
+"As state:appends:reply:, with aVote: the grant or reject of this node's own request or renewal,
+ or the ack of its own replication (CC1), nil for any other step; no label learnt."
 PBAcceptorStep class >> state: aState appends: anArray reply: aReplyArray vote: aVote
+  ^ self state: aState appends: anArray reply: aReplyArray vote: aVote learnt: 0.
+
+"As state:appends:reply:vote:, with aLabel (an Integer >= 0): the highest label of a root this
+ step observed accepted or committed, 0 when none (proto_db _learn_label: the dispatcher clears
+ a suspicion of its own that the label answers, and raises its hint). The dispatcher reads both
+ from the step handed back."
+PBAcceptorStep class >> state: aState appends: anArray reply: aReplyArray vote: aVote learnt: aLabel
   (aState isKindOf: PBAcceptorState) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorStep: a state is a PBAcceptorState, not ' , aState printString].
   (anArray isArray and: [anArray allSatisfy: [:e | e isKindOf: PBLogAppend]]) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorStep: the appends are an Array of PBLogAppend, not ' , anArray printString].
   (aReplyArray isArray and: [aReplyArray allSatisfy: [:e | (e isKindOf: PBEffect) and: [(e isKindOf: PBLogAppend) not]]]) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorStep: the reply is an Array of effects other than PBLogAppend, not ' , aReplyArray printString].
-  (aVote isNil or: [(aVote isKindOf: PBClusterMessage) and: [#('grant' 'reject') includes: aVote type]]) ifFalse: [
-    ^ PBValidationError signal: 'PBAcceptorStep: a vote is a grant or reject message or nil, not ' , aVote printString].
-  ^ self basicNew _setState: aState appends: anArray copy reply: aReplyArray copy vote: aVote.
+  (aVote isNil or: [(aVote isKindOf: PBClusterMessage) and: [#('grant' 'reject' 'ack') includes: aVote type]]) ifFalse: [
+    ^ PBValidationError signal: 'PBAcceptorStep: a vote is a grant, reject or ack message or nil, not ' , aVote printString].
+  (aLabel isInteger and: [aLabel >= 0]) ifFalse: [
+    ^ PBValidationError signal: 'PBAcceptorStep: a label learnt is an Integer >= 0, not ' , aLabel printString].
+  ^ self basicNew _setState: aState appends: anArray copy reply: aReplyArray copy vote: aVote learnt: aLabel.
 
-PBAcceptorStep >> _setState: aState appends: anArray reply: aReplyArray vote: aVote
+PBAcceptorStep >> _setState: aState appends: anArray reply: aReplyArray vote: aVote learnt: aLabel
   "Runs once, on a fresh instance."
   state isNil ifFalse: [^ PBUserError signal: 'PBAcceptorStep is immutable'].
   state := aState.
   appends := anArray.
   reply := aReplyArray.
   vote := aVote.
+  learnt := aLabel.
   ^ self.
 
 PBAcceptorStep >> state
@@ -742,9 +763,14 @@ PBAcceptorStep >> appends
 PBAcceptorStep >> reply
   ^ reply copy.
 
-"The grant or reject of this node's own request or renewal, or nil."
+"The grant or reject of this node's own request or renewal, the ack of its own replication, or
+ nil."
 PBAcceptorStep >> vote
   ^ vote.
+
+"The highest label of a root this step observed accepted or committed, 0 when none."
+PBAcceptorStep >> learnt
+  ^ learnt.
 
 "=== PBNodeState ============================================================="
 
@@ -858,16 +884,19 @@ Object subclass: #PBAcceptorState instanceVariableNames: 'config grants accepted
 "The acceptor of the node of aConfig started at t over aLoggedRoots (what its acceptor log holds,
  PBAcceptorLog load): the grant state refuses every request until t + startupGrace and honours
  the logged promise and the accepted root's label (PBGrantState initial:now:, restore:,
- coordinator.py _attach_locked); accepted, committed, rejoined and the logged promise are the
- log's (proto_db _logged_promise = (tier, promised)), and aLoggedRoots is the log's identity."
+ coordinator.py _attach_locked); committed, rejoined and the logged promise are the log's
+ (proto_db _logged_promise = (tier, promised)), and aLoggedRoots is the log's identity. The
+ accepted root is the higher, in root order, of the logged accepted and committed roots: a
+ root known committed is accepted knowledge (proto_db _attach_locked observes the committed
+ root with accept=True)."
 PBAcceptorState class >> config: aConfig logged: aLoggedRoots now: t
   (aConfig isKindOf: PBClusterConfig) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorState: a config is a PBClusterConfig, not ' , aConfig printString].
   (aLoggedRoots isKindOf: PBLoggedRoots) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorState: the logged roots are a PBLoggedRoots, not ' , aLoggedRoots printString].
   ^ self basicNew _setConfig: aConfig grants: ((PBGrantState initial: aConfig now: t) restore: aLoggedRoots)
-    accepted: aLoggedRoots accepted committed: aLoggedRoots committed seqSeen: #(0 0) suspectTerm: 0
-    rejoined: aLoggedRoots isRejoined rejoinBallot: 0 tierFailed: nil fenced: nil log: aLoggedRoots
+    accepted: (PBRootOrder max: aLoggedRoots accepted with: aLoggedRoots committed) committed: aLoggedRoots committed
+    seqSeen: #(0 0) suspectTerm: 0 rejoined: aLoggedRoots isRejoined rejoinBallot: 0 tierFailed: nil fenced: nil log: aLoggedRoots
     loggedPromise: { aLoggedRoots. aLoggedRoots promise }.
 
 PBAcceptorState >> _setConfig: aConfig grants: aGrantState accepted: anAccepted committed: aCommitted seqSeen: aPair suspectTerm: aTerm rejoined: aBoolean rejoinBallot: aBallot tierFailed: aFailure fenced: aReason log: aLog loggedPromise: aPromise
@@ -943,6 +972,19 @@ PBAcceptorState >> withGrants: aGrantState suspectTerm: aTerm rejoined: aBoolean
   ^ self class basicNew _setConfig: config grants: aGrantState accepted: accepted committed: committed seqSeen: seqSeen
     suspectTerm: aTerm rejoined: aBoolean rejoinBallot: rejoinBallot tierFailed: aFailure fenced: fenced log: log
     loggedPromise: { log. aPromise }.
+
+"This state with the fields someAssociations name (#accepted, #committed, #seqSeen,
+ #suspectTerm) replaced by their values; the rest unchanged. Another name is PBValidationError."
+PBAcceptorState >> with: someAssociations
+  | d |
+  d := Dictionary new.
+  d at: #accepted put: accepted; at: #committed put: committed; at: #seqSeen put: seqSeen; at: #suspectTerm put: suspectTerm.
+  someAssociations do: [:a |
+    (d includesKey: a key) ifFalse: [^ PBValidationError signal: 'PBAcceptorState has no field ' , a key printString].
+    d at: a key put: a value].
+  ^ self class basicNew _setConfig: config grants: grants accepted: (d at: #accepted) committed: (d at: #committed)
+    seqSeen: (d at: #seqSeen) copy suspectTerm: (d at: #suspectTerm) rejoined: rejoined rejoinBallot: rejoinBallot
+    tierFailed: tierFailed fenced: fenced log: log loggedPromise: loggedPromise.
 
 PBAcceptorState >> printOn: aStream
   aStream nextPutAll: 'PBAcceptorState('; nextPutAll: config nodeId; nextPutAll: ', '; print: grants; nextPut: $).

@@ -305,19 +305,27 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   (design spec section 4), and a protoBaseST cluster never sends `after` (DEPTH 0). A received
   permit whose `after` is not nil is held as uncertain (H2, tested); its proposal and the gate
   H5 are not tracked, and that case is untested. *Cost:* none in a protoBaseST cluster.
-- **A certain permit teaches nothing yet (until Task 13).** `proto_db`'s holder records the base
-  of a certain permit as committed (`_observe_committed`); protoBaseST's does not until committed
-  knowledge reaches the acceptor (Task 13). *Cost:* freshness only: a holder that later owns
-  sees its lease root as not known committed, and its first permit is uncertain.
 - **The base issued twice, tested in its stand-in form (until Task 14).** `proto_db` keeps R79/L28
   (an owner issuing one base twice) as an expected failure at convergence (S4). With the
   stand-in replication of Task 12 the plant `PlantBaseTwice` is caught earlier, by the
   simulator checker's sibling-roots rule (two roots of one label and epoch); the strict S4 form
   is Task 14's. *Cost:* none in the product; the test is weaker until then.
-- **Suspicion stays until committed knowledge (until Task 13).** An abandoned term sets the
-  node's `suspectTerm`; `proto_db` clears it when it learns a committed label above it
-  (`_learn_label`), which arrives with Task 13. Until then only later leases are reported
-  uncertain. *Cost:* uncertain releases, and so a phase-1 recovery, after an abandon.
+- **The dispatcher's suspicion clears one acceptor step later (timing only, CC2).** `proto_db`'s
+  `_learn_label` clears the node's `suspect_term` in the one shared state the moment a committed
+  label at or above it is observed. protoBaseST's suspicion has two halves: the acceptor's
+  (cleared in the step that learns the label) and the dispatcher's, cleared when that step
+  reaches it (`PBAcceptorStep learnt`, `_learnt:in:`, `cluster/holder.st`); a replication that
+  commits clears it at once. *Cost:* a lease or release decided in between is reported
+  uncertain: freshness only, never a wrong certainty.
+- **The replicate's pred comes with the commit (representation only, until Task 14).**
+  `proto_db`'s `replicate` takes the pred from the lease (`lease.sent`, else the lease root);
+  protoBaseST's commit path hands it in `PBReplicateWanted permission:root:pred:waiter:` (the root
+  its build started from), since the base choice is Task 14's and a `PBPermission` is
+  immutable. The `replicate` message is the same. *Cost:* none.
+- **No rejoin-ballot refusal on the holder yet (until Task 16).** `proto_db`'s `replicate` refuses
+  (`ProtoConflictError`) a term below the node's rejoin ballot (L14); rejoining is Task 16, so
+  a protoBaseST node has no rejoin ballot to compare yet and the check comes with it. *Cost:*
+  none until rejoining exists: a node that never rejoined has ballot 0.
 
 ## Errors and messages
 

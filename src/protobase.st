@@ -23,6 +23,7 @@ Import from: 'protobase/cluster/core'.
 Import from: 'protobase/cluster/acceptor'.
 Import from: 'protobase/cluster/proposer'.
 Import from: 'protobase/cluster/owner'.
+Import from: 'protobase/cluster/holder'.
 Import from: 'protobase/avl'.
 Import from: 'protobase/collections'.
 Import from: 'protobase/records'.

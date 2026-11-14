@@ -73,7 +73,14 @@ survives counts as synced afterwards. A crash between an acceptor step's sync an
 leaves the entry durable and the reply never sent. crash: id keepDisk: true is the #drop crash
 (the brief's); keepDisk: false loses the whole disk. tearLog: id cuts the last synced frame of a
 crashed node's log (a torn tail). restart: id starts it again, with a new incarnation, over
-what its disk holds.
+what its disk holds. reconfigure: id options: aDictionary gives a crashed node other options
+(its peers kept: another voter set, another startup grace) for its next restart.
+
+Pauses. pause: id freezes a node's process (a VM or process stop): its clock stands still and
+none of its events runs (deliveries, timers, acceptor steps wait; messages to it queue). resume:
+id restarts its clock at the rate it had and runs what waited, in order, from now on. A crash
+resumes a paused node first; clockRate: refuses a paused node. (A clock at rate 0 stays the
+clock-skew model: the node still runs, its time does not advance.)
 
 The checker. PBSimChecker runs after every step: at most one owner of a term (S1: an ownership
 seen in any node's state, by node and incarnation); two different roots with equal (label,
@@ -148,6 +155,9 @@ PBSimClock >> globalAt: aLocal
   rate = 0 ifTrue: [^ nil].
   ^ originGlobal + (aLocal - originLocal / rate) ceiling.
 
+PBSimClock >> rate
+  ^ rate.
+
 "This clock running at aNumber from the virtual time g on, continuous at g."
 PBSimClock >> rate: aNumber at: g
   ^ self class rate: aNumber global: g local: (self localAt: g).
@@ -177,6 +187,10 @@ PBSimDisk >> syncThrough: anIndex
 
 PBSimDisk >> size
   ^ entries size.
+
+"The payloads written, synced or not, a fresh Array."
+PBSimDisk >> payloads
+  ^ entries asArray.
 
 PBSimDisk >> syncedSize
   ^ synced.
@@ -210,7 +224,7 @@ PBSimDisk >> loggedRoots
 "One simulated node: its configuration, clock and disk survive a crash; the rest is its
  incarnation's. lane: the acceptor events not yet decided; laneBusy: a step is between its
  decision and its reply; owed: the last disk entry the acceptor asked to sync."
-Object subclass: #PBSimNode instanceVariableNames: 'config clock disk up gen state acceptor committed lane laneBusy owed'.
+Object subclass: #PBSimNode instanceVariableNames: 'config clock disk up gen state acceptor committed lane laneBusy owed paused'.
 
 PBSimNode class >> config: aConfig
   ^ self basicNew setConfig: aConfig.
@@ -224,6 +238,19 @@ PBSimNode >> setConfig: aConfig
   lane := OrderedCollection new.
   laneBusy := false.
   owed := 0.
+  paused := nil.
+
+"A crashed node configured with aConfig from its next start on (its disk and clock kept)."
+PBSimNode >> reconfigure: aConfig
+  up ifTrue: [^ Error signal: 'PBSimNode: reconfigure a crashed node'].
+  config := aConfig.
+
+"The rate its clock ran at when it was paused, nil while it runs."
+PBSimNode >> paused
+  ^ paused.
+
+PBSimNode >> paused: aRateOrNil
+  paused := aRateOrNil.
 
 PBSimNode >> id
   ^ config nodeId.
@@ -412,7 +439,7 @@ PBSimChecker >> checkConverged
 
 "=== PBSim ==================================================================="
 
-Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current counts failing syncCost fixedLags'.
+Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current counts failing syncCost fixedLags peers'.
 
 "N nodes (anArray of ids) running aRules, each configured with aDictionary (PBClusterConfig
  options), all started at virtual time 0, every choice drawn from Random seed: n."
@@ -425,7 +452,6 @@ PBSim class >> seed: n ids: anArray rules: aRules options: aDictionary logs: aLo
   ^ self basicNew setSeed: n ids: anArray rules: aRules options: aDictionary logs: aLogs.
 
 PBSim >> setSeed: n ids: anArray rules: aRules options: aDictionary logs: aLogs
-  | peers |
   seed := n.
   "Park-Miller's first draws of nearby small seeds are small and alike: the seed is spread
    over the generator's range and the first draws are discarded."
@@ -551,11 +577,47 @@ PBSim >> heal
 PBSim >> clockRate: anId rate: aNumber
   | node |
   node := self nodeAt: anId.
+  node paused notNil ifTrue: [^ Error signal: 'PBSim: ' , anId , ' is paused (resume: it first)'].
   node clock: (node clock rate: aNumber at: now).
   queue do: [:e |
     ((e at: 2) = #timer and: [(e at: 3) = anId]) ifTrue: [
       e at: 1 put: (node clock globalAt: ((e at: 5) at: 1))]].
   self _trace: anId , ' clock rate ' , aNumber printString.
+
+"A process pause of anId (a VM freeze, SIGSTOP, a long GC): from now on until resume: its clock
+ stands still and the node runs nothing, neither a delivery, nor a dispatch, nor a timer, nor an
+ acceptor step; what is due for it waits, in order. Messages it sent before stay in flight."
+PBSim >> pause: anId
+  | node rate |
+  node := self nodeAt: anId.
+  (node isUp and: [node paused isNil]) ifFalse: [^ Error signal: 'PBSim: pause a running node that is not paused'].
+  self _trace: anId , ' paused'.
+  rate := node clock rate.
+  self clockRate: anId rate: 0.
+  node paused: rate.
+  ^ self.
+
+"anId resumes after pause: its clock runs again at the rate it had, from where it stood; what
+ waited for it is due now, in the order it was due."
+PBSim >> resume: anId
+  | node rate waiting tick |
+  node := self nodeAt: anId.
+  node paused isNil ifTrue: [^ Error signal: 'PBSim: ' , anId , ' is not paused'].
+  rate := node paused.
+  node paused: nil.
+  self clockRate: anId rate: rate.
+  waiting := (queue select: [:e | (e at: 3) = anId and: [(e at: 1) notNil and: [(e at: 1) < now]]]) asArray.
+  waiting := waiting asSortedCollection: [:a :b | (a at: 1) <= (b at: 1)].
+  tick := 0.
+  waiting do: [:e | e at: 1 put: now + tick. tick := tick + 1].
+  self _trace: anId , ' resumed'.
+  ^ self.
+
+"A crashed node anId starts, at its next restart, configured with aDictionary (PBClusterConfig
+ options) instead of the options it had: a member misconfigured by its operator."
+PBSim >> reconfigure: anId options: aDictionary
+  (self nodeAt: anId) reconfigure: (PBClusterConfig nodeId: anId peers: peers options: aDictionary).
+  self _trace: anId , ' reconfigured'.
 
 "A crash of anId: aMode (#drop, #keep, #prefix or #any) decides the unsynced tail of its disk."
 PBSim >> crash: anId unsynced: aMode
@@ -564,6 +626,7 @@ PBSim >> crash: anId unsynced: aMode
   node isUp ifFalse: [^ Error signal: 'PBSim: ' , anId , ' is not running'].
   (#(#drop #keep #prefix #any) includes: aMode) ifFalse: [
     ^ Error signal: 'PBSim crash:unsynced: #drop, #keep, #prefix or #any, not ' , aMode printString].
+  node paused notNil ifTrue: [self resume: anId].
   mode := aMode = #any ifTrue: [#(#drop #keep #prefix) at: (random nextInt: 3)] ifFalse: [aMode].
   tail := node disk unsyncedSize.
   kept := mode = #drop
@@ -637,13 +700,14 @@ PBSim >> commit: aToken at: anId time: aTime
   self _schedule: #dispatch node: node payload: (PBPermitWanted waiter: { 'permit'. aToken }) at: aTime.
 
 "Runs the earliest due event (one of those due at once, drawn), then the checker; false when
- nothing is due (the queue is empty, or holds only timers of paused clocks)."
+ nothing is due (the queue is empty, or holds only timers of paused clocks and events of paused
+ nodes)."
 PBSim >> step
   | best due event |
   best := nil.
-  queue do: [:e | ((e at: 1) notNil and: [best isNil or: [(e at: 1) < best]]) ifTrue: [best := e at: 1]].
+  queue do: [:e | ((e at: 1) notNil and: [(self _isPaused: (e at: 3)) not and: [best isNil or: [(e at: 1) < best]]]) ifTrue: [best := e at: 1]].
   best isNil ifTrue: [^ false].
-  due := queue select: [:e | (e at: 1) = best].
+  due := queue select: [:e | (e at: 1) = best and: [(self _isPaused: (e at: 3)) not]].
   event := due size = 1 ifTrue: [due first] ifFalse: [due at: (random nextInt: due size)].
   queue := queue reject: [:e | e == event].
   now := best.
@@ -672,6 +736,9 @@ PBSim >> converge: n
   ^ quiet.
 
 "--- the scheduler ---"
+
+PBSim >> _isPaused: anId
+  ^ (nodes at: anId) paused notNil.
 
 PBSim >> _trace: aText
   lines add: 't=' , now printString , ' ' , aText.
@@ -850,7 +917,7 @@ PBSim >> _settle: aWaiter outcome: anOutcome at: aNode
     self _trace: aNode id , ' built ' , (PBCoreValue textOf: root) , ' on ' , (PBCoreValue textOf: anOutcome)
       , ' for ' , token printString.
     ^ self _schedule: #dispatch node: aNode
-      payload: (PBReplicateWanted permission: permission root: root waiter: { 'replicate'. token. permission }) at: now].
+      payload: (PBReplicateWanted permission: permission root: root pred: anOutcome waiter: { 'replicate'. token. permission }) at: now].
   stage = 'replicate' ifTrue: [
     self _end: token as: ((PBDoneReport outcomes includes: anOutcome)
       ifTrue: [anOutcome = #committed ifTrue: [#acknowledged] ifFalse: [anOutcome]]

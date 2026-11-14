@@ -69,7 +69,7 @@ PBReceived>>_setMessage:
 PBTimerFired>>_setToken:event:
 PBPermitWanted>>_setWaiter:
 PBBaseWanted>>_setPermission:waiter:
-PBReplicateWanted>>_setPermission:root:waiter:
+PBReplicateWanted>>_setPermission:root:pred:waiter:
 PBDoneReport>>_setPermission:outcome:root:
 PBAcceptorDecided>>_setStep:
 PBAcceptorDiscarded>>_setStep:
@@ -82,7 +82,8 @@ PBPublishCommitted>>_setRoot:
 PBPublishAcceptor>>_setState:
 PBFence>>_setReason:
 PBStep>>_setState:effects:
-PBAcceptorStep>>_setState:appends:reply:vote:
+PBAcceptorStep>>_setState:appends:reply:vote:learnt:
+PBLearnCommitted>>_setRoot:accept:logged:
 PBNodeState>>_setConfig:inc:acceptorView:hints:proposer:ownership:waiters:suspectTerm:fenced:rejoin:nextRid:holder:
 PBAcceptorState>>_setConfig:grants:accepted:committed:seqSeen:suspectTerm:rejoined:rejoinBallot:tierFailed:fenced:log:loggedPromise:
 PBCount>>_setStat:

@@ -418,7 +418,7 @@ For tests, tools and readers of the format. An application does not need them.
   and `acceptStart:in:now:`; a rule not yet defined by a later module answers the state
   unchanged with no effect. Events: `PBReceived message:`, `PBTimerFired token:event:`,
   `PBStartNode`, `PBStopNode`, `PBPermitWanted waiter:`, `PBBaseWanted permission:waiter:`,
-  `PBReplicateWanted permission:root:waiter:`, `PBDoneReport permission:outcome:` (`#committed`,
+  `PBReplicateWanted permission:root:pred:waiter:` (the root built and the root it was built on), `PBDoneReport permission:outcome:` (`#committed`,
   `#unknown` or `#none`), `PBRejoinWanted`, `PBAcceptorDecided step:`, `PBAcceptorDiscarded
   step:` (the step the shell discarded because its append failed; `dispatchAcceptorDiscarded:in:now:`). Effects, each answering
   `applyTo:` with one message the shell implements (applySend:, applyToAcceptor:, applyTimer:,
@@ -432,11 +432,15 @@ For tests, tools and readers of the format. An application does not need them.
   `acceptorView`, `hints`, `proposer`, `ownership`, `waiters`, `suspectTerm`, `fenced`, `rejoin`,
   `nextRid`, `withOwnership:` and `with:` (an Array of field -> value associations, the fields
   above from `acceptorView` on); `PBAcceptorStep state:appends:reply:vote:` adds `vote`: the
-  grant or reject of the node's own request, renewal or release, which the acceptor answers to
-  its dispatcher in the step instead of a `PBSend` (`state:appends:reply:` is the vote nil); `PBAcceptorState config:logged:now:` (a `PBLoggedRoots`: the
-  grant state starts its grace at that time and restores the logged promise) answers `config`,
+  grant, reject or ack of the node's own request, renewal, release or replication, which the acceptor answers to
+  its dispatcher in the step instead of a `PBSend` (`state:appends:reply:` is the vote nil), and
+  `state:appends:reply:vote:learnt:` adds `learnt`, the highest root label the step observed (0
+  for none), from which the dispatcher clears its suspicion; `PBAcceptorState config:logged:now:` (a `PBLoggedRoots`: the
+  grant state starts its grace at that time and restores the logged promise; the accepted root
+  is the higher in root order of the logged accepted and committed roots) answers `config`,
   `grants`, `accepted`, `committed`, `seqSeen`, `suspectTerm`, `isRejoined`, `rejoinBallot`,
-  `tierFailed` and `fenced`. Nothing in the core reads a clock; constructors refuse ill-typed
+  `tierFailed` and `fenced`, and `with:` (`#accepted`, `#committed`, `#seqSeen`, `#suspectTerm`).
+  Nothing in the core reads a clock; constructors refuse ill-typed
   arguments (`PBValidationError`). The deterministic simulator that drives it in the tests is
   test support (`tests/unit/_sim.st`), not part of the module.
 - **Acceptor rules** (`cluster/acceptor.st`): the acceptor side of `proto_db`'s coordinator as
@@ -457,8 +461,25 @@ For tests, tools and readers of the format. An application does not need them.
   `acceptQuery:in:now:` (a plain query's answer: the state `'ok'`, `'empty'`, `'learner'` or
   `'unknown'`, promised max(`termsSeen`, accepted label), 0 when unknown; answered by the
   acceptor, see [deviations.md](deviations.md#cluster-mode)). `acceptStart:in:now:` appends the
-  rejoined marker for a learner or a lone voter whose log lacks it and rebuilds neither the
-  grace nor the restore. The acceptor events `PBSuspect term:` (`acceptSuspect:in:now:`: raises
+  rejoined marker for a learner or a lone voter whose log lacks it, rebuilds neither the grace
+  nor the restore, and publishes the restored committed root (`PBPublishCommitted`).
+  `acceptReplicate:in:now:` (CP 1.7 step 8, `proto_db` `_apply_replicate` over a shared storage)
+  accepts a known root labelled with the message's term, not the empty space, whole (chunks 0),
+  when `_mayAccept:term:pred:seq:in:` allows it: no refusal of the state, the ballot rule (no
+  higher term granted, `_ballotAllows:in:`), not below the accepted root, not a sibling of it,
+  the first root of a term after an older accepted root or on an acceptor that accepted nothing,
+  a later root only on the accepted root itself (V2', `_extends:with:`), a seq not below the
+  term's highest; one synced `#accepted` append, `PBPublishAcceptor`, the committed root the
+  message teaches (memory only), `'accepted'`, then `'ack'` (ok, the accepted root, stored
+  false). A refusal, a fenced node included, is `'ack'` ok false (`'refused'`). The node's own
+  replication is decided alike, answered in the step's vote, uncounted. A `'store'` is never
+  accepted (V1; ignored at DEPTH 0). `acceptDone:in:now:` learns a `'committed'` done's root and
+  `PBLearnCommitted root:accept:logged:` (`acceptLearnCommitted:in:now:`, `isAccepted`,
+  `isLogged`) the committed knowledge the dispatcher observes; a newer committed root is
+  published and, when logged, appended `#committed` without a sync (none on a failed tier); a
+  root known committed through the cluster is accepted knowledge too. A held release teaches
+  its committed root after the grant it ended taints, and an uncertain one taints again; a
+  committed label at or above the suspicion clears it (`_learnLabel:clears:`). The acceptor events `PBSuspect term:` (`acceptSuspect:in:now:`: raises
   `suspectTerm`) and `PBAppendFailed reason:` (`acceptAppendFailed:in:now:`: the tier fails,
   the first reason kept; the shell discards the step whose append failed). `wireSeconds:`
   converts microseconds to the wire's seconds (a reject's `remaining`). `PBCount stat:`
@@ -528,7 +549,24 @@ For tests, tools and readers of the format. An application does not need them.
   handed back with done `'none'`, else held (`'permits_held'`, valid from the request's send); a
   refusal (`'permits_refused'`) or a silence of `leaseDuration` forgets the owner only while the
   hint names the term asked under. A local waiter queued at the ownership leaves the queue with
-  `PBTimeoutError` at its deadline (`acquireTimeout`).
+  `PBTimeoutError` at its deadline (`acquireTimeout`). A certain permit, held or issued to a
+  local waiter, teaches its base committed (`PBLearnCommitted`, not logged); a grant's committed
+  root is committed knowledge only (`cluster/proposer.st`).
+- **Holder's replication** (`cluster/holder.st`): `proto_db`'s replicate and `_on_answer` for an
+  ack, at DEPTH 0 over a shared storage. `dispatchReplicateWanted:in:now:` refuses a root not
+  labelled with the permission's term (`PBValidationError`); past the permission or under
+  `sendReserve` it sends nothing and settles `#none` (H7); else it sends `'replicate'` (no
+  records, chunks 0, the permission's seq, the pred, the committed root, vs, copies this node)
+  to the other voters and the own acceptor when a voter (`'replications'`), with a timer at the
+  permission's end, recorded as a `PBReplication` (`waiter`, `permission`, `rid`, `root`, `acks`,
+  `nacks`, `isOwnPending`, `token`) in `PBHolder replications`. An ack of another incarnation is
+  dropped (`'stale_replies'`), of another term or request ignored, of a learner never counted
+  (D54); the own acceptor's ok counts as a voter's, its refusal as neither. Once the own
+  acceptance answered, the replication is decided: `#committed` exactly when a majority of the
+  voters acked while the permission is valid (the commit point, CP 1.7 step 9), teaching the own
+  acceptor the root (logged) and clearing a suspicion it answers; more refusals than a majority
+  allows, the permission's end or a failed own append end it `#unknown`
+  (`'replication_failures'`, the node and its acceptor suspect for the term).
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
   `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered

@@ -181,18 +181,20 @@ PBPermitAsk >> printOn: aStream
 "=== PBHolder ================================================================"
 
 "The holder side of a node's permissions: the permit requests out (PBPermitAsk), the deadline of
- every local waiter not yet settled ({ waiter. deadline }) and the last permits seen ({ term.
- seq }, at most permitsSeenLimit: proto_db _permits_seen)."
+ every local waiter not yet settled ({ waiter. deadline }), the last permits seen ({ term.
+ seq }, at most permitsSeenLimit: proto_db _permits_seen) and the replications not decided yet
+ (holder.st PBReplication)."
 PBProposerValue subclass: #PBHolder.
 
 PBHolder class >> fieldNames
-  ^ #(#asks #deadlines #seen).
+  ^ #(#asks #deadlines #seen #replications).
 
 PBHolder class >> permitsSeenLimit
   ^ 64.
 
 PBHolder class >> empty
-  ^ self _from: (Dictionary new at: #asks put: #(); at: #deadlines put: #(); at: #seen put: #(); yourself).
+  ^ self _from: (Dictionary new at: #asks put: #(); at: #deadlines put: #(); at: #seen put: #();
+    at: #replications put: #(); yourself).
 
 "A fresh Array."
 PBHolder >> asks
@@ -211,6 +213,10 @@ PBHolder >> deadlineOf: aWaiter
   | e |
   e := (self _at: #deadlines) detect: [:d | d first = aWaiter] ifNone: [nil].
   ^ e isNil ifTrue: [nil] ifFalse: [e last].
+
+"The replications not decided yet (holder.st PBReplication), a fresh Array."
+PBHolder >> replications
+  ^ (self _at: #replications) copy.
 
 "The ask whose request id is aRid, or nil."
 PBHolder >> askWithRid: aRid
@@ -418,8 +424,16 @@ PBCoordinatorCore >> receivedPermit: anEvent in: s now: t
                 certain: ((m at: 'certain') and: [root notNil and: [(m at: 'after') isNil]])
                 sentAt: ask sentAt valid: (self class microsFromWire: (m at: 'valid')).
               fx add: (PBCount stat: 'permits_held').
+              self _observePermit: permission effects: fx.
               state := self _settle: ask waiter with: permission in: (self _replaceAsk: ask with: nil in: state) effects: fx]]].
     self _poke: state now: t effects: fx].
+
+"proto_db _permission_from_owner: a permission whose base is certain teaches its base as
+ committed (_observe_committed, accepted knowledge, not logged), so that this node, owning a
+ later term, knows its lease root committed (proposer.st _own:)."
+PBCoordinatorCore >> _observePermit: aPermission effects: fx
+  aPermission isCertain ifTrue: [
+    fx add: (PBToAcceptor event: (PBLearnCommitted root: aPermission root accept: true logged: false))].
 
 "proto_db _on_permit_reply, a permit_no: one to another incarnation is dropped (its request ids
  restarted); else the waiter's request was refused: the hint forgets the sender only while it
@@ -482,9 +496,12 @@ PBCoordinatorCore >> _issue: aState now: t effects: fx
   fx add: (PBCount stat: 'permits_issued').
   (entry at: 4) notNil
     ifTrue: [
+      | local |
       permit := nil.
-      state := self _settle: (entry at: 4) with: (PBPermission term: own term seq: seq rid: (entry at: 2) owner: c nodeId
-        root: base certain: certain sentAt: t valid: valid) in: s effects: fx]
+      local := PBPermission term: own term seq: seq rid: (entry at: 2) owner: c nodeId root: base certain: certain
+        sentAt: t valid: valid.
+      self _observePermit: local effects: fx.
+      state := self _settle: (entry at: 4) with: local in: s effects: fx]
     ifFalse: [
       permit := PBClusterMessage type: 'permit' from: c nodeId fields: {
         'term' -> own term. 'rid' -> (entry at: 2). 'seq' -> seq. 'inc' -> (entry at: 3).

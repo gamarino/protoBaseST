@@ -69,7 +69,8 @@ on every queued waiter (proto_db's ownership thread sleeps until its timer or a 
 Acquisition here is proto_db's permit without its first step, the permission of a known owner
 (_permission_from_owner, with _await_turn's yield_to_owner and the deadline of
 acquireTimeout): owner.st (Task 12) adds them. The committed root a grant carries
-(_observe_committed) is acceptance knowledge (Task 13).
+(_observe_committed with accept=False) goes to the acceptor as committed knowledge
+(PBLearnCommitted, Task 13).
 
 Every value here is immutable: built once by its class-side constructor; with: answers a new
 value."
@@ -712,10 +713,16 @@ PBCoordinatorCore >> _attempt: anAttempt with: aMessage root: aRoot
   ^ anAttempt withReject: aMessage from reason: (aMessage at: 'reason') highest: (aMessage at: 'highest')
     remaining: (self class microsFromWire: (aMessage at: 'remaining')).
 
-"The voter's reply recorded in the attempt it answers: the acquisition's, or the renewal's."
+"The voter's reply recorded in the attempt it answers: the acquisition's, or the renewal's. A
+ grant's committed root (the granter learnt it from the previous holder's release) is committed
+ knowledge, not accepted knowledge (proto_db _on_reply: _observe_committed with accept=False)."
 PBCoordinatorCore >> _record: aMessage root: aRoot in: s now: t effects: fx
   | p own |
   p := s proposer.
+  own := s ownership.
+  ((p notNil and: [p phase = #attempt and: [self _reply: aMessage answers: p attempt]])
+      or: [own notNil and: [self _reply: aMessage answers: own renewal]]) ifTrue: [
+    self _observeGrant: aMessage effects: fx].
   (p notNil and: [p phase = #attempt and: [self _reply: aMessage answers: p attempt]]) ifTrue: [
     ^ self _attemptAnswered: (s with: { #proposer -> (p with: { #attempt -> (self _attempt: p attempt with: aMessage root: aRoot) }) })
       now: t effects: fx].
@@ -725,22 +732,37 @@ PBCoordinatorCore >> _record: aMessage root: aRoot in: s now: t effects: fx
       now: t effects: fx].
   ^ s.
 
+"The committed root a grant carries, taught to the acceptor as committed knowledge only."
+PBCoordinatorCore >> _observeGrant: aMessage effects: fx
+  | committed |
+  aMessage type = 'grant' ifFalse: [^ self].
+  committed := PBClusterMessage rootFrom: (aMessage at: 'committed').
+  committed notNil ifTrue: [
+    fx add: (PBToAcceptor event: (PBLearnCommitted root: committed accept: false logged: false))].
+
 PBCoordinatorCore >> receivedGrant: anEvent in: s now: t
   ^ self _step: [:fx | self _onReply: anEvent message in: s now: t effects: fx].
 
 PBCoordinatorCore >> receivedReject: anEvent in: s now: t
   ^ self _step: [:fx | self _onReply: anEvent message in: s now: t effects: fx].
 
-"The acceptor's step is durable: its state is the dispatcher's view (CC2) and its vote, if any,
- is this node's own reply."
+"The acceptor's step is durable: its state is the dispatcher's view (CC2), the label it learnt
+ answers a suspicion of the dispatcher's (holder.st _learnt:in:), and its vote, if any, is this
+ node's own reply: a grant or reject of its own request or renewal, or the ack of its own
+ replication (holder.st _ownAck:in:now:effects:)."
 PBCoordinatorCore >> dispatchAcceptorDecided: anEvent in: s now: t
-  ^ self _step: [:fx | | state |
-    state := s with: { #acceptorView -> anEvent step state }.
-    anEvent step vote notNil ifTrue: [state := self _onReply: anEvent step vote in: state now: t effects: fx].
+  ^ self _step: [:fx | | state vote |
+    state := self _learnt: anEvent step learnt in: (s with: { #acceptorView -> anEvent step state }).
+    vote := anEvent step vote.
+    vote notNil ifTrue: [
+      state := vote type = 'ack'
+        ifTrue: [self _ownAck: vote in: state now: t effects: fx]
+        ifFalse: [self _onReply: vote in: state now: t effects: fx]].
     self _poke: state now: t effects: fx].
 
 "The acceptor could not make the promise of this node's own grant durable (proto_db _promise
- failing): the own vote is the refusal 'promise_failed' (highest the term, remaining 0)."
+ failing): the own vote is the refusal 'promise_failed' (highest the term, remaining 0). An own
+ acceptance that could not be made durable ends its replication unknown (holder.st)."
 PBCoordinatorCore >> dispatchAcceptorDiscarded: anEvent in: s now: t
   ^ self _step: [:fx | | vote |
     vote := anEvent step vote.
@@ -749,7 +771,10 @@ PBCoordinatorCore >> dispatchAcceptorDiscarded: anEvent in: s now: t
           'term' -> (vote at: 'term'). 'rid' -> (vote at: 'rid'). 'inc' -> (vote at: 'inc'). 'root' -> nil.
           'certain' -> false. 'reason' -> 'promise_failed'. 'highest' -> (vote at: 'term'). 'remaining' -> 0 })
         in: s now: t effects: fx]
-      ifFalse: [s]].
+      ifFalse: [
+        (vote notNil and: [vote type = 'ack'])
+          ifTrue: [self _ownAckFailed: vote in: s now: t effects: fx]
+          ifFalse: [s]]].
 
 "=== PBCoordinatorCore: owning ==============================================="
 
@@ -994,4 +1019,7 @@ PBCoordinatorCore >> dispatchTimerFired: anEvent in: s now: t
           ifFalse: [
             anEvent event = #ask
               ifTrue: [self _askTimer: anEvent in: s now: t effects: fx]
-              ifFalse: [s]]]].
+              ifFalse: [
+                anEvent event = #replicate
+                  ifTrue: [self _replicationTimer: anEvent in: s now: t effects: fx]
+                  ifFalse: [s]]]]].

@@ -793,7 +793,9 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     `copies` over shared storage); one synced `#accepted` append, `PBPublishAcceptor`, then
     `ack(ok, stored=false)`. A refusal is `ack(ok=false)`. Never an acceptance from a `store`
     (V1; `store` is ignored at DEPTH 0, CC7).
-  - Holder: `PBReplicateWanted` → `replicate(...)` to every voter plus own acceptance (CC1);
+  - Holder: `PBReplicateWanted` (as built, `permission:root:pred:waiter:`: Task 13 adds the
+    pred, the root the build started from; Task 14's commit path supplies it) → `replicate(...)`
+    to every voter plus own acceptance (CC1);
     the commit point is a majority of voters' acks (holder included) observed within the
     permission; otherwise `unknown` once anything acceptable left, `none` if nothing did (H7).
     `done(term, seq, inc, outcome, root, copies, ranges)` broadcast; every member appends
