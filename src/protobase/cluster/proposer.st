@@ -161,7 +161,9 @@ PBHints >> wantingSince
 "{ member. named. seen } of the turn a release named (seen: when its request was seen, nil
  before), or nil."
 PBHints >> turn
-  ^ self _at: #turn.
+  | turn |
+  turn := self _at: #turn.
+  ^ turn isNil ifTrue: [nil] ifFalse: [turn copy].
 
 "Whether a release named this node's turn."
 PBHints >> myTurn
@@ -202,7 +204,7 @@ PBProposer class >> fieldNames
 "An acquisition about to run its first round."
 PBProposer class >> start
   ^ self _from: (Dictionary new
-    at: #phase put: #start; at: #attempt put: nil; at: #failures put: 0; at: #marks put: #(0 0 0 nil);
+    at: #phase put: #start; at: #attempt put: nil; at: #failures put: 0; at: #marks put: { 0. 0. 0. nil };
     at: #token put: nil; at: #wakeAt put: nil; at: #startedAt put: 0; at: #straggling put: false; at: #backoffEnd put: 0;
     at: #busyEnd put: 0; at: #waited put: false; yourself).
 
@@ -216,14 +218,18 @@ PBProposer >> failures
   ^ self _at: #failures.
 
 PBProposer >> marks
-  ^ self _at: #marks.
+  ^ (self _at: #marks) copy.
 
 PBProposer >> token
-  ^ self _at: #token.
+  | token |
+  token := self _at: #token.
+  ^ token isNil ifTrue: [nil] ifFalse: [token copy].
 
 "{ phase. end } of the timer of token: the phase it ends and when."
 PBProposer >> wakeAt
-  ^ self _at: #wakeAt.
+  | at |
+  at := self _at: #wakeAt.
+  ^ at isNil ifTrue: [nil] ifFalse: [at copy].
 
 PBProposer >> startedAt
   ^ self _at: #startedAt.
@@ -289,7 +295,9 @@ PBOwnership >> straggling
   ^ self _at: #straggling.
 
 PBOwnership >> token
-  ^ self _at: #token.
+  | token |
+  token := self _at: #token.
+  ^ token isNil ifTrue: [nil] ifFalse: [token copy].
 
 PBOwnership >> printOn: aStream
   aStream nextPutAll: 'PBOwnership('; print: self lease; nextPut: $).
@@ -300,10 +308,21 @@ PBOwnership >> printOn: aStream
 PBCoordinatorCore class >> drawRange
   ^ 2147483646.
 
-"The microseconds of a wire number of seconds (a received reject's remaining): the exact inverse
- of wireSeconds: for every value it answers below 2^52 microseconds."
+"The cap of microsFromWire: (2^52 us, about 142 years)."
+PBCoordinatorCore class >> wireMicrosCap
+  ^ 4503599627370496.
+
+"The microseconds of a wire number of seconds (a received reject's remaining), total: a
+ non-finite number (the wire accepts +Infinity, a valid float64) or one of wireMicrosCap
+ microseconds or more answers wireMicrosCap, which every caller clamps (proto_db: busy =
+ min(busy_remaining, D)). It inverts wireSeconds: exactly for every value tested up to 2^51
+ microseconds; near 2^52 the product of a float64 can round to one off (4375678581963491)."
 PBCoordinatorCore class >> microsFromWire: aSeconds
-  ^ (aSeconds * 1000000) rounded.
+  | micros |
+  aSeconds isFinite ifFalse: [^ self wireMicrosCap].
+  micros := aSeconds * 1000000.
+  micros >= self wireMicrosCap ifTrue: [^ self wireMicrosCap].
+  ^ micros rounded.
 
 PBCoordinatorCore >> _hintsIn: s
   ^ s hints isNil ifTrue: [PBHints seed: s inc] ifFalse: [s hints].
@@ -471,6 +490,11 @@ PBCoordinatorCore >> _attemptAnswered: s now: t effects: fx
   ^ self _sleep: (s with: { #proposer -> (p with: { #straggling -> true }) })
     until: t + (self _straggleFrom: p startedAt in: s now: t) now: t effects: fx.
 
+"Whether t is still before anAttempt's validUntil: (L5): a majority granted after the belief
+ from the send (a late timer, a slow dispatcher) is not a win, of an attempt or a renewal."
+PBCoordinatorCore >> _inTime: anAttempt in: s now: t
+  ^ t < (self _leaseEnd: anAttempt in: s now: t).
+
 "Whether anAttempt is won (a majority of the voters granted)."
 PBCoordinatorCore >> _won: anAttempt
   ^ anAttempt state = #won.
@@ -483,7 +507,7 @@ PBCoordinatorCore >> _closeAttempt: s now: t effects: fx
   h := self _hintsIn: s.
   h := h with: { #hint -> (h hint max: a highestSeen) }.
   state := s with: { #hints -> h }.
-  ((self _won: a) and: [t < (self _leaseEnd: a in: s now: t)]) ifTrue: [
+  ((self _won: a) and: [self _inTime: a in: s now: t]) ifTrue: [
     view := s acceptorView.
     own := ((s config membership isVoter: s config nodeId) and: [view notNil]) ifTrue: [view accepted] ifFalse: [nil].
     pair := a bestRoot: own suspect: (self _suspectIn: s) > 0.
@@ -711,18 +735,22 @@ PBCoordinatorCore >> _renewalAnswered: s now: t effects: fx
   ^ state with: { #ownership -> (state ownership with: { #straggling -> true. #token -> pair last }) }.
 
 "A renewal won before its validUntil: extends the lease; any other outcome leaves it. Then the
- ownership goes on (proto_db _renew, then the loop)."
+ ownership goes on (proto_db _renew, then the loop). The waiters that arrived while the lease
+ had lapsed join the queue of the renewed lease (proto_db permit loops back to the owner)."
 PBCoordinatorCore >> _closeRenewal: s now: t effects: fx
   | own a lease state |
   own := s ownership.
   a := own renewal.
   lease := own lease.
-  ((self _won: a) and: [t < (self _leaseEnd: a in: s now: t)])
+  ((self _won: a) and: [self _inTime: a in: s now: t])
     ifTrue: [
       fx add: (PBCount stat: 'renewals').
-      state := self _issue: (s with: { #ownership -> (own with: { #renewal -> nil.
-          #lease -> (PBLease term: lease term validUntil: (lease validUntil max: (self _leaseEnd: a in: s now: t))
-            root: lease root certain: lease isCertain) }) }) now: t effects: fx]
+      own := own with: { #renewal -> nil.
+        #lease -> (PBLease term: lease term validUntil: (lease validUntil max: (self _leaseEnd: a in: s now: t))
+          root: lease root certain: lease isCertain) }.
+      s waiters isEmpty ifFalse: [
+        own := own with: { #queue -> (own queue , s waiters). #lastDemand -> t. #lastLocal -> t }].
+      state := self _issue: (s with: { #ownership -> own. #waiters -> #() }) now: t effects: fx]
     ifFalse: [
       fx add: (PBCount stat: 'renewal_failures').
       state := s with: { #ownership -> (own with: { #renewal -> nil }) }].

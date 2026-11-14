@@ -755,6 +755,12 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   `valid` measured from the send of `permit_req`; no answer within one `leaseDuration` forgets
   the owner **only for the term asked under** (plants `silence_forgets`, `hint_forgotten`);
   `acquireTimeout` settles the waiter with `PBTimeoutError`.
+- Carried from Task 11 (proposer.st leaves these to this task): `_permission_from_owner` (a
+  waiter asks the owner the hint names before it acquires), `_await_turn`'s `yield_to_owner`,
+  the `acquireTimeout` deadline in `_awaitTurn:now:effects:` (`now >= deadline`) and in
+  `_backOff:busy:now:effects:` (`min(…, remaining)`), and `_issue:now:effects:` (issues none in
+  Task 11). Task 11 already hands the waiters that arrived while a lease had lapsed to the queue
+  of a won renewal (`_closeRenewal:now:effects:`).
 - Scenario families (`test_cluster_permit_backoff`, `_deferral`, `_incarnations`,
   `test_cluster_coordinator`): `first come first served, own threads included`, `a restarted
   holder's done never retires a permission it did not hold` (L12), `a dead holder's late done`

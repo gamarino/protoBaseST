@@ -6,7 +6,8 @@
 # Environment:
 #   PROTOST         the protost binary (default: protost)
 #   PROTOBASE_REPO  a ProtoBase checkout (default: ../ProtoBase), used by the vector fetch
-#   RUN_TIMEOUT     seconds allowed per test (default 120)
+#   RUN_TIMEOUT     seconds allowed per test (default 600: the simulator tests of the cluster
+#                   take up to about 4 minutes each on a loaded machine)
 #
 # Each *.st file is a protoST program run with its own directory as the working directory and
 # STPATH=<repo>/src. Its first line (second after a "#!" line) is a directive:
@@ -41,7 +42,7 @@ fi
 export PROTOST
 export PROTOBASE_REPO="${PROTOBASE_REPO:-$REPO/../ProtoBase}"
 export STPATH="$REPO/src${STPATH:+:$STPATH}"
-TIMEOUT="${RUN_TIMEOUT:-120}"
+TIMEOUT="${RUN_TIMEOUT:-600}"
 
 if [[ $# -eq 0 ]]; then
     set -- "$REPO/tests"

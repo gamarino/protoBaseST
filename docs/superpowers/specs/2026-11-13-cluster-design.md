@@ -162,6 +162,9 @@ are deliberately **not** invariants.
    in root order is the **phase-1 value** (`lease.root`). The lease is *certain* when every granter
    knows a root, none is suspect and the requester is not suspect.
 6. **Losing**: cancel (`release`, `held=False`), jittered back-off, ended early by any release.
+   *Erratum (Task 11):* `proto_db`'s code (`coordinator.py` `_back_off`, N7/M2) ends the back-off
+   itself only on progress (a held release, a newly learnt owner); any release ends only its busy
+   extension. protoBaseST follows the code, as the ruling of Task 5 (code over spec wording).
 7. **Owning**: an ownership thread renews at half the belief while there is demand (`renew`; no
    log write: the promise is already durable).
 8. **Releasing**: idle for `lease_duration / 4`; the release closes the term at every receiver and

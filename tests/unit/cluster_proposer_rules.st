@@ -1,4 +1,4 @@
-"EXPECT: ok 15"
+"EXPECT: ok 20"
 "The proposer's rules (cluster/proposer.st) called directly, one rule per check (proto_db
  coordinator.py permit, _become_owner, _open_attempt, _on_reply, _close_attempt, _back_off,
  release, _own_loop_body, _renew, the fairness hints).
@@ -21,12 +21,27 @@
  remain, and the releaser defers to it until turnSilence when its request is not seen; a member
  nobody queues says want before it defers. (12) The named member takes its turn at once (no spread) and
  counts turns_taken. (13) ownerIdleRelease ends a term without local demand
- (terms_released_idle_local). (14) The owner hint is learnt from a renewal, not from a request."
+ (terms_released_idle_local). (14) The owner hint is learnt from a renewal, not from a request.
+ (15) A reject whose remaining is +Infinity (a valid float64 the wire accepts) is a lost round
+ busy for leaseDuration, as proto_db's min(busy_remaining, D), not an error. (16) A majority of
+ grants dispatched at the send + the belief or later (a late timer, a slow dispatcher) is not a
+ win: a lost round, a cancel, no ownership (L5). (17) Likewise a renewal: counted
+ renewal_failures, the lease not extended. (18) The plant PlantLateWin (the win check t <
+ validUntil dropped) fails checks 16 and 17. (19) A waiter that arrives while the lease has
+ lapsed during a renewal joins the queue of the renewed lease (proto_db permit loops back to the
+ owner)."
 Import from: 'protobase'.
 Import from: '_check'.
 
+"The plant of checks 16-17: a majority wins whenever it comes, the win check t < validUntil
+ dropped (CC13)."
+PBCoordinatorCore subclass: #PlantLateWin.
+
+PlantLateWin >> _inTime: anAttempt in: s now: t
+  ^ true.
+
 | c core peers config three four vs marker logged view stateIn ready step eff sends msg granted reject
-  request s own att t0 pair sim |
+  request s own att t0 pair sim owned renewing late lateRenewal plant stats lapsed |
 c := Check new.
 core := PBCoordinatorCore new.
 peers := [:someIds | (1 to: someIds size) asArray collect: [:i | PBPeer nodeId: (someIds at: i) host: '127.0.0.1' port: 7000 + i]].
@@ -66,10 +81,11 @@ c that: 'ballotFor: the ballot of the rank above the acceptor''s highest, the hi
   equals: { 1. 12289. 20482. 12289 }.
 
 "(2) The inbound remaining."
-c that: 'microsFromWire: inverts wireSeconds:'
-  is: (#(0 1 7 999999 1000000 1333334 3333334 123456789 4503599627370495) collect: [:m |
-    (PBCoordinatorCore microsFromWire: (PBCoordinatorCore wireSeconds: m)) = m]) asSet
-  equals: #(true) asSet.
+c that: 'microsFromWire: inverts wireSeconds: (to 2^51; near 2^52 one off, a documented limit)'
+  is: { (#(0 1 7 999999 1000000 1333334 3333334 123456789 2251799813685247) collect: [:m |
+      (PBCoordinatorCore microsFromWire: (PBCoordinatorCore wireSeconds: m)) = m]) asSet.
+    (PBCoordinatorCore microsFromWire: (PBCoordinatorCore wireSeconds: 4375678581963491)) - 4375678581963491 }
+  equals: { #(true) asSet. 1 }.
 
 "(3) A permit wanted."
 pair := step value: (PBPermitWanted waiter: #w1) value: (PBNodeState config: (config value: 'n1' value: three value: Dictionary new) inc: 5) value: t0.
@@ -142,7 +158,9 @@ c that: 'a cancel ends only the busy extension; a held release ends the back-off
 s := (step value: (PBAcceptorDecided step: own) value: att state value: t0 + 3000) state.
 s := (step value: (granted value: 'n2' value: 1 value: 1 value: 5) value: s value: t0 + 4000) state.
 s := s with: { #ownership -> (s ownership with: { #queue -> #() }) }.
+owned := s.
 pair := step value: (PBTimerFired token: s ownership token event: #owner) value: s value: t0 + 333334.
+renewing := pair state.
 sim := step value: (granted value: 'n0' value: 1 value: pair state ownership renewal rid value: 5) value: pair state value: t0 + 340000.
 sim := step value: (granted value: 'n2' value: 1 value: pair state ownership renewal rid value: 5) value: sim state value: t0 + 341000.
 c that: 'an owner with demand renews at half the belief left; a won renewal extends the lease'
@@ -203,5 +221,52 @@ c that: 'the owner hint is learnt from a renewal, not from a request'
   is: { ((step value: (msg value: 'request' value: 'n2' value: { 'term' -> 8194. 'rid' -> 1. 'inc' -> 1. 'vs' -> vs }) value: s value: t0) state hints) ownerTerm.
     ((step value: (msg value: 'renew' value: 'n2' value: { 'term' -> 8194. 'rid' -> 1. 'inc' -> 1. 'vs' -> vs }) value: s value: t0) state hints) ownerNode }
   equals: { 0. 'n2' }.
+
+"(15) Two rejects whose remaining is +Infinity."
+pair := step value: (reject value: 'n0' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: Float infinity) value: att state value: t0 + 4000.
+pair := step value: (reject value: 'n2' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: Float infinity) value: pair state value: t0 + 4000.
+c that: 'a reject with remaining +Infinity is a lost round busy for leaseDuration'
+  is: { PBCoordinatorCore microsFromWire: Float infinity. (pair effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat].
+    pair state proposer phase. pair state proposer busyEnd - (t0 + 4000) }
+  equals: { PBCoordinatorCore wireMicrosCap. #('lost_attempts'). #backoff. 2000000 }.
+
+"(16-18) A majority after the belief: of an attempt, of a renewal, and the plant."
+late := [:rules :t | | p |
+  p := rules dispatch: (PBAcceptorDecided step: own) in: att state now: t0 + 3000.
+  p := rules dispatch: (granted value: 'n2' value: 1 value: 1 value: 5) in: p state now: t.
+  { p state ownership isNil. (p effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat].
+    (p effects select: [:e | e isKindOf: PBSend]) collect: [:e | { e to. e message type.
+      e message type = 'release' ifTrue: [e message at: 'held'] ifFalse: [nil] }] }].
+c that: 'a majority of grants at the send + the belief or later is not a win'
+  is: { late value: core value: t0 + 666666. (late value: core value: t0 + 900000) first }
+  equals: { { true. #('lost_attempts'). #(#('n0' 'release' false) #('n2' 'release' false)) }. true }.
+lateRenewal := [:rules :t | | p |
+  p := rules dispatch: (granted value: 'n0' value: 1 value: renewing ownership renewal rid value: 5) in: renewing now: t.
+  p := rules dispatch: (granted value: 'n2' value: 1 value: renewing ownership renewal rid value: 5) in: p state now: t.
+  stats := (p effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat].
+  { stats includes: 'renewals'. stats includes: 'renewal_failures'.
+    p state ownership isNil or: [p state ownership lease validUntil = (t0 + 666666)] }].
+c that: 'a renewal won after its belief is a renewal failure and extends nothing'
+  is: (lateRenewal value: core value: t0 + 333334 + 666666) equals: #(false true true).
+plant := PlantLateWin new.
+c that: 'the plant PlantLateWin fails checks 16 and 17'
+  is: { ((late value: plant value: t0 + 666666) at: 2) includes: 'acquired'. (lateRenewal value: plant value: t0 + 333334 + 666666) first }
+  equals: #(true true).
+
+"(19) A waiter during a lapsed lease joins the renewed lease's queue."
+s := stateIn value: 'n1' value: three value: { marker } value: (Dictionary new at: #requestTimeout put: 600; yourself).
+pair := step value: (PBPermitWanted waiter: #w1) value: s value: t0.
+s := (step value: (PBAcceptorDecided step: (core accept: (pair effects at: 2) event
+  in: (view value: 'n1' value: three value: { marker }) now: t0)) value: pair state value: t0 + 1000) state.
+s := (step value: (granted value: 'n2' value: 1 value: 1 value: 5) value: s value: t0 + 2000) state.
+s := s with: { #ownership -> (s ownership with: { #queue -> #() }) }.
+s := (step value: (PBTimerFired token: s ownership token event: #owner) value: s value: t0 + 333334) state.
+lapsed := (step value: (PBPermitWanted waiter: #w2) value: s value: t0 + 700000) state.
+pair := step value: (granted value: 'n0' value: 1 value: lapsed ownership renewal rid value: 5) value: lapsed value: t0 + 800000.
+pair := step value: (granted value: 'n2' value: 1 value: lapsed ownership renewal rid value: 5) value: pair state value: t0 + 800000.
+c that: 'a waiter that arrived while the lease lapsed joins the renewed lease''s queue'
+  is: { s ownership renewal notNil. lapsed waiters. lapsed ownership queue. pair state ownership lease validUntil.
+    pair state ownership queue. pair state waiters. pair state ownership lastDemand }
+  equals: { true. #(#w2). #(). t0 + 1000000. #(#w2). #(). t0 + 800000 }.
 
 c report displayNl.

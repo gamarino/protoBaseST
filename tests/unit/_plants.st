@@ -10,7 +10,7 @@
   PlantSharedBallot     every proposer asks the ballots of rank 0 (two proposers never share
                         a ballot).
   PlantWindowFromWin    the lease is valid for the belief from the win, not from the send (L5:
-                        a grant delayed past the belief is not a win).
+                        the lease runs from the send, not the win).
   PlantNoDriftMargin    the lease is valid for leaseDuration from the send (clock rates 2/3 to
                         3/2 keep S1: two valid leases at once).
   PlantNoTurns          a release names nobody (releases name the longest waiter and the turns
@@ -137,32 +137,42 @@ LeaseRun >> owns: anId
   node := sim nodeAt: anId.
   ^ node isUp and: [node state notNil and: [node state ownership notNil]].
 
-"The families: each answers what its checks count over the seeds; an Error of the checker
- (S1, L5) is a failed seed."
+"The families: each answers what its checks count over the seeds; a violation the checker
+ reports (S1, L5: an Error whose text starts with 'PBSim seed') is a failed seed, and any other
+ Error is signalled on, never counted as a plant's failure."
 Object subclass: #LeaseFamilies.
 
-"{ seeds whose run failed the checker. seeds where two members asked the same term }: under
- drop 1/10, duplicate 1/20, delay up to 2 ms and reorder, every member wants a lease until four
- terms were owned."
+"Whether aBlock ended with a violation of the checker (true) or ran through (false)."
+LeaseFamilies class >> violates: aBlock
+  ^ [aBlock value. false] on: Error do: [:e |
+    (e messageText beginsWith: 'PBSim seed') ifTrue: [true] ifFalse: [e pass]].
+
+"{ seeds whose run failed the checker. seeds where two members asked the same term. seeds that
+ owned fewer than four terms }: under drop 1/10, duplicate 1/20, delay up to 2 ms and reorder,
+ every member wants a lease until four terms were owned (or 5 s of virtual time ran)."
 LeaseFamilies class >> terms: aRulesClass seeds: someSeeds
-  | failed shared |
+  | failed shared stalled |
   failed := 0.
   shared := 0.
+  stalled := 0.
   someSeeds do: [:seed | | rules run bad |
     rules := aRulesClass new.
     run := LeaseRun rules: rules seed: seed options: Dictionary new.
     run sim faults: (PBSimFaults drop: 1/10 duplicate: 1/20 delay: 2000 reorder: true).
     run sim checker watchLeases.
-    bad := [run until: [run ownerships >= 4 or: [run sim now > 5000000]] demandAt: run sim ids gap: 0 owners: false. false]
-      on: Error do: [:e | true].
+    bad := self violates: [run until: [run ownerships >= 4 or: [run sim now > 5000000]] demandAt: run sim ids gap: 0 owners: false].
     bad ifTrue: [failed := failed + 1].
+    (bad not and: [run ownerships < 4]) ifTrue: [stalled := stalled + 1].
     ((rules requests collect: [:r | r last]) asSet size = rules requests size) ifFalse: [shared := shared + 1]].
-  ^ { failed. shared }.
+  ^ { failed. shared. stalled }.
 
-"{ seeds failed. seeds where both n0 and n1 owned }: n0 (clock rate 2/3) asks; the grants of
- n1 and n2 (rate 3/2) reach it 800 ms later, past its belief (666 ms of its clock) but within its
- requestTimeout (600 ms of its clock, 900 ms of virtual time); n0 is cut off; n1 asks at 1.4 s,
- after the granters' promise (2 s of their clocks, 1.33 s) ended (L5)."
+"{ seeds failed. seeds where both n0 and n1 owned }: the lease runs from the send, not the win
+ (L5). n0 (clock rate 2/3) asks; the grants of n1 and n2 (rate 3/2) reach it 800 ms of virtual
+ time later, 533 ms of its clock: a win within its requestTimeout (600 ms of its clock) and
+ before its belief (666 ms of its clock). n0 is cut off; n1 asks at 1.4 s, after the granters'
+ promise (2 s of their clocks, 1.33 s of virtual time) ended. A lease measured from the win
+ would still be valid at n0 then. (A grant arriving after the belief cannot be scheduled here,
+ the simulator fires timers punctually: cluster_proposer_rules.st checks that case directly.)"
 LeaseFamilies class >> window: aRulesClass seeds: someSeeds
   | failed both |
   failed := 0.
@@ -173,13 +183,12 @@ LeaseFamilies class >> window: aRulesClass seeds: someSeeds
     run sim delay: 'n1' to: 'n0' by: 800000; delay: 'n2' to: 'n0' by: 800000.
     run sim checker watchLeases.
     n1 := false.
-    bad := [
+    bad := self violates: [
       run sim commit: 'a' at: 'n0'.
       run sim runUntil: [(run owns: 'n0') or: [run sim now > 1200000]] steps: 100000.
       run sim partition: #(#('n0') #('n1' 'n2')).
       run sim commit: 'b' at: 'n1' time: 1400000.
-      run sim runUntil: [n1 := n1 or: [run owns: 'n1']. run sim now > 2500000] steps: 100000.
-      false] on: Error do: [:e | true].
+      run sim runUntil: [n1 := n1 or: [run owns: 'n1']. run sim now > 2500000] steps: 100000].
     bad ifTrue: [failed := failed + 1].
     ((run sim countOf: 'ownerships' at: 'n0') > 0 and: [n1]) ifTrue: [both := both + 1]].
   ^ { failed. both }.
@@ -199,13 +208,12 @@ LeaseFamilies class >> drift: aRulesClass seeds: someSeeds
     ids do: [:id | run sim clockRate: id rate: (id = slow ifTrue: [2/3] ifFalse: [3/2])].
     run sim checker watchLeases.
     other := false.
-    bad := [
+    bad := self violates: [
       run until: [(run owns: slow) or: [run sim now > 2000000]] demandAt: { slow } gap: 20000 owners: true.
       run sim partition: { { slow }. others }.
       end := run sim now + 4000000.
       run until: [other := other or: [others anySatisfy: [:id | run owns: id]]. run sim now > end]
-        demandAt: ids gap: 20000 owners: true.
-      false] on: Error do: [:e | true].
+        demandAt: ids gap: 20000 owners: true].
     bad ifTrue: [failed := failed + 1].
     other ifTrue: [taken := taken + 1]].
   ^ { failed. taken }.

@@ -281,6 +281,12 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   same (`promised` is max(terms seen, accepted label)); the answer can come later, and it reports
   only what is durable, where `proto_db`'s may count a promise not yet synced. *Cost:* a recovery
   round or a rejoin may wait behind a node's queued syncs.
+- **A release's fairness bookkeeping at dispatch (timing only).** `proto_db` notes a release's
+  wake-ups, progress and the turn it names (`_note_release`) when its acceptor lane takes the
+  release; protoBaseST's dispatcher notes them when it receives the release, before it hands the
+  release to its acceptor (`receivedRelease:in:now:`, `cluster/proposer.st`). The acceptor still
+  takes the release before any request of the same step, and no grant rule reads the hints.
+  *Cost:* a back-off or a deferral may end one acceptor-lane latency earlier.
 
 ## Errors and messages
 

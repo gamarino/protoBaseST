@@ -14,8 +14,8 @@
   node's own messages, and `PBAcceptorDiscarded` reports a discarded step to the dispatcher.
   The owner's permissions follow in Task 12. The simulator gains a sync cost, fixed link delays,
   scheduled commits and the L5 lease check (`watchLeases`). Tested by `tests/unit/sim_leases.st`,
-  `tests/unit/sim_leases_plants.st` (the planted rules of `tests/unit/_plants.st`) and
-  `tests/unit/cluster_proposer_rules.st`.
+  `tests/unit/sim_leases_terms.st`, `tests/unit/sim_leases_plants.st` (the planted rules of `tests/unit/_plants.st`) and
+  `tests/unit/cluster_proposer_rules.st`. `tests/run_tests.sh`'s default `RUN_TIMEOUT` is now 600 s.
 - The acceptor's phase-1 rules (`src/protobase/cluster/acceptor.st`), `proto_db`'s `_route`,
   `_on_request`, `_decide`, `_refusal`, `_on_release` and plain query as rule methods of
   `PBCoordinatorCore`: the dispatcher drops messages of non-members and counts voter-set

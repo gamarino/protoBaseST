@@ -447,8 +447,8 @@ For tests, tools and readers of the format. An application does not need them.
   `acceptReceived:in:now:` drops a non-member and calls accept<Type>:in:now: (this node's own
   messages included: its vote travels in the step's `vote`, never counts `'grants_given'`, and its
   own release raises no suspicion); `dispatchStartNode:in:now:` hands the start to the acceptor. Here,
-  `receivedRequest:in:now:`, `receivedRenew:in:now:`, `receivedRelease:in:now:` and
-  `receivedQuery:in:now:` hand the message to the acceptor (`PBToAcceptor`), which answers in
+  `receivedQuery:in:now:` hands the message to the acceptor (`PBToAcceptor`), as do the
+  handlers of requests, renewals and releases, defined in `cluster/proposer.st` only; it answers in
   `acceptRequest:in:now:` and `acceptRenew:in:now:` (nothing when fenced; a refusal of the
   state, 'learner', 'tier_failed', 'rejoining', else `PBGrantState`'s decision; a grant of a
   term above `loggedPromise` appends one synced promise, its grant carries the accepted and
@@ -489,7 +489,8 @@ For tests, tools and readers of the format. An application does not need them.
   `'ownerships'`) is an ownership whose lease ends at the send plus the belief (L5); a loss
   (`'lost_attempts'`) cancels to every member and its own acceptor and backs off for the jittered
   exponential delay, extended to the refusals' busy remaining (`microsFromWire:`, the inverse
-  of `wireSeconds:`): a held release or a newly learnt owner ends the back-off, any release only
+  of `wireSeconds:`, total: a non-finite or huge number answers `wireMicrosCap`, 2^52 us, clamped
+  to `leaseDuration` like any busy remaining): a held release or a newly learnt owner ends the back-off, any release only
   its busy extension, after which a member the release did not name waits a random spread of up
   to `wakeSpread`. An owner with demand renews at half the belief left (`'renewals'`,
   `'renewal_failures'`; a failed renewal does not end the term); without demand for `idleEnd`, or

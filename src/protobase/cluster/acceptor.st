@@ -9,8 +9,9 @@ lane 'decides, makes its write durable, publishes, then replies, in arrival orde
 durable before it performs the reply (R55, R81).
 
   The dispatcher's handlers: core.st's dispatchReceived: checks the sender and the voter-set
-    fingerprint (proto_db _route); receivedRequest:, receivedRenew:, receivedRelease: and
-    receivedQuery: (in:now:) hand the message to the acceptor lane (PBToAcceptor). A plain
+    fingerprint (proto_db _route); receivedQuery:in:now: hands the message to the acceptor lane
+    (PBToAcceptor). receivedRequest:, receivedRenew: and receivedRelease: (in:now:) are
+    proposer.st's only: they keep the fairness hints, then hand the message here. A plain
     query is answered by the acceptor, where proto_db answers it on the dispatcher (a timing
     difference only, docs/deviations.md).
   acceptRequest:in:now:, acceptRenew:in:now: (proto_db _on_request, _decide): a fenced node
@@ -127,19 +128,11 @@ PBAppendFailed >> printOn: aStream
 PBCoordinatorCore class >> wireSeconds: someMicros
   ^ (someMicros / 1000000) asFloat.
 
-"The acceptor lane takes requests, renewals, releases and queries (proto_db _route; a release's
- fairness part is the proposer's, Task 11). proto_db answers a plain query on the dispatcher;
- here the acceptor answers it from its own state (CC2), after the steps queued before it: a
- timing difference only, and its answer reports durable state only."
-PBCoordinatorCore >> receivedRequest: anEvent in: aNodeState now: t
-  ^ PBStep state: aNodeState effects: { PBToAcceptor event: anEvent }.
-
-PBCoordinatorCore >> receivedRenew: anEvent in: aNodeState now: t
-  ^ PBStep state: aNodeState effects: { PBToAcceptor event: anEvent }.
-
-PBCoordinatorCore >> receivedRelease: anEvent in: aNodeState now: t
-  ^ PBStep state: aNodeState effects: { PBToAcceptor event: anEvent }.
-
+"The acceptor lane takes requests, renewals, releases and queries (proto_db _route). The
+ handlers of requests, renewals and releases are defined once, in proposer.st, which keeps the
+ fairness hints before it hands the message to the lane. proto_db answers a plain query on the
+ dispatcher; here the acceptor answers it from its own state (CC2), after the steps queued
+ before it: a timing difference only, and its answer reports durable state only."
 PBCoordinatorCore >> receivedQuery: anEvent in: aNodeState now: t
   ^ PBStep state: aNodeState effects: { PBToAcceptor event: anEvent }.
 
