@@ -31,7 +31,7 @@ Contents:
 
 ## 1. Before you start
 
-You need a protoST binary, version 0.11.0 or newer
+You need a protoST binary, version 0.12.0 or newer
 ([release](https://github.com/gamarino/protoST); it adds `Decimal`, `CalendarDate`, `UUID`, random
 bytes and the UTC clock), and this repository's `src/` on the module path:
 

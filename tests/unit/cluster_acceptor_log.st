@@ -1,4 +1,4 @@
-"EXPECT: ok 10"
+"EXPECT: ok 12"
 "PBAcceptorLog (cluster/rootlog.st): the acceptor log of proto_db's rootlog.py RootsLog. Its
  lock file, its synced and unsynced entries, the poisoning of a failed write and the refusal of a
  log file with two hard links. The syncs are observed through a PBFramedLog subclass (the
@@ -176,6 +176,28 @@ check value: 'corrupt log refused' value: (refusal value: [PBAcceptorLog path: b
 log := PBAcceptorLog path: base / 'bad' / 'n1.roots'.
 check value: 'its lock was released' value: log load entries isEmpty.
 log close.
+tests add: 11.
+"11. a symbolic link to the log file names the same lock (the real path, proto_db RootsLog): the
+ review's reproduction, where two lock files let two handles append promises 5, 3, 4"
+log := PBAcceptorLog path: path.
+linked := base / 'cluster' / 'symlink.roots'.
+check value: 'symbolic link made' value: (OSProcess run: 'ln' arguments: { '-s'. path pathString. linked pathString }) exitCode = 0.
+other := refusal value: [PBAcceptorLog path: linked] value: PBUserError.
+check value: 'the link is refused by the lock' value: (other notNil and: [other includesSubstring: path realPath pathString , '.lock']).
+check value: 'no lock file for the link' value: (base / 'cluster' / 'symlink.roots.lock') exists not.
+log close.
+log := PBAcceptorLog path: linked.
+check value: 'opened through the link, the log is the real file' value: (log path pathString = path realPath pathString and: [log load promise = 40]).
+log close.
+
+tests add: 12.
+"12. a symbolic link loop is refused cleanly (PBUnexpectedError), nothing created"
+(base / 'loop') ensureCreateDirectory.
+OSProcess run: 'ln' arguments: { '-s'. 'b.roots'. (base / 'loop' / 'a.roots') pathString }.
+OSProcess run: 'ln' arguments: { '-s'. 'a.roots'. (base / 'loop' / 'b.roots') pathString }.
+other := refusal value: [PBAcceptorLog path: base / 'loop' / 'a.roots'] value: PBUnexpectedError.
+check value: 'a loop is refused' value: (other notNil and: [other includesSubstring: 'symbolic links']).
+check value: 'no lock file for a loop' value: ((base / 'loop') children allSatisfy: [:f | (f basename endsWith: '.lock') not]).
 base deleteAll.
 failures isEmpty ifFalse: [failures do: [:f | ('FAIL ' , f) displayNl]. Smalltalk exit: 1].
 'ok ' , tests size printString

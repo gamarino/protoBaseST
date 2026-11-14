@@ -33,8 +33,8 @@ PBRootOrder is the only comparison of roots in the code base.
                  marker is synced before the call answers, whatever the space's durability; a
                  committed entry is knowledge (R67) and rides on the next sync. Any failed
                  write or sync poisons the log: every later write is PBUnexpectedError until it
-                 is reopened. The log holds <path>.lock (tryLock, the lock proto_db's OwnerLock
-                 takes) from before it opens the file until close, so a second open, in this
+                 is reopened. The log holds <real path>.lock (tryLock, the lock proto_db's OwnerLock
+                 takes; the path resolved as os.path.realpath) from before it opens the file until close, so a second open, in this
                  process or another, is PBUserError naming the lock file; a log file with more
                  than one hard link is PBLockingError (PBFramedLog openAppend:kind:). One caller
                  at a time: the acceptor actor owns the log (the methods are not serialized; load
@@ -394,14 +394,19 @@ PBAcceptorLog class >> _describe: anError
   ^ anError messageText isNil ifTrue: [anError class name] ifFalse: [anError messageText].
 
 "Opens or creates the acceptor log at aPath (a String or FileReference) and its directory
- (proto_db RootsLog): takes the lock on aPath , '.lock' first (a held lock is PBUserError naming
+ (proto_db RootsLog): resolves aPath to its real path (FileReference realPath; a symbolic link
+ loop is PBUnexpectedError), which the log answers as its path, then takes the lock on that
+ path , '.lock' first (a held lock is PBUserError naming
  the lock file), then opens the log (PBFramedLog openAppend:kind:, which refuses a file with more
  than one hard link and trims a torn tail), syncs the file, its directory and the directory's
  parent (whatever made the file, L10), and decodes its entries (PBCorruptionError). A failure to
  create, open or sync is PBUnexpectedError. On any refusal the file and the lock are released."
 PBAcceptorLog class >> path: aPath
   | ref lockRef lock took log ok promised |
-  ref := aPath asFileReference.
+  "Resolved (proto_db: os.path.realpath before the lock file is named): a symbolic link to the
+   log, or to a directory above it, names the same lock file as the real path."
+  ref := [aPath asFileReference realPath] on: FileSystemError do: [:e |
+    ^ PBUnexpectedError signal: 'Cannot resolve the path of the root log ' , aPath asFileReference pathString , ': ' , (self _describe: e)].
   [ref parent ensureCreateDirectory] on: FileSystemError do: [:e |
     ^ PBUnexpectedError signal: 'Cannot create the directory of the root log ' , ref pathString , ': ' , (self _describe: e)].
   lockRef := (ref pathString , self lockSuffix) asFileReference.

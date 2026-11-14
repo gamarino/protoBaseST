@@ -135,8 +135,11 @@ explicit.
   modules (`PBFramedLog`, `PBAcceptorLog`), which no space uses yet. The acceptor log writes
   kinds 1 to 4 and reads 1 to 6 (it never writes kinds 5 and 6, which belong to `proto_db`'s
   tiered storage), and it is never compacted (`proto_db`'s `RootsLog` rewrites a log over 1 MiB).
-  The lock file is still named after the path as given, not its real path: an open,
-  ship-blocking item in `docs/not-done.md` (symbolic link to the log file). A lock held
+  The lock file is named after the real path (`FileReference >> realPath`, as `proto_db`'s
+  `os.path.realpath`). A symbolic link loop is refused when the path is resolved
+  (`PBUnexpectedError`, nothing created): Python's non-strict `realpath` does not raise on a loop,
+  so `proto_db` creates `<loop path>.lock` and then fails to open the log (`ELOOP`, also
+  `ProtoUnexpectedError`). Same class, earlier refusal, no stray lock file. A lock held
   elsewhere is `PBUserError` naming the lock file (cluster plan, Review Focus 3), where `proto_db`
   raises `ProtoLockingError`; a log with two hard links is `PBLockingError`, as `proto_db`.
 - **The caller owns the lock backoff, and it blocks the caller's worker.** The publisher never

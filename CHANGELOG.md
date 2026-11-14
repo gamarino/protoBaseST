@@ -17,8 +17,11 @@
   `tests/conformance/rootlog.st` and no longer skipped.
 - `PBFramedLog openAppend:kind:` refuses a log file with more than one hard link
   (`PBLockingError`), before reading or repairing it, as `proto_db`'s `open_log`; `PBFramedLog >>
-  sync`. protoBaseST now needs **protoST 0.11.0** (`BinaryFile >> linkCount`), built on protoIO
-  0.6.0.
+  sync`. protoBaseST now needs **protoST 0.12.0** (`BinaryFile >> linkCount`, `FileReference >>
+  realPath`), built on protoIO 0.7.0.
+- `PBAcceptorLog path:` resolves the real path before it names `<path>.lock`, as `proto_db`'s
+  `RootsLog`: a symbolic link to a log no longer opens a second handle on it (the ship-blocking
+  item of review is closed). A symbolic link loop is `PBUnexpectedError`.
 
 - The wire messages of cluster protocol 13 (`src/protobase/cluster/protocol.st`):
   `PBClusterMessage`, the 22 types of `proto_db`'s `protocol.py` with its field table and

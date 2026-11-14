@@ -366,8 +366,10 @@ For tests, tools and readers of the format. An application does not need them.
   An unknown root is `nil` and orders below every known one; two different roots with equal
   label and epoch are `PBCorruptionError`.
 - **Acceptor log** (`cluster/rootlog.st`): `PBAcceptorLog`, `proto_db`'s RootsLog (kind
-  `'ROOT'`). Class side: `path:` (takes the lock on the path plus `lockSuffix` (`'.lock'`) first,
-  a held lock being `PBUserError` naming the lock file; then opens or creates the log and its
+  `'ROOT'`). Class side: `path:` (resolves the path to its real path, `FileReference >> realPath`,
+  so a symbolic link names the real file's lock, a link loop being `PBUnexpectedError`; takes the
+  lock on that path plus `lockSuffix` (`'.lock'`) first, a held lock being `PBUserError` naming
+  the lock file; then opens or creates the log and its
   directory with `PBFramedLog openAppend:kind:` and syncs the file, its directory and the
   parent directory), `encode:label:root:` (the 41-byte entry of kind `#accepted`, `#committed`,
   `#promise` or `#rejoined`; the root a `PBRootRecord` or `nil`), `decode:path:` (pure: payloads
