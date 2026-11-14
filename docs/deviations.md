@@ -331,18 +331,23 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   `proto_db` also reports under a delayed observation, never one it could not.
 - **The replicate's pred is named by the commit path and checked by the core (representation
   only).** `proto_db`'s `replicate` takes the pred from the lease (`lease.sent`, else the lease
-  root, which `bind_root` sets to the base); protoBaseST's commit path names it in
+  root, which `bind_root` sets to the base, then to the re-committed root and to each root a
+  round commits); protoBaseST's commit path names it in
   `PBReplicateWanted permission:root:pred:waiter:`, since a `PBPermission` is immutable. The
   `replicate` message is the same. Acceptors trust the pred (V2' cannot detect one that lies
   about the build base), so the core keeps `proto_db`'s rule itself: `PBHolder permits` records,
-  per permission held, the base bound by the base choice and the root last sent, and
+  per permission held, the base bound (the base choice's, then each root committed under the
+  permission, as `bind_root`), the root last sent and the root last committed, and
   `dispatchReplicateWanted:` refuses (`PBValidationError`) a pred other than `predFor:in:` (the
   root last sent, even when its outcome was `#unknown`; else the base bound; else the
   permission's root; a round that sent nothing does not move it). A record is forgotten when
   the permission's done report is made; at most `permitsSeenLimit` (64) are kept, the oldest
-  dropped first, and a permission whose record was dropped falls back to its permission's root,
-  so a later root is refused, never sent on a wrong pred. *Cost:* none on the wire; a commit path
-  that holds more than 64 permissions at once sees refusals.
+  dropped first. After an eviction `predFor:in:` falls back to the permission's root, so a root
+  built on it would be accepted even if another root had been sent under that permission: the
+  check would no longer hold for it. At DEPTH 0 or 1 at most two permissions are live at once
+  and every update re-appends a record at the end, so an eviction cannot reach a live
+  permission. *Cost:* none on the wire; a commit path holding more than 64 permissions at once
+  would lose the check for the oldest.
 - **The base choice runs as values on the dispatcher (representation and timing, CC2).**
   `proto_db`'s `_lease_base` and `recover_root` block a commit thread on the recovery round and
   on the storage read. protoBaseST's `leaseBase:waiter:in:now:` (`cluster/holder.st`) records a
@@ -355,24 +360,30 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   the failure of a refound read. This node's own accepted and committed roots and its witness
   state are the acceptor's last report (`acceptorView`), not the one shared state `proto_db`
   reads: they can lag one acceptor step. A lagging accepted root can only lower the recovery
-  result (the phase-1 floor and the hard guard still apply); a lagging committed root can give
+  result (the phase-1 floor and the hard guard still apply); a lagging committed root (other than
+  one committed under the same permission, which the holder records itself) can give
   an extra re-commit (`needsCommit` where `proto_db` would not) or miss a `#stale` supersession,
   whose replicate the acceptors then refuse by the chain rule like any stale one. The suspicion
   held when the query was sent is cleared on both halves: the dispatcher's at once, the
   acceptor's by `PBRecovered`, which keeps a higher one raised meanwhile (`proto_db`'s single
   variable has the same rule: cleared only when at most the one held at the send). *Cost:* the
   lag only; no safety rule reads a value the acceptor has not made durable.
-- **An unreachable base is probed on shared storage (coverage, R133).** In `proto_db`
-  `_BaseUnreachable` arises only on a local-records tier, whose `commit_records` answers that a
-  base's records are not readable; on shared storage it answers "persisted" and the case never
-  arises (`await_records` is likewise only for local tiers, and protoBaseST has none, so it is
-  not ported). protoBaseST's storage is shared, but a base that must be committed first can still
-  name a SpaceRoot the storage cannot read (a holder that crashed before its write reached the
-  storage, or a lost object): the core probes it (`PBProbeRoot`) and an unreadable one is R133's
-  unreachable base: nothing is sent, the commits get a retryable conflict and the permission ends
-  `unknown`, so its owner abandons the term (O6) instead of issuing the same base again. The
-  probe is modelled in the simulator by `PBSimDisk unreadable:`. *Cost:* one storage probe per
-  base that needs a commit first.
+- **An unreachable base is probed on shared storage (client outcome, R133).** In `proto_db`
+  `_BaseUnreachable` (a retryable conflict, the term abandoned) arises only on a local-records
+  tier, whose `commit_records` answers that the base's records are not readable. On shared
+  storage `commit_records` answers "persisted" and `_commit_base` goes on to `_load_space`: an
+  unreadable SpaceRoot raises there, after the permission is marked sent, so the permission ends
+  `unknown` (the owner abandons the term) and the commits fail with the storage's read error.
+  protoBaseST probes the SpaceRoot of a base that must be committed first (`PBProbeRoot`) before
+  sending anything, and an unreadable one is `#unreachable`: the permission ends `unknown` as
+  in `proto_db`, but the commits get a retryable conflict instead of the read error.
+  (`await_records` serves only local tiers, and protoBaseST has none, so it is not ported.)
+  Under the failure model the case does not arise: records are synced to the shared storage
+  before a round replicates (L11), so an accepted root's SpaceRoot is readable; it means a lost
+  or damaged storage object. *Cost:* such storage damage is reported as a retryable conflict,
+  not as the read error, and when live members hold the unreadable root accepted, every new
+  term's floor reports it again, so commits keep getting retryable conflicts where `proto_db`
+  surfaces the storage error each time; one storage probe per base that needs a commit first.
 - **Open item: no back-off after a lost renewal (`proto_db` behaviour, kept).** After a
   renewal lost to a majority that rejects at once (members restarted inside their startup
   grace, or a newer term granted), the owner renews again immediately, one round per RTT,

@@ -7,7 +7,9 @@
  No seed violates the simulator's checks (S1, sibling roots, sync before reply) or the
  convergence checks (no fork, S4, unknown in all or none, H7); the run exercised recovery
  rounds, stale (refound) bases and re-commits. Each seed ends, without faults, with a last commit
- that must be acknowledged, so every member learns the newest commit before the checks."
+ that must be acknowledged, so every member learns the newest commit before the checks; the
+ acknowledged commits some member had not learnt before it, faults ended and the queue drained, are
+ printed (a liveness figure, D54, not asserted)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_base'.
@@ -18,4 +20,5 @@ out := BaseFamilies seeds: (1 to: 100) rules: [BaseRules new].
 c that: 'seeds 1-100 under drops and clock skew ({ violations. recoveries ran. stale bases. re-commits. first violation })'
   is: { out first. (out at: 2) > 0. (out at: 3) > 0. (out at: 4) > 0. out at: 5 }
   equals: { 0. true. true. true. nil }.
+Transcript show: 'acknowledged commits unlearned once the faults ended and the queue drained, before the last commit: ' , (out at: 6) printString; cr.
 c report.

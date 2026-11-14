@@ -56,9 +56,10 @@ no proposal). Nothing here reads a clock: t is the node's clock (CC3).
     later term, or of this term above the base, makes it #stale; a base below the committed root
     this node knows reads the persisted root for the hard guard (PBCorruptionError naming the
     operator's remedy, or a refound from it). A base labelled above the term is #stale. A base
-    that is not the committed root this node knows needs a commit first (R50) and is probed
-    (PBProbeRoot); an unreadable one is #unreachable (R133). An #ok base is bound to its
-    permission.
+    other than the empty space that is not the committed root this node knows needs a commit
+    first (R50) and is probed (PBProbeRoot); an unreadable one is #unreachable (R133). An #ok
+    base is bound to its permission, and so is each root committed under it (proto_db
+    bind_root), so a later round under the permission builds on the last committed root.
   The pred (proto_db replicate: lease.sent, else the lease root, which bind_root sets to the
     base): the holder keeps, per permission held, the base bound and the root last sent
     (PBHolder permits), and dispatchReplicateWanted: refuses a pred other than predFor:in:
@@ -217,7 +218,9 @@ PBCoordinatorCore >> _commitPoint: aReplication majority: aMajority valid: isVal
   ^ aReplication acks size >= aMajority and: [isValid].
 
 "aReplication ends: committed (its root learnt committed by the own acceptor, a suspicion its
- label answers cleared), else unknown (the root left this node: counted, the node suspect for
+ label answers cleared, and the root bound as its permission's base: proto_db _permit_round's
+ bind_root after _commit_base and after each successful replicate, so a later round under the
+ permission builds on it), else unknown (the root left this node: counted, the node suspect for
  its term, its acceptor too)."
 PBCoordinatorCore >> _endReplication: aReplication committed: isCommitted in: s effects: fx
   | state label |
@@ -226,6 +229,7 @@ PBCoordinatorCore >> _endReplication: aReplication committed: isCommitted in: s 
   isCommitted ifTrue: [
     fx add: (PBToAcceptor event: (PBLearnCommitted root: aReplication root accept: true logged: true)).
     state := state with: { #suspectTerm -> (self _learnLabel: label clears: state suspectTerm) }.
+    state := self _bindCommitted: aReplication permission root: aReplication root in: state.
     ^ self _settle: aReplication waiter with: #committed in: state effects: fx].
   fx add: (PBCount stat: 'replication_failures'); add: (PBToAcceptor event: (PBSuspect term: label)).
   state := state with: { #suspectTerm -> (state suspectTerm max: label) }.
@@ -615,35 +619,48 @@ PBProbeRoot >> printOn: aStream
 
 "=== PBCoordinatorCore: what the holder bound and sent under a permission ======"
 
-"The record { { term. seq }. bound. sent } of aPermission in s, nil when none."
+"The record { { term. seq }. bound. sent. committed } of aPermission in s, nil when none: the base
+ bound under it, the root last sent under it and the root last committed under it (each a
+ PBLabeledRoot or nil)."
 PBCoordinatorCore >> _permitRecord: aPermission in: s
   | key |
   key := { aPermission term. aPermission seq }.
   ^ (self _holderIn: s) permits detect: [:e | e first = key] ifNone: [nil].
 
-"s with the record of aPermission replaced by { key. aBound. aSent }; at most permitsSeenLimit
- records are kept (the oldest go first)."
-PBCoordinatorCore >> _permit: aPermission bound: aBound sent: aSent in: s
+"Field n (2 bound, 3 sent, 4 committed) of aPermission's record in s, nil when none."
+PBCoordinatorCore >> _permit: aPermission field: n in: s
+  | e |
+  e := self _permitRecord: aPermission in: s.
+  ^ e isNil ifTrue: [nil] ifFalse: [e at: n].
+
+"s with the record of aPermission replaced by { key. aBound. aSent. aCommitted }; at most
+ permitsSeenLimit records are kept (the oldest go first)."
+PBCoordinatorCore >> _permit: aPermission bound: aBound sent: aSent committed: aCommitted in: s
   | h key list |
   h := self _holderIn: s.
   key := { aPermission term. aPermission seq }.
-  list := (h permits reject: [:e | e first = key]) copyWith: { key. aBound. aSent }.
+  list := (h permits reject: [:e | e first = key]) copyWith: { key. aBound. aSent. aCommitted }.
   list size > PBHolder permitsSeenLimit ifTrue: [list := list copyFrom: list size - PBHolder permitsSeenLimit + 1 to: list size].
   ^ s with: { #holder -> (h with: { #permits -> list }) }.
 
 "s with aRoot bound as the base of aPermission (proto_db _permit_round: permission.bind_root,
- which also makes the base certain for a later round under it); what was sent is kept."
+ which also makes the base certain for a later round under it); the rest is kept."
 PBCoordinatorCore >> _bind: aPermission base: aRoot in: s
-  | e |
-  e := self _permitRecord: aPermission in: s.
-  ^ self _permit: aPermission bound: aRoot sent: (e isNil ifTrue: [nil] ifFalse: [e last]) in: s.
+  ^ self _permit: aPermission bound: aRoot sent: (self _permit: aPermission field: 3 in: s)
+    committed: (self _permit: aPermission field: 4 in: s) in: s.
+
+"s with aRoot, committed under aPermission, bound as its base and recorded as committed under it
+ (proto_db _permit_round: bind_root after _commit_base and after each successful replicate; the
+ commit is this node's committed knowledge, which a later choice under the permission reads
+ before the acceptor reports it)."
+PBCoordinatorCore >> _bindCommitted: aPermission root: aRoot in: s
+  ^ self _permit: aPermission bound: aRoot sent: (self _permit: aPermission field: 3 in: s) committed: aRoot in: s.
 
 "s with aRoot recorded as the root last sent under aPermission (proto_db replicate, lease.sent =
  (label, root) at the send; nothing is recorded when nothing acceptable left the node)."
 PBCoordinatorCore >> _sent: aRoot under: aPermission in: s
-  | e |
-  e := self _permitRecord: aPermission in: s.
-  ^ self _permit: aPermission bound: (e isNil ifTrue: [nil] ifFalse: [e at: 2]) sent: aRoot in: s.
+  ^ self _permit: aPermission bound: (self _permit: aPermission field: 2 in: s) sent: aRoot
+    committed: (self _permit: aPermission field: 4 in: s) in: s.
 
 "s without the record of aPermission (it ended: proto_db finish)."
 PBCoordinatorCore >> _forgetPermit: aPermission in: s
@@ -673,7 +690,7 @@ PBCoordinatorCore >> _isCertain: aPermission in: s
 PBCoordinatorCore >> predFor: aPermission in: s
   | e root |
   e := self _permitRecord: aPermission in: s.
-  (e notNil and: [e last notNil]) ifTrue: [^ e last].
+  (e notNil and: [(e at: 3) notNil]) ifTrue: [^ e at: 3].
   root := self _rootOf: aPermission in: s.
   ^ root isNil ifTrue: [PBLabeledRoot label: 0 record: nil] ifFalse: [root].
 
@@ -750,7 +767,10 @@ PBCoordinatorCore >> phase1Floor: aRoot
  #unreachable (R133). An #ok base is bound to the permission (predFor:in:)."
 PBCoordinatorCore >> leaseBase: aPermission waiter: aWaiter in: s now: t
   ^ self _step: [:fx | | choice |
-    choice := PBBaseChoice waiter: aWaiter permission: aPermission every: false.
+    "A root committed under the permission is committed knowledge already (proto_db's shared
+     _committed), though the acceptor may not have reported it yet."
+    choice := (PBBaseChoice waiter: aWaiter permission: aPermission every: false)
+      with: { #learnt -> (self _permit: aPermission field: 4 in: s) }.
     (self _isCertain: aPermission in: s)
       ifTrue: [self _committedChecks: (choice with: { #current -> (self _rootOf: aPermission in: s) }) in: s now: t effects: fx]
       ifFalse: [self _recover: choice in: s now: t effects: fx]].
@@ -946,16 +966,18 @@ PBCoordinatorCore >> _committedChecks: aChoice in: s now: t effects: fx
   ^ self _finishBase: aChoice in: s now: t effects: fx.
 
 "The last checks (proto_db _lease_base and _base_needs_commit): a base labelled above the term is
- #stale (the acquisition learnt the label; the next term is above it); a base that is not the
- committed root this node knows needs a commit first (R50), and when it is not the empty space
- its SpaceRoot is probed first (R133)."
+ #stale (the acquisition learnt the label; the next term is above it); a base other than the
+ empty space that is not the committed root this node knows needs a commit first (R50), and its
+ SpaceRoot is probed first (R133)."
 PBCoordinatorCore >> _finishBase: aChoice in: s now: t effects: fx
   | base committed needs |
   base := aChoice current.
   base label > aChoice permission term ifTrue: [^ self _stale: aChoice in: s effects: fx].
   committed := self _committedFor: aChoice in: s.
-  needs := self _needsCommit: base committed: committed.
-  (needs and: [base record notNil]) ifTrue: [^ self _probe: aChoice in: s effects: fx].
+  "proto_db _permit_round: 'if current is not None and _base_needs_commit(...)': the empty space
+   is never re-committed."
+  needs := base record notNil and: [self _needsCommit: base committed: committed].
+  needs ifTrue: [^ self _probe: aChoice in: s effects: fx].
   ^ self _decide: (PBBaseDecision base: base needsCommit: needs outcome: #ok) for: aChoice in: s effects: fx.
 
 "proto_db _base_needs_commit at DEPTH 0: aBase is not the committed root this node knows

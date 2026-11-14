@@ -1,4 +1,4 @@
-"EXPECT: ok 27"
+"EXPECT: ok 31"
 "The base choice (cluster/holder.st, CP 1.6) called directly, one guard per check (proto_db
  transactions.py _lease_base, _phase_1_floor, _base_needs_commit, _commit_base, refound,
  _guard_error; coordinator.py recover_root, _on_answer, replicate's pred). drive runs one
@@ -25,10 +25,14 @@
  reads the persisted root; none, one below or a failed read: PBCorruptionError naming
  forceRejoin; one at or above: refound from it. (23) A base labelled above the term is #stale.
  (24) needsCommit (R50): not for the committed root, yes otherwise; the empty space is never
- probed. (25) An unreadable base is #unreachable and is not bound. (26) The pred obligation: a
+ re-committed (proto_db: 'current is not None') nor probed. (25) An unreadable base is #unreachable and is not bound. (26) The pred obligation: a
  PBReplicateWanted not built on the base, else on the root last sent, is refused
  (PBValidationError); the record is forgotten when the permission ends. (27) PBRecoverWanted
- settles { known. root }."
+ settles { known. root }. (28) A root committed under a permission is bound (proto_db bind_root):
+ a second round under it builds on that root, no commit needed, not #stale, whether or not the
+ acceptor reported the commit, and the pred is that root. (29) A round that sent nothing
+ (#none, under sendReserve) does not move the pred. (30) This node's own accepted root is in the
+ recovery result. (31) An answer to another recovery round (its rid) is ignored."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_base'.
@@ -257,12 +261,12 @@ c that: 'a base labelled above the term is #stale'
   equals: #stale.
 
 "(24)"
-c that: 'needsCommit: not for the committed root; a base only accepted is probed and committed first; the empty space never probed'
+c that: 'needsCommit: not for the committed root; a base only accepted is probed and committed first; the empty space never re-committed nor probed'
   is: { out value: (decision value: core value: (stateOf value: k) value: (perm value: r1 value: true) value: #() value: nil value: false).
     out value: (decision value: core value: (stateOf value: { marker. acc value: r1 }) value: (perm value: r1 value: true) value: #() value: nil value: true).
     [out value: (decision value: core value: (stateOf value: { marker }) value: (perm value: empty value: true) value: #() value: nil value: false)]
       on: Error do: [:e | e class name] }
-  equals: { #(#ok false 4096 1). #(#ok true 4096 1). #(#ok true 0 0) }.
+  equals: { #(#ok false 4096 1). #(#ok true 4096 1). #(#ok false 0 0) }.
 
 "(25)"
 p := perm value: r1 value: true.
@@ -289,5 +293,43 @@ c that: 'the pred obligation: built on the base, then on the root last sent; for
 s := drive value: core value: (stateOf value: k) value: (PBRecoverWanted every: false waiter: #r)
   value: { { 'n1'. { rp. r1. 'ok' } } } value: nil value: true.
 c that: 'PBRecoverWanted settles { known. root }' is: { s first first. s first last key = rp key } equals: #(true true).
+
+"(28)"
+p := perm value: r1 value: true.
+s := (decision value: core value: (stateOf value: k) value: p value: #() value: nil value: true) at: 3.
+st := core dispatch: (PBReplicateWanted permission: p root: rT pred: r1 waiter: #x) in: s now: 1000.
+st := core _step: [:fx | core _endReplication: (core _replicationsIn: st state) first committed: true in: st state effects: fx].
+c that: 'a root committed under a permission is the next round''s base ({ acceptor lagging }, { acceptor reports it }, pred)'
+  is: { out value: (decision value: core value: st state value: p value: #() value: nil value: true).
+    out value: (decision value: core value: (st state with: { #acceptorView -> (viewOf value: { marker. acc value: r1. count value: r1. acc value: rT. count value: rT }) })
+      value: p value: #() value: nil value: true).
+    (core predFor: p in: ((decision value: core value: st state value: p value: #() value: nil value: true) at: 3)) key = rT key }
+  equals: { #(#ok false 12288 5). #(#ok false 12288 5). true }.
+
+"(29)"
+p := perm value: r1 value: true.
+s := (decision value: core value: (stateOf value: k) value: p value: #() value: nil value: true) at: 3.
+st := core dispatch: (PBReplicateWanted permission: p root: rT pred: r1 waiter: #x) in: s now: p validUntil - 1.
+c that: 'a round that sent nothing (#none) does not move the pred ({ outcome }, { the refused root as pred }, { the base as pred })'
+  is: { ((st effects select: [:e | e isKindOf: PBSettle]) collect: [:e | e outcome]) asArray.
+    [core dispatch: (PBReplicateWanted permission: p root: (rec value: T value: 6) pred: rT waiter: #y) in: st state now: 1000. #sent]
+      on: PBValidationError do: [:e | #refused].
+    [((core dispatch: (PBReplicateWanted permission: p root: (rec value: T value: 6) pred: r1 waiter: #y) in: st state now: 1000) effects
+      select: [:e | (e isKindOf: PBSend) and: [e message type = 'replicate']]) size]
+      on: PBValidationError do: [:e | #refused] }
+  equals: { #(#none). #refused. 2 }.
+
+"(30)"
+s := decision value: core value: (stateOf value: { marker. acc value: r1. count value: r1. acc value: rp }) value: (perm value: nil value: false)
+  value: { { 'n1'. { r1. r1. 'ok' } } } value: nil value: true.
+c that: 'this node''s own accepted root is in the recovery result' is: (out value: s) equals: #(#ok true 8192 2).
+
+"(31)"
+st := core dispatch: (PBBaseWanted permission: (perm value: r1 value: false) waiter: #w) in: (stateOf value: k) now: 1000.
+tr := (st effects detect: [:e | (e isKindOf: PBSend) and: [e message type = 'query']]) message at: 'rid'.
+s := core dispatch: (answer value: 'n1' value: tr + 100 value: { r1. r1. 'ok' }) in: st state now: 1000.
+c that: 'an answer to another recovery round is ignored ({ settled }, answers recorded)'
+  is: { (s effects select: [:e | e isKindOf: PBSettle]) size. ((core _choicesIn: s state) collect: [:x | x answers size]) asArray }
+  equals: { 0. #(0) }.
 
 c report.

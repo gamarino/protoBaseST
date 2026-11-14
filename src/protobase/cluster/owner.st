@@ -185,9 +185,9 @@ PBPermitAsk >> printOn: aStream
  every local waiter not yet settled ({ waiter. deadline }), the last permits seen ({ term.
  seq }, at most permitsSeenLimit: proto_db _permits_seen), the replications not decided yet
  (holder.st PBReplication), the base choices and recovery rounds in progress (holder.st
- PBBaseChoice) and what the holder bound and sent under each permission it holds ({ { term.
- seq }. base bound or nil. root last sent or nil }, at most permitsSeenLimit: proto_db
- lease.bind_root and lease.sent)."
+ PBBaseChoice) and what the holder bound, sent and committed under each permission it holds
+ ({ { term. seq }. base bound or nil. root last sent or nil. root last committed or nil }, at
+ most permitsSeenLimit: proto_db lease.bind_root and lease.sent)."
 PBProposerValue subclass: #PBHolder.
 
 PBHolder class >> fieldNames
@@ -226,7 +226,7 @@ PBHolder >> replications
 PBHolder >> choices
   ^ (self _at: #choices) copy.
 
-"{ { term. seq }. bound. sent } of the permissions held (holder.st), a fresh Array."
+"{ { term. seq }. bound. sent. committed } of the permissions held (holder.st), a fresh Array."
 PBHolder >> permits
   ^ (self _at: #permits) collect: [:e | e copy].
 

@@ -12,12 +12,12 @@
   (terms raised by `refoundStep`); a base superseded by a committed root is `#stale`; a base
   below the committed root this node knows is a `PBCorruptionError` naming the operator's
   remedy, unless the persisted root lets it refound; a base that is not the committed root must
-  be committed first (R50), and one whose SpaceRoot the shared storage cannot read is
-  `#unreachable` (R133: a retryable conflict, the term abandoned). The decision is a
+  be committed first (R50; never the empty space), and one whose SpaceRoot the shared storage
+  cannot read is `#unreachable` (R133: a retryable conflict, the term abandoned). The decision is a
   `PBBaseDecision`; new events `PBRecoverWanted`, `PBStorageRead`, `PBRootProbed`, the acceptor
   event `PBRecovered`, the effects `PBReadPersisted` and `PBProbeRoot`, and `PBHolder` gains
-  `choices` and `permits`. The holder now keeps the base bound and the root last sent under each
-  permission and refuses a `PBReplicateWanted` whose pred is not `proto_db`'s `lease.sent` rule
+  `choices` and `permits`. The holder now keeps the base bound (re-bound to each root committed
+  under the permission, as `bind_root`) and the root last sent under each permission and refuses a `PBReplicateWanted` whose pred is not `proto_db`'s `lease.sent` rule
   (`predFor:in:`). The simulator gains the persisted root, an unreadable-root disk fault, an
   epoch step per node and the commit path's base, re-commit and replicate stages. Tested by
   `tests/unit/sim_base_choice.st` (the C1, I1, M6 and refound schedules, the strict R79/L28 form

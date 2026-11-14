@@ -599,10 +599,12 @@ For tests, tools and readers of the format. An application does not need them.
   a base below the committed root this node knows reads the persisted root: none, one below it
   or a failed read settles the `PBCorruptionError` that names the operator's remedy (D46), one at
   or above it refounds from it. A base labelled above the term is `#stale`. `needsCommit` is true
-  when the base is not the committed root this node knows (R50); such a base other than the empty
-  space is probed (`PBProbeRoot root:token:`, answered by `PBRootProbed token:readable:`,
+  when the base is neither the empty space nor the committed root this node knows (R50); such a
+  base is probed (`PBProbeRoot root:token:`, answered by `PBRootProbed token:readable:`,
   `isReadable`) and an unreadable one is `#unreachable` (R133). An `#ok` base is bound to the
-  permission (the next choice under it is certain; `predFor:in:`). `PBRecoverWanted every:waiter:`
+  permission (the next choice under it is certain; `predFor:in:`), and so is each root committed
+  under it (`proto_db`'s `bind_root`): a later round under the permission builds on the last
+  committed root, which counts as committed knowledge. `PBRecoverWanted every:waiter:`
   (`dispatchRecoverWanted:in:now:`) runs a round alone and settles `{ known. root }` or its
   `PBConflictError`. See [deviations.md](deviations.md#cluster-mode).
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for

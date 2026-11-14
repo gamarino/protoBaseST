@@ -337,17 +337,18 @@ BaseFamilies class >> baseTwice: aRules seed: n
 "--- 6. seeds under drops and clock skew ---"
 
 "{ seeds with a violation. recoveries. stale decisions. re-commits. the first violation's text or
- nil } over someSeeds: three
+ nil. acknowledged commits unlearned before z } over someSeeds: three
  members formed with empty logs (the first commit refounds), drops 1/10, duplicates 1/20, delays
  up to 2 ms, reordering, n1's clock 10 % fast and n2's 10 % slow; four commits at members drawn
  by the seed, one member crashing (#any) and restarting between them; then, without faults, a
  last commit z that must be acknowledged (a commit every member learns: with acks and done
- reports dropped, a quiet cluster may otherwise never learn a commit made); then convergence: no fork,
+ reports dropped, a quiet cluster may otherwise never learn a commit made; how many acknowledged
+ commits were still unlearned, faults ended and the queue drained, before z is counted); then convergence: no fork,
  every acknowledged commit in every chain (S4), every unknown one in all or none, none in none
  (H7)."
 BaseFamilies class >> seeds: someSeeds rules: aRulesBlock
-  | failed recoveries stale recommits first |
-  failed := 0. recoveries := 0. stale := 0. recommits := 0. first := nil.
+  | failed recoveries stale recommits first unlearned |
+  failed := 0. recoveries := 0. stale := 0. recommits := 0. first := nil. unlearned := 0.
   someSeeds do: [:n | | sim text pick |
     sim := self sim: aRulesBlock value seed: n ids: self three knowing: #() options: Dictionary new.
     sim faults: (PBSimFaults drop: 1/10 duplicate: 1/20 delay: 2000 reorder: true).
@@ -368,6 +369,9 @@ BaseFamilies class >> seeds: someSeeds rules: aRulesBlock
       sim heal.
       sim faults: PBSimFaults none.
       self three do: [:id | (sim nodeAt: id) isUp ifFalse: [sim restart: id]].
+      "Drained without faults, the commits still unlearned are the liveness gap."
+      sim runUntil: [false] steps: 2000000.
+      unlearned := unlearned + (self unlearnedIn: sim).
       (self commit: 'z' at: (self three at: (pick nextInt: 3)) in: sim) = #acknowledged ifFalse: [
         sim fail: 'the last commit z is ' , (sim outcomeOf: 'z')].
       sim converge: 2000000].
@@ -375,4 +379,17 @@ BaseFamilies class >> seeds: someSeeds rules: aRulesBlock
     self three do: [:id | recoveries := recoveries + (sim countOf: 'recoveries' at: id)].
     stale := stale + (sim decisions select: [:d | ((d at: 3) isKindOf: PBBaseDecision) and: [(d at: 3) outcome = #stale]]) size.
     recommits := recommits + (sim trace select: [:l | l includesSubstring: ' re-commits ']) size].
-  ^ { failed. recoveries. stale. recommits. first }.
+  ^ { failed. recoveries. stale. recommits. first. unlearned }.
+
+"The acknowledged commits of aSim that some live member's committed chain does not hold, asked
+ once the faults ended and the queue drained (the liveness gap D54 leaves under faults: no
+ re-replication, committed knowledge lost with a crash; a later commit learns them). Reported,
+ not asserted: it depends on the schedule."
+BaseFamilies class >> unlearnedIn: aSim
+  | live chains |
+  live := aSim ids select: [:id | (aSim nodeAt: id) isUp].
+  chains := live collect: [:id | aSim committedChainOf: id].
+  ^ (aSim commitOrder select: [:token | | root |
+    root := aSim rootOf: token.
+    (aSim outcomeOf: token) = #acknowledged and: [root notNil
+      and: [chains anySatisfy: [:ch | (ch includes: (aSim keyText: root)) not]]]]) size.
