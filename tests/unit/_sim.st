@@ -50,7 +50,15 @@ applyTo:).
                  (#committed: #acknowledged, #unknown, #none; anything else: #failed) and the
                  node gets it as a PBDoneReport.
   PBPublishCommitted sets the root the node's readers see; PBPublishAcceptor and PBFence are
-                 recorded by their trace lines.
+                 recorded by their trace lines; PBCount adds one to the node's counter
+                 (countOf:at:).
+
+Script. inject: aMessage to: anId at: aTime delivers a message as if its sender had sent it
+(framed with the sender's key; the faults apply), to drive the acceptors without a proposer.
+seed:ids:rules:options:logs: starts each node over a synced log (id -> an Array of
+PBLogAppend), as a member of a cluster formed before. failAppends: anId makes every later
+append of that node's acceptor fail: the step is not written, never synced nor replied, and its
+node's acceptor takes PBAppendFailed before the next event of its lane.
 
 Crashes. crash: id unsynced: aMode stops a node at once: its pending events and its acceptor
 lane are dropped (messages already sent stay in flight). The synced entries of its disk
@@ -378,14 +386,19 @@ PBSimChecker >> checkConverged
 
 "=== PBSim ==================================================================="
 
-Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current'.
+Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current counts failing'.
 
 "N nodes (anArray of ids) running aRules, each configured with aDictionary (PBClusterConfig
  options), all started at virtual time 0, every choice drawn from Random seed: n."
 PBSim class >> seed: n ids: anArray rules: aRules options: aDictionary
-  ^ self basicNew setSeed: n ids: anArray rules: aRules options: aDictionary.
+  ^ self seed: n ids: anArray rules: aRules options: aDictionary logs: Dictionary new.
 
-PBSim >> setSeed: n ids: anArray rules: aRules options: aDictionary
+"As seed:ids:rules:options:, each node id of aLogs starting over a synced log holding its
+ Array of PBLogAppend."
+PBSim class >> seed: n ids: anArray rules: aRules options: aDictionary logs: aLogs
+  ^ self basicNew setSeed: n ids: anArray rules: aRules options: aDictionary logs: aLogs.
+
+PBSim >> setSeed: n ids: anArray rules: aRules options: aDictionary logs: aLogs
   | peers |
   seed := n.
   "Park-Miller's first draws of nearby small seeds are small and alike: the seed is spread
@@ -408,6 +421,13 @@ PBSim >> setSeed: n ids: anArray rules: aRules options: aDictionary
   commitRoots := Dictionary new.
   preds := Dictionary new.
   offsets := 0.
+  counts := Dictionary new.
+  failing := Set new.
+  aLogs keysAndValuesDo: [:id :appends |
+    | disk |
+    disk := (self nodeAt: id) disk.
+    appends do: [:a | disk append: a payload].
+    disk syncThrough: disk size].
   ids do: [:id | self _start: (nodes at: id)].
 
 "--- accessors ---"
@@ -438,6 +458,10 @@ PBSim >> rootOf: aToken
 
 PBSim >> commitOrder
   ^ commitOrder asArray.
+
+"How many PBCount stat: aName anId performed."
+PBSim >> countOf: aName at: anId
+  ^ counts at: anId , ' ' , aName ifAbsent: [0].
 
 "The text of the ordering key of aRoot (PBLabeledRoot key)."
 PBSim >> keyText: aRoot
@@ -525,6 +549,20 @@ PBSim >> restart: anId
   node := self nodeAt: anId.
   node isUp ifTrue: [^ Error signal: 'PBSim: ' , anId , ' is running'].
   self _start: node.
+
+PBSim >> failAppends: anId
+  failing add: anId.
+  self _trace: anId , ' appends fail'.
+
+"Delivers aMessage (a PBClusterMessage from a member) to anId at aTime (not before now), as if
+ its sender had sent it then."
+PBSim >> inject: aMessage to: anId at: aTime
+  | from |
+  aTime < now ifTrue: [^ Error signal: 'PBSim inject: a time not before now'].
+  from := self nodeAt: aMessage from.
+  current := from.
+  self _trace: 'inject ' , aMessage type , ' from ' , from id , ' to ' , anId , ' at ' , aTime printString.
+  self _send: (PBSend to: anId message: aMessage) at: aTime.
 
 PBSim >> tearLog: anId
   | node |
@@ -631,6 +669,11 @@ PBSim >> _accept: anEvent at: aNode
   self _trace: aNode id , ' accept ' , anEvent printString.
   step := rules accept: anEvent in: aNode acceptor now: (aNode clock localAt: now).
   aNode acceptor: step state.
+  ((failing includes: aNode id) and: [step appends notEmpty]) ifTrue: [
+    self _trace: aNode id , '   append failed, the step is not replied'.
+    aNode lane addFirst: (PBAppendFailed reason: 'simulated append failure').
+    aNode laneBusy: false.
+    ^ self _runLane: aNode].
   last := 0.
   step appends do: [:append |
     | index |
@@ -677,6 +720,9 @@ PBSim >> _deliver: aPayload to: aNode
 "--- the shell: one apply message per effect kind ---"
 
 PBSim >> applySend: aSend
+  ^ self _send: aSend at: now.
+
+PBSim >> _send: aSend at: aTime
   | to bytes link copies |
   to := self nodeAt: aSend to.
   to == current ifTrue: [^ Error signal: 'PBSim: ' , current id , ' sends to itself (CC1: its own acceptor takes a PBToAcceptor)'].
@@ -688,7 +734,7 @@ PBSim >> applySend: aSend
   copies := (faults duplicate > 0 and: [random next < faults duplicate]) ifTrue: [2] ifFalse: [1].
   copies timesRepeat: [
     | at |
-    at := now + (faults delay > 0 ifTrue: [random between: 0 and: faults delay] ifFalse: [0]).
+    at := aTime + (faults delay > 0 ifTrue: [random between: 0 and: faults delay] ifFalse: [0]).
     faults reorder ifFalse: [
       at := at max: (links at: link ifAbsent: [-1]) + 1.
       links at: link put: at].
@@ -718,6 +764,11 @@ PBSim >> applyPublishAcceptor: aPublish
 
 PBSim >> applyFence: aFence
   ^ self.
+
+PBSim >> applyCount: aCount
+  | key |
+  key := current id , ' ' , aCount stat.
+  counts at: key put: (counts at: key ifAbsent: [0]) + 1.
 
 "--- the synthetic transactions ---"
 

@@ -2,6 +2,20 @@
 
 ## 0.2.0 (unreleased)
 
+- The acceptor's phase-1 rules (`src/protobase/cluster/acceptor.st`), `proto_db`'s `_route`,
+  `_on_request`, `_decide`, `_refusal`, `_on_release` and plain query as rule methods of
+  `PBCoordinatorCore`: the dispatcher drops messages of non-members and counts voter-set
+  mismatches (`config_mismatches`); `acceptRequest:in:now:` and `acceptRenew:in:now:` refuse
+  (`fenced`, `learner`, `tier_failed`, `rejoining`, then the grant rules' reasons) or grant,
+  appending a synced promise only above the one already logged, so a renewal writes nothing;
+  `acceptRelease:in:now:`, `acceptQuery:in:now:` (promised = max(terms seen, accepted label)),
+  `acceptStart:in:now:` (the rejoined marker of a learner or a lone voter),
+  `acceptSuspect:in:now:` (`PBSuspect`) and `acceptAppendFailed:in:now:` (`PBAppendFailed`: the
+  tier fails, the unsynced grant is never replied). A reject's `remaining` is wire seconds
+  (`wireSeconds:`). `core.st` gains the `PBCount` effect and `PBAcceptorState loggedPromise`;
+  the simulator gains injected messages, pre-formed logs, append failures and counters.
+  Tested by `tests/unit/sim_grants.st` (seeds 1-40, plant `PlantRenewStale`) and
+  `tests/unit/cluster_acceptor_rules.st`.
 - The coordinator core's vocabulary (`src/protobase/cluster/core.st`): `PBCoordinatorCore`
   (`dispatch:in:now:` answering a `PBStep`, `accept:in:now:` answering a `PBAcceptorStep`, one
   rule method per event chosen by double dispatch), the events (`PBReceived`, `PBTimerFired`,

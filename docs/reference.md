@@ -435,6 +435,24 @@ For tests, tools and readers of the format. An application does not need them.
   `tierFailed` and `fenced`. Nothing in the core reads a clock; constructors refuse ill-typed
   arguments (`PBValidationError`). The deterministic simulator that drives it in the tests is
   test support (`tests/unit/_sim.st`), not part of the module.
+- **Acceptor rules** (`cluster/acceptor.st`): the acceptor side of `proto_db`'s coordinator as
+  rule methods of `PBCoordinatorCore`. `dispatchReceived:in:now:` drops a message whose sender is
+  not another member, drops a type of `fingerprintedTypes` whose vs is not this voter set's
+  fingerprint with `PBCount stat: 'config_mismatches'`, and hands the `acceptorLaneTypes`
+  (request, renew, release, query) to the acceptor (`PBToAcceptor`). `acceptReceived:in:now:`
+  routes them to `acceptRequest:in:now:` and `acceptRenew:in:now:` (a refusal of the state,
+  'fenced', 'learner', 'tier_failed', 'rejoining', else `PBGrantState`'s decision; a grant
+  of a term above `loggedPromise` appends one synced promise, and its grant carries the
+  accepted and committed roots and certain), `acceptRelease:in:now:` (frees the grant, closes
+  the term, suspect for an uncertain held release), `acceptQuery:in:now:` (a plain query's
+  answer: the state `'ok'`, `'empty'`, `'learner'` or `'unknown'`, promised max(`termsSeen`,
+  accepted label), 0 when unknown). `acceptStart:in:now:` appends the rejoined marker for a
+  learner or a lone voter whose log lacks it and rebuilds neither the grace nor the restore.
+  The acceptor events `PBSuspect term:` (`acceptSuspect:in:now:`: raises `suspectTerm`) and
+  `PBAppendFailed reason:` (`acceptAppendFailed:in:now:`: the tier fails, the first reason
+  kept). `wireSeconds:` converts microseconds to the wire's seconds (a reject's `remaining`).
+  `PBCount stat:` (`stat`; the shell implements applyCount:) and `PBAcceptorState >> loggedPromise`,
+  `withGrants:suspectTerm:rejoined:tierFailed:loggedPromise:` are in `core.st`.
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
   `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered
@@ -514,6 +532,6 @@ For tests, tools and readers of the format. An application does not need them.
 ## The module and its files
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
-`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/lease`, `cluster/core`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
+`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
 `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar` and `uuid`.

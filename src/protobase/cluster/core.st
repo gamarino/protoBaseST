@@ -21,12 +21,13 @@ clock, a socket or a file, sends, logs or waits.
     (a PBTimerFired token: event: after that many microseconds of the node's clock; the token
     names one timer and the rules ignore a fired timer whose token is no longer the current
     one, so a shell never cancels), PBSettle waiter: outcome:, PBPublishCommitted root: (the
-    committed root readers see), PBPublishAcceptor state: (the acceptor's snapshot, CC2) and
-    PBFence reason: (the node is fenced for the life of the process). An effect answers
-    applyTo: aShell, which sends aShell the one message of its kind (applySend:,
+    committed root readers see), PBPublishAcceptor state: (the acceptor's snapshot, CC2),
+    PBFence reason: (the node is fenced for the life of the process) and PBCount stat: (add one
+    to the named counter of the node's stats, proto_db's snake_case name, CC24). An effect
+    answers applyTo: aShell, which sends aShell the one message of its kind (applySend:,
     applyToAcceptor:, applyTimer:, applySettle:, applyPublishCommitted:,
-    applyPublishAcceptor:, applyFence:); a PBLogAppend is written by the acceptor shell from
-    its step, never applied.
+    applyPublishAcceptor:, applyFence:, applyCount:); a PBLogAppend is written by the acceptor
+    shell from its step, never applied.
   PBStep           state: effects: (the answer of dispatch:in:now:). A PBLogAppend among its
                    effects is PBValidationError: only the acceptor writes its log.
   PBAcceptorStep   state: appends: reply: (the answer of accept:in:now:): the shell writes the
@@ -41,7 +42,8 @@ clock, a socket or a file, sends, logs or waits.
                    promises are durable acceptor state, CC2), accepted and committed (a
                    PBLabeledRoot or nil), seqSeen ({ term. seq } of the highest permission
                    accepted), suspectTerm, rejoined (the log holds the rejoined marker),
-                   rejoinBallot, tierFailed and fenced.
+                   rejoinBallot, tierFailed, fenced and loggedPromise (the highest promise
+                   the log holds, proto_db _logged_promise).
   PBCoordinatorCore  dispatch: anEvent in: aNodeState now: t and accept: anEvent in:
                    anAcceptorState now: t. The event picks its rule method by double dispatch
                    (dispatchWith:in:now:, acceptWith:in:now:), one per event class, never by
@@ -594,6 +596,31 @@ PBFence >> applyTo: aShell
 PBFence >> printOn: aStream
   aStream nextPutAll: 'PBFence('; nextPutAll: reason; nextPut: $).
 
+"--- PBCount ---"
+
+PBEffect subclass: #PBCount instanceVariableNames: 'stat'.
+
+"Add one to the node's counter aName (proto_db's stats name, a snake_case String, CC24)."
+PBCount class >> stat: aName
+  (aName isString and: [aName notEmpty]) ifFalse: [
+    ^ PBValidationError signal: 'PBCount: a stat is a non-empty String, not ' , aName printString].
+  ^ self basicNew _setStat: aName asString.
+
+PBCount >> _setStat: aName
+  "Runs once, on a fresh instance."
+  stat isNil ifFalse: [^ PBUserError signal: 'PBCount is immutable'].
+  stat := aName.
+  ^ self.
+
+PBCount >> stat
+  ^ stat.
+
+PBCount >> applyTo: aShell
+  ^ aShell applyCount: self.
+
+PBCount >> printOn: aStream
+  aStream nextPutAll: 'PBCount('; nextPutAll: stat; nextPut: $).
+
 "=== Steps ===================================================================="
 
 Object subclass: #PBStep instanceVariableNames: 'state effects'.
@@ -737,12 +764,13 @@ PBNodeState >> printOn: aStream
 
 "=== PBAcceptorState ========================================================="
 
-Object subclass: #PBAcceptorState instanceVariableNames: 'config grants accepted committed seqSeen suspectTerm rejoined rejoinBallot tierFailed fenced'.
+Object subclass: #PBAcceptorState instanceVariableNames: 'config grants accepted committed seqSeen suspectTerm rejoined rejoinBallot tierFailed fenced loggedPromise'.
 
 "The acceptor of the node of aConfig started at t over aLoggedRoots (what its acceptor log holds,
  PBAcceptorLog load): the grant state refuses every request until t + startupGrace and honours
  the logged promise and the accepted root's label (PBGrantState initial:now:, restore:,
- coordinator.py _attach_locked); accepted, committed and rejoined are the log's."
+ coordinator.py _attach_locked); accepted, committed, rejoined and the logged promise are the
+ log's (proto_db _logged_promise = (tier, promised))."
 PBAcceptorState class >> config: aConfig logged: aLoggedRoots now: t
   (aConfig isKindOf: PBClusterConfig) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorState: a config is a PBClusterConfig, not ' , aConfig printString].
@@ -750,9 +778,9 @@ PBAcceptorState class >> config: aConfig logged: aLoggedRoots now: t
     ^ PBValidationError signal: 'PBAcceptorState: the logged roots are a PBLoggedRoots, not ' , aLoggedRoots printString].
   ^ self basicNew _setConfig: aConfig grants: ((PBGrantState initial: aConfig now: t) restore: aLoggedRoots)
     accepted: aLoggedRoots accepted committed: aLoggedRoots committed seqSeen: #(0 0) suspectTerm: 0
-    rejoined: aLoggedRoots isRejoined rejoinBallot: 0 tierFailed: nil fenced: nil.
+    rejoined: aLoggedRoots isRejoined rejoinBallot: 0 tierFailed: nil fenced: nil loggedPromise: aLoggedRoots promise.
 
-PBAcceptorState >> _setConfig: aConfig grants: aGrantState accepted: anAccepted committed: aCommitted seqSeen: aPair suspectTerm: aTerm rejoined: aBoolean rejoinBallot: aBallot tierFailed: aFailure fenced: aReason
+PBAcceptorState >> _setConfig: aConfig grants: aGrantState accepted: anAccepted committed: aCommitted seqSeen: aPair suspectTerm: aTerm rejoined: aBoolean rejoinBallot: aBallot tierFailed: aFailure fenced: aReason loggedPromise: aPromise
   "Runs once, on a fresh instance."
   config isNil ifFalse: [^ PBUserError signal: 'PBAcceptorState is immutable'].
   config := aConfig.
@@ -765,6 +793,7 @@ PBAcceptorState >> _setConfig: aConfig grants: aGrantState accepted: anAccepted 
   rejoinBallot := aBallot.
   tierFailed := aFailure.
   fenced := aReason.
+  loggedPromise := aPromise.
   ^ self.
 
 PBAcceptorState >> config
@@ -804,6 +833,17 @@ PBAcceptorState >> tierFailed
 "The reason the node is fenced, or nil."
 PBAcceptorState >> fenced
   ^ fenced.
+
+"The highest promise the acceptor log holds (written by this acceptor's steps or loaded), 0
+ when none: a grant of a term at or below it appends no promise (proto_db _on_request, D50)."
+PBAcceptorState >> loggedPromise
+  ^ loggedPromise.
+
+"This state with aGrantState, aTerm as suspectTerm, aBoolean as rejoined, aFailure as
+ tierFailed (nil: none) and aPromise as loggedPromise; the rest unchanged."
+PBAcceptorState >> withGrants: aGrantState suspectTerm: aTerm rejoined: aBoolean tierFailed: aFailure loggedPromise: aPromise
+  ^ self class basicNew _setConfig: config grants: aGrantState accepted: accepted committed: committed seqSeen: seqSeen
+    suspectTerm: aTerm rejoined: aBoolean rejoinBallot: rejoinBallot tierFailed: aFailure fenced: fenced loggedPromise: aPromise.
 
 PBAcceptorState >> printOn: aStream
   aStream nextPutAll: 'PBAcceptorState('; nextPutAll: config nodeId; nextPutAll: ', '; print: grants; nextPut: $).
