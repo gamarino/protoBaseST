@@ -519,22 +519,29 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:signals:
 - Consumes: Tasks 3 and 7.
 - Produces (immutable values; every "with" answers a new value):
   - `PBGrantState class >> initial: aConfig now: t` (grace end = t + startupGrace);
-    `restore: aLoggedRoots now: t`; `decideRequest: aHolder inc: anInc term: aTerm now: t config: c`
+    `restore: aLoggedRoots` (max of the logged promise and the accepted label; reads no clock);
+    `decideRequest: aHolder inc: anInc term: aTerm now: t config: c`
     → `PBGrantDecision` (`verdict` `#grant | #reject`, `reason` (the wire strings of
-    `lease.py`/`coordinator.py`, verbatim: `busy starting stale_term term_taken bad_ballot ...`),
-    `remaining` µs, `promiseToLog` (term or nil), `newState`); `renew:inc:term:now:config:`
-    (no log write); `release:inc:term:` (closes the term at this receiver);
-    `highestSeen`, `highestGranted`, `grantedTop`, `activeGrant` (`holder inc term expiry`),
-    `isStarting: t`.
-  - `PBAttempt class >> term: t rid: r sentAt: s needed: n`; `withGrant: peer root: aRoot
-    committed: aRoot certain: aBoolean`, `withReject: peer reason: r highest: h remaining: m`;
-    `state` (`#pending #won #lost`), `bestRoot` → `{PBLabeledRoot-or-nil. certain}` (CP 1.5
-    step 5: highest in root order; certain when every granter knows a root, none is suspect
-    and the requester is not), `busyRemaining`.
+    `lease.py`/`coordinator.py`, verbatim: `granted bad_ballot starting stale_term busy term_taken`),
+    `highest`, `remaining` µs, `promiseToLog` (the term on every grant, renewals included; nil on a
+    refusal; the acceptor log writes nothing at or below its durable promise), `endedTerm` (a grant
+    ended without its holder's release, 0 when none: the node is suspect for it), `newState`);
+    `renew:inc:term:now:config:`; `release:inc:term:now:` → `{ newState. endedTerm }` (settles
+    an expired grant first, closes the term at this receiver);
+    `highestSeen`, `highestGranted`, `grantedTop`, `activeGrant` (a `PBActiveGrant`: `holder inc
+    term expiry`, or nil), `isStarting: t`.
+  - `PBAttempt class >> term: t rid: r sentAt: s voters: v` (`needed` = v // 2 + 1); `withGrant: peer
+    root: aRoot committed: aRoot certain: aBoolean`, `withReject: peer reason: r highest: h
+    remaining: m` (a peer counts once; a refusal's highest always counts);
+    `state` (`#pending #won #lost`), `bestRoot: ownRootOrNil suspect: aBoolean` →
+    `{PBLabeledRoot-or-nil. certain}` (CP 1.5 step 5: highest in root order of the granters' roots
+    and the requester's own; certain when every granter knows a root, none is suspect and the
+    requester is not), `busyRemaining`, `highestSeen`, `needed`, `committedRoots`.
   - `PBLease class >> term: t validUntil: v root: r certain: c` with `validUntil = sentAt +
     belief` **from the send** (L5); `remainingAt: now`, `isValidAt: now`.
-  - `PBPermission class >> lease: aLease rid: r seq: s owner: anId sentAt: t` (`after` always
-    nil at DEPTH 0); `validUntil` = request send + `valid`.
+  - `PBPermission class >> term: t seq: s rid: r owner: anId root: aRoot certain: c sentAt: aSent
+    valid: v` (a `PBLease`; `validUntil` = request send + `valid`; certain only when the root is
+    known; `after` always nil at DEPTH 0).
 
 - [ ] **Step 1: write the failing test.** `cluster_lease_values.st` (`"EXPECT: ok 13"`): one row
   per rule of `lease.py` `PeerGrants.on_request` (refusals `starting` during grace, `stale_term`,
@@ -627,7 +634,9 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   `PBLogAppend kind: #promise sync: true` and its `grant` reply carries the accepted and
   committed roots and `certain`. Refusals: `fenced`, learner, no log, tier failed, rejoining
   (log without kind 4), `bad_ballot`, `starting`, `stale_term`, `busy` (with remaining),
-  `term_taken`, `promise_failed` (an append failure withdraws the grant). `vs` mismatch drops
+  `term_taken`, `promise_failed` (an append failure withdraws the grant). A grant answers `promiseToLog` on every grant, renewals included: the
+  scenario `renew keeps the term without a log write` counts real acceptor-log writes (the
+  `PBSimDisk` appends), not `promiseToLog` or `PBLogAppend` effects. `vs` mismatch drops
   the request and counts `config_mismatches`; another `inc` than the active grant's is a new
   holder.
 - Scenario families (proto_db `test_cluster_lease`, `_terms`, `_renewal`, `_voters`):

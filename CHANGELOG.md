@@ -2,6 +2,10 @@
 
 ## 0.2.0 (unreleased)
 
+- Lease values (`src/protobase/cluster/lease.st`): `PBGrantState` (the grant rules of
+  `proto_db`'s `PeerGrants` with the ballot check of `_decide`), `PBGrantDecision`,
+  `PBActiveGrant`, `PBAttempt`, `PBLease` and `PBPermission`, immutable, with time passed in
+  microseconds. A lease is measured from the send of its request (L5).
 - Cluster configuration (`src/protobase/cluster/config.st`): `PBClusterConfig` validates a member's options with
   `proto_db`'s defaults and refusal rules (drift margin at least 2/3 of the lease, request timeout below the belief,
   send reserve at most a quarter of it), takes milliseconds and answers microseconds, and `timerTable` lists the timers
