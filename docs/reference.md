@@ -561,7 +561,7 @@ For tests, tools and readers of the format. An application does not need them.
   permission's end, recorded as a `PBReplication` (`waiter`, `permission`, `rid`, `root`, `acks`,
   `nacks`, `isOwnPending`, `token`) in `PBHolder replications`. An ack of another incarnation is
   dropped (`'stale_replies'`), of another term or request ignored, of a learner never counted
-  (D54); only an ack answering a replication raises the hint; the own acceptor's ok counts as a
+  (D54); only an ack answering a replication (a learner's too) raises the hint; the own acceptor's ok counts as a
   voter's, its refusal as neither. Once the own
   acceptance answered, the replication is decided: `#committed` exactly when a majority of the
   voters acked while the permission is valid (the commit point, CP 1.7 step 9), teaching the own

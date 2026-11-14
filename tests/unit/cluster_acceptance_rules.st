@@ -33,7 +33,7 @@
  is neither an ack nor a refusal (proto_db). The timer decides only once the own acceptance
  answered. (21, two checks) Acks
  of another incarnation are dropped, of another term ignored, a duplicate counted once; a
- learner's never counts. (22) A step's learnt label clears the dispatcher's suspicion at or below it and
+ learner's never counts, though a matching one raises the hint. (22) A step's learnt label clears the dispatcher's suspicion at or below it and
  raises the hint. (23) A certain permit, remote or local, teaches its base committed (not
  logged); a grant's committed root is committed knowledge only. (24) A replicate notes the
  owner hint and goes to the acceptor lane; one of another voter set is dropped and counted; a
@@ -317,12 +317,14 @@ holderOf := [:id :someIds | | st |
     now: t0 + 1000.
   st state].
 s2 := holderOf value: 'n3' value: five.
-c that: 'a learner''s ack never counts toward the commit point (D54)'
+c that: 'a learner''s ack never counts toward the commit point (D54), but a matching one raises the hint (proto_db)'
   is: { settled value: (core dispatch: (ackOf value: 'n4' value: true value: T value: 5 value: (rep value: s2) rid)
       in: (core dispatch: (ackOf value: 'n0' value: true value: T value: 5 value: (rep value: s2) rid) in: s2 now: t0 + 2000) state now: t0 + 3000).
     settled value: (core dispatch: (ackOf value: 'n1' value: true value: T value: 5 value: (rep value: s2) rid)
-      in: (core dispatch: (ackOf value: 'n0' value: true value: T value: 5 value: (rep value: s2) rid) in: s2 now: t0 + 2000) state now: t0 + 3000) }
-  equals: #(#() #(#committed)).
+      in: (core dispatch: (ackOf value: 'n0' value: true value: T value: 5 value: (rep value: s2) rid) in: s2 now: t0 + 2000) state now: t0 + 3000).
+    (core _hintsIn: (core dispatch: (msg value: 'ack' value: 'n4' value: { 'term' -> T. 'rid' -> (rep value: s2) rid. 'inc' -> 5. 'ok' -> true.
+      'root' -> (PBClusterMessage rootValue: (rec value: T + 50 value: 40)). 'stored' -> false }) in: s2 now: t0 + 2000) state) hint }
+  equals: { #(). #(#committed). T + 50 }.
 
 "(22) The dispatcher's half of _learn_label."
 s2 := (nodeOf value: 'n0' value: three) with: { #suspectTerm -> T }.

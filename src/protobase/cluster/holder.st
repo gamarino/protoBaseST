@@ -212,12 +212,13 @@ PBCoordinatorCore >> _onAck: aMessage in: s now: t effects: fx
   | rep h root state |
   rep := self _replication: (aMessage at: 'rid') in: s.
   (rep isNil or: [rep permission term ~= (aMessage at: 'term')]) ifTrue: [^ s].
-  "Only a voter's answer decides the root (D54)."
-  (self _countsAck: aMessage in: s) ifFalse: [^ s].
-  "The hint rises only from an ack that answers this replication (proto_db _on_answer)."
+  "The hint rises from any ack that answers this replication, a learner's too (proto_db
+   _on_answer)."
   h := self _hintsIn: s.
   root := PBClusterMessage rootFrom: (aMessage at: 'root').
   state := root isNil ifTrue: [s] ifFalse: [s with: { #hints -> (h with: { #hint -> (h hint max: root label) }) }].
+  "Only a voter's answer decides the root (D54)."
+  (self _countsAck: aMessage in: state) ifFalse: [^ state].
   rep := rep answered: aMessage from ok: (aMessage at: 'ok').
   ^ self _decideReplication: rep in: (self _replaceReplication: rep with: rep in: state) now: t effects: fx.
 
