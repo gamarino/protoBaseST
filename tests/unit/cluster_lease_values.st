@@ -1,4 +1,4 @@
-"EXPECT: ok 15"
+"EXPECT: ok 16"
 "PBGrantState, PBAttempt, PBLease and PBPermission (cluster/lease.st): the lease rules of
  proto_db cluster/lease.py (PeerGrants, LeaseAttempt, Lease, Permission) and the ballot check of
  coordinator.py _decide, as immutable values. Time is a parameter (microseconds): nothing here
@@ -142,6 +142,20 @@ c that: 'a permission is valid from the send of its request' is:
   { perm validUntil. perm isValidAt: 300999. perm isValidAt: 301000. perm after. perm seq. perm rid. perm owner. perm isCertain.
     (PBPermission term: 4097 seq: 3 rid: 6 owner: 'n1' root: nil certain: true sentAt: 0 valid: 1) isCertain }
   equals: { 301000. true. false. nil. 2. 5. 'n1'. true. false }.
+"term 0 (a well-typed wire term no honest sender produces) is decided by the rules, as proto_db:
+ term_taken for rank 0's requester, bad_ballot for another; restore: 0 seen: 0 (a first start's
+ rejoin that learnt nothing, coordinator.py:1434) is a no-op."
+c that: 'term 0 is decided by the rules and restore: 0 seen: 0 is a no-op' is:
+  { (s0 restore: 0 seen: 0) termsSeen. (s0 restore: 0 seen: 0) highestSeen. (s0 restore: 0 seen: 0) grantedTop.
+    (s0 decideRequest: 'n0' inc: 3 term: 0 now: grace config: cfg) reason.
+    (s0 decideRequest: 'n0' inc: 3 term: 0 now: grace config: cfg) highest.
+    (s0 decideRequest: 'n1' inc: 7 term: 0 now: grace config: cfg) reason.
+    (s0 renew: 'n0' inc: 3 term: 0 now: grace config: cfg) reason.
+    (s1 release: 'n0' inc: 3 term: 0 now: grace) last.
+    ((grantOf value: (s1 release: 'n0' inc: 3 term: 0 now: grace) first) at: 3).
+    (s1 promise: 0) last. (s1 promise: 0) first grantedTop.
+    (PBPermission term: 4097 seq: 0 rid: 0 owner: 'n1' root: nil certain: false sentAt: 0 valid: 0) seq }
+  equals: { 0. 0. 0. 'term_taken'. 0. 'bad_ballot'. 'term_taken'. 0. 4097. 0. 4097. 0 }.
 c that: 'a nil holder, term or seq is refused' is:
   ({ [s1 decideRequest: nil inc: 7 term: 4097 now: grace config: cfg].
      [s1 decideRequest: 'n1' inc: 7 term: nil now: grace config: cfg].

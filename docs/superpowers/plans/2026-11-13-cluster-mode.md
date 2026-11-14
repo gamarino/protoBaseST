@@ -551,14 +551,15 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:signals:
     valid: v` (a `PBLease`; `validUntil` = request send + `valid`; certain only when the root is
     known; `after` always nil at DEPTH 0).
 
-- [ ] **Step 1: write the failing test.** `cluster_lease_values.st` (`"EXPECT: ok 13"`): one row
+- [ ] **Step 1: write the failing test.** `cluster_lease_values.st` (`"EXPECT: ok 16"`): one row
   per rule of `lease.py` `PeerGrants.on_request` (refusals `starting` during grace, `stale_term`,
   `busy` with the remaining promise, `term_taken`; a grant above `granted_top` with
   `promiseToLog`; a renew of the active grant; a release closing the term; `restore:` from a
   logged promise refuses below it); attempt reaching `needed` grants is `#won`; best root by
   root order; uncertain when one granter reports a nil root; a lease valid at `sentAt + belief - 1`
   and invalid at `sentAt + belief` even when the grants arrived late (L5's planted case:
-  measured from the win it would still be valid).
+  measured from the win it would still be valid); `promise:` ends a lower grant; term 0 and
+  `restore: 0 seen: 0` decided as proto_db; nil arguments refused.
 - [ ] **Step 2:** run. Expected: FAIL.
 - [ ] **Step 3:** implement after reading `lease.py` at the tag.
 - [ ] **Step 4:** run, then the suite. Expected: PASS.

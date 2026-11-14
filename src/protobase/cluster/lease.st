@@ -140,10 +140,10 @@ PBGrantState >> _setHighest: aHighest seen: aSeen grantedMax: aMax grantedTop: a
 PBGrantState >> _highest: aHighest seen: aSeen grantedMax: aMax grantedTop: aTop grant: aGrant
   ^ self class basicNew _setHighest: aHighest seen: aSeen grantedMax: aMax grantedTop: aTop grant: aGrant graceEnd: graceEnd.
 
-"A term (a positive Integer) or PBValidationError."
+"A term: an Integer >= 0, as a wire #int (0 is decided by the rules, as proto_db), or PBValidationError."
 PBGrantState >> _checkTerm: aTerm
-  (aTerm isInteger and: [aTerm > 0]) ifFalse: [
-    ^ PBValidationError signal: 'PBGrantState: a term is a positive Integer, not ' , aTerm printString].
+  (aTerm isInteger and: [aTerm >= 0]) ifFalse: [
+    ^ PBValidationError signal: 'PBGrantState: a term is an Integer >= 0, not ' , aTerm printString].
   ^ aTerm.
 
 PBGrantState >> highestSeen
@@ -278,8 +278,8 @@ Object subclass: #PBAttempt instanceVariableNames: 'term rid sentAt voters grant
 "An attempt for aTerm, request id r, sent at s (microseconds, the requester's clock), among v
  voters (learners excluded, D54)."
 PBAttempt class >> term: aTerm rid: r sentAt: s voters: v
-  (aTerm isInteger and: [aTerm > 0]) ifFalse: [
-    ^ PBValidationError signal: 'PBAttempt: a term is a positive Integer, not ' , aTerm printString].
+  (aTerm isInteger and: [aTerm >= 0]) ifFalse: [
+    ^ PBValidationError signal: 'PBAttempt: a term is an Integer >= 0, not ' , aTerm printString].
   (r isInteger and: [s isInteger]) ifFalse: [
     ^ PBValidationError signal: 'PBAttempt: the rid and sentAt are Integers'].
   (v isInteger and: [v > 0]) ifFalse: [
@@ -389,8 +389,8 @@ PBLease class >> term: aTerm validUntil: v root: aRoot certain: aBoolean
   ^ self basicNew _setTerm: aTerm validUntil: v root: aRoot certain: aBoolean.
 
 PBLease class >> _checkTerm: aTerm validUntil: v root: aRoot certain: aBoolean
-  (aTerm isInteger and: [aTerm > 0]) ifFalse: [
-    ^ PBValidationError signal: self name , ': a term is a positive Integer, not ' , aTerm printString].
+  (aTerm isInteger and: [aTerm >= 0]) ifFalse: [
+    ^ PBValidationError signal: self name , ': a term is an Integer >= 0, not ' , aTerm printString].
   v isInteger ifFalse: [^ PBValidationError signal: self name , ': validUntil is an Integer, not ' , v printString].
   (aBoolean == true or: [aBoolean == false]) ifFalse: [
     ^ PBValidationError signal: self name , ': certain is a Boolean, not ' , aBoolean printString].
@@ -437,8 +437,8 @@ PBLease subclass: #PBPermission instanceVariableNames: 'seq rid owner'.
  later, so it never outlasts the owner's lease here). aRoot is the base the owner sent; the base
  is certain only when known (H2 at DEPTH 0, where after is always nil)."
 PBPermission class >> term: aTerm seq: s rid: r owner: anOwner root: aRoot certain: aBoolean sentAt: aSent valid: v
-  ((s isInteger and: [s > 0]) and: [r isInteger and: [aSent isInteger and: [v isInteger]]]) ifFalse: [
-    ^ PBValidationError signal: 'PBPermission: seq is a positive Integer; rid, sentAt and valid are Integers'].
+  ((s isInteger and: [s >= 0]) and: [r isInteger and: [aSent isInteger and: [v isInteger]]]) ifFalse: [
+    ^ PBValidationError signal: 'PBPermission: seq is an Integer >= 0; rid, sentAt and valid are Integers'].
   (anOwner isString and: [anOwner notEmpty]) ifFalse: [
     ^ PBValidationError signal: 'PBPermission: an owner is a node id, not ' , anOwner printString].
   self _checkTerm: aTerm validUntil: aSent + v root: aRoot certain: aBoolean.
