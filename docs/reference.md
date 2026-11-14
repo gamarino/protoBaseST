@@ -543,7 +543,7 @@ For tests, tools and readers of the format. An application does not need them.
   a term the node does not serve gets `'permit_no'` (`'not_owner'` or `'ending'`, term the highest
   seen). `receivedDone:in:now:` counts a wake-up and progress, sequences the owner's outcome and
   forwards the done to the acceptor; `dispatchDoneReport:in:now:` broadcasts the holder's done
-  (`PBDoneReport permission:outcome:root:`). A holder asks with `'permit_req'`
+  (`PBDoneReport permission:outcome:root:`; its copies name the holder for a committed root). A holder asks with `'permit_req'`
   (`'permit_requests_sent'`, retried every `requestTimeout`, `'permit_requests_retried'`); a
   permit of another incarnation is dropped (`'permits_foreign_dropped'`), one nobody waits for
   handed back with done `'none'`, else held (`'permits_held'`, valid from the request's send); a
@@ -561,11 +561,13 @@ For tests, tools and readers of the format. An application does not need them.
   permission's end, recorded as a `PBReplication` (`waiter`, `permission`, `rid`, `root`, `acks`,
   `nacks`, `isOwnPending`, `token`) in `PBHolder replications`. An ack of another incarnation is
   dropped (`'stale_replies'`), of another term or request ignored, of a learner never counted
-  (D54); the own acceptor's ok counts as a voter's, its refusal as neither. Once the own
+  (D54); only an ack answering a replication raises the hint; the own acceptor's ok counts as a
+  voter's, its refusal as neither. Once the own
   acceptance answered, the replication is decided: `#committed` exactly when a majority of the
   voters acked while the permission is valid (the commit point, CP 1.7 step 9), teaching the own
   acceptor the root (logged) and clearing a suspicion it answers; more refusals than a majority
-  allows, the permission's end or a failed own append end it `#unknown`
+  allows, the permission's end (a timer that comes earlier is set again for the time left) or a
+  failed own append end it `#unknown`
   (`'replication_failures'`, the node and its acceptor suspect for the term).
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and

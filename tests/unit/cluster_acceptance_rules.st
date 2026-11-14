@@ -42,7 +42,8 @@ Import from: 'protobase'.
 Import from: '_check'.
 
 | c core peers config three five marker logged acceptorOf T OLD rec accept node r1 r2 r3 base sibling k k1 old newer
-  vs msg repl step ackOf counts s granted nodeOf perm view eff toAcc settled t0 rep holderOf learn s2 v |
+  vs msg repl step ackOf counts s granted nodeOf perm view eff toAcc settled t0 rep holderOf learn s2 v own stats
+  timers hintAck done |
 c := Check new.
 core := PBCoordinatorCore new.
 peers := [:someIds | (1 to: someIds size) asArray collect: [:i | PBPeer nodeId: (someIds at: i) host: '127.0.0.1' port: 7000 + i]].
@@ -272,16 +273,18 @@ c that: 'decided only after its own acceptance; a majority commits, teaching the
 "(19) Unknown outcomes."
 step := own value: (v value: (v value: s value: 'n1' value: true value: t0 + 2000) state value: 'n2' value: true value: t0 + 600000) state
   value: true value: t0 + 600000.
-c that: 'a majority observed past the permission, its timer (once the own acceptance answered), a failed own acceptance: unknown, counted, suspect'
+timers := [:aStep | { settled value: aStep. (aStep effects select: [:e | e isKindOf: PBTimer]) collect: [:e | e after] }].
+c that: 'a majority observed past the permission, its timer (once the own acceptance answered; re-armed when early), a failed own acceptance: unknown, counted, suspect'
   is: { settled value: step. (step effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat]. step state suspectTerm.
     (toAcc value: step) collect: [:e | e class name asSymbol].
     settled value: (core dispatch: (PBTimerFired token: (rep value: s) token event: #replicate) in: (own value: s value: true value: t0 + 2000) state now: t0 + 500000).
-    settled value: (core dispatch: (PBTimerFired token: (rep value: s) token event: #replicate) in: (own value: s value: true value: t0 + 2000) state now: t0 + 400000).
+    timers value: (core dispatch: (PBTimerFired token: (rep value: s) token event: #replicate) in: (own value: s value: true value: t0 + 2000) state now: t0 + 400000).
+    timers value: (core dispatch: (PBTimerFired token: (rep value: s) token event: #replicate) in: s now: t0 + 400000).
     settled value: (core dispatch: (PBTimerFired token: (rep value: s) token event: #replicate) in: s now: t0 + 500000).
     settled value: (core dispatch: (PBAcceptorDiscarded step: (PBAcceptorStep state: view appends: #() reply: #()
       vote: (PBClusterMessage type: 'ack' from: 'n0' fields: { 'term' -> T. 'rid' -> (rep value: s) rid. 'inc' -> 5. 'ok' -> true.
         'root' -> nil. 'stored' -> false }))) in: (v value: (v value: s value: 'n1' value: true value: t0 + 2000) state value: 'n2' value: true value: t0 + 3000) state now: t0 + 4000) }
-  equals: { #(#unknown). #('replication_failures'). T. #(#PBSuspect). #(#unknown). #(). #(). #(#unknown) }.
+  equals: { #(#unknown). #('replication_failures'). T. #(#PBSuspect). #(#unknown). { #(). #(100000) }. { #(). #(100000) }. #(). #(#unknown) }.
 
 "(20) Refusals."
 c that: 'more refusals than a majority allows end it unknown at once; an own refusal is neither (proto_db), peers alone can commit'
@@ -297,12 +300,17 @@ c that: 'more refusals than a majority allows end it unknown at once; an own ref
 
 "(21) Ack filters."
 s2 := (own value: s value: true value: t0 + 2000) state.
-c that: 'acks of another incarnation are dropped, of another term ignored, a duplicate counted once'
+hintAck := [:rid :term | core dispatch: (msg value: 'ack' value: 'n1' value: { 'term' -> term. 'rid' -> rid. 'inc' -> 5. 'ok' -> false.
+  'root' -> (PBClusterMessage rootValue: (rec value: T + 50 value: 40)). 'stored' -> false }) in: s2 now: t0 + 3000].
+c that: 'acks of another incarnation are dropped, of another term ignored, a duplicate counted once; only an ack answering the replication raises the hint'
   is: { [ | st | st := core dispatch: (ackOf value: 'n1' value: true value: T value: 6 value: (rep value: s2) rid) in: s2 now: t0 + 3000.
       { settled value: st. (st effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat] } ] value.
     settled value: (core dispatch: (ackOf value: 'n1' value: true value: T + 1 value: 5 value: (rep value: s2) rid) in: s2 now: t0 + 3000).
-    (rep value: (v value: (v value: s value: 'n1' value: true value: t0 + 2000) state value: 'n1' value: true value: t0 + 2500) state) acks }
-  equals: { { #(). #('stale_replies') }. #(). #('n1') }.
+    (rep value: (v value: (v value: s value: 'n1' value: true value: t0 + 2000) state value: 'n1' value: true value: t0 + 2500) state) acks.
+    (core _hintsIn: (hintAck value: (rep value: s2) rid + 99 value: T) state) hint.
+    (core _hintsIn: (hintAck value: (rep value: s2) rid value: T + 1) state) hint.
+    (hintAck value: (rep value: s2) rid value: T) state hints hint }
+  equals: { { #(). #('stale_replies') }. #(). #('n1'). (core _hintsIn: s2) hint. (core _hintsIn: s2) hint. T + 50 }.
 holderOf := [:id :someIds | | st |
   st := core dispatch: (PBReplicateWanted permission: (perm value: 500000) root: r1 pred: base waiter: #w)
     in: ((PBNodeState config: (config value: id value: someIds) inc: 5) with: { #acceptorView -> (acceptorOf value: id value: someIds value: { marker }) })
@@ -339,14 +347,17 @@ c that: 'a certain permit teaches its base committed (not logged); a grant''s co
 "(24) The dispatcher."
 s2 := nodeOf value: 'n1' value: three.
 step := core dispatch: (repl value: 'n0' value: T value: r1 value: base value: #()) in: s2 now: 1000.
-c that: 'a replicate notes the owner and goes to the acceptor; another voter set is dropped and counted; a store never is accepted'
+done := [:outcome | ((core dispatch: (PBDoneReport permission: (perm value: 500000) outcome: outcome root: r1) in: (nodeOf value: 'n0' value: three) now: t0 + 2000)
+  effects detect: [:e | (e isKindOf: PBSend) and: [e message type = 'done']]) message at: 'copies'].
+c that: 'a replicate notes the owner and goes to the acceptor; another voter set is dropped and counted; a store never is accepted; a committed done names the holder in copies'
   is: { step state hints ownerTerm. step state hints ownerNode. eff value: step.
     eff value: (core dispatch: (repl value: 'n0' value: T value: r1 value: base value: { 'vs' -> (vs + 1) }) in: s2 now: 1000).
     (stats := (core dispatch: (repl value: 'n0' value: T value: r1 value: base value: { 'vs' -> (vs + 1) }) in: s2 now: 1000) effects first stat).
     eff value: (core dispatch: (msg value: 'store' value: 'n0' value: { 'term' -> T. 'rid' -> 7. 'inc' -> 3. 'root' -> (PBClusterMessage rootValue: r1).
       'records' -> #(). 'chunks' -> 0. 'ranges' -> nil. 'copies' -> #('n0'). 'vs' -> vs }) in: s2 now: 1000).
     (core accept: (msg value: 'store' value: 'n0' value: { 'term' -> T. 'rid' -> 7. 'inc' -> 3. 'root' -> (PBClusterMessage rootValue: r1).
-      'records' -> #(). 'chunks' -> 0. 'ranges' -> nil. 'copies' -> #('n0'). 'vs' -> vs }) in: (acceptorOf value: 'n1' value: three value: { marker }) now: 1000) appends size }
-  equals: { T. 'n0'. #(#PBToAcceptor). #(#PBCount). 'config_mismatches'. #(). 0 }.
+      'records' -> #(). 'chunks' -> 0. 'ranges' -> nil. 'copies' -> #('n0'). 'vs' -> vs }) in: (acceptorOf value: 'n1' value: three value: { marker }) now: 1000) appends size.
+    done value: #committed. done value: #unknown }
+  equals: { T. 'n0'. #(#PBToAcceptor). #(#PBCount). 'config_mismatches'. #(). 0. #('n0'). #() }.
 
 c report displayNl.

@@ -340,7 +340,10 @@ AcceptFamilies class >> pausedHolder: aRulesBlock seeds: someSeeds
         sim resume: 'n1'.
         sim runUntil: [(sim outcomeOf: 'c') ~= #pending] steps: 500000.
         sim converge: 300000.
-        (sim outcomeOf: 'c') = #acknowledged ifFalse: [bad := bad + 1]].
+        (sim outcomeOf: 'c') = #acknowledged ifFalse: [bad := bad + 1].
+        "n1, resumed, never accepts a root of the old term either (it promised the newer term
+         to itself)."
+        ((sim syncedAcceptedOf: 'n1') allButFirst: (others at: 1)) do: [:k | (k at: 1) = old ifTrue: [bad := bad + 1]]].
       bad + sim problems size]) > 0 ifTrue: [1] ifFalse: [0])].
   ^ { failed. acked }.
 

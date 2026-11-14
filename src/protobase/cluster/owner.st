@@ -41,8 +41,9 @@ Nothing here reads a clock: t is the node's clock (CC3).
     counts it as a wake-up and progress (it ends a back-off); the owner of that term sequences
     the next permission now (O3, O5, O6); the message then goes to the acceptor lane, where
     Task 13 learns the committed root it teaches. dispatchDoneReport: (proto_db finish): the
-    holder's done(term, seq, inc, outcome, root, copies, ranges) is broadcast; at its own
-    ownership the outcome is applied at once, if the permission was issued to this incarnation.
+    holder's done(term, seq, inc, outcome, root, copies: this node for a committed root, ranges)
+    is broadcast; at its own ownership the outcome is applied at once, if the permission was
+    issued to this incarnation.
   The holder side (PBHolder, proto_db _permit_waits). A waiter's deadline is acquireTimeout from
     its PBPermitWanted. With an owner hint naming another member (term not 0), a waiter asks it
     (_ask:, a PBPermitAsk): permit_req(term, rid, inc) under the hint's term, counted
@@ -634,6 +635,10 @@ PBCoordinatorCore >> dispatchDoneReport: anEvent in: s now: t
         state := self _permitOutcome: issued outcome: outcome root: root in: s now: t effects: later]].
     self _broadcast: (PBClusterMessage type: 'done' from: s config nodeId fields: {
       'term' -> p term. 'seq' -> p seq. 'inc' -> s inc. 'outcome' -> outcome.
-      'root' -> (PBClusterMessage rootValue: root). 'copies' -> #(). 'ranges' -> nil }) in: s effects: fx.
+      'root' -> (PBClusterMessage rootValue: root).
+      "proto_db finish: the placement a committed replication learnt (_learn_locator with
+       copies [self], shared storage) names the holder; none otherwise."
+      'copies' -> ((outcome = 'committed' and: [root record notNil]) ifTrue: [{ s config nodeId }] ifFalse: [#()]).
+      'ranges' -> nil }) in: s effects: fx.
     fx addAll: later.
     state].

@@ -315,13 +315,43 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   label at or above it is observed. protoBaseST's suspicion has two halves: the acceptor's
   (cleared in the step that learns the label) and the dispatcher's, cleared when that step
   reaches it (`PBAcceptorStep learnt`, `_learnt:in:`, `cluster/holder.st`); a replication that
-  commits clears it at once. *Cost:* a lease or release decided in between is reported
-  uncertain: freshness only, never a wrong certainty.
-- **The replicate's pred comes with the commit (representation only, until Task 14).**
+  commits clears it at once. Two effects follow. (1) A lease or release decided between the
+  observation and its step's return is reported uncertain: freshness only. (2) When the
+  acceptor observes label T and the dispatcher then abandons T (its suspicion T, the
+  `PBSuspect` queued behind that step), the step's return clears the dispatcher's half,
+  although in `proto_db`'s single variable that real-time order (learn, then abandon) leaves
+  the node suspect; until the `PBSuspect` step returns, a release decided in that window is
+  certain. That is still an execution `proto_db` admits: it clears the suspicion the same way
+  when the observation is delivered after the abandon (`_learn_label` has no ordering guard),
+  and a message delayed past the abandon is inside the failure model. It is transient: once the
+  `PBSuspect` step lands, the acceptor's half holds the suspicion again, more conservatively
+  than `proto_db`. *Cost:* uncertainty reported a little longer in (1); in (2) a certainty
+  `proto_db` also reports under a delayed observation, never one it could not.
+- **The replicate's pred comes with the commit (until Task 14; a safety obligation on it).**
   `proto_db`'s `replicate` takes the pred from the lease (`lease.sent`, else the lease root);
-  protoBaseST's commit path hands it in `PBReplicateWanted permission:root:pred:waiter:` (the root
-  its build started from), since the base choice is Task 14's and a `PBPermission` is
-  immutable. The `replicate` message is the same. *Cost:* none.
+  protoBaseST's commit path hands it in `PBReplicateWanted permission:root:pred:waiter:`, since
+  the base choice is Task 14's and a `PBPermission` is immutable. The `replicate` message is
+  the same. Acceptors trust the pred the holder names: V2' compares it with their own accepted
+  root and cannot detect a pred that lies about the build base, so a holder that builds on one
+  root and names another can make acceptors holding r1 take an r2 that does not contain r1,
+  and r1's commit is lost. Task 14's commit path must therefore follow `proto_db`'s
+  `lease.sent` rules: the pred of the first root under a permission is the permission's root;
+  that of each later root is the root last sent under it, even when its outcome was
+  `#unknown`; a round that ended `#none` does not move it; and the root is built on exactly
+  that pred (the plan's Task 14 entry carries this, with the option of the core keeping `sent`
+  per permission and refusing a wrong pred). *Cost:* none on the wire; today nothing in the
+  product sends a `PBReplicateWanted`, so the obligation binds Task 14.
+- **Open item: no back-off after a lost renewal (`proto_db` behaviour, kept).** After a
+  renewal lost to a majority that rejects at once (members restarted inside their startup
+  grace, or a newer term granted), the owner renews again immediately, one round per RTT,
+  until its lease ends (at most belief / 2): `proto_db`'s `_own_loop_body` and `_renew` do the
+  same, so this is not a deviation today. Messages and acceptor-lane work only, no log write;
+  safety is unaffected (nothing is issued once 4 x remaining < belief, and a won renewal counts
+  only before its validUntil). In the simulator, at about 1 us per round, it makes such runs
+  long in virtual time, which the acceptance families avoid by crashing between terms. The
+  decision (keep it, adopt a timing-only lost-renewal back-off here as a recorded deviation,
+  or propose one to `proto_db` upstream) is carried by the plan's Task 20. *Cost:* network and
+  acceptor-lane load for up to belief / 2 after such a loss.
 - **No rejoin-ballot refusal on the holder yet (until Task 16).** `proto_db`'s `replicate` refuses
   (`ProtoConflictError`) a term below the node's rejoin ballot (L14); rejoining is Task 16, so
   a protoBaseST node has no rejoin ballot to compare yet and the check comes with it. *Cost:*

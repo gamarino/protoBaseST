@@ -862,6 +862,16 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   owner issuing one base twice (`PlantBaseTwice`) must let phase 1 rank the uncommitted sibling
   of a higher epoch above the commit, and the run must then fail S4 at convergence
   (`converge:`), with the sibling-roots rule disabled for that check.
+- Carried from Task 13 (review m7), a **safety obligation**: acceptors trust the pred a
+  `PBReplicateWanted permission:root:pred:waiter:` names (V2' compares it with their own accepted
+  root and cannot detect a pred that lies about the build base). The commit path follows
+  `proto_db`'s `lease.sent` rules (`replicate` 3622, 3725, 3873-3875): the pred of the first root
+  under a permission is the permission's root (the base); the pred of each later root is the
+  root last *sent* under that permission, even when its outcome was `#unknown`; a round that
+  ended `#none` (nothing acceptable left) does not move it. The root is built on **exactly**
+  that pred. A test pins it (a commit after an `#unknown` and after a `#none` round names the
+  right pred), or the core keeps `sent` per permission in `PBHolder` and refuses a
+  `PBReplicateWanted` whose pred differs (preferred: a wrong caller is refused, not trusted).
 
 - [ ] **Step 1: write the failing test** `sim_base_choice.st` (`"EXPECT: ok 9"`: the five
   families, plus one check per plant `PlantRecoveryWaitsAll`, `PlantRecoveryEveryIgnored`,
@@ -1077,6 +1087,17 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     drops lane messages once fenced; replicate and store get `ack(ok=false)`, Task 13): the
     acceptor drops request, renew and release when `fenced`; the dispatcher's fence is this
     task's. (e) `PBCount` effects (`config_mismatches`, `grants_given`) feed `stats` (CC24).
+    (f) Carried from Task 13 (review m1, open item): after a renewal lost to a majority that
+    rejects at once (members restarted inside their startup grace, or a newer term granted),
+    the owner renews again immediately, as `proto_db`'s `_own_loop_body`/`_renew` do: one round
+    per RTT until the lease ends (at most belief / 2), messages and acceptor-lane work only, no
+    log write, safety unaffected. Decide here, with real timers and RTTs: keep `proto_db`'s
+    behaviour, adopt a lost-renewal back-off as a recorded timing-only deviation (for example
+    wait min(requestTimeout, remaining - belief / 4) before the next attempt), or propose it to
+    `proto_db` upstream (preferred, since the behaviour is `proto_db`'s); record the decision in
+    docs/deviations.md. (g) Carried from Task 13 (review note): `stop` settles a replication in
+    flight (`PBHolder replications`) `#unknown`, never `#none` (the root left the node;
+    `proto_db` `replicate` 3895-3897).
     (CC24), `forceRejoin`, `committedRoot` (`PBLabeledRoot` from an `Atom`, never a message),
     `committedEpoch`, `needsConfirmation`, `isFenced`, `nodeId`, `config`.
   - For the round runner (all answer `Future`s, never wait): `_permit` → `PBPermission`

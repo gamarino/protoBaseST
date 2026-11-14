@@ -470,7 +470,7 @@ PBCoordinatorCore >> _ack: aMessage ok: isOk in: s
  by the same rule; its ack is the step's vote, it is not counted, and it teaches no committed
  root (proto_db replicate's own acceptance)."
 PBCoordinatorCore >> acceptReplicate: anEvent in: s now: t
-  | m own root pred term ok state reply learnt committed triple ack |
+  | m own root pred term ok state reply learnt committed triple ack appends |
   m := anEvent message.
   own := m from = s config nodeId.
   term := m at: 'term'.
@@ -486,19 +486,18 @@ PBCoordinatorCore >> acceptReplicate: anEvent in: s now: t
   state := state with: { #seqSeen -> (self _seqSeen: state seqSeen after: term seq: (m at: 'seq')) }.
   learnt := term.
   reply := OrderedCollection new.
+  appends := OrderedCollection with: (PBLogAppend kind: #accepted label: term root: root record sync: true).
   own ifFalse: [
     committed := PBClusterMessage rootFrom: (m at: 'committed').
     committed notNil ifTrue: [
       triple := self _learnCommitted: committed accept: true logged: false in: state.
       state := triple first.
+      appends addAll: (triple at: 2).
       reply addAll: triple last.
       learnt := learnt max: committed label].
     reply add: (PBCount stat: 'accepted')].
   reply addFirst: (PBPublishAcceptor state: state).
   ack := self _ack: m ok: true in: state.
-  own ifTrue: [
-    ^ PBAcceptorStep state: state appends: { PBLogAppend kind: #accepted label: term root: root record sync: true }
-      reply: reply asArray vote: ack learnt: learnt].
+  own ifTrue: [^ PBAcceptorStep state: state appends: appends asArray reply: reply asArray vote: ack learnt: learnt].
   reply add: (PBSend to: m from message: ack).
-  ^ PBAcceptorStep state: state appends: { PBLogAppend kind: #accepted label: term root: root record sync: true }
-    reply: reply asArray vote: nil learnt: learnt.
+  ^ PBAcceptorStep state: state appends: appends asArray reply: reply asArray vote: nil learnt: learnt.

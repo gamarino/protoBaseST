@@ -210,13 +210,14 @@ PBCoordinatorCore >> _replication: aRid in: s
  when its sender is a voter; then the replication is decided if it can be."
 PBCoordinatorCore >> _onAck: aMessage in: s now: t effects: fx
   | rep h root state |
+  rep := self _replication: (aMessage at: 'rid') in: s.
+  (rep isNil or: [rep permission term ~= (aMessage at: 'term')]) ifTrue: [^ s].
+  "Only a voter's answer decides the root (D54)."
+  (self _countsAck: aMessage in: s) ifFalse: [^ s].
+  "The hint rises only from an ack that answers this replication (proto_db _on_answer)."
   h := self _hintsIn: s.
   root := PBClusterMessage rootFrom: (aMessage at: 'root').
   state := root isNil ifTrue: [s] ifFalse: [s with: { #hints -> (h with: { #hint -> (h hint max: root label) }) }].
-  rep := self _replication: (aMessage at: 'rid') in: state.
-  (rep isNil or: [rep permission term ~= (aMessage at: 'term')]) ifTrue: [^ state].
-  "Only a voter's answer decides the root (D54)."
-  (self _countsAck: aMessage in: state) ifFalse: [^ state].
   rep := rep answered: aMessage from ok: (aMessage at: 'ok').
   ^ self _decideReplication: rep in: (self _replaceReplication: rep with: rep in: state) now: t effects: fx.
 
@@ -255,11 +256,17 @@ PBCoordinatorCore >> _ownAckFailed: anAck in: s now: t effects: fx
   rep isNil ifTrue: [^ s].
   ^ self _endReplication: rep committed: false in: s effects: fx.
 
-"The timer of a replication: its permission ended."
+"The timer of a replication: its permission ended (re-armed when it came early)."
 PBCoordinatorCore >> _replicationTimer: anEvent in: s now: t effects: fx
   | rep |
   rep := (self _replicationsIn: s) detect: [:r | r token = anEvent token] ifNone: [nil].
   rep isNil ifTrue: [^ s].
+  "Defensive, as _askTimer: re-arms: a timer that came before the permission's end (a shell
+   whose timer source is not the node's clock) is set again for the time left, so the
+   replication is never stranded undecided."
+  (rep permission isValidAt: t) ifTrue: [
+    fx add: (PBTimer after: (rep permission remainingAt: t) token: rep token event: #replicate).
+    ^ s].
   ^ self _decideReplication: rep in: s now: t effects: fx.
 
 "proto_db _learn_label on the dispatcher's half of the suspicion: a root labelled aLabel was
