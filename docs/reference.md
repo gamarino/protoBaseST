@@ -406,7 +406,7 @@ For tests, tools and readers of the format. An application does not need them.
 - **Coordinator core** (`cluster/core.st`): the sans-IO core's vocabulary. `PBCoordinatorCore new`
   is the rules object, stateless: `dispatch:in:now:` (an event, a `PBNodeState`, the time now in
   microseconds of the node's clock) answers a `PBStep` (`state`, `effects`), and
-  `accept:in:now:` (a `PBReceived` or a `PBStartNode`, a `PBAcceptorState`) answers a
+  `accept:in:now:` (an acceptor event, a `PBAcceptorState`) answers a
   `PBAcceptorStep` (`state`, `appends`, `reply`: the shell writes the appends in order and
   performs the reply only once every append with `sync` true is durable, then hands the step to
   the dispatcher as `PBAcceptorDecided step:`). The event picks its rule method by double
@@ -423,7 +423,8 @@ For tests, tools and readers of the format. An application does not need them.
   `applyTo:` with one message the shell implements (applySend:, applyToAcceptor:, applyTimer:,
   applySettle:, applyPublishCommitted:, applyPublishAcceptor:, applyFence:): `PBSend
   to:message:`, `PBToAcceptor event:` (the node's own vote and acceptance, never through the
-  transport), `PBTimer after:token:event:` (`fired` is its `PBTimerFired`), `PBSettle
+  transport; the event's class answers `isAcceptorEvent` true: `PBReceived` and `PBStartNode` here, and
+  a later module adds its own), `PBTimer after:token:event:` (`fired` is its `PBTimerFired`), `PBSettle
   waiter:outcome:`, `PBPublishCommitted root:`, `PBPublishAcceptor state:`, `PBFence reason:`,
   and `PBLogAppend kind:label:root:sync:` (`payload` is its `PBAcceptorLog` entry), allowed only
   in the appends of an acceptor step. `PBNodeState config:inc:` answers `config`, `inc`,

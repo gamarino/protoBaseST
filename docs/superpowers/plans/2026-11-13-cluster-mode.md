@@ -639,7 +639,7 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
 - Produces: `PBCoordinatorCore` acceptor methods: `acceptRequest:in:now:`,
   `acceptRenew:in:now:`, `acceptRelease:in:now:`, `acceptQuery:in:now:` (the `answer` of a
   plain query: `state` `ok`/`empty`/`unknown`, `promised`, ballot 0), `acceptStart:in:now:`
-  (restore from `PBLoggedRoots`, grace), `acceptSuspect:in:now:`. A grant appends
+  (the start's acceptor work beyond the grace and the restore), `acceptSuspect:in:now:`. A grant appends
   `PBLogAppend kind: #promise sync: true` and its `grant` reply carries the accepted and
   committed roots and `certain`. Refusals: `fenced`, learner, no log, tier failed, rejoining
   (log without kind 4), `bad_ballot`, `starting`, `stale_term`, `busy` (with remaining),
@@ -649,9 +649,10 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   release from a sender that is not a member is dropped before `decideRequest:`/`renew:`
   (`rankOf:` signals `PBValidationError` for it; proto_db drops it in the dispatcher). A query
   answer's `promised` is `max(termsSeen, accepted label)` (coordinator.py:1852, 1884), 0 when
-  `state` is `unknown`. `acceptStart:in:now:` builds the grace with `PBGrantState initial:now:`
-  only when the node starts; a re-attach of a running node only `restore:`s
-  (coordinator.py:977 versus 1134: the grace is not restarted). The wire `remaining` is a
+  `state` is `unknown`. Controller ruling (Task 9 review): `PBAcceptorState config:logged:now:` owns building
+  the startup grace (`PBGrantState initial:now:`) and restoring the log (`restore:`), once, when
+  the node starts; `acceptStart:in:now:` must rebuild neither, and a re-attach of a running node
+  reuses the existing state (coordinator.py:977 versus 1134: the grace is not restarted). The wire `remaining` is a
   number of seconds (`#number`, a float in proto_db): the shell converts it to and from the
   core's integer microseconds (Tasks 10 and 20). `vs` mismatch drops
   the request and counts `config_mismatches`; another `inc` than the active grant's is a new

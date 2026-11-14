@@ -7,44 +7,71 @@
   sim runUntil: [(sim outcomeOf: 'a') ~= #pending] steps: 10000.
   sim converge: 10000.
 
-N nodes run the rules object (a PBCoordinatorCore, or a test subclass that plants a defect:
-CC13) in one thread, in virtual time: an Integer of microseconds that only the scheduler
-advances. Every node starts at time 0; its clock (PBSimClock) runs at a rate (clockRate:rate:)
-from the virtual time, and its rules see that clock as now. The scheduler holds the pending
-events (a dispatch, an acceptor step, the sync that completes one, a delivery) and takes the
-earliest; it draws every choice (which of several events due at once, a message's fate, a
-node's incarnation) from one Random seed: n, so one seed and one script give one trace, byte
-for byte. Nothing reads a wall clock or sleeps.
+Time. N nodes run the rules object (a PBCoordinatorCore, or a test subclass that plants a
+defect: CC13) in one thread, in virtual time: an Integer of microseconds that only the
+scheduler advances. Every node starts at time 0. Its clock (PBSimClock) runs at a rate from
+the virtual time, and its rules see that clock as now; clockRate:rate: changes the rate from
+the current virtual time on, continuously. Rate 0 pauses the clock: the node still takes
+messages and acceptor steps, its now standing still. A timer (PBTimer after:) is kept with its
+deadline on the node's clock, and every rate change re-derives the virtual time at which that
+clock reaches it, so a timer always fires after its duration of the node's own clock; a timer
+of a paused clock is not due until the clock runs again.
 
-The simulator is the shell of every node: it performs each effect (PBEffect applyTo:). A
-PBSend is framed (PBClusterFrame, with the node's authKey) and delivered as a PBReceived of
-the decoded message, unless the faults (PBSimFaults) drop it (each copy is drawn on send:
-dropped with probability drop, sent twice with probability duplicate, delayed by 0 to delay
-us; without reorder each link keeps its order) or a partition separates the two nodes when it
-arrives. A PBToAcceptor runs the node's acceptor; its step's appends are written to the node's
-PBSimDisk at once, then a sync event syncs through the last append that asks for a sync and only
-then performs the reply and hands the step back (PBAcceptorDecided). A PBTimer comes due when
-the node's clock has advanced by its after. A PBSettle advances the synthetic transaction of its
-waiter: commit: aToken at: id asks the node for a permission (PBPermitWanted), then for the
-base under it (PBBaseWanted), builds a new root on that base (label the permission's term,
-epoch the base's + 1, a fresh offset; its pred link is the base) and replicates it
-(PBReplicateWanted); the replication's outcome is the commit's (#committed: #acknowledged,
-#unknown, #none or anything else: #failed) and the node gets it as a PBDoneReport.
-PBPublishCommitted sets the root the node's readers see; PBPublishAcceptor and PBFence are
-recorded by their trace lines.
+Scheduling. The scheduler holds the pending events (a dispatch, a timer, an acceptor step, its
+sync, its reply, a delivery) and takes the earliest; it draws every choice (which of several
+events due at once, a message's fate, a node's incarnation, a crash's unsynced tail) from one
+Random seed: n, so one seed and one script give one trace, byte for byte. Nothing reads a wall
+clock or sleeps.
 
-crash: id keepDisk: aBoolean stops a node at once (pending events of the node are dropped;
-messages already sent stay in flight): keeping the disk drops what was not synced, losing it
-empties it. tearLog: id cuts the last synced frame of a crashed node's log (a torn tail).
-restart: id starts it again, with a new incarnation, over what its disk holds.
+The shell. The simulator is the shell of every node: it performs each effect (PBEffect
+applyTo:).
+  PBSend         is framed (PBClusterFrame, with the node's authKey) and delivered as a
+                 PBReceived of the decoded message, unless the faults (PBSimFaults) drop it:
+                 each copy is drawn on send (dropped with probability drop, sent twice with
+                 probability duplicate, delayed by 0 to delay us; without reorder each link
+                 keeps its order), or a partition separates the two nodes when it arrives. A
+                 message is addressed to a node, not to an incarnation: one still in flight when
+                 its receiver crashes is delivered to the receiver's next incarnation if it
+                 arrives after the restart (more adversarial than a TCP connection, which the
+                 crash would close): the rules must check incarnations (L12).
+  PBToAcceptor   queues the event on the node's acceptor lane. The lane is serial, as
+                 proto_db's (coordinator.py:1791, 'each step decides, makes its write durable,
+                 publishes, then replies, in arrival order'): one step at a time, in arrival
+                 order, each in three events: decide (the rules' step; its appends written to
+                 the node's PBSimDisk), sync (through the last append that asks for one), reply
+                 (the reply effects, then PBAcceptorDecided to the dispatcher); the next step of
+                 the lane is decided only after that reply.
+  PBTimer        comes due when the node's clock has advanced by its after (above).
+  PBSettle       advances the synthetic transaction of its waiter: commit: aToken at: id asks
+                 the node for a permission (PBPermitWanted), then for the base under it
+                 (PBBaseWanted), builds a new root on that base (label the permission's term,
+                 epoch the base's + 1, a fresh offset; its pred link is the base) and
+                 replicates it (PBReplicateWanted). The replication's outcome is the commit's
+                 (#committed: #acknowledged, #unknown, #none; anything else: #failed) and the
+                 node gets it as a PBDoneReport.
+  PBPublishCommitted sets the root the node's readers see; PBPublishAcceptor and PBFence are
+                 recorded by their trace lines.
 
-PBSimChecker runs after every step: at most one owner of a term (S1: an ownership seen in any
-node's state, by node and incarnation); two different roots with equal (label, epoch) appended,
-published or sent anywhere; an acceptor reply performed before the appends it waits for are
-synced. checkConverged (converge:): every acknowledged commit is in the committed chain of
-every live node (S4: from its published committed root through the pred links of the roots the
-simulator built), every unknown commit in the chain of every live node or of none. A violation
-is an Error whose text holds the seed and the last 200 trace lines."
+Crashes. crash: id unsynced: aMode stops a node at once: its pending events and its acceptor
+lane are dropped (messages already sent stay in flight). The synced entries of its disk
+survive; the unsynced tail is, by aMode: #drop, all lost (power loss); #keep, all kept (a
+process crash: the page cache reaches the disk); #prefix, a prefix of a length drawn from the
+seed kept (a power loss during write-back); #any, one of the three drawn from the seed. What
+survives counts as synced afterwards. A crash between an acceptor step's sync and its reply
+leaves the entry durable and the reply never sent. crash: id keepDisk: true is the #drop crash
+(the brief's); keepDisk: false loses the whole disk. tearLog: id cuts the last synced frame of a
+crashed node's log (a torn tail). restart: id starts it again, with a new incarnation, over
+what its disk holds.
+
+The checker. PBSimChecker runs after every step: at most one owner of a term (S1: an ownership
+seen in any node's state, by node and incarnation); two different roots with equal (label,
+epoch) appended, published or sent anywhere; an acceptor reply performed before every entry the
+node's acceptor asked to sync so far is synced. checkConverged (converge:): the committed
+chains of the live nodes (from each one's published committed root through the pred links of
+the roots the simulator built) do not fork (of two heads, one is in the other's chain); every
+acknowledged commit is in every live node's chain (S4); every unknown commit in every live
+node's chain or in none; a commit answered #none in no chain (H7). A violation is an Error
+whose text holds the seed and the last 200 trace lines."
 
 Import from: 'protobase'.
 
@@ -82,11 +109,12 @@ PBSimFaults >> reorder
 
 "=== PBSimClock =============================================================="
 
-"A node's clock: from the virtual time originGlobal, when it read originLocal, it runs at rate."
+"A node's clock: from the virtual time originGlobal, when it read originLocal, it runs at rate
+ (0: paused)."
 Object subclass: #PBSimClock instanceVariableNames: 'rate originGlobal originLocal'.
 
 PBSimClock class >> rate: aNumber global: g local: l
-  ((aNumber isKindOf: Number) and: [aNumber > 0]) ifFalse: [^ Error signal: 'PBSimClock: a rate is a positive Number'].
+  ((aNumber isKindOf: Number) and: [aNumber >= 0]) ifFalse: [^ Error signal: 'PBSimClock: a rate is a Number >= 0'].
   ^ self basicNew setRate: aNumber global: g local: l.
 
 PBSimClock >> setRate: aNumber global: g local: l
@@ -94,13 +122,16 @@ PBSimClock >> setRate: aNumber global: g local: l
   originGlobal := g.
   originLocal := l.
 
-"The node's clock (microseconds) at the virtual time g."
+"The node's clock (microseconds) at the virtual time g (>= originGlobal)."
 PBSimClock >> localAt: g
   ^ originLocal + ((g - originGlobal) * rate) floor.
 
-"The earliest virtual time at which the clock has advanced by someMicros from the virtual time g."
-PBSimClock >> globalAfter: someMicros from: g
-  ^ originGlobal + ((self localAt: g) + someMicros - originLocal / rate) ceiling.
+"The earliest virtual time, not before originGlobal, at which the clock reads aLocal or more;
+ nil when a paused clock never will."
+PBSimClock >> globalAt: aLocal
+  aLocal <= originLocal ifTrue: [^ originGlobal].
+  rate = 0 ifTrue: [^ nil].
+  ^ originGlobal + (aLocal - originLocal / rate) ceiling.
 
 "This clock running at aNumber from the virtual time g on, continuous at g."
 PBSimClock >> rate: aNumber at: g
@@ -135,13 +166,17 @@ PBSimDisk >> size
 PBSimDisk >> syncedSize
   ^ synced.
 
-"A crash that keeps the disk: what was not synced is gone."
-PBSimDisk >> dropUnsynced
-  [entries size > synced] whileTrue: [entries removeLast].
+PBSimDisk >> unsyncedSize
+  ^ entries size - synced.
+
+"A crash: the first n unsynced entries survive (and count as synced), the rest are gone."
+PBSimDisk >> keepUnsynced: n
+  [entries size > (synced + n)] whileTrue: [entries removeLast].
+  synced := entries size.
 
 "A torn tail: the last synced frame is cut."
 PBSimDisk >> tear
-  self dropUnsynced.
+  self keepUnsynced: 0.
   synced = 0 ifTrue: [^ Error signal: 'PBSimDisk ' , name , ': no synced frame to tear'].
   entries removeLast.
   synced := synced - 1.
@@ -158,8 +193,9 @@ PBSimDisk >> loggedRoots
 "=== PBSimNode ==============================================================="
 
 "One simulated node: its configuration, clock and disk survive a crash; the rest is its
- incarnation's."
-Object subclass: #PBSimNode instanceVariableNames: 'config clock disk up gen state acceptor committed'.
+ incarnation's. lane: the acceptor events not yet decided; laneBusy: a step is between its
+ decision and its reply; owed: the last disk entry the acceptor asked to sync."
+Object subclass: #PBSimNode instanceVariableNames: 'config clock disk up gen state acceptor committed lane laneBusy owed'.
 
 PBSimNode class >> config: aConfig
   ^ self basicNew setConfig: aConfig.
@@ -170,6 +206,9 @@ PBSimNode >> setConfig: aConfig
   disk := PBSimDisk named: aConfig nodeId.
   up := false.
   gen := 0.
+  lane := OrderedCollection new.
+  laneBusy := false.
+  owed := 0.
 
 PBSimNode >> id
   ^ config nodeId.
@@ -210,18 +249,38 @@ PBSimNode >> committed
 PBSimNode >> committed: aRoot
   committed := aRoot.
 
-"A new incarnation: up, with these states."
+PBSimNode >> lane
+  ^ lane.
+
+PBSimNode >> isLaneBusy
+  ^ laneBusy.
+
+PBSimNode >> laneBusy: aBoolean
+  laneBusy := aBoolean.
+
+PBSimNode >> owed
+  ^ owed.
+
+PBSimNode >> owe: anIndex
+  owed := owed max: anIndex.
+
+"A new incarnation: up, with these states, an empty lane."
 PBSimNode >> startState: aNodeState acceptor: anAcceptorState
   gen := gen + 1.
   up := true.
   state := aNodeState.
   acceptor := anAcceptorState.
+  lane := OrderedCollection new.
+  laneBusy := false.
+  owed := 0.
 
 PBSimNode >> crash
   up := false.
   state := nil.
   acceptor := nil.
   committed := nil.
+  lane := OrderedCollection new.
+  laneBusy := false.
 
 "The 16 segment bytes of the roots this node builds."
 PBSimNode >> segment
@@ -280,17 +339,26 @@ PBSimChecker >> noteAppend: aLogAppend
 PBSimChecker >> noteMessage: aMessage
   (rootFields at: aMessage type) do: [:field | self noteRoot: (PBClusterMessage rootFrom: (aMessage at: field))].
 
-"aNode performs an acceptor reply that waits for its entries up to anIndex."
-PBSimChecker >> replyAt: aNode needs: anIndex
-  aNode disk syncedSize < anIndex ifTrue: [
-    self fail: aNode id , ' performed an acceptor reply before its append is synced (entry ' , anIndex printString
+"aNode performs an acceptor reply: every entry its acceptor asked to sync so far must be synced."
+PBSimChecker >> replyAt: aNode
+  aNode disk syncedSize < aNode owed ifTrue: [
+    self fail: aNode id , ' performed an acceptor reply before its append is synced (entry ' , aNode owed printString
       , ', synced through ' , aNode disk syncedSize printString , ')'].
 
-"At convergence: S4 and the unknown commits."
+"At convergence: no fork, S4, the unknown commits and H7."
 PBSimChecker >> checkConverged
   | live chains |
   live := sim ids select: [:id | (sim nodeAt: id) isUp].
   chains := live collect: [:id | sim committedChainOf: id].
+  1 to: live size do: [:i |
+    i + 1 to: live size do: [:j |
+      | hi hj |
+      hi := (sim nodeAt: (live at: i)) committed.
+      hj := (sim nodeAt: (live at: j)) committed.
+      (hi notNil and: [hj notNil and: [((chains at: j) includes: (sim keyText: hi)) not
+          and: [((chains at: i) includes: (sim keyText: hj)) not]]]) ifTrue: [
+        self fail: 'fork: the committed chains of ' , (live at: i) , ' (' , (sim keyText: hi) , ') and '
+          , (live at: j) , ' (' , (sim keyText: hj) , ') diverge']]].
   sim commitOrder do: [:token |
     | status root key holders |
     status := sim outcomeOf: token.
@@ -303,11 +371,14 @@ PBSimChecker >> checkConverged
           , (live at: i)]]].
     (status = #unknown and: [holders notEmpty and: [holders size < live size]]) ifTrue: [
       self fail: 'the unknown commit ' , token printString , ' is in the committed chain of '
-        , (holders collect: [:i | live at: i]) printString , ' only']].
+        , (holders collect: [:i | live at: i]) printString , ' only'].
+    (status = #none and: [holders notEmpty]) ifTrue: [
+      self fail: 'H7: the commit ' , token printString , ' answered none is in the committed chain of '
+        , (holders collect: [:i | live at: i]) printString]].
 
 "=== PBSim ==================================================================="
 
-Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue seq now faults groups links lines checker commits commitOrder commitRoots preds offsets current'.
+Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current'.
 
 "N nodes (anArray of ids) running aRules, each configured with aDictionary (PBClusterConfig
  options), all started at virtual time 0, every choice drawn from Random seed: n."
@@ -317,14 +388,16 @@ PBSim class >> seed: n ids: anArray rules: aRules options: aDictionary
 PBSim >> setSeed: n ids: anArray rules: aRules options: aDictionary
   | peers |
   seed := n.
-  random := Random seed: n.
+  "Park-Miller's first draws of nearby small seeds are small and alike: the seed is spread
+   over the generator's range and the first draws are discarded."
+  random := Random seed: n * 48271 + 1013904223.
+  16 timesRepeat: [random next].
   rules := aRules.
   ids := anArray asArray.
   peers := (1 to: ids size) asArray collect: [:i | PBPeer nodeId: (ids at: i) host: '127.0.0.1' port: 7000 + i].
   nodes := Dictionary new.
   ids do: [:id | nodes at: id put: (PBSimNode config: (PBClusterConfig nodeId: id peers: peers options: aDictionary))].
   queue := OrderedCollection new.
-  seq := 0.
   now := 0.
   faults := PBSimFaults none.
   links := Dictionary new.
@@ -355,7 +428,7 @@ PBSim >> checker
 PBSim >> trace
   ^ lines asArray.
 
-"#pending, #acknowledged, #unknown or #failed; nil for a token never committed."
+"#pending, #acknowledged, #unknown, #none or #failed; nil for a token never committed."
 PBSim >> outcomeOf: aToken
   ^ commits at: aToken ifAbsent: [nil].
 
@@ -413,19 +486,39 @@ PBSim >> heal
   groups := nil.
   self _trace: 'heal'.
 
+"anId's clock runs at aNumber (>= 0; 0 pauses it) from now on; its pending timers move to the
+ virtual time at which the clock reaches their deadlines."
 PBSim >> clockRate: anId rate: aNumber
   | node |
   node := self nodeAt: anId.
   node clock: (node clock rate: aNumber at: now).
+  queue do: [:e |
+    ((e at: 2) = #timer and: [(e at: 3) = anId]) ifTrue: [
+      e at: 1 put: (node clock globalAt: ((e at: 5) at: 1))]].
   self _trace: anId , ' clock rate ' , aNumber printString.
 
-PBSim >> crash: anId keepDisk: aBoolean
-  | node |
+"A crash of anId: aMode (#drop, #keep, #prefix or #any) decides the unsynced tail of its disk."
+PBSim >> crash: anId unsynced: aMode
+  | node mode tail kept |
   node := self nodeAt: anId.
   node isUp ifFalse: [^ Error signal: 'PBSim: ' , anId , ' is not running'].
+  (#(#drop #keep #prefix #any) includes: aMode) ifFalse: [
+    ^ Error signal: 'PBSim crash:unsynced: #drop, #keep, #prefix or #any, not ' , aMode printString].
+  mode := aMode = #any ifTrue: [#(#drop #keep #prefix) at: (random nextInt: 3)] ifFalse: [aMode].
+  tail := node disk unsyncedSize.
+  kept := mode = #drop
+    ifTrue: [0]
+    ifFalse: [mode = #keep ifTrue: [tail] ifFalse: [(random nextInt: tail + 1) - 1]].
   node crash.
-  aBoolean ifTrue: [node disk dropUnsynced] ifFalse: [node disk wipe].
-  self _trace: anId , ' crash' , (aBoolean ifTrue: [', disk kept'] ifFalse: [', disk lost']).
+  node disk keepUnsynced: kept.
+  self _trace: anId , ' crash (' , mode , '), ' , kept printString , ' of ' , tail printString , ' unsynced entries kept'.
+
+"keepDisk: true is the #drop crash (power loss); false loses the whole disk."
+PBSim >> crash: anId keepDisk: aBoolean
+  aBoolean ifTrue: [^ self crash: anId unsynced: #drop].
+  self crash: anId unsynced: #drop.
+  (self nodeAt: anId) disk wipe.
+  self _trace: anId , ' disk lost'.
 
 PBSim >> restart: anId
   | node |
@@ -451,12 +544,13 @@ PBSim >> commit: aToken at: anId
   self _trace: anId , ' commit ' , aToken printString.
   self _schedule: #dispatch node: node payload: (PBPermitWanted waiter: { 'permit'. aToken }) at: now.
 
-"Runs the earliest pending event (one of those due at once, drawn), then the checker; false
- when nothing is pending."
+"Runs the earliest due event (one of those due at once, drawn), then the checker; false when
+ nothing is due (the queue is empty, or holds only timers of paused clocks)."
 PBSim >> step
   | best due event |
-  queue isEmpty ifTrue: [^ false].
-  best := queue inject: (queue first at: 1) into: [:m :e | m min: (e at: 1)].
+  best := nil.
+  queue do: [:e | ((e at: 1) notNil and: [best isNil or: [(e at: 1) < best]]) ifTrue: [best := e at: 1]].
+  best isNil ifTrue: [^ false].
   due := queue select: [:e | (e at: 1) = best].
   event := due size = 1 ifTrue: [due first] ifFalse: [due at: (random nextInt: due size)].
   queue := queue reject: [:e | e == event].
@@ -473,23 +567,27 @@ PBSim >> runUntil: aBlock steps: n
     self step ifFalse: [^ aBlock value]].
   ^ aBlock value.
 
-"Heals the network, ends the faults, runs until nothing is pending or n steps ran, then checks
- S4 and the unknown commits."
+"Heals the network, ends the faults, runs until the queue is empty or n steps ran, then checks
+ the committed chains (checkConverged). Answers whether the queue emptied: false means the
+ checks ran on a cluster still busy."
 PBSim >> converge: n
+  | quiet |
   self heal.
   faults := PBSimFaults none.
-  self runUntil: [queue isEmpty] steps: n.
+  quiet := self runUntil: [queue isEmpty] steps: n.
+  self _trace: (quiet ifTrue: ['converge: quiet'] ifFalse: ['converge: still busy after ' , n printString , ' steps']).
   checker checkConverged.
+  ^ quiet.
 
 "--- the scheduler ---"
 
 PBSim >> _trace: aText
   lines add: 't=' , now printString , ' ' , aText.
 
-"{ at. seq. kind. node id. incarnation gen. payload }"
+"A queue entry { at (nil: not due). kind. node id. incarnation gen. payload }: an Array the
+ rate changes of #timer entries update in place."
 PBSim >> _schedule: aKind node: aNode payload: aPayload at: aTime
-  seq := seq + 1.
-  queue add: { aTime. seq. aKind. aNode id. aNode gen. aPayload }.
+  queue add: (Array with: aTime with: aKind with: aNode id with: aNode gen with: aPayload).
 
 PBSim >> _start: aNode
   | inc |
@@ -500,23 +598,33 @@ PBSim >> _start: aNode
   self _schedule: #dispatch node: aNode payload: PBStartNode new at: now.
 
 PBSim >> _run: anEvent
-  | kind node |
-  kind := anEvent at: 3.
-  node := self nodeAt: (anEvent at: 4).
-  kind = #deliver ifTrue: [^ self _deliver: (anEvent at: 6) to: node].
-  (node isUp and: [node gen = (anEvent at: 5)]) ifFalse: [
-    ^ self _trace: node id , ' gone, dropped ' , kind , ' ' , (anEvent at: 6) printString].
-  kind = #dispatch ifTrue: [^ self _dispatch: (anEvent at: 6) at: node].
-  kind = #accept ifTrue: [^ self _accept: (anEvent at: 6) at: node].
-  kind = #sync ifTrue: [^ self _syncThrough: ((anEvent at: 6) at: 1) step: ((anEvent at: 6) at: 2) at: node].
+  | kind node payload |
+  kind := anEvent at: 2.
+  node := self nodeAt: (anEvent at: 3).
+  payload := anEvent at: 5.
+  kind = #deliver ifTrue: [^ self _deliver: payload to: node].
+  (node isUp and: [node gen = (anEvent at: 4)]) ifFalse: [
+    ^ self _trace: node id , ' gone, dropped ' , kind , ' ' , payload printString].
+  kind = #dispatch ifTrue: [^ self _dispatch: payload at: node].
+  kind = #timer ifTrue: [^ self _dispatch: (payload at: 2) at: node].
+  kind = #accept ifTrue: [^ self _accept: node lane removeFirst at: node].
+  kind = #sync ifTrue: [^ self _syncThrough: (payload at: 1) step: (payload at: 2) at: node].
+  kind = #reply ifTrue: [^ self _reply: (payload at: 2) at: node syncedThrough: (payload at: 1)].
   ^ Error signal: 'PBSim: unknown event kind ' , kind printString.
 
 PBSim >> _dispatch: anEvent at: aNode
-  | step |
-  self _trace: aNode id , ' dispatch ' , anEvent printString.
-  step := rules dispatch: anEvent in: aNode state now: (aNode clock localAt: now).
+  | step local |
+  local := aNode clock localAt: now.
+  self _trace: aNode id , ' dispatch ' , anEvent printString , ' [clock ' , local printString , ']'.
+  step := rules dispatch: anEvent in: aNode state now: local.
   aNode state: step state.
   self _apply: step effects at: aNode.
+
+"Decides the next step of aNode's lane only when no step is between its decision and its reply."
+PBSim >> _runLane: aNode
+  (aNode isLaneBusy or: [aNode lane isEmpty]) ifTrue: [^ self].
+  aNode laneBusy: true.
+  self _schedule: #accept node: aNode payload: nil at: now.
 
 PBSim >> _accept: anEvent at: aNode
   | step last |
@@ -530,18 +638,22 @@ PBSim >> _accept: anEvent at: aNode
     self _trace: aNode id , '   append ' , append printString.
     checker noteAppend: append.
     append sync ifTrue: [last := index]].
+  aNode owe: last.
   self _schedule: #sync node: aNode payload: { last. step } at: now.
 
-"The sync of an acceptor step: the disk through anIndex, then the reply."
+"The sync of an acceptor step: the disk through anIndex; the reply is the next event."
 PBSim >> _syncThrough: anIndex step: aStep at: aNode
   aNode disk syncThrough: anIndex.
-  self _reply: aStep at: aNode syncedThrough: anIndex.
+  self _trace: aNode id , ' synced through ' , anIndex printString.
+  self _schedule: #reply node: aNode payload: { anIndex. aStep } at: now.
 
 PBSim >> _reply: aStep at: aNode syncedThrough: anIndex
-  self _trace: aNode id , ' reply after the sync through ' , anIndex printString.
-  checker replyAt: aNode needs: anIndex.
+  self _trace: aNode id , ' reply'.
+  checker replyAt: aNode.
   self _apply: aStep reply at: aNode.
   self _schedule: #dispatch node: aNode payload: (PBAcceptorDecided step: aStep) at: now.
+  aNode laneBusy: false.
+  self _runLane: aNode.
 
 PBSim >> _apply: anArray at: aNode
   current := aNode.
@@ -583,10 +695,14 @@ PBSim >> applySend: aSend
     self _schedule: #deliver node: to payload: { current id. bytes. aSend message type } at: at].
 
 PBSim >> applyToAcceptor: aToAcceptor
-  self _schedule: #accept node: current payload: aToAcceptor event at: now.
+  current lane addLast: aToAcceptor event.
+  self _runLane: current.
 
+"A timer keeps its deadline on the node's clock (clockRate:rate: moves it in virtual time)."
 PBSim >> applyTimer: aTimer
-  self _schedule: #dispatch node: current payload: aTimer fired at: (current clock globalAfter: aTimer after from: now).
+  | deadline |
+  deadline := (current clock localAt: now) + aTimer after.
+  self _schedule: #timer node: current payload: { deadline. aTimer fired } at: (current clock globalAt: deadline).
 
 PBSim >> applySettle: aSettle
   self _settle: aSettle waiter outcome: aSettle outcome at: current.
@@ -629,9 +745,9 @@ PBSim >> _settle: aWaiter outcome: anOutcome at: aNode
     ^ self _schedule: #dispatch node: aNode
       payload: (PBReplicateWanted permission: permission root: root waiter: { 'replicate'. token. permission }) at: now].
   stage = 'replicate' ifTrue: [
-    self _end: token as: (anOutcome = #committed
-      ifTrue: [#acknowledged]
-      ifFalse: [anOutcome = #unknown ifTrue: [#unknown] ifFalse: [#failed]]).
+    self _end: token as: ((PBDoneReport outcomes includes: anOutcome)
+      ifTrue: [anOutcome = #committed ifTrue: [#acknowledged] ifFalse: [anOutcome]]
+      ifFalse: [#failed]).
     ^ self _schedule: #dispatch node: aNode
       payload: (PBDoneReport permission: permission
         outcome: ((PBDoneReport outcomes includes: anOutcome) ifTrue: [anOutcome] ifFalse: [#none])) at: now].

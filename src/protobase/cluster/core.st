@@ -93,10 +93,16 @@ PBCoreValue subclass: #PBCoreEvent.
 PBCoreEvent >> dispatchWith: aCore in: aNodeState now: t
   ^ self subclassResponsibility.
 
-"Sends aCore the acceptor rule of this event's class: only a received message and a start reach
- an acceptor; any other event is PBValidationError."
+"Whether events of this class go to a node's acceptor (PBToAcceptor, accept:in:now:): false
+ here. A module that adds an acceptor event defines it true on its class side and the event's
+ acceptWith:in:now:, without editing this module."
+PBCoreEvent class >> isAcceptorEvent
+  ^ false.
+
+"Sends aCore the acceptor rule of this event's class; an event that is no acceptor event is
+ PBValidationError."
 PBCoreEvent >> acceptWith: aCore in: anAcceptorState now: t
-  ^ PBValidationError signal: 'An acceptor takes a PBReceived or a PBStartNode, not ' , self printString.
+  ^ PBValidationError signal: 'An acceptor takes no ' , self printString , ' (its class is not an acceptor event)'.
 
 "--- PBReceived ---"
 
@@ -107,6 +113,9 @@ PBReceived class >> message: aMessage
   (aMessage isKindOf: PBClusterMessage) ifFalse: [
     ^ PBValidationError signal: 'PBReceived: a message is a PBClusterMessage, not ' , aMessage printString].
   ^ self basicNew _setMessage: aMessage.
+
+PBReceived class >> isAcceptorEvent
+  ^ true.
 
 PBReceived >> _setMessage: aMessage
   "Runs once, on a fresh instance."
@@ -157,6 +166,9 @@ PBTimerFired >> printOn: aStream
 "--- PBStartNode, PBStopNode, PBRejoinWanted ---"
 
 PBCoreEvent subclass: #PBStartNode.
+
+PBStartNode class >> isAcceptorEvent
+  ^ true.
 
 PBStartNode >> dispatchWith: aCore in: aNodeState now: t
   ^ aCore dispatchStartNode: self in: aNodeState now: t.
@@ -367,10 +379,11 @@ PBSend >> printOn: aStream
 
 PBEffect subclass: #PBToAcceptor instanceVariableNames: 'event'.
 
-"Hand anEvent (a PBReceived or a PBStartNode) to this node's own acceptor (CC1)."
+"Hand anEvent, an event whose class isAcceptorEvent (PBReceived, PBStartNode, and those later
+ modules add), to this node's own acceptor (CC1)."
 PBToAcceptor class >> event: anEvent
-  ((anEvent isKindOf: PBReceived) or: [anEvent isKindOf: PBStartNode]) ifFalse: [
-    ^ PBValidationError signal: 'PBToAcceptor: an acceptor takes a PBReceived or a PBStartNode, not ' , anEvent printString].
+  ((anEvent isKindOf: PBCoreEvent) and: [anEvent class isAcceptorEvent]) ifFalse: [
+    ^ PBValidationError signal: 'PBToAcceptor: an acceptor event is one whose class isAcceptorEvent, not ' , anEvent printString].
   ^ self basicNew _setEvent: anEvent.
 
 PBToAcceptor >> _setEvent: anEvent
@@ -814,7 +827,7 @@ PBCoordinatorCore >> dispatch: anEvent in: aNodeState now: t
     ^ PBUnexpectedError signal: 'The rule for ' , anEvent printString , ' answered ' , step printString , ', not a PBStep'].
   ^ step.
 
-"The step of the acceptor of anAcceptorState for anEvent (a PBReceived or a PBStartNode) at t:
+"The step of the acceptor of anAcceptorState for anEvent (an acceptor event) at t:
  a PBAcceptorStep. A rule that answers anything else is PBUnexpectedError."
 PBCoordinatorCore >> accept: anEvent in: anAcceptorState now: t
   | step |
