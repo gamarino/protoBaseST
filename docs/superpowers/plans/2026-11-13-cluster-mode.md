@@ -520,6 +520,11 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:signals:
 - Produces (immutable values; every "with" answers a new value):
   - `PBGrantState class >> initial: aConfig now: t` (grace end = t + startupGrace);
     `restore: aLoggedRoots` (max of the logged promise and the accepted label; reads no clock);
+    `restore: aTerm seen: aSeen` (lease.py `restore(term, seen=)`, coordinator.py:1434: the
+    rejoin's form, `termsSeen` rising only to `min(seen, term)`; consumed by Task 16);
+    `promise: aTerm` → `{ newState. endedTerm }` (lease.py:155-167, `PeerGrants.promise`, R78a:
+    a rejoin witness promises the ballot, ending a grant of a lower term; called from
+    `_on_ballot_query`, coordinator.py:1874, so consumed by Task 16's witness side);
     `decideRequest: aHolder inc: anInc term: aTerm now: t config: c`
     → `PBGrantDecision` (`verdict` `#grant | #reject`, `reason` (the wire strings of
     `lease.py`/`coordinator.py`, verbatim: `granted bad_ballot starting stale_term busy term_taken`),
@@ -528,7 +533,8 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:signals:
     ended without its holder's release, 0 when none: the node is suspect for it), `newState`);
     `renew:inc:term:now:config:`; `release:inc:term:now:` → `{ newState. endedTerm }` (settles
     an expired grant first, closes the term at this receiver);
-    `highestSeen`, `highestGranted`, `grantedTop`, `activeGrant` (a `PBActiveGrant`: `holder inc
+    `highestSeen`, `termsSeen` (lease.py `terms_seen`, R51: lease activity only; Task 10's query
+    answers use it), `highestGranted`, `grantedTop`, `activeGrant` (a `PBActiveGrant`: `holder inc
     term expiry`, or nil), `isStarting: t`.
   - `PBAttempt class >> term: t rid: r sentAt: s voters: v` (`needed` = v // 2 + 1); `withGrant: peer
     root: aRoot committed: aRoot certain: aBoolean`, `withReject: peer reason: r highest: h
@@ -536,7 +542,9 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:signals:
     `state` (`#pending #won #lost`), `bestRoot: ownRootOrNil suspect: aBoolean` →
     `{PBLabeledRoot-or-nil. certain}` (CP 1.5 step 5: highest in root order of the granters' roots
     and the requester's own; certain when every granter knows a root, none is suspect and the
-    requester is not), `busyRemaining`, `highestSeen`, `needed`, `committedRoots`.
+    requester is not), `busyRemaining`, `highestSeen`, `needed`, `replies` (R39's straggler
+    rule: `replies >= needed`), `committedRoots`, `validUntil: aConfig` (`sentAt + belief`,
+    lease.py `valid_until`).
   - `PBLease class >> term: t validUntil: v root: r certain: c` with `validUntil = sentAt +
     belief` **from the send** (L5); `remainingAt: now`, `isValidAt: now`.
   - `PBPermission class >> term: t seq: s rid: r owner: anId root: aRoot certain: c sentAt: aSent
@@ -636,7 +644,15 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   (log without kind 4), `bad_ballot`, `starting`, `stale_term`, `busy` (with remaining),
   `term_taken`, `promise_failed` (an append failure withdraws the grant). A grant answers `promiseToLog` on every grant, renewals included: the
   scenario `renew keeps the term without a log write` counts real acceptor-log writes (the
-  `PBSimDisk` appends), not `promiseToLog` or `PBLogAppend` effects. `vs` mismatch drops
+  `PBSimDisk` appends), not `promiseToLog` or `PBLogAppend` effects. A request, renewal or
+  release from a sender that is not a member is dropped before `decideRequest:`/`renew:`
+  (`rankOf:` signals `PBValidationError` for it; proto_db drops it in the dispatcher). A query
+  answer's `promised` is `max(termsSeen, accepted label)` (coordinator.py:1852, 1884), 0 when
+  `state` is `unknown`. `acceptStart:in:now:` builds the grace with `PBGrantState initial:now:`
+  only when the node starts; a re-attach of a running node only `restore:`s
+  (coordinator.py:977 versus 1134: the grace is not restarted). The wire `remaining` is a
+  number of seconds (`#number`, a float in proto_db): the shell converts it to and from the
+  core's integer microseconds (Tasks 10 and 20). `vs` mismatch drops
   the request and counts `config_mismatches`; another `inc` than the active grant's is a new
   holder.
 - Scenario families (proto_db `test_cluster_lease`, `_terms`, `_renewal`, `_voters`):
@@ -673,7 +689,10 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   renew at half the belief left while there is demand; idle end after `idleEnd` without demand;
   `ownerIdleRelease`; releases carry the committed root, `certain`, `next` (the member waiting
   longest), `more`; `want` and `_TURN_SILENCE` deferral (D-LIVE-1); owner hint learnt only from
-  messages proving a term was won; incarnation checks on every reply (L12).
+  messages proving a term was won; incarnation checks on every reply (L12); a reply from a
+  member that is not a voter is never recorded with `withGrant:`/`withReject:` (`PBAttempt`
+  does not filter, as proto_db's `LeaseAttempt`; `_on_reply` drops it, coordinator.py:2001, D54);
+  the lease's end is `PBAttempt validUntil:`.
 - Scenario families (`test_cluster_terms`, `_renewal`, `_fairness`, `_coordinator`): `one
   owner per term under drop/dup/reorder` (seeds 1-200), `two proposers never share a ballot`,
   `a grant delayed past the belief is not a win` (L5, plant `PlantWindowFromWin` must fail),
@@ -869,7 +888,11 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   directory); a root the storage cannot read leaves the node rejoining with
   `rejoin_blocked` in stats. `forceRejoin` (operator's decision; writes the marker after a
   plain round, as `force_rejoin()`). `needsConfirmation` true after every attach, cleared by
-  the first permission round (L18). No code path waits for time (L13).
+  the first permission round (L18). No code path waits for time (L13). The grant-state
+  transitions are Task 8's: the witness promises a ballot with `PBGrantState promise:`
+  (ending a lower grant: suspect for `endedTerm`), and the rejoining node adopts what it learnt
+  with `restore:seen:` (the floor every term and label learnt, `seen` the promises only), so
+  `termsSeen` stays 0 for a cluster's first start (R51).
 - Scenario families (`test_cluster_rejoin`, `_rejoin_fresh`, `_rejoin_records`): the R78a
   schedule (wiped node's timer 1.3× fast) never loses an acknowledged commit, and the plant
   `PlantRejoinByWaiting` (waits `restartGrace` instead of the ballot) makes it fail; late first

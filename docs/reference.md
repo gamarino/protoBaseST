@@ -375,23 +375,34 @@ For tests, tools and readers of the format. An application does not need them.
   rows `{ name. default. what it drives }`.
 - **Lease values** (`cluster/lease.st`): `proto_db`'s `lease.py` as immutable values; time is
   the argument `now:` in microseconds and nothing reads a clock. `PBGrantState initial:now:`
-  (refuses every request until `now + startupGrace`) answers `restore:` (the logged promise
-  and the accepted root's label count as granted), `decideRequest:inc:term:now:config:` and
-  `renew:inc:term:now:config:` (a `PBGrantDecision`: `verdict` `#grant` or `#reject`, `reason`
-  the wire string `'granted'`, `'bad_ballot'`, `'starting'`, `'stale_term'`, `'busy'` or `'term_taken'`,
-  `highest`, `remaining`, `promiseToLog` (the term of a grant, `nil` on a refusal), `endedTerm`
-  (a grant ended without its holder's release, 0 when none) and `newState`),
-  `release:inc:term:now:` (`{ newState. endedTerm }`; closes the term here), `highestSeen`,
-  `highestGranted`, `grantedTop`, `activeGrant` (a `PBActiveGrant`: `holder`, `inc`, `term`,
-  `expiry`; or `nil`) and `isStarting:`. `PBAttempt term:rid:sentAt:voters:` answers
-  `withGrant:root:committed:certain:`, `withReject:reason:highest:remaining:` (a peer counts once),
-  `state` (`#pending`, `#won` at `voters // 2 + 1` grants, `#lost` past reach), `needed`,
-  `busyRemaining`, `highestSeen`, `committedRoots` and `bestRoot:suspect:` (`{ root. certain }`:
-  the highest root in root order of the granters' and the requester's own). `PBLease
-  term:validUntil:root:certain:` (`validUntil` is the request's send plus the belief, never the
-  win) answers `remainingAt:`, `isValidAt:`, `term`, `root`, `isCertain`. `PBPermission
+  builds the state of a peer that refuses every request until `now + startupGrace`. A state
+  answers:
+  - `restore:` (a `PBLoggedRoots`: the logged promise and the accepted root's label count as
+    granted) and `restore:seen:` (a term, of which only the second argument is lease activity:
+    a rejoin's form);
+  - `promise:` (a rejoin's ballot: `{ newState. endedTerm }`, ending a grant of a lower term);
+  - `decideRequest:inc:term:now:config:` and `renew:inc:term:now:config:`, each answering a
+    `PBGrantDecision`: `verdict` `#grant` or `#reject`, `reason` the wire string `'granted'`,
+    `'bad_ballot'`, `'starting'`, `'stale_term'`, `'busy'` or `'term_taken'`, `highest`,
+    `remaining`, `promiseToLog` (the term of a grant, `nil` on a refusal), `endedTerm` (a grant
+    ended without its holder's release, 0 when none) and `newState`. The holder must be a
+    member (`PBValidationError` otherwise);
+  - `release:inc:term:now:` (`{ newState. endedTerm }`; closes the term here);
+  - `highestSeen`, `termsSeen` (lease activity only, as terms_seen of `proto_db`),
+    `highestGranted`, `grantedTop`, `activeGrant` (a `PBActiveGrant`: `holder`, `inc`, `term`,
+    `expiry`; or `nil`) and `isStarting:`.
+
+  `PBAttempt term:rid:sentAt:voters:` answers `withGrant:root:committed:certain:`,
+  `withReject:reason:highest:remaining:` (a peer counts once), `state` (`#pending`, `#won` at
+  `voters // 2 + 1` grants, `#lost` past reach), `needed`, `replies`, `busyRemaining`,
+  `highestSeen`, `committedRoots`, `validUntil:` (a configuration: the send plus the belief,
+  never the win) and `bestRoot:suspect:` (`{ root. certain }`: the highest root in root order
+  of the granters' and the requester's own). `PBLease term:validUntil:root:certain:` answers
+  `remainingAt:`, `isValidAt:`, `term`, `root`, `isCertain`. `PBPermission
   term:seq:rid:owner:root:certain:sentAt:valid:` is a `PBLease` valid until the send of its
   request plus the owner's `valid:`, with `seq`, `rid`, `owner` and `after` (`nil` at depth 0).
+  The constructors refuse a missing or ill-typed term, holder, seq or time
+  (`PBValidationError`).
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
   `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered

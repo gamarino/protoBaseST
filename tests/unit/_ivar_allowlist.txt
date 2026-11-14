@@ -61,7 +61,7 @@ PBAcceptorLog>>_setPath:lock:log:promised:failed:
 PBClusterConfig>>_setMembership:nodeId:durations:authKey:seed:transport:clock:
 PBActiveGrant>>_setHolder:inc:term:expiry:
 PBGrantDecision>>_setVerdict:reason:highest:remaining:promiseToLog:endedTerm:newState:
-PBGrantState>>_setHighest:grantedMax:grantedTop:grant:graceEnd:
+PBGrantState>>_setHighest:seen:grantedMax:grantedTop:grant:graceEnd:
 PBAttempt>>_setTerm:rid:sentAt:voters:grants:rejects:highestSeen:
 PBLease>>_setTerm:validUntil:root:certain:
 PBPermission>>_setSeq:rid:owner:

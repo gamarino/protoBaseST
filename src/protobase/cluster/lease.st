@@ -40,6 +40,10 @@ Import from: 'protobase/cluster/config'.
 Object subclass: #PBActiveGrant instanceVariableNames: 'holder inc term expiry'.
 
 PBActiveGrant class >> holder: aHolder inc: anInc term: aTerm expiry: anExpiry
+  (aHolder isString and: [aHolder notEmpty]) ifFalse: [
+    ^ PBValidationError signal: 'PBActiveGrant: a holder is a node id, not ' , aHolder printString].
+  ({ anInc. aTerm. anExpiry } allSatisfy: [:x | x isInteger]) ifFalse: [
+    ^ PBValidationError signal: 'PBActiveGrant: inc, term and expiry are Integers'].
   ^ self basicNew _setHolder: aHolder inc: anInc term: aTerm expiry: anExpiry.
 
 PBActiveGrant >> _setHolder: aHolder inc: anInc term: aTerm expiry: anExpiry
@@ -108,32 +112,48 @@ PBGrantDecision >> newState
 
 "=== PBGrantState ============================================================"
 
-"highest: the highest term seen in a request or a release; grantedMax: the highest term granted
+"highest: the highest term seen in a request or a release, or restored as a floor; seen: the
+ highest term of lease activity (requests, releases, promises: proto_db terms_seen), which a
+ rejoin's floor of root labels does not raise; grantedMax: the highest term granted
  or closed here; grantedTop: the highest term actually granted here (the ballot a replicated
  root must not be below); grant: the PBActiveGrant, or nil; graceEnd: the end of the startup
  grace. A grant whose expiry has passed stays in grant until a rule settles it: every rule
  settles first, as proto_db's _settle."
-Object subclass: #PBGrantState instanceVariableNames: 'highest grantedMax grantedTop grant graceEnd'.
+Object subclass: #PBGrantState instanceVariableNames: 'highest seen grantedMax grantedTop grant graceEnd'.
 
 "The state of a peer started at t: nothing granted, every request refused until t + startupGrace."
 PBGrantState class >> initial: aConfig now: t
-  ^ self basicNew _setHighest: 0 grantedMax: 0 grantedTop: 0 grant: nil graceEnd: t + aConfig startupGrace.
+  t isInteger ifFalse: [^ PBValidationError signal: 'PBGrantState: now is an Integer of microseconds, not ' , t printString].
+  ^ self basicNew _setHighest: 0 seen: 0 grantedMax: 0 grantedTop: 0 grant: nil graceEnd: t + aConfig startupGrace.
 
-PBGrantState >> _setHighest: aHighest grantedMax: aMax grantedTop: aTop grant: aGrant graceEnd: anEnd
+PBGrantState >> _setHighest: aHighest seen: aSeen grantedMax: aMax grantedTop: aTop grant: aGrant graceEnd: anEnd
   "Runs once, on a fresh instance."
   graceEnd isNil ifFalse: [^ PBUserError signal: 'PBGrantState is immutable'].
   highest := aHighest.
+  seen := aSeen.
   grantedMax := aMax.
   grantedTop := aTop.
   grant := aGrant.
   graceEnd := anEnd.
   ^ self.
 
-PBGrantState >> _highest: aHighest grantedMax: aMax grantedTop: aTop grant: aGrant
-  ^ self class basicNew _setHighest: aHighest grantedMax: aMax grantedTop: aTop grant: aGrant graceEnd: graceEnd.
+PBGrantState >> _highest: aHighest seen: aSeen grantedMax: aMax grantedTop: aTop grant: aGrant
+  ^ self class basicNew _setHighest: aHighest seen: aSeen grantedMax: aMax grantedTop: aTop grant: aGrant graceEnd: graceEnd.
+
+"A term (a positive Integer) or PBValidationError."
+PBGrantState >> _checkTerm: aTerm
+  (aTerm isInteger and: [aTerm > 0]) ifFalse: [
+    ^ PBValidationError signal: 'PBGrantState: a term is a positive Integer, not ' , aTerm printString].
+  ^ aTerm.
 
 PBGrantState >> highestSeen
   ^ highest.
+
+"The highest term of lease activity this peer knows of (proto_db terms_seen): 0 means it knows
+ of no lease ever requested in this cluster (a rejoin's first-start test, R51). The promised of
+ a query answer is max(termsSeen, accepted label)."
+PBGrantState >> termsSeen
+  ^ seen.
 
 PBGrantState >> highestGranted
   ^ grantedMax.
@@ -153,12 +173,39 @@ PBGrantState >> isStarting: t
  coordinator.py _attach_locked with max(promised, accepted label)): that term, and every lower
  one, counts as granted here. It reads no clock, as proto_db's."
 PBGrantState >> restore: aLoggedRoots
-  | term |
-  term := aLoggedRoots promise max: (aLoggedRoots accepted isNil ifTrue: [0] ifFalse: [aLoggedRoots accepted label]).
-  ^ self _highest: (highest max: term) grantedMax: (grantedMax max: term) grantedTop: (grantedTop max: term) grant: grant.
+  ^ self _restore: (aLoggedRoots promise max: (aLoggedRoots accepted isNil ifTrue: [0] ifFalse: [aLoggedRoots accepted label]))
+    seen: nil.
+
+"Honours aTerm as restore: does, of which only aSeen is evidence of lease activity (proto_db
+ restore(term, seen=...)): a rejoin passes the promises it learnt as aSeen, and the root labels
+ that also raise its floor only in aTerm, so termsSeen rises to min(aSeen, aTerm)."
+PBGrantState >> restore: aTerm seen: aSeen
+  self _checkTerm: aTerm.
+  (aSeen isInteger and: [aSeen >= 0]) ifFalse: [
+    ^ PBValidationError signal: 'PBGrantState: seen is an Integer >= 0, not ' , aSeen printString].
+  ^ self _restore: aTerm seen: aSeen.
+
+PBGrantState >> _restore: aTerm seen: aSeenOrNil
+  ^ self _highest: (highest max: aTerm) seen: (seen max: (aSeenOrNil isNil ifTrue: [aTerm] ifFalse: [aSeenOrNil min: aTerm]))
+    grantedMax: (grantedMax max: aTerm) grantedTop: (grantedTop max: aTerm) grant: grant.
+
+"Promises aTerm without granting a lease (proto_db PeerGrants.promise, a rejoin's ballot, R78a):
+ every term at or below it is refused from now on, and a grant of a lower term ends here,
+ expired or not (as proto_db, which does not settle first). Answers { newState. endedTerm },
+ endedTerm the term of the grant this ended, else 0. The caller makes the promise durable
+ before it answers."
+PBGrantState >> promise: aTerm
+  | g ended |
+  self _checkTerm: aTerm.
+  g := grant.
+  ended := 0.
+  (g notNil and: [g term < aTerm]) ifTrue: [ended := g term. g := nil].
+  ^ { (self _highest: highest seen: seen grantedMax: grantedMax grantedTop: grantedTop grant: g) _restore: aTerm seen: nil.
+      ended }.
 
 "Decides aHolder's (incarnation anInc) request for aTerm at t (proto_db _decide, then
- PeerGrants.on_request without renew)."
+ PeerGrants.on_request without renew). aHolder must be a member (PBValidationError otherwise):
+ the caller drops a request from a non-member before it decides, as proto_db's dispatcher."
 PBGrantState >> decideRequest: aHolder inc: anInc term: aTerm now: t config: c
   ^ self _decide: aHolder inc: anInc term: aTerm now: t config: c renew: false.
 
@@ -171,7 +218,8 @@ PBGrantState >> renew: aHolder inc: anInc term: aTerm now: t config: c
   ^ self _decide: aHolder inc: anInc term: aTerm now: t config: c renew: true.
 
 PBGrantState >> _decide: aHolder inc: anInc term: aTerm now: t config: c renew: isRenew
-  | g ended seen reject |
+  | g ended top reject |
+  self _checkTerm: aTerm.
   aTerm \\ PBMembership maxMembers = (c membership rankOf: aHolder) ifFalse: [
     "Not this requester's ballot: granting it could give one term to two proposers. Decided
      before the grant rules, which it leaves untouched (coordinator.py _decide)."
@@ -182,25 +230,25 @@ PBGrantState >> _decide: aHolder inc: anInc term: aTerm now: t config: c renew: 
   (g notNil and: [t >= g expiry]) ifTrue: [ended := g term. g := nil].
   (g notNil and: [g holder = aHolder and: [g inc ~= anInc]]) ifTrue: [ended := g term. g := nil].
   "Every outcome records the term as seen (the finally of on_request)."
-  seen := highest max: aTerm.
+  top := highest max: aTerm.
   reject := [:aReason :aRemaining |
     PBGrantDecision verdict: #reject reason: aReason highest: highest remaining: aRemaining promiseToLog: nil
-      endedTerm: ended newState: (self _highest: seen grantedMax: grantedMax grantedTop: grantedTop grant: g)].
+      endedTerm: ended newState: (self _highest: top seen: (seen max: aTerm) grantedMax: grantedMax grantedTop: grantedTop grant: g)].
   t < graceEnd ifTrue: [^ reject value: 'starting' value: graceEnd - t].
   (isRenew and: [g notNil and: [g holder = aHolder and: [g term = aTerm and: [g inc = anInc]]]]) ifTrue: [
     ^ PBGrantDecision verdict: #grant reason: 'granted' highest: highest remaining: c leaseDuration promiseToLog: aTerm
-      endedTerm: 0 newState: (self _highest: seen grantedMax: grantedMax grantedTop: grantedTop
+      endedTerm: 0 newState: (self _highest: top seen: (seen max: aTerm) grantedMax: grantedMax grantedTop: grantedTop
         grant: (PBActiveGrant holder: aHolder inc: anInc term: aTerm expiry: t + c leaseDuration))].
   aTerm < highest ifTrue: [^ reject value: 'stale_term' value: 0].
   g notNil ifTrue: [
     (g holder = aHolder and: [g term = aTerm]) ifTrue: [
       "A duplicate: granted again, the promise never extended."
       ^ PBGrantDecision verdict: #grant reason: 'granted' highest: highest remaining: g expiry - t promiseToLog: aTerm
-        endedTerm: 0 newState: (self _highest: seen grantedMax: grantedMax grantedTop: grantedTop grant: g)].
+        endedTerm: 0 newState: (self _highest: top seen: (seen max: aTerm) grantedMax: grantedMax grantedTop: grantedTop grant: g)].
     g holder = aHolder ifFalse: [^ reject value: 'busy' value: g expiry - t]].
   aTerm <= grantedMax ifTrue: [^ reject value: 'term_taken' value: 0].
   ^ PBGrantDecision verdict: #grant reason: 'granted' highest: aTerm remaining: c leaseDuration promiseToLog: aTerm
-    endedTerm: ended newState: (self _highest: seen grantedMax: aTerm grantedTop: (grantedTop max: aTerm)
+    endedTerm: ended newState: (self _highest: top seen: (seen max: aTerm) grantedMax: aTerm grantedTop: (grantedTop max: aTerm)
       grant: (PBActiveGrant holder: aHolder inc: anInc term: aTerm expiry: t + c leaseDuration)).
 
 "Applies aHolder's release (or cancel) of aTerm from incarnation anInc at t (proto_db
@@ -209,11 +257,12 @@ PBGrantState >> _decide: aHolder inc: anInc term: aTerm now: t config: c renew: 
  endedTerm the term of a grant that had expired by t (the caller is suspect for it), else 0."
 PBGrantState >> release: aHolder inc: anInc term: aTerm now: t
   | g ended |
+  self _checkTerm: aTerm.
   g := grant.
   ended := 0.
   (g notNil and: [t >= g expiry]) ifTrue: [ended := g term. g := nil].
   (g notNil and: [g holder = aHolder and: [g term = aTerm and: [g inc = anInc]]]) ifTrue: [g := nil].
-  ^ { self _highest: (highest max: aTerm) grantedMax: (grantedMax max: aTerm) grantedTop: grantedTop grant: g. ended }.
+  ^ { self _highest: (highest max: aTerm) seen: (seen max: aTerm) grantedMax: (grantedMax max: aTerm) grantedTop: grantedTop grant: g. ended }.
 
 PBGrantState >> printOn: aStream
   aStream nextPutAll: 'PBGrantState(highest '; print: highest; nextPutAll: ', granted '; print: grantedTop;
@@ -229,6 +278,10 @@ Object subclass: #PBAttempt instanceVariableNames: 'term rid sentAt voters grant
 "An attempt for aTerm, request id r, sent at s (microseconds, the requester's clock), among v
  voters (learners excluded, D54)."
 PBAttempt class >> term: aTerm rid: r sentAt: s voters: v
+  (aTerm isInteger and: [aTerm > 0]) ifFalse: [
+    ^ PBValidationError signal: 'PBAttempt: a term is a positive Integer, not ' , aTerm printString].
+  (r isInteger and: [s isInteger]) ifFalse: [
+    ^ PBValidationError signal: 'PBAttempt: the rid and sentAt are Integers'].
   (v isInteger and: [v > 0]) ifFalse: [
     ^ PBValidationError signal: 'PBAttempt: the voters are a positive Integer, not ' , v printString].
   ^ self basicNew _setTerm: aTerm rid: r sentAt: s voters: v grants: #() rejects: #() highestSeen: aTerm.
@@ -259,6 +312,17 @@ PBAttempt >> rid
 
 PBAttempt >> sentAt
   ^ sentAt.
+
+"Peers that answered, granted or refused, the requester's own vote included (proto_db replies:
+ the straggler rule R39 waits once replies >= needed)."
+PBAttempt >> replies
+  ^ grants size + rejects size.
+
+"The end of a lease won by this attempt, on the requester's clock: the send + the belief of
+ aConfig (proto_db LeaseAttempt.valid_until, sent_at + lease_duration - drift_margin; L5: from
+ the send, never the win)."
+PBAttempt >> validUntil: aConfig
+  ^ sentAt + aConfig belief.
 
 "Grants needed to win: a majority of the voters, V // 2 + 1."
 PBAttempt >> needed
@@ -321,7 +385,17 @@ Object subclass: #PBLease instanceVariableNames: 'term validUntil root certain'.
  with the phase-1 value aRoot (a PBLabeledRoot or nil) and aBoolean (it can be trusted without
  a recovery round)."
 PBLease class >> term: aTerm validUntil: v root: aRoot certain: aBoolean
+  self _checkTerm: aTerm validUntil: v root: aRoot certain: aBoolean.
   ^ self basicNew _setTerm: aTerm validUntil: v root: aRoot certain: aBoolean.
+
+PBLease class >> _checkTerm: aTerm validUntil: v root: aRoot certain: aBoolean
+  (aTerm isInteger and: [aTerm > 0]) ifFalse: [
+    ^ PBValidationError signal: self name , ': a term is a positive Integer, not ' , aTerm printString].
+  v isInteger ifFalse: [^ PBValidationError signal: self name , ': validUntil is an Integer, not ' , v printString].
+  (aBoolean == true or: [aBoolean == false]) ifFalse: [
+    ^ PBValidationError signal: self name , ': certain is a Boolean, not ' , aBoolean printString].
+  (aRoot isNil or: [aRoot isClassObject not and: [aRoot class == PBLabeledRoot]]) ifFalse: [
+    ^ PBValidationError signal: self name , ': a root is a PBLabeledRoot or nil'].
 
 PBLease >> _setTerm: aTerm validUntil: v root: aRoot certain: aBoolean
   "Runs once, on a fresh instance."
@@ -363,6 +437,11 @@ PBLease subclass: #PBPermission instanceVariableNames: 'seq rid owner'.
  later, so it never outlasts the owner's lease here). aRoot is the base the owner sent; the base
  is certain only when known (H2 at DEPTH 0, where after is always nil)."
 PBPermission class >> term: aTerm seq: s rid: r owner: anOwner root: aRoot certain: aBoolean sentAt: aSent valid: v
+  ((s isInteger and: [s > 0]) and: [r isInteger and: [aSent isInteger and: [v isInteger]]]) ifFalse: [
+    ^ PBValidationError signal: 'PBPermission: seq is a positive Integer; rid, sentAt and valid are Integers'].
+  (anOwner isString and: [anOwner notEmpty]) ifFalse: [
+    ^ PBValidationError signal: 'PBPermission: an owner is a node id, not ' , anOwner printString].
+  self _checkTerm: aTerm validUntil: aSent + v root: aRoot certain: aBoolean.
   ^ (self basicNew _setTerm: aTerm validUntil: aSent + v root: aRoot certain: (aBoolean and: [aRoot notNil]))
     _setSeq: s rid: r owner: anOwner.
 
