@@ -436,22 +436,29 @@ For tests, tools and readers of the format. An application does not need them.
   arguments (`PBValidationError`). The deterministic simulator that drives it in the tests is
   test support (`tests/unit/_sim.st`), not part of the module.
 - **Acceptor rules** (`cluster/acceptor.st`): the acceptor side of `proto_db`'s coordinator as
-  rule methods of `PBCoordinatorCore`. `dispatchReceived:in:now:` drops a message whose sender is
-  not another member, drops a type of `fingerprintedTypes` whose vs is not this voter set's
-  fingerprint with `PBCount stat: 'config_mismatches'`, and hands the `acceptorLaneTypes`
-  (request, renew, release, query) to the acceptor (`PBToAcceptor`). `acceptReceived:in:now:`
-  routes them to `acceptRequest:in:now:` and `acceptRenew:in:now:` (a refusal of the state,
-  'fenced', 'learner', 'tier_failed', 'rejoining', else `PBGrantState`'s decision; a grant
-  of a term above `loggedPromise` appends one synced promise, and its grant carries the
-  accepted and committed roots and certain), `acceptRelease:in:now:` (frees the grant, closes
-  the term, suspect for an uncertain held release), `acceptQuery:in:now:` (a plain query's
-  answer: the state `'ok'`, `'empty'`, `'learner'` or `'unknown'`, promised max(`termsSeen`,
-  accepted label), 0 when unknown). `acceptStart:in:now:` appends the rejoined marker for a
-  learner or a lone voter whose log lacks it and rebuilds neither the grace nor the restore.
-  The acceptor events `PBSuspect term:` (`acceptSuspect:in:now:`: raises `suspectTerm`) and
-  `PBAppendFailed reason:` (`acceptAppendFailed:in:now:`: the tier fails, the first reason
-  kept). `wireSeconds:` converts microseconds to the wire's seconds (a reject's `remaining`).
-  `PBCount stat:` (`stat`; the shell implements applyCount:) and `PBAcceptorState >> loggedPromise`,
+  rule methods of `PBCoordinatorCore`. In `core.st`, `dispatchReceived:in:now:` drops a message
+  whose sender is not another member, drops a type of `fingerprintedTypes` whose vs is not this
+  voter set's fingerprint with `PBCount stat: 'config_mismatches'`, then calls the handler of the
+  type (`handlerFor:prefix:`: received<Type>:in:now:) when a module defines one;
+  `acceptReceived:in:now:` drops a non-member and this node itself and calls
+  accept<Type>:in:now:; `dispatchStartNode:in:now:` hands the start to the acceptor. Here,
+  `receivedRequest:in:now:`, `receivedRenew:in:now:`, `receivedRelease:in:now:` and
+  `receivedQuery:in:now:` hand the message to the acceptor (`PBToAcceptor`), which answers in
+  `acceptRequest:in:now:` and `acceptRenew:in:now:` (nothing when fenced; a refusal of the
+  state, 'learner', 'tier_failed', 'rejoining', else `PBGrantState`'s decision; a grant of a
+  term above `loggedPromise` appends one synced promise, its grant carries the accepted and
+  committed roots and certain, and it counts grants_given), `acceptRelease:in:now:` (dropped
+  when fenced; frees the grant, closes the term, suspect for an uncertain held release) and
+  `acceptQuery:in:now:` (a plain query's answer: the state `'ok'`, `'empty'`, `'learner'` or
+  `'unknown'`, promised max(`termsSeen`, accepted label), 0 when unknown; answered by the
+  acceptor, see [deviations.md](deviations.md#cluster-mode)). `acceptStart:in:now:` appends the
+  rejoined marker for a learner or a lone voter whose log lacks it and rebuilds neither the
+  grace nor the restore. The acceptor events `PBSuspect term:` (`acceptSuspect:in:now:`: raises
+  `suspectTerm`) and `PBAppendFailed reason:` (`acceptAppendFailed:in:now:`: the tier fails,
+  the first reason kept; the shell discards the step whose append failed). `wireSeconds:`
+  converts microseconds to the wire's seconds (a reject's `remaining`). `PBCount stat:`
+  (`stat`; the shell implements applyCount:), `PBAcceptorState >> log` (the identity of the
+  attached log), `loggedPromise` (the promise written to that log, 0 for another log) and
   `withGrants:suspectTerm:rejoined:tierFailed:loggedPromise:` are in `core.st`.
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and

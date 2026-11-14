@@ -1,4 +1,4 @@
-"EXPECT: ok 9"
+"EXPECT: ok 10"
 "The acceptor's phase-1 rules (cluster/acceptor.st) in the simulator (_sim.st), over seeds 1-40,
  with duplicated, delayed and reordered messages: each node starts over a log holding the
  rejoined marker (a cluster formed before), and the test injects the requests, renewals and
@@ -12,7 +12,11 @@
  higher request does not end the owner's renewals. (8) No grant is replied before its promise
  is synced: after a power loss of every node, each node's log holds every term it granted (and
  the simulator's checker runs after every step). (9) The plant PlantRenewStale (a renewal
- decided after the stale-term rule, proto_db's renew_stale) makes family 7 fail."
+ decided after the stale-term rule, proto_db's renew_stale) makes family 7 fail. (10) Started
+ over empty logs (proto_db start then _attach_locked): a one-member cluster's node and the
+ learner of four members each take one start step and log the rejoined marker, synced, and
+ serve; the three voters of four log nothing, take one start step each and refuse requests as
+ rejoining (their rejoin is Task 16's)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_sim'.
@@ -217,6 +221,30 @@ family at: 8 put: [:seed :rules |
   ((ids inject: 0 into: [:n :id | n + (rules repliesAt: id) size]) > 0 and: [bad isEmpty])
     ifTrue: [nil] ifFalse: ['seed ' , seed printString , ': a grant of ' , bad printString , ' not durable']].
 
+"(10) started over empty logs"
+family at: 9 put: [:seed :rules |
+  | s t solo starts entries |
+  starts := [:aSim :id | (aSim trace select: [:l | l includesSubstring: id , ' accept PBStartNode']) size].
+  entries := [:aSim :id | (aSim diskOf: id) loggedRoots entries collect: [:e | e kind]].
+  solo := PBSim seed: seed ids: #('n0') rules: rules options: Dictionary new.
+  solo faults: faults.
+  run value: solo.
+  t := PBSim seed: seed ids: four rules: rules options: Dictionary new.
+  t faults: faults.
+  run value: t.
+  t inject: (request value: t value: 'n0' value: 4096 value: 7) to: 'n1' at: g.
+  t inject: (request value: t value: 'n2' value: 4098 value: 9) to: 'n3' at: g + 100000.
+  run value: t.
+  ({ starts value: solo value: 'n0'. entries value: solo value: 'n0'. (solo diskOf: 'n0') syncedSize.
+     (solo nodeAt: 'n0') acceptor isRejoined.
+     four collect: [:id | starts value: t value: id]. four collect: [:id | entries value: t value: id].
+     (t diskOf: 'n3') syncedSize. four collect: [:id | (t nodeAt: id) acceptor isRejoined].
+     reasons value: rules value: 'n0' value: 'n1'. reasons value: rules value: 'n2' value: 'n3' }
+    = { 1. #(4). 1. true. #(1 1 1 1). #(#() #() #() #(4)). 1. #(false false false true).
+        #('rejoining') asSet. #('learner') asSet })
+    ifTrue: [nil] ifFalse: ['seed ' , seed printString , ': ' , (entries value: t value: 'n3') printString , ' '
+      , (four collect: [:id | starts value: t value: id]) printString]].
+
 one := (1 to: 8) asArray collect: [:k | failuresOf value: (family at: k) value: GrantRules].
 c that: 'grant then busy for another holder' is: (one at: 1) equals: #().
 c that: 'release ends busy at once' is: (one at: 2) equals: #().
@@ -226,6 +254,8 @@ c that: 'learner never grants' is: (one at: 5) equals: #().
 c that: 'renew keeps the term without a log write' is: (one at: 6) equals: #().
 c that: 'a refused higher request does not end the owner''s renewals' is: (one at: 7) equals: #().
 c that: 'no reply before the promise is synced' is: (one at: 8) equals: #().
+c that: 'started over empty logs, a lone voter and a learner log the rejoined marker, the voters rejoin'
+  is: (failuresOf value: (family at: 9) value: GrantRules) equals: #().
 
 "(9) The plant fails family 7 on every seed."
 two := failuresOf value: (family at: 7) value: PlantRenewStale.

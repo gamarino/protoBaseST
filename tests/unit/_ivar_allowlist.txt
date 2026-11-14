@@ -83,7 +83,7 @@ PBFence>>_setReason:
 PBStep>>_setState:effects:
 PBAcceptorStep>>_setState:appends:reply:
 PBNodeState>>_setConfig:inc:acceptorView:hints:proposer:ownership:waiters:suspectTerm:fenced:rejoin:nextRid:
-PBAcceptorState>>_setConfig:grants:accepted:committed:seqSeen:suspectTerm:rejoined:rejoinBallot:tierFailed:fenced:loggedPromise:
+PBAcceptorState>>_setConfig:grants:accepted:committed:seqSeen:suspectTerm:rejoined:rejoinBallot:tierFailed:fenced:log:loggedPromise:
 PBCount>>_setStat:
 PBSuspect>>_setTerm:
 PBAppendFailed>>_setReason:

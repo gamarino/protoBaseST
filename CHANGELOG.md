@@ -14,8 +14,13 @@
   tier fails, the unsynced grant is never replied). A reject's `remaining` is wire seconds
   (`wireSeconds:`). `core.st` gains the `PBCount` effect and `PBAcceptorState loggedPromise`;
   the simulator gains injected messages, pre-formed logs, append failures and counters.
-  Tested by `tests/unit/sim_grants.st` (seeds 1-40, plant `PlantRenewStale`) and
-  `tests/unit/cluster_acceptor_rules.st`.
+  The dispatcher's checks of `_route` live in `core.st`, which then calls the handler of the
+  message's type (`received<Type>:in:now:`, `accept<Type>:in:now:`); the start reaches the
+  acceptor; a fenced node sends nothing; every grant counts `grants_given`; `loggedPromise`
+  belongs to the log it was written to (`PBAcceptorState >> log`), and a step whose append fails
+  is discarded. A plain query is answered by the acceptor (`docs/deviations.md`).
+  Tested by `tests/unit/sim_grants.st` (seeds 1-40, empty-log starts, plant `PlantRenewStale`)
+  and `tests/unit/cluster_acceptor_rules.st`.
 - The coordinator core's vocabulary (`src/protobase/cluster/core.st`): `PBCoordinatorCore`
   (`dispatch:in:now:` answering a `PBStep`, `accept:in:now:` answering a `PBAcceptorStep`, one
   rule method per event chosen by double dispatch), the events (`PBReceived`, `PBTimerFired`,

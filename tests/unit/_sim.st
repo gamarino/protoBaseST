@@ -57,8 +57,9 @@ Script. inject: aMessage to: anId at: aTime delivers a message as if its sender 
 (framed with the sender's key; the faults apply), to drive the acceptors without a proposer.
 seed:ids:rules:options:logs: starts each node over a synced log (id -> an Array of
 PBLogAppend), as a member of a cluster formed before. failAppends: anId makes every later
-append of that node's acceptor fail: the step is not written, never synced nor replied, and its
-node's acceptor takes PBAppendFailed before the next event of its lane.
+append of that node's acceptor fail: the step is discarded (the acceptor keeps its state before
+it; nothing written, synced or replied), and the acceptor takes PBAppendFailed before the next
+event of its lane.
 
 Crashes. crash: id unsynced: aMode stops a node at once: its pending events and its acceptor
 lane are dropped (messages already sent stay in flight). The synced entries of its disk
@@ -668,12 +669,13 @@ PBSim >> _accept: anEvent at: aNode
   | step last |
   self _trace: aNode id , ' accept ' , anEvent printString.
   step := rules accept: anEvent in: aNode acceptor now: (aNode clock localAt: now).
-  aNode acceptor: step state.
   ((failing includes: aNode id) and: [step appends notEmpty]) ifTrue: [
-    self _trace: aNode id , '   append failed, the step is not replied'.
+    "The failed step is discarded: the acceptor keeps the state it had before it."
+    self _trace: aNode id , '   append failed, the step is discarded and not replied'.
     aNode lane addFirst: (PBAppendFailed reason: 'simulated append failure').
     aNode laneBusy: false.
     ^ self _runLane: aNode].
+  aNode acceptor: step state.
   last := 0.
   step appends do: [:append |
     | index |

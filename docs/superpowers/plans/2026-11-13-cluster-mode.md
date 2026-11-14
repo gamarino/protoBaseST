@@ -653,8 +653,10 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   the startup grace (`PBGrantState initial:now:`) and restoring the log (`restore:`), once, when
   the node starts; `acceptStart:in:now:` must rebuild neither, and a re-attach of a running node
   reuses the existing state (coordinator.py:977 versus 1134: the grace is not restarted). The wire `remaining` is a
-  number of seconds (`#number`, a float in proto_db): the shell converts it to and from the
-  core's integer microseconds (Tasks 10 and 20). `vs` mismatch drops
+  number of seconds (`#number`, a float in proto_db): the core converts it when it builds a
+  reject (`PBCoordinatorCore class >> wireSeconds:`, `(µs / 1000000) asFloat`, bit-exact with
+  Python's `µs / 1e6` below 2^53 µs); the inbound direction (a received reject's `remaining` to
+  µs for `PBAttempt withReject:`) is Task 11's. `vs` mismatch drops
   the request and counts `config_mismatches`; another `inc` than the active grant's is a new
   holder.
 - Scenario families (proto_db `test_cluster_lease`, `_terms`, `_renewal`, `_voters`):
@@ -684,6 +686,27 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
 - Produces: `PBCoordinatorCore` proposer methods (CP 1.5): local head-of-queue asks only;
   `ballotFor: aNodeState` (`ballotAfter:` of max(highest seen, hint, accepted label, committed
   label)); own vote through `PBToAcceptor` (CC1); `request` to the other voters with `vs`;
+  **Task 10 carry-overs:** (a) lift the acceptor's drop of this node's own messages
+  (`PBCoordinatorCore >> acceptReceived:in:now:` in `core.st`, the `_fromPeer:in:` check, which
+  also drops `from = nodeId`), so the own vote is decided by `acceptRequest:in:now:` as CC1 says,
+  and replace check 2 of `tests/unit/cluster_acceptor_rules.st` (which pins that drop). (b) How
+  the dispatcher learns its own vote, following proto_db (`_open_attempt` decides the own vote
+  with `_decide` and records it in the attempt; `_promise` then makes it durable and, on failure,
+  `granted_by.pop(self._node)` and `on_reject(self._node, "promise_failed", term, 0.0)`): the
+  acceptor's step for an own request answers no `PBSend` (a node never sends to itself); the
+  dispatcher reads the vote from the step handed back in `PBAcceptorDecided` (the grant or
+  reject message the step carries, a field this task adds to `PBAcceptorStep`), and when the
+  shell reports the step's append failed (`PBAppendFailed`, the step discarded) the dispatcher
+  records `withReject: nodeId reason: 'promise_failed' highest: term remaining: 0` (the shell
+  hands the dispatcher that outcome with the discarded step). (c) The inbound `remaining`: a
+  Float of seconds to Integer µs as `(seconds * 1000000) rounded`, the exact inverse of
+  `wireSeconds:` for every value it produces. (d) Message routing: add `received<Type>:in:now:`
+  handlers (grant, reject, answer, want, ...) next to acceptor.st's; never redefine
+  `dispatchReceived:in:now:` (core.st, it holds the peer and `vs` checks). Likewise extend
+  `dispatchStartNode:in:now:` (core.st) by keeping its `PBToAcceptor` start effect. (e)
+  `PBSuspect term:` (acceptor.st) has no product caller yet: the dispatcher emits it whenever
+  proto_db raises `_suspect_term` outside the acceptor (an abandoned term, Task 12; a
+  replication outcome it cannot know, Task 13), else it stays dead code and is removed;
   winning before `validUntil` measured from the send; losing: cancel with `release`
   (`held=false`), jittered back-off in `[backoffLow, backoffHigh]` drawn from the seeded
   `Random`, ended early by any release, `_WAKE_SPREAD`; once a majority answered an undecided
@@ -895,6 +918,11 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   (ending a lower grant: suspect for `endedTerm`), and the rejoining node adopts what it learnt
   with `restore:seen:` (the floor every term and label learnt, `seen` the promises only), so
   `termsSeen` stays 0 for a cluster's first start (R51).
+  Task 10 carry-over: the start reaches the acceptor (`dispatchStartNode:in:now:` in core.st
+  hands `PBStartNode` to `acceptStart:in:now:`), which marks a learner's or a lone voter's empty
+  log and leaves a voter with other voters rejoining; the rejoin starts from that start step,
+  and its own ballot query goes to `acceptQuery:in:now:` (which leaves `ballot` > 0 unanswered
+  until this task).
 - Scenario families (`test_cluster_rejoin`, `_rejoin_fresh`, `_rejoin_records`): the R78a
   schedule (wiped node's timer 1.3× fast) never loses an acknowledged commit, and the plant
   `PlantRejoinByWaiting` (waits `restartGrace` instead of the ballot) makes it fail; late first
@@ -1013,6 +1041,20 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
 - Produces:
   - `PBClusterCoordinator class >> nodeId: anId peers: anArray options: aDictionary`;
     `start` (opens nothing until a tier is attached: `_attach: aTier`), `stop`, `stats`
+    **Task 10 carry-overs:** (a) before a tier is attached, a request is answered with a
+    `reject` `no_storage` (counted `grants_refused_no_storage`) and a plain query with `state`
+    `unknown`, as proto_db (`_refusal`, `_witness_state`); the core has no acceptor state then,
+    so the shell (or a detached acceptor state this task adds) answers them. (b) A re-attach of
+    a running node (proto_db `_attach_locked` 1113-1121) keeps the lease activity (`grants`:
+    promises, terms seen, the grant running; `suspectTerm`) and takes `log`, `loggedPromise`,
+    `accepted`, `committed`, `rejoined` and `tierFailed` from the **new** log: `loggedPromise`
+    belongs to the log it was written to (`PBAcceptorState >> log`, proto_db
+    `_logged_promise[0] is tier`), so a renewal over the new log writes its promise again (L17).
+    (c) The acceptor shell discards a step whose append fails (keeps the state before it) and
+    hands the acceptor `PBAppendFailed`. (d) A fenced node sends nothing (proto_db `_enqueue`
+    drops lane messages once fenced; replicate and store get `ack(ok=false)`, Task 13): the
+    acceptor drops request, renew and release when `fenced`; the dispatcher's fence is this
+    task's. (e) `PBCount` effects (`config_mismatches`, `grants_given`) feed `stats` (CC24).
     (CC24), `forceRejoin`, `committedRoot` (`PBLabeledRoot` from an `Atom`, never a message),
     `committedEpoch`, `needsConfirmation`, `isFenced`, `nodeId`, `config`.
   - For the round runner (all answer `Future`s, never wait): `_permit` → `PBPermission`

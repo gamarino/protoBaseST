@@ -274,6 +274,13 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   network must still be trusted for confidentiality. Encrypted links would need a TLS server in
   protoST. `proto_db`'s documentation does not state the assumption; proposing that it does is
   Q7(b) of the design spec.
+- **Plain queries on the acceptor lane (timing only, CC2).** `proto_db`'s dispatcher answers a
+  plain query (`ballot` 0) at once from its in-memory state (`_route`); only a ballot query goes
+  to the acceptor lane. protoBaseST's dispatcher holds no acceptor state (CC2), so the acceptor
+  answers every query from its own state, after the steps queued before it. The fields are the
+  same (`promised` is max(terms seen, accepted label)); the answer can come later, and it reports
+  only what is durable, where `proto_db`'s may count a promise not yet synced. *Cost:* a recovery
+  round or a rejoin may wait behind a node's queued syncs.
 
 ## Errors and messages
 

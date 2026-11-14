@@ -33,7 +33,11 @@ clock, a socket or a file, sends, logs or waits.
   PBAcceptorStep   state: appends: reply: (the answer of accept:in:now:): the shell writes the
                    appends in order, syncs, and only once every append that asks for a sync is
                    durable performs the reply effects (atomic acceptor steps, R55, R81, R81b),
-                   then hands the step to the dispatcher (PBAcceptorDecided).
+                   then hands the step to the dispatcher (PBAcceptorDecided). A step whose
+                   append fails is discarded: the shell keeps the acceptor state it had before
+                   that step, performs none of its reply, and hands the acceptor PBAppendFailed
+                   (acceptor.st) before anything else, so the state never holds what the log
+                   does not.
   PBNodeState      the dispatcher's state of one node: config, inc (this incarnation, as
                    proto_db's random _inc), acceptorView (the acceptor state last handed back,
                    for hints only: CC2), hints, proposer, ownership, waiters, suspectTerm,
@@ -42,12 +46,19 @@ clock, a socket or a file, sends, logs or waits.
                    promises are durable acceptor state, CC2), accepted and committed (a
                    PBLabeledRoot or nil), seqSeen ({ term. seq } of the highest permission
                    accepted), suspectTerm, rejoined (the log holds the rejoined marker),
-                   rejoinBallot, tierFailed, fenced and loggedPromise (the highest promise
-                   the log holds, proto_db _logged_promise).
+                   rejoinBallot, tierFailed, fenced, log (the PBLoggedRoots of the log it
+                   is attached to: the log's identity) and loggedPromise (the highest promise
+                   written to that log, proto_db _logged_promise = (tier, term)).
   PBCoordinatorCore  dispatch: anEvent in: aNodeState now: t and accept: anEvent in:
                    anAcceptorState now: t. The event picks its rule method by double dispatch
                    (dispatchWith:in:now:, acceptWith:in:now:), one per event class, never by
-                   doesNotUnderstand:. A rule method this module defines answers the state
+                   doesNotUnderstand:. A received message passes the checks of proto_db
+                   _route (dispatchReceived:: a sender that is another member, the voter-set
+                   fingerprint) and then goes to the handler of its type, if a module defines
+                   one: received<Type>:in:now: on the dispatcher, accept<Type>:in:now: on the
+                   acceptor (handlerFor:prefix:; 'permit_req' -> receivedPermitReq:in:now:), so
+                   each concern adds its types without replacing the checks. A rule method
+                   this module defines answers the state
                    unchanged with no effect: the rules of each concern are the methods of
                    acceptor.st, proposer.st, owner.st, holder.st and rejoin.st, and a planted
                    defect is a test subclass overriding one of them (CC13).
@@ -764,13 +775,13 @@ PBNodeState >> printOn: aStream
 
 "=== PBAcceptorState ========================================================="
 
-Object subclass: #PBAcceptorState instanceVariableNames: 'config grants accepted committed seqSeen suspectTerm rejoined rejoinBallot tierFailed fenced loggedPromise'.
+Object subclass: #PBAcceptorState instanceVariableNames: 'config grants accepted committed seqSeen suspectTerm rejoined rejoinBallot tierFailed fenced log loggedPromise'.
 
 "The acceptor of the node of aConfig started at t over aLoggedRoots (what its acceptor log holds,
  PBAcceptorLog load): the grant state refuses every request until t + startupGrace and honours
  the logged promise and the accepted root's label (PBGrantState initial:now:, restore:,
  coordinator.py _attach_locked); accepted, committed, rejoined and the logged promise are the
- log's (proto_db _logged_promise = (tier, promised))."
+ log's (proto_db _logged_promise = (tier, promised)), and aLoggedRoots is the log's identity."
 PBAcceptorState class >> config: aConfig logged: aLoggedRoots now: t
   (aConfig isKindOf: PBClusterConfig) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorState: a config is a PBClusterConfig, not ' , aConfig printString].
@@ -778,9 +789,10 @@ PBAcceptorState class >> config: aConfig logged: aLoggedRoots now: t
     ^ PBValidationError signal: 'PBAcceptorState: the logged roots are a PBLoggedRoots, not ' , aLoggedRoots printString].
   ^ self basicNew _setConfig: aConfig grants: ((PBGrantState initial: aConfig now: t) restore: aLoggedRoots)
     accepted: aLoggedRoots accepted committed: aLoggedRoots committed seqSeen: #(0 0) suspectTerm: 0
-    rejoined: aLoggedRoots isRejoined rejoinBallot: 0 tierFailed: nil fenced: nil loggedPromise: aLoggedRoots promise.
+    rejoined: aLoggedRoots isRejoined rejoinBallot: 0 tierFailed: nil fenced: nil log: aLoggedRoots
+    loggedPromise: { aLoggedRoots. aLoggedRoots promise }.
 
-PBAcceptorState >> _setConfig: aConfig grants: aGrantState accepted: anAccepted committed: aCommitted seqSeen: aPair suspectTerm: aTerm rejoined: aBoolean rejoinBallot: aBallot tierFailed: aFailure fenced: aReason loggedPromise: aPromise
+PBAcceptorState >> _setConfig: aConfig grants: aGrantState accepted: anAccepted committed: aCommitted seqSeen: aPair suspectTerm: aTerm rejoined: aBoolean rejoinBallot: aBallot tierFailed: aFailure fenced: aReason log: aLog loggedPromise: aPromise
   "Runs once, on a fresh instance."
   config isNil ifFalse: [^ PBUserError signal: 'PBAcceptorState is immutable'].
   config := aConfig.
@@ -793,6 +805,7 @@ PBAcceptorState >> _setConfig: aConfig grants: aGrantState accepted: anAccepted 
   rejoinBallot := aBallot.
   tierFailed := aFailure.
   fenced := aReason.
+  log := aLog.
   loggedPromise := aPromise.
   ^ self.
 
@@ -834,16 +847,24 @@ PBAcceptorState >> tierFailed
 PBAcceptorState >> fenced
   ^ fenced.
 
-"The highest promise the acceptor log holds (written by this acceptor's steps or loaded), 0
- when none: a grant of a term at or below it appends no promise (proto_db _on_request, D50)."
+"The PBLoggedRoots of the log this acceptor is attached to: the identity of that log."
+PBAcceptorState >> log
+  ^ log.
+
+"The highest promise written to the attached log (loaded with it, or appended by a step whose
+ append was durable), 0 when none or when the promise recorded was written to another log
+ (proto_db _logged_promise[0] is tier): a grant of a term at or below it appends no promise
+ (proto_db _on_request, D50)."
 PBAcceptorState >> loggedPromise
-  ^ loggedPromise.
+  ^ loggedPromise first == log ifTrue: [loggedPromise last] ifFalse: [0].
 
 "This state with aGrantState, aTerm as suspectTerm, aBoolean as rejoined, aFailure as
- tierFailed (nil: none) and aPromise as loggedPromise; the rest unchanged."
+ tierFailed (nil: none) and aPromise as the promise written to the attached log; the rest
+ unchanged."
 PBAcceptorState >> withGrants: aGrantState suspectTerm: aTerm rejoined: aBoolean tierFailed: aFailure loggedPromise: aPromise
   ^ self class basicNew _setConfig: config grants: aGrantState accepted: accepted committed: committed seqSeen: seqSeen
-    suspectTerm: aTerm rejoined: aBoolean rejoinBallot: rejoinBallot tierFailed: aFailure fenced: fenced loggedPromise: aPromise.
+    suspectTerm: aTerm rejoined: aBoolean rejoinBallot: rejoinBallot tierFailed: aFailure fenced: fenced log: log
+    loggedPromise: { log. aPromise }.
 
 PBAcceptorState >> printOn: aStream
   aStream nextPutAll: 'PBAcceptorState('; nextPutAll: config nodeId; nextPutAll: ', '; print: grants; nextPut: $).
@@ -891,17 +912,53 @@ PBCoordinatorCore >> _unchangedAcceptor: anAcceptorState
 
 "--- the dispatcher's rule methods, one per event (the rules of each concern override them) ---"
 
-"A message of a peer (coordinator.py _route): the routing by type is the rules' of acceptor.st,
- proposer.st, owner.st and holder.st."
+"The types whose vs must be this node's voter-set fingerprint (proto_db _FINGERPRINTED)."
+PBCoordinatorCore class >> fingerprintedTypes
+  ^ #('request' 'renew' 'query' 'replicate' 'store').
+
+"The selector of the handler of messages of aType: aPrefix, the type in camel case (each '_'
+ starts a capital), then ':in:now:'. 'permit_req' with 'received' is #receivedPermitReq:in:now:."
+PBCoordinatorCore class >> handlerFor: aType prefix: aPrefix
+  | out up |
+  out := WriteStream on: String new.
+  out nextPutAll: aPrefix.
+  up := true.
+  aType do: [:ch |
+    ch = $_
+      ifTrue: [up := true]
+      ifFalse: [out nextPut: (up ifTrue: [ch asUppercase] ifFalse: [ch]). up := false]].
+  out nextPutAll: ':in:now:'.
+  ^ out contents asSymbol.
+
+"Whether aMessage comes from another member of aConfig (proto_db _route drops the rest)."
+PBCoordinatorCore >> _fromPeer: aMessage in: aConfig
+  ^ aMessage from ~= aConfig nodeId and: [aConfig membership ids includes: aMessage from].
+
+"A message of a peer (coordinator.py _route): a sender that is not another member is dropped; a
+ fingerprinted type of another voter set is dropped and counted (config_mismatches, D54); the
+ rest goes to the handler of its type (received<Type>:in:now:, defined by the module of its
+ concern), and a type no module handles is ignored."
 PBCoordinatorCore >> dispatchReceived: anEvent in: aNodeState now: t
-  ^ self _unchanged: aNodeState.
+  | m handler |
+  m := anEvent message.
+  (self _fromPeer: m in: aNodeState config) ifFalse: [^ self _unchanged: aNodeState].
+  ((self class fingerprintedTypes includes: m type) and: [(m at: 'vs') ~= aNodeState config membership fingerprint]) ifTrue: [
+    "Configured with another voter set (D54): two sets could form two disjoint majorities, so
+     nothing it asks for is granted, answered or accepted here."
+    ^ PBStep state: aNodeState effects: { PBCount stat: 'config_mismatches' }].
+  handler := self class handlerFor: m type prefix: 'received'.
+  (self respondsTo: handler) ifFalse: [^ self _unchanged: aNodeState].
+  ^ self perform: handler with: anEvent with: aNodeState with: t.
 
 "A timer came due; a token that is not current is ignored by the rule that set it."
 PBCoordinatorCore >> dispatchTimerFired: anEvent in: aNodeState now: t
   ^ self _unchanged: aNodeState.
 
+"The node starts (proto_db start, then _attach_locked): its acceptor runs its start step
+ (acceptStart:in:now:) over the log it was built on. A later concern that adds to the start
+ keeps this effect."
 PBCoordinatorCore >> dispatchStartNode: anEvent in: aNodeState now: t
-  ^ self _unchanged: aNodeState.
+  ^ PBStep state: aNodeState effects: { PBToAcceptor event: anEvent }.
 
 PBCoordinatorCore >> dispatchStopNode: anEvent in: aNodeState now: t
   ^ self _unchanged: aNodeState.
@@ -926,10 +983,16 @@ PBCoordinatorCore >> dispatchAcceptorDecided: anEvent in: aNodeState now: t
 
 "--- the acceptor's rule methods ---"
 
-"A message for the acceptor lane (request, renew, release, replicate, a ballot query, done:
- coordinator.py _route): the routing by type is acceptor.st's."
+"A message for the acceptor lane (proto_db _work): one from a sender that is not another member
+ is dropped (the dispatcher drops it already; the lane does not trust that), the rest goes to
+ the handler of its type (accept<Type>:in:now:), and a type no module handles is ignored. The
+ drop of this node's own messages is lifted by the proposer (Task 11) for its own vote (CC1)."
 PBCoordinatorCore >> acceptReceived: anEvent in: anAcceptorState now: t
-  ^ self _unchangedAcceptor: anAcceptorState.
+  | handler |
+  (self _fromPeer: anEvent message in: anAcceptorState config) ifFalse: [^ self _unchangedAcceptor: anAcceptorState].
+  handler := self class handlerFor: anEvent message type prefix: 'accept'.
+  (self respondsTo: handler) ifFalse: [^ self _unchangedAcceptor: anAcceptorState].
+  ^ self perform: handler with: anEvent with: anAcceptorState with: t.
 
 PBCoordinatorCore >> acceptStart: anEvent in: anAcceptorState now: t
   ^ self _unchangedAcceptor: anAcceptorState.

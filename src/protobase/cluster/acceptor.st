@@ -8,20 +8,20 @@ lane 'decides, makes its write durable, publishes, then replies, in arrival orde
 (coordinator.py:1791): each rule answers one PBAcceptorStep whose appends the shell makes
 durable before it performs the reply (R55, R81).
 
-  The dispatcher's routing (proto_db _route): a message whose sender is not another member is
-    dropped (so a non-member never reaches PBGrantState, whose rankOf: refuses it); a
-    request, renew, query, replicate or store of another voter-set fingerprint (vs, D54) is
-    dropped and counted (PBCount stat: 'config_mismatches'); a request, renew, release or
-    query goes to the acceptor lane (PBToAcceptor).
-  acceptRequest:in:now:, acceptRenew:in:now: (proto_db _on_request, _decide): a refusal of the
-    acceptor's state first (fenced, learner, tier_failed, rejoining, in proto_db _refusal's
-    order), then PBGrantState decideRequest: or renew: (bad_ballot, starting, stale_term,
+  The dispatcher's handlers: core.st's dispatchReceived: checks the sender and the voter-set
+    fingerprint (proto_db _route); receivedRequest:, receivedRenew:, receivedRelease: and
+    receivedQuery: (in:now:) hand the message to the acceptor lane (PBToAcceptor). A plain
+    query is answered by the acceptor, where proto_db answers it on the dispatcher (a timing
+    difference only, docs/deviations.md).
+  acceptRequest:in:now:, acceptRenew:in:now: (proto_db _on_request, _decide): a fenced node
+    answers nothing (proto_db _enqueue); a refusal of the acceptor's state first (learner,
+    tier_failed, rejoining, in proto_db _refusal's order), then PBGrantState decideRequest: or renew: (bad_ballot, starting, stale_term,
     busy, term_taken). A grant of a term above loggedPromise appends a synced promise; a
     renewal or a duplicate of a term already logged appends nothing (D50). The reply is a
     grant (accepted root, committed root, certain) or a reject (accepted root, certain, reason,
-    highest, remaining). A grant that ended another one before its time makes the node
-    suspect for that term.
-  acceptRelease:in:now: (proto_db _on_release): PBGrantState release:inc:term:now:; suspect for
+    highest, remaining) and every grant counts grants_given. A grant that ended another one
+    before its time makes the node suspect for that term.
+  acceptRelease:in:now: (proto_db _on_release; dropped when fenced): PBGrantState release:inc:term:now:; suspect for
     an expired grant it ended, and for the term of a held release that is not certain. The
     committed root a release teaches is acceptance knowledge (Task 13).
   acceptQuery:in:now: (the plain query of proto_db _route, ballot 0): the answer of state
@@ -38,7 +38,9 @@ durable before it performs the reply (R55, R81).
   acceptAppendFailed:in:now: (PBAppendFailed reason:): the shell could not make an append
     durable. The step that asked for it is never replied (a grant whose promise is not
     durable is withdrawn); the tier fails for good (R57, the first failure kept), so every
-    later request is refused tier_failed and every query answered unknown.
+    later request is refused tier_failed and every query answered unknown. The shell discards
+    the failed step's state (core.st, PBAcceptorStep), so loggedPromise never holds a promise
+    that was not written.
 
 Not representable here: proto_db's no_storage refusal (no acceptor log attached). An acceptor
 state exists only over a loaded log (PBAcceptorState config:logged:now:); before the attach
@@ -112,52 +114,30 @@ PBAppendFailed >> acceptWith: aCore in: anAcceptorState now: t
 PBAppendFailed >> printOn: aStream
   aStream nextPutAll: 'PBAppendFailed('; nextPutAll: reason; nextPut: $).
 
-"=== PBCoordinatorCore: the dispatcher's routing ============================="
+"=== PBCoordinatorCore: the dispatcher's handlers ==========================="
 
-"The types whose vs must be this node's voter-set fingerprint (proto_db _FINGERPRINTED)."
-PBCoordinatorCore class >> fingerprintedTypes
-  ^ #('request' 'renew' 'query' 'replicate' 'store').
-
-"The types the dispatcher hands to the acceptor lane (proto_db _route; a release's fairness
- part is the proposer's, Task 11)."
-PBCoordinatorCore class >> acceptorLaneTypes
-  ^ #('request' 'renew' 'release' 'query').
-
-"A wire number of seconds (#number) for someMicros, an Integer of microseconds."
+"A wire number of seconds (#number) for someMicros, an Integer of microseconds. The inbound
+ direction (a received reject's remaining) is the proposer's (Task 11)."
 PBCoordinatorCore class >> wireSeconds: someMicros
   ^ (someMicros / 1000000) asFloat.
 
-"Whether aMessage comes from another member of aConfig (proto_db _route drops the rest)."
-PBCoordinatorCore >> _fromPeer: aMessage in: aConfig
-  ^ aMessage from ~= aConfig nodeId and: [aConfig membership ids includes: aMessage from].
+"The acceptor lane takes requests, renewals, releases and queries (proto_db _route; a release's
+ fairness part is the proposer's, Task 11). proto_db answers a plain query on the dispatcher;
+ here the acceptor answers it from its own state (CC2), after the steps queued before it: a
+ timing difference only, and its answer reports durable state only."
+PBCoordinatorCore >> receivedRequest: anEvent in: aNodeState now: t
+  ^ PBStep state: aNodeState effects: { PBToAcceptor event: anEvent }.
 
-"proto_db _route: unknown senders dropped, a voter-set mismatch dropped and counted, the
- acceptor's messages handed to its lane."
-PBCoordinatorCore >> dispatchReceived: anEvent in: aNodeState now: t
-  | m |
-  m := anEvent message.
-  (self _fromPeer: m in: aNodeState config) ifFalse: [^ self _unchanged: aNodeState].
-  ((self class fingerprintedTypes includes: m type) and: [(m at: 'vs') ~= aNodeState config membership fingerprint]) ifTrue: [
-    "Configured with another voter set (D54): two sets could form two disjoint majorities, so
-     nothing it asks for is granted, answered or accepted here."
-    ^ PBStep state: aNodeState effects: { PBCount stat: 'config_mismatches' }].
-  (self class acceptorLaneTypes includes: m type) ifTrue: [
-    ^ PBStep state: aNodeState effects: { PBToAcceptor event: anEvent }].
-  ^ self _unchanged: aNodeState.
+PBCoordinatorCore >> receivedRenew: anEvent in: aNodeState now: t
+  ^ PBStep state: aNodeState effects: { PBToAcceptor event: anEvent }.
+
+PBCoordinatorCore >> receivedRelease: anEvent in: aNodeState now: t
+  ^ PBStep state: aNodeState effects: { PBToAcceptor event: anEvent }.
+
+PBCoordinatorCore >> receivedQuery: anEvent in: aNodeState now: t
+  ^ PBStep state: aNodeState effects: { PBToAcceptor event: anEvent }.
 
 "=== PBCoordinatorCore: the acceptor's rules ================================="
-
-"A message on the acceptor lane, by type (proto_db _work). A sender that is not another member
- is dropped before any rule (the dispatcher drops it already; the lane does not trust that)."
-PBCoordinatorCore >> acceptReceived: anEvent in: anAcceptorState now: t
-  | type |
-  (self _fromPeer: anEvent message in: anAcceptorState config) ifFalse: [^ self _unchangedAcceptor: anAcceptorState].
-  type := anEvent message type.
-  type = 'request' ifTrue: [^ self acceptRequest: anEvent in: anAcceptorState now: t].
-  type = 'renew' ifTrue: [^ self acceptRenew: anEvent in: anAcceptorState now: t].
-  type = 'release' ifTrue: [^ self acceptRelease: anEvent in: anAcceptorState now: t].
-  type = 'query' ifTrue: [^ self acceptQuery: anEvent in: anAcceptorState now: t].
-  ^ self _unchangedAcceptor: anAcceptorState.
 
 PBCoordinatorCore >> acceptRequest: anEvent in: anAcceptorState now: t
   ^ self _decide: anEvent in: anAcceptorState now: t renew: false.
@@ -165,10 +145,11 @@ PBCoordinatorCore >> acceptRequest: anEvent in: anAcceptorState now: t
 PBCoordinatorCore >> acceptRenew: anEvent in: anAcceptorState now: t
   ^ self _decide: anEvent in: anAcceptorState now: t renew: true.
 
-"Why this acceptor may not vote now, or nil (proto_db _refusal, in its order; no_storage is
- not representable, see the module comment)."
+"Why this acceptor may not vote now, or nil (proto_db _refusal, in its order). fenced is not
+ a reply here: a fenced node sends nothing (proto_db _enqueue drops the lane's messages once
+ fenced; its 'fenced' reject only answers a message queued before the fence, which a serial lane
+ whose state holds the fence cannot have). no_storage is not representable (module comment)."
 PBCoordinatorCore >> _refusalIn: s
-  s fenced notNil ifTrue: [^ 'fenced'].
   (s config membership isVoter: s config nodeId) ifFalse: [^ 'learner'].
   s tierFailed notNil ifTrue: [^ 'tier_failed'].
   s isRejoined ifFalse: [^ 'rejoining'].
@@ -184,7 +165,8 @@ PBCoordinatorCore >> _reject: aMessage reason: aReason highest: aHighest remaini
 "proto_db _on_request and _decide: the decision, the promise made durable before the reply,
  the reply."
 PBCoordinatorCore >> _decide: anEvent in: s now: t renew: isRenew
-  | m term refusal decision suspect appends next reply |
+  | m term refusal decision suspect appends next reply counts |
+  s fenced notNil ifTrue: [^ self _unchangedAcceptor: s].
   m := anEvent message.
   term := m at: 'term'.
   refusal := self _refusalIn: s.
@@ -196,6 +178,7 @@ PBCoordinatorCore >> _decide: anEvent in: s now: t renew: isRenew
     ifFalse: [s grants decideRequest: m from inc: (m at: 'inc') term: term now: t config: s config].
   "A grant ended before its holder released it: its outcome is not known here."
   suspect := s suspectTerm max: decision endedTerm.
+  counts := #().
   decision verdict = #grant
     ifFalse: [
       appends := #().
@@ -210,14 +193,18 @@ PBCoordinatorCore >> _decide: anEvent in: s now: t renew: isRenew
       reply := PBClusterMessage type: 'grant' from: s config nodeId fields: {
         'term' -> term. 'rid' -> (m at: 'rid'). 'inc' -> (m at: 'inc').
         'root' -> (PBClusterMessage rootValue: s accepted). 'committed' -> (PBClusterMessage rootValue: s committed).
-        'certain' -> (suspect = 0) }].
+        'certain' -> (suspect = 0) }.
+      "Every grant, renewals and duplicates included (proto_db _decide, grants_given)."
+      counts := { PBCount stat: 'grants_given' }].
   next := s withGrants: decision newState suspectTerm: suspect rejoined: s isRejoined tierFailed: s tierFailed
     loggedPromise: (s loggedPromise max: (appends isEmpty ifTrue: [0] ifFalse: [decision promiseToLog])).
-  ^ PBAcceptorStep state: next appends: appends reply: { PBSend to: m from message: reply }.
+  ^ PBAcceptorStep state: next appends: appends reply: { PBSend to: m from message: reply } , counts.
 
 "proto_db _on_release (its grant part): frees the sender's grant, closes the term here."
 PBCoordinatorCore >> acceptRelease: anEvent in: s now: t
   | m pair suspect |
+  "A fenced node drops the lane's messages (proto_db _enqueue)."
+  s fenced notNil ifTrue: [^ self _unchangedAcceptor: s].
   m := anEvent message.
   pair := s grants release: m from inc: (m at: 'inc') term: (m at: 'term') now: t.
   suspect := s suspectTerm max: pair last.
