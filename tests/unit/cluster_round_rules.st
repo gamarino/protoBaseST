@@ -1,4 +1,4 @@
-"EXPECT: ok 25"
+"EXPECT: ok 31"
 "The commit round (cluster/holder.st, PBCoordinatorCore round:in:now:) called directly, one guard
  per check (proto_db transactions.py _run_round, _permit_round, _keep, _take_kept,
  _await_retries, _drop_kept; coordinator.py replicate's _check_reserve and rejoin-ballot
@@ -27,12 +27,22 @@
  then the entries build on the re-commit. (21) A failed re-commit: #none for a conflict,
  #unknown for any other error. (22) #unknown: PBOutcomeUnknownError for every built entry, a
  conflicted one its own conflict. (23) A permit error settles the batch. (24) PBReportDone
- carries a root exactly with #committed."
+ carries a root exactly with #committed. (26) termRetries stale permissions in a row fail the
+ queued commits with a conflict (proto_db _TERM_RETRIES); a fresh permission, or a permit
+ error, resets the run.
+ (27) A held retry is awaited by its caller, not by a count: another caller's commit does not
+ take its round (reviewer probe P3). (28) Commits left queued by the group bound do not stand
+ for the held retry. (29) #none: a retryable conflict, never held; the permission ends #none, or
+ #committed after a committed round. (30) A build error: a PBDBError fails its commit alone, any
+ other error ends the round. Also: an expired permission's refusal is not counted (7); a held
+ hold is at least retryWait (11); rounds 2 to permitRetries hold, the next does not (13); a
+ stale round's commits go back to the head of the queue (18); a PBDropKept of a caller not
+ awaited changes nothing (12, 16)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_round'.
 
-| held lastErr firstErr textOf c core cfg peers T rec r1 perm e go fresh ok settles reps reportOf builds st out rule err x conflict permitted |
+| hround stale staleRun held lastErr firstErr textOf c core cfg peers T rec r1 perm e go fresh ok settles reps reportOf builds st out rule err x conflict permitted |
 c := Check new.
 core := RoundRules new.
 peers := (1 to: 3) asArray collect: [:i | PBPeer nodeId: (#('n0' 'n1' 'n2') at: i) host: '127.0.0.1' port: 7000 + i].
@@ -41,7 +51,7 @@ T := 3 * 4096.
 rec := [:aLabel :ep | PBLabeledRoot label: aLabel record: (PBRootRecord segment: (ByteArray new: 16) offset: 64 + ep epoch: ep)].
 r1 := rec value: 4096 value: 1.
 perm := PBPermission term: T seq: 1 rid: 9 owner: 'n1' root: nil certain: false sentAt: 0 valid: 600000.
-e := [:k :r | PBRoundEntry token: k willRetry: r deadline: nil].
+e := [:k :r | PBRoundEntry token: k caller: k willRetry: r deadline: nil].
 fresh := PBRoundState config: cfg.
 ok := PBBaseDecided decision: (PBBaseDecision base: r1 needsCommit: false outcome: #ok).
 conflict := [:k :r | PBBuildConflict entry: (e value: k value: r) error: (PBConflictError new messageText: 'hot'; yourself)].
@@ -115,6 +125,10 @@ c that: 'R121: under sendReserve left, nothing replicated, counted, CC18 text, r
     (#('149 ms left' 'sendReserve' '450 ms' 'leaseDuration') allSatisfy: [:w | (textOf value: (firstErr value: x last)) includesSubstring: w]).
     reportOf value: x last }
   equals: { 0. #('sends_refused_reserve'). true. true. #(#none) }.
+st := go value: core value: (rule value: core value: false) first value: { { PBBuilt entry: (e value: 'a' value: false) root: (rec value: T value: 2) micros: 1000. 650000 } }.
+c that: 'an expired permission refuses the send without counting sends_refused_reserve'
+  is: { (reps value: st last) size. (st last select: [:f | f isKindOf: PBCount]) size. reportOf value: st last }
+  equals: { 0. 0. #(#none) }.
 
 "(8)"
 x := go value: core value: ((rule value: core value: false) first withRejoinBallot: T + 1)
@@ -139,10 +153,11 @@ c that: '#committed settles the built entries true, the permission ends #committ
   equals: { { { 'a'. true } }. #(#committed) }.
 
 "A round of 'a' (committed) and 'h' (conflicting, willRetry aBool) up to its replication's answer at t."
-x := [:aRules :aBool :t | | s |
+hround := [:aRules :aBool :t | | s |
   s := go value: aRules value: fresh value: { permitted. { PBRoundEnqueued entry: (e value: 'h' value: aBool). 0 }. { PBPermitted permission: perm. 0 }. { ok. 1000 }.
     { PBBuilt entry: (e value: 'a' value: false) root: (rec value: T value: 2) micros: 1000. 2000 }. { conflict value: 'h' value: aBool. 3000 } }.
   go value: aRules value: s first value: { { PBReplicated outcome: #committed. t } }].
+x := hround.
 
 "(11)"
 out := x value: core value: true value: 4000.
@@ -150,24 +165,29 @@ st := go value: core value: out first value: { { PBRoundEnqueued entry: (e value
 c that: 'a held retry: permitHeld, kept min(retryHold, left), the retry runs under it'
   is: { (held value: out last). out first phase.
     ((out last select: [:f | f isKindOf: PBTimer]) collect: [:f | f after]). (st last first isKindOf: PBAskBase). st first rounds.
-    ((x value: core value: true value: 550000) last select: [:f | f isKindOf: PBTimer]) collect: [:f | f after] }
-  equals: { true. #held. { cfg retryHold }. true. 2. #(50000) }.
+    ((x value: core value: true value: 550000) last select: [:f | f isKindOf: PBTimer]) collect: [:f | f after].
+    ((x value: core value: true value: 598000) last select: [:f | f isKindOf: PBTimer]) collect: [:f | f after] }
+  equals: { true. #held. { cfg retryHold }. true. 2. #(50000). { cfg retryWait } }.
 
 "(12)"
 st := x value: core value: false value: 4000.
 c that: 'a retry not coming is not held: retryWait, then the permission ends'
   is: { (held value: st last). ((st last select: [:f | f isKindOf: PBTimer]) collect: [:f | f after]).
-    reportOf value: (go value: core value: st first value: { { PBHoldExpired token: st first holdToken. 10000 } }) last }
-  equals: { false. { cfg retryWait }. #(#committed) }.
+    reportOf value: (go value: core value: st first value: { { PBHoldExpired token: st first holdToken. 10000 } }) last.
+    (go value: core value: st first value: { { PBDropKept caller: 'h'. 5000 } }) first phase }
+  equals: { false. { cfg retryWait }. #(#committed). #held }.
 
 "(13)"
 st := out.
+out := OrderedCollection new.
 cfg permitRetries timesRepeat: [
   st := go value: core value: st first value: { { PBRoundEnqueued entry: (e value: 'h' value: true). 5000 }. { ok. 5000 }.
-    { conflict value: 'h' value: true. 6000 } }].
-c that: 'after permitRetries rounds nothing is held, the permission ends'
-  is: { st first rounds. (held value: st last). reportOf value: st last }
-  equals: { 0. false. #(#committed) }.
+    { conflict value: 'h' value: true. 6000 } }.
+  out add: (held value: st last)].
+c that: 'rounds 2 to permitRetries still hold, round permitRetries + 1 does not and the permission ends'
+  is: { out asArray. st first rounds. reportOf value: st last }
+  equals: { ((2 to: cfg permitRetries + 1) collect: [:r | r <= cfg permitRetries]) asArray. 0. #(#committed) }.
+out := x value: core value: true value: 4000.
 
 "(14)"
 st := x value: core value: true value: 600000.
@@ -188,8 +208,9 @@ x := go value: core value: st first value: { { PBRoundEnqueued entry: (e value: 
 c that: 'two held retries: the next round waits for both, or for a PBDropKept'
   is: { st first awaiting. x first phase.
     (go value: core value: x first value: { { PBRoundEnqueued entry: (e value: 'k' value: true). 4000 } }) first phase.
-    (go value: core value: x first value: { { PBDropKept new. 4000 } }) first phase }
-  equals: { 2. #held. #base. #base }.
+    (go value: core value: x first value: { { PBDropKept caller: 'k'. 4000 } }) first phase.
+    (go value: core value: x first value: { { PBDropKept caller: 'z'. 4000 } }) first phase }
+  equals: { #('h' 'k'). #held. #base. #base. #held }.
 
 "(17)"
 st := go value: core value: out first value: { { PBRoundEnqueued entry: (e value: 'h' value: true). 700000 } }.
@@ -200,12 +221,13 @@ c that: 'enqueued under a kept permission no longer valid: it ends, the queue as
 "(18)"
 st := go value: core value: (rule value: core value: false) first value: #().
 x := go value: core value: (go value: core value: fresh value: { permitted. { PBPermitted permission: perm. 0 } }) first
-  value: { { PBBaseDecided decision: (PBBaseDecision base: r1 needsCommit: false outcome: #stale). 1000 } }.
+  value: { { PBRoundEnqueued entry: (e value: 'z' value: false). 500 }.
+    { PBBaseDecided decision: (PBBaseDecision base: r1 needsCommit: false outcome: #stale). 1000 } }.
 st := go value: core value: out first value: { { PBRoundEnqueued entry: (e value: 'h' value: true). 5000 }.
   { PBBaseDecided decision: (PBBaseDecision base: r1 needsCommit: false outcome: #stale). 5000 } }.
-c that: '#stale requeues and ends #unknown; after a committed round, #committed'
+c that: '#stale requeues at the head and ends #unknown; after a committed round, #committed'
   is: { settles value: x last. reportOf value: x last. x first phase. x first batch collect: [:q | q token]. reportOf value: st last }
-  equals: { #(). #(#unknown). #permit. #('a'). #(#committed) }.
+  equals: { #(). #(#unknown). #permit. #('a' 'z'). #(#committed) }.
 
 "(19)"
 x := go value: core value: (go value: core value: fresh value: { permitted. { PBPermitted permission: perm. 0 } }) first
@@ -250,5 +272,80 @@ c that: 'PBReportDone: a root exactly with #committed'
   is: { err value: [PBReportDone permission: perm outcome: #committed root: nil]. err value: [PBReportDone permission: perm outcome: #none root: r1].
     err value: [PBReportDone permission: perm outcome: #committed root: r1] }
   equals: { PBValidationError. PBValidationError. nil }.
+
+"(26) I1"
+stale := PBBaseDecided decision: (PBBaseDecision base: r1 needsCommit: false outcome: #stale).
+"{ state. effects } of n stale permissions in a row from aState (a permission asked)."
+staleRun := [:aState :n | | acc |
+  acc := { aState. #() }.
+  1 to: n do: [:i | acc first phase = #permit ifTrue: [ | o |
+    o := go value: core value: acc first value: { { PBPermitted permission: perm. i * 1000 }. { stale. i * 1000 + 1 } }.
+    acc := { o first. acc last , o last }]].
+  acc].
+st := staleRun value: (go value: core value: fresh value: { permitted }) first value: core termRetries.
+x := staleRun value: (go value: core value: fresh value: { permitted }) first value: core termRetries - 1.
+x := go value: core value: x first value: { { PBPermitted permission: perm. 9000 }. { ok. 9001 }.
+  { PBBuilt entry: (e value: 'a' value: false) root: (rec value: T value: 2) micros: 1. 9002 }. { PBReplicated outcome: #committed. 9003 }.
+  { PBRoundEnqueued entry: (e value: 'b' value: false). 9004 } }.
+x := staleRun value: x first value: core termRetries - 1.
+out := staleRun value: (go value: core value: fresh value: { permitted }) first value: core termRetries - 1.
+out := go value: core value: out first value: { { PBPermitted permission: (PBTimeoutError new messageText: 't'; yourself). 9000 }.
+  { PBRoundEnqueued entry: (e value: 'b' value: false). 9001 } }.
+out := staleRun value: out first value: core termRetries - 1.
+c that: 'termRetries stale permissions in a row fail the queue with a conflict; a fresh one resets the run'
+  is: { (settles value: st last) collect: [:q | q first]. ((firstErr value: st last) isKindOf: PBConflictError).
+    (textOf value: (firstErr value: st last)) includesSubstring: 'after 5 attempts'. (st last select: [:f | f isKindOf: PBAskPermit]) size.
+    st first phase. (settles value: x last) collect: [:q | q first]. x first phase.
+    (settles value: out last) collect: [:q | q first]. out first phase }
+  equals: { #('a'). true. true. core termRetries - 1. #idle. #(). #permit. #(). #permit }.
+
+"(27) I2: a held retry is awaited by caller (reviewer probe P3)"
+st := go value: core value: fresh value: {
+  permitted. { PBRoundEnqueued entry: (e value: 'h' value: true). 0 }. { PBPermitted permission: perm. 0 }. { ok. 1000 }.
+  { PBBuilt entry: (e value: 'a' value: false) root: (rec value: T value: 2) micros: 1000. 2000 }.
+  { conflict value: 'h' value: true. 3000 }. { PBRoundEnqueued entry: (e value: 'z' value: false). 3500 }.
+  { PBReplicated outcome: #committed. 4000 } }.
+x := go value: core value: st first value: { { PBRoundEnqueued entry: (e value: 'h' value: true). 4100 } }.
+c that: 'a held retry gets its round although another caller''s commit is queued'
+  is: { held value: st last. st first phase. st first awaiting. x first phase. x first live collect: [:q | q token] }
+  equals: { true. #held. #('h'). #base. #('z' 'h') }.
+
+"(28) I2: group-bound leftovers do not stand for a held retry"
+st := go value: core value: fresh value: {
+  { PBRoundEnqueued entry: (e value: 'h' value: true). 0 }. permitted. { PBRoundEnqueued entry: (e value: 'l' value: false). 0 }.
+  { PBPermitted permission: perm. 0 }. { ok. 1000 }. { conflict value: 'h' value: true. 2000 }.
+  { PBBuilt entry: (e value: 'a' value: false) root: (rec value: T value: 2) micros: 300000. 302000 }.
+  { PBReplicated outcome: #committed. 303000 } }.
+c that: 'a round that left commits queued by the group bound still waits for its held retry'
+  is: { st first queue collect: [:q | q token]. st first phase. held value: st last.
+    (go value: core value: st first value: { { PBRoundEnqueued entry: (e value: 'h' value: true). 303100 } }) first live
+      collect: [:q | q token] }
+  equals: { #('l'). #held. true. #('l' 'h') }.
+
+"(29) I3: #none"
+st := go value: core value: (rule value: core value: false) first value: {
+  { PBBuilt entry: (e value: 'a' value: false) root: (rec value: T value: 2) micros: 1000. 2000 }. { PBReplicated outcome: #none. 3000 } }.
+x := go value: core value: (go value: core value: fresh value: { permitted. { PBPermitted permission: perm. 0 } }) first value: {
+  { PBBaseDecided decision: (PBBaseDecision base: r1 needsCommit: true outcome: #ok). 1000 }.
+  { PBBuilt entry: nil root: (rec value: T value: 2) micros: 0. 1000 }. { PBReplicated outcome: #none. 2000 } }.
+out := hround value: core value: true value: 4000.
+out := go value: core value: out first value: { { PBRoundEnqueued entry: (e value: 'h' value: true). 5000 }. { PBBaseDecided decision:
+  (PBBaseDecision base: (rec value: T value: 2) needsCommit: false outcome: #ok). 5000 }.
+  { PBBuilt entry: (e value: 'h' value: true) root: (rec value: T value: 3) micros: 1000. 6000 }. { PBReplicated outcome: #none. 7000 } }.
+c that: '#none: a retryable conflict, never held, reported #none; after a committed round, #committed'
+  is: { ((firstErr value: st last) isKindOf: PBConflictError). held value: st last. reportOf value: st last.
+    ((firstErr value: x last) isKindOf: PBConflictError). reportOf value: x last.
+    ((firstErr value: out last) isKindOf: PBConflictError). held value: out last. reportOf value: out last }
+  equals: { true. false. #(#none). true. #(#none). true. false. #(#committed) }.
+
+"(30) m5: an entry's build error other than a PBDBError ends the round"
+st := go value: core value: (rule value: core value: true) first value: {
+  { PBBuildFailed entry: (e value: 'a' value: false) error: (Error new messageText: 'bug'; yourself). 2000 } }.
+x := go value: core value: (rule value: core value: true) first value: {
+  { PBBuildFailed entry: (e value: 'a' value: false) error: (PBValidationError new messageText: 'v'; yourself). 2000 } }.
+c that: 'a build error: a PBDBError fails its commit alone; any other error ends the round, nothing sent'
+  is: { (settles value: st last) collect: [:q | { q first. q last messageText }]. reportOf value: st last.
+    (settles value: x last) collect: [:q | q first]. x first phase }
+  equals: { #(#('a' 'bug') #('b' 'bug')). #(#none). #('a'). #build }.
 
 c report.

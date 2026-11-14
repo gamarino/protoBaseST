@@ -1,4 +1,4 @@
-"EXPECT: ok 8"
+"EXPECT: ok 11"
 "The commit round as a pure state machine (cluster/holder.st, PBCoordinatorCore round:in:now:;
  proto_db transactions.py _run_round, _permit_round, _keep, _take_kept, _await_retries; spec 5.6,
  D-LIVE-2, CC11, CC18, R121, H7) in the simulator: every node commits through its PBRoundState,
@@ -12,14 +12,23 @@
  leaseDuration, sendReserve and the build time. (4) The group bound (CC11) leaves the rest
  queued and they commit next round; the first round re-commits its base first and builds on the
  re-commit under the same permission. (5) A stale base requeues and abandons the term. (6)
- Unknown is never retried. (7) PlantNoReserve fails (2). (8) PlantNoKeep fails (1)."
+ Unknown is never retried. (7) PlantNoReserve fails (2). (8) PlantNoKeep fails (1). (9) Hot-key
+ clients beside blind writers on every node, each held retry 2 ms (virtual) after its conflict:
+ still fair (a held retry is awaited by its caller; a blind commit does not take its round).
+ (10) A conflict in a round that ends unknown gets its own conflict: its client ends. (11) A
+ commit on a minority node ends PBTimeoutError (spec 5.7): its client ends."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_round'.
 
 | c out fair |
 c := Check new.
-fair := [:o | (o first allSatisfy: [:g | g <= 50]) and: [o second allSatisfy: [:a | a > 0]]].
+"Fair (D-LIVE-2, proto_db test_hot_key_increments_never_starve_a_member): every member commits
+ at least once per 50 virtual rounds, the fewest acknowledged commits of a member are at least
+ 0.3 of the most, and no acknowledged commit is lost."
+fair := [:o | (o first allSatisfy: [:g | g <= 50]) and: [(o second allSatisfy: [:a | a > 0])
+  and: [(o second inject: o second first into: [:m :a | m min: a]) >= (0.3 * (o second inject: 0 into: [:m :a | m max: a]))
+  and: [(o at: 5) = 0]]]].
 
 "(1)"
 out := { RoundFamilies hotKey: RoundRules new seed: 1 clients: 1. RoundFamilies hotKey: RoundRules new seed: 2 clients: 2 }.
@@ -38,9 +47,9 @@ c that: 'reserve refusal sends nothing and is retryable ({ outcome. conflict nam
 
 "(3)"
 out := RoundFamilies buildLonger: RoundRules new seed: 1.
-c that: 'build longer than the belief ({ outcome. attempts. the CC18 text. replicates. refusals })'
+c that: 'build longer than the belief ({ outcome. attempts. the CC18 text. replicates. refusals counted: none, the permission expired })'
   is: out
-  equals: { #none. 5. true. 0. 5 }.
+  equals: { #none. 5. true. 0. 0 }.
 
 "(4)"
 out := RoundFamilies groupBound: RoundRules new seed: 1.
@@ -73,5 +82,23 @@ out := RoundFamilies hotKey: PlantNoKeep new seed: 1 clients: 1.
 c that: 'PlantNoKeep is caught (a member starves for more than 50 rounds)'
   is: (fair value: out)
   equals: false.
+
+"(9)"
+out := RoundFamilies hotKey: RoundRules new seed: 3 clients: 1 blind: 1 heldDelay: 2000.
+('hot key beside blind writers: longest gaps ' , out first printString , ', acks ' , out second printString
+  , ', permits with two committed rounds ' , (out at: 3) printString , ', lost ' , (out at: 5) printString) displayNl.
+c that: 'hot-key clients beside blind writers, held retries 2 ms late, do not starve a member'
+  is: (fair value: out)
+  equals: true.
+
+"(10)"
+c that: 'a conflict in a round that ends unknown gets its own conflict ({ h. its error. a })'
+  is: (RoundFamilies conflictInUnknown: RoundRules new seed: 1)
+  equals: { #none. true. #unknown }.
+
+"(11)"
+c that: 'a commit on a minority node ends PBTimeoutError ({ outcome. error })'
+  is: (RoundFamilies minority: RoundRules new seed: 1)
+  equals: { #failed. true }.
 
 c report.

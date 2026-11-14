@@ -110,3 +110,4 @@ PBAskBase>>_setPermission:
 PBBuild>>_setEntry:base:stamp:
 PBReplicate>>_setPermission:root:pred:
 PBReportDone>>_setPermission:outcome:root:
+PBDropKept>>_setCaller:

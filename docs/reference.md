@@ -612,15 +612,16 @@ For tests, tools and readers of the format. An application does not need them.
   pure state machine, `PBCoordinatorCore >> round:in:now:` (an event, a `PBRoundState`, the
   node's clock) answering a `PBStep` whose state is the new `PBRoundState` (`config:`; `queue`,
   `phase`, `batch`, `permission`, `outcome`, `committed`, `base`, `current`, `live`, `building`,
-  `built`, `conflicted`, `longest`, `tried`, `rounds`, `awaiting`, `holdToken`, `rejoinBallot`,
-  `isHeld`, `withRejoinBallot:`, which never lowers it). A commit is a `PBRoundEntry
-  token:willRetry:deadline:` (`willRetry`: its caller retries a conflict at once; `deadline`
+  `built`, `conflicted`, `longest`, `tried`, `rounds`, `awaiting` (the held callers),
+  `awaitCount`, `stale`, `holdToken`, `rejoinBallot`, `isHeld`, `withRejoinBallot:`, which never
+  lowers it). A commit is a `PBRoundEntry token:caller:willRetry:deadline:` (`caller`: its client,
+  `proto_db`'s `entry.thread`; `willRetry`: its caller retries a conflict at once; `deadline`
   carried for the standalone shell). Events (`PBRoundEvent`, `roundWith:in:now:`):
   `PBRoundEnqueued entry:`, `PBPermitted permission:` (a `PBPermission` or an error value),
   `PBBaseDecided decision:` (a `PBBaseDecision` or an error value), `PBBuilt entry:root:micros:`
   (entry `nil` for the re-commit of a base that needs one; root `nil` for nothing to publish),
   `PBBuildConflict entry:error:`, `PBBuildFailed entry:error:`, `PBReplicated outcome:`,
-  `PBHoldExpired token:`, `PBDropKept`. Effects: `PBAskPermit`, `PBAskBase permission:`,
+  `PBHoldExpired token:`, `PBDropKept caller:`. Effects: `PBAskPermit`, `PBAskBase permission:`,
   `PBBuild entry:base:stamp:` (stamp `{ term. base epoch + 1 }`), `PBReplicate
   permission:root:pred:`, `PBSettle` of an entry's token (`true`, `false`, or an error value),
   `PBReportDone permission:outcome:root:` (a root exactly with `#committed`), `PBCount`, and the
@@ -630,16 +631,23 @@ For tests, tools and readers of the format. An application does not need them.
   `groupBoundAllows:now:` (CC11) asks for `sendReserve` plus the longest build of the round, the
   rest going back to the head of the queue, not as attempts; before any send `mayReplicate:now:`
   refuses, with a retryable `PBConflictError` and nothing sent, less than `sendReserve` left
-  (R121, `'sends_refused_reserve'`; the text names the time left, `sendReserve`, the round's
-  longest build, the belief and `leaseDuration`, CC18) and a term below the rejoin ballot (L14).
+  (R121, `'sends_refused_reserve'` while the permission is valid; the text names the time left, `sendReserve`, the round's
+  longest build, the belief and `leaseDuration`, CC18) and a term below the rejoin ballot (L14;
+  `dispatchReplicateWanted:` checks it again at the send against the acceptor's ballot and then
+  sends nothing, `#none`). A build error that is a `PBDBError` fails its commit alone; any other
+  ends the round, nothing sent.
   `#committed` settles the built entries `true`; `#none` is a retryable conflict; `#unknown` is a
   `PBOutcomeUnknownError` for every built entry, never retried. A `#stale` base requeues the
-  round and ends the permission `#unknown` (unless a round under it committed); `#unreachable`
+  round at the head of the queue and ends the permission `#unknown` (unless a round under it
+  committed); after `termRetries` (5) stale permissions in a row the queued commits fail with a
+  `PBConflictError`; `#unreachable`
   is a retryable conflict ending it `#unknown`. A conflicted entry that will retry, while the
   permission is valid and at most `permitRetries` rounds ran, gets a `PBConflictError` with
-  `permitHeld` true (`PBConflictError held:`), and the permission is kept for min(`retryHold`,
-  the time left) (`retryWait` when no retry is held); once the held retries are queued (or a
-  `PBDropKept` says one is not coming) the next round runs under it; its `PBHoldExpired` ends it.
+  `permitHeld` true (`PBConflictError held:`), and the permission is kept for
+  max(min(`retryHold`, the time left), `retryWait`) (`retryWait` when no retry is held); once
+  every held caller has a commit queued (with none held, as many commits as the round's
+  conflicts), or a `PBDropKept caller:` says an awaited one is not coming, the next round runs
+  under it; its `PBHoldExpired` ends the wait (what is queued runs, else the permission ends).
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
   `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered

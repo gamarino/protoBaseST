@@ -21,8 +21,9 @@ whose snapshot is the newest root its node knows committed when the attempt is e
 published committed root, or a root this node's rounds learnt committed: a base decided #ok
 with no commit needed, a root its replication committed). Its build takes the virtual
 microseconds of builds (one per attempt, the last repeated). A hot transaction (a
-read-modify-write of one key) conflicts at its build unless the base is its snapshot; any other
-never conflicts. A conflict marked permitHeld is retried at once (from the root the permission
+read-modify-write of one key) conflicts at its build unless the hot key is unchanged since its
+snapshot (the base's last hot write is the snapshot's: hotVersionOf:); one made with hot: #always
+always conflicts; any other never conflicts (a blind write, which leaves the hot key as it was). A conflict marked permitHeld is retried at once (from the root the permission
 committed); another conflict after retryBackoff; PBOutcomeUnknownError and anything else end the
 transaction (never retried). loop:at:hot:builds:retries: runs such transactions one after the
 other until stopLoops.
@@ -49,7 +50,7 @@ PlantNoKeep >> _keep: s hold: someMicros now: t effects: fx
 
 "=== RoundSim ================================================================"
 
-PBSim subclass: #RoundSim instanceVariableNames: 'rounds txs inRound waiters known started acks baseDelays onReplicate replicates reports settles decisions stopped recommits'.
+PBSim subclass: #RoundSim instanceVariableNames: 'rounds txs inRound waiters known started acks baseDelays onReplicate replicates reports settles decisions stopped recommits heldDelay hotVersions'.
 
 RoundSim >> rounds
   rounds isNil ifTrue: [rounds := Dictionary new].
@@ -63,7 +64,8 @@ RoundSim >> known
   known isNil ifTrue: [known := Dictionary new].
   ^ known.
 
-"{ round index. node id. token } of every acknowledged transaction, in order."
+"{ round index. node id. token. hot } of every acknowledged transaction, in order (hot: its
+ hot flag, true for a read-modify-write of the hot key)."
 RoundSim >> acks
   acks isNil ifTrue: [acks := OrderedCollection new].
   ^ acks.
@@ -161,6 +163,10 @@ RoundSim >> run: aToken at: anId hot: isHot builds: someMicros retries: n
   ^ self run: aToken at: anId hot: isHot builds: someMicros retries: n then: nil.
 
 RoundSim >> run: aToken at: anId hot: isHot builds: someMicros retries: n then: aBlock
+  ^ self run: aToken at: anId hot: isHot builds: someMicros retries: n then: aBlock caller: aToken.
+
+"aCaller: the client (proto_db entry.thread) every attempt of aToken names."
+RoundSim >> run: aToken at: anId hot: isHot builds: someMicros retries: n then: aBlock caller: aCaller
   | tx |
   (self nodeAt: anId) isUp ifFalse: [^ Error signal: 'RoundSim: ' , anId , ' is not running'].
   (commits includesKey: aToken) ifTrue: [^ Error signal: 'RoundSim: the token ' , aToken printString , ' is taken'].
@@ -168,7 +174,8 @@ RoundSim >> run: aToken at: anId hot: isHot builds: someMicros retries: n then: 
   commitOrder add: aToken.
   tx := Dictionary new.
   tx at: #node put: anId; at: #hot put: isHot; at: #builds put: someMicros; at: #retries put: n; at: #attempt put: 0;
-    at: #snapshot put: nil; at: #errors put: OrderedCollection new; at: #roots put: OrderedCollection new; at: #then put: aBlock.
+    at: #snapshot put: nil; at: #errors put: OrderedCollection new; at: #roots put: OrderedCollection new; at: #then put: aBlock;
+    at: #caller put: aCaller.
   self txs at: aToken put: tx.
   self _trace: anId , ' run ' , aToken printString.
   self _attempt: aToken.
@@ -182,7 +189,7 @@ RoundSim >> loop: aName at: anId hot: isHot builds: someMicros retries: n
   next := [
     (stopped == true or: [(self nodeAt: anId) isUp not]) ifFalse: [
       count := count + 1.
-      self run: aName , '-' , count printString at: anId hot: isHot builds: someMicros retries: n then: next]].
+      self run: aName , '-' , count printString at: anId hot: isHot builds: someMicros retries: n then: next caller: aName]].
   next value.
 
 RoundSim >> _attempt: aToken
@@ -192,7 +199,7 @@ RoundSim >> _attempt: aToken
   node isUp ifFalse: [^ self].
   tx at: #attempt put: (tx at: #attempt) + 1.
   tx at: #snapshot put: (self knownAt: node id).
-  entry := PBRoundEntry token: { 'tx'. aToken. tx at: #attempt } willRetry: (tx at: #retries) > 0 deadline: nil.
+  entry := PBRoundEntry token: { 'tx'. aToken. tx at: #attempt } caller: (tx at: #caller) willRetry: (tx at: #retries) > 0 deadline: nil.
   self _schedule: #round node: node payload: (PBRoundEnqueued entry: entry) at: now.
 
 RoundSim >> _txEnd: aToken as: aStatus
@@ -206,14 +213,16 @@ RoundSim >> _txSettled: aToken attempt: k outcome: anOutcome at: aNode
   tx := self txs at: aToken.
   self settles add: { aNode id. aToken. k. anOutcome. now. self started }.
   anOutcome == true ifTrue: [
-    self acks add: { self started. aNode id. aToken }.
+    self acks add: { self started. aNode id. aToken. (tx at: #hot) == true }.
     ^ self _txEnd: aToken as: #acknowledged].
   anOutcome == false ifTrue: [^ self _txEnd: aToken as: #failed].
   (tx at: #errors) add: anOutcome.
   (anOutcome isKindOf: PBConflictError) ifTrue: [
     (tx at: #retries) > 0 ifFalse: [^ self _txEnd: aToken as: #none].
     tx at: #retries put: (tx at: #retries) - 1.
-    anOutcome permitHeld ifTrue: [^ self _attempt: aToken].
+    anOutcome permitHeld ifTrue: [
+      self heldDelay = 0 ifTrue: [^ self _attempt: aToken].
+      ^ self _schedule: #client node: aNode payload: aToken at: now + self heldDelay].
     ^ self _schedule: #client node: aNode payload: aToken at: now + self retryBackoff].
   (anOutcome isKindOf: PBOutcomeUnknownError) ifTrue: [^ self _txEnd: aToken as: #unknown].
   ^ self _txEnd: aToken as: #failed.
@@ -270,11 +279,24 @@ RoundSim >> applyAskBase: anAsk
 
 "A root of the stamp { label. epoch } on aBase, its pred link recorded."
 RoundSim >> _stamped: aStamp on: aBase at: aNode
+  ^ self _stamped: aStamp on: aBase at: aNode hot: false.
+
+"isHot: the root writes the hot key (its hot version is itself), else it keeps its base's."
+RoundSim >> _stamped: aStamp on: aBase at: aNode hot: isHot
   | root |
   offsets := offsets + 1.
   root := PBLabeledRoot label: aStamp first record: (PBRootRecord segment: aNode segment offset: offsets epoch: aStamp last).
   preds at: (self keyText: root) put: (self keyText: aBase).
+  hotVersions isNil ifTrue: [hotVersions := Dictionary new].
+  hotVersions at: (self keyText: root) put: (isHot ifTrue: [self keyText: root] ifFalse: [self hotVersionOf: aBase]).
   ^ root.
+
+"The key of the last root that wrote the hot key in aRoot's chain (a root no build made, such as
+ a pre-formed log's: its own key; nil for nil)."
+RoundSim >> hotVersionOf: aRoot
+  aRoot isNil ifTrue: [^ nil].
+  hotVersions isNil ifTrue: [hotVersions := Dictionary new].
+  ^ hotVersions at: (self keyText: aRoot) ifAbsent: [self keyText: aRoot].
 
 "The virtual time at which aNode's clock has advanced by someMicros."
 RoundSim >> _after: someMicros at: aNode
@@ -293,13 +315,13 @@ RoundSim >> applyBuild: aBuild
   tx := self txs at: token.
   micros := (tx at: #builds) at: ((tx at: #attempt) min: (tx at: #builds) size).
   snapshot := tx at: #snapshot.
-  ((tx at: #hot) and: [snapshot isNil or: [(self keyText: snapshot) ~= (self keyText: aBuild base)]]) ifTrue: [
+  ((tx at: #hot) == #always or: [(tx at: #hot) == true and: [snapshot isNil or: [(self hotVersionOf: snapshot) ~= (self hotVersionOf: aBuild base)]]]) ifTrue: [
     self _trace: current id , ' ' , token printString , ' conflicts (read ' , (PBCoreValue textOf: snapshot) , ', base '
       , (PBCoreValue textOf: aBuild base) , ')'.
     ^ self _schedule: #round node: current
       payload: (PBBuildConflict entry: entry error: (PBConflictError new messageText: 'the hot key changed after the transaction read it'; yourself))
       at: (self _after: micros at: current)].
-  root := self _stamped: aBuild stamp on: aBuild base at: current.
+  root := self _stamped: aBuild stamp on: aBuild base at: current hot: (tx at: #hot) == true.
   commitRoots at: token put: root.
   (tx at: #roots) add: root.
   self _trace: current id , ' built ' , (PBCoreValue textOf: root) , ' on ' , (PBCoreValue textOf: aBuild base) , ' for ' , token printString.
@@ -346,21 +368,41 @@ RoundSim >> _settle: aWaiter outcome: anOutcome at: aNode
 
 "--- measures ---"
 
-"The longest run of rounds (counted cluster-wide) that anId went without an acknowledged commit,
- over the rounds 0 to aRound."
+"The longest run of rounds (counted cluster-wide) that anId went without an acknowledged hot
+ commit, over the rounds 0 to aRound."
 RoundSim >> longestGapOf: anId upTo: aRound
   | last gap |
   last := 0.
   gap := 0.
   self acks do: [:a |
-    ((a at: 2) = anId and: [a first <= aRound]) ifTrue: [
+    ((a at: 2) = anId and: [(a at: 4) and: [a first <= aRound]]) ifTrue: [
       gap := gap max: a first - last.
       last := a first]].
   ^ gap max: aRound - last.
 
-"How many transactions of anId were acknowledged."
+"How long a client takes to retry a permitHeld conflict (its fn run again), virtual
+ microseconds; 0 by default."
+RoundSim >> heldDelay
+  heldDelay isNil ifTrue: [heldDelay := 0].
+  ^ heldDelay.
+
+RoundSim >> heldDelay: someMicros
+  heldDelay := someMicros.
+
+"proto_db test_cluster_permit_hot_key's lost updates: acknowledged commits whose root is not in
+ the committed chain of the newest root committed anywhere (after convergence)."
+RoundSim >> lostUpdates
+  | top chain k |
+  top := nil.
+  ids do: [:id | top := PBRootOrder max: top with: (self nodeAt: id) committed].
+  chain := Set new.
+  k := top isNil ifTrue: [nil] ifFalse: [self keyText: top].
+  [k notNil and: [(chain includes: k) not]] whileTrue: [chain add: k. k := preds at: k ifAbsent: [nil]].
+  ^ (self acks select: [:a | (chain includes: (self keyText: (commitRoots at: (a at: 3)))) not]) size.
+
+"How many hot transactions of anId were acknowledged."
 RoundSim >> acksOf: anId
-  ^ (self acks select: [:a | (a at: 2) = anId]) size.
+  ^ (self acks select: [:a | (a at: 2) = anId and: [a at: 4]]) size.
 
 "How many permissions committed two rounds or more (several rounds under one permission, each
  replication acknowledged by the voters; the re-commit of a base is not a round's)."
@@ -411,29 +453,41 @@ RoundFamilies class >> textOf: anError
 
 "--- 1. hot key: no member starves (D-LIVE-2) ---"
 
-"{ longest gap of each member (rounds without an acknowledged commit, over the first 200
- rounds). acknowledged commits of each member. permissions that committed two rounds }: proto_db
- test_cluster_permit_hot_key at DEPTH 0. Three members, lease 2400 ms, requestTimeout 100 ms;
- k clients per member each run hot read-modify-writes of one key (10 retries, 1 ms builds), one
- after the other. A transaction reads its snapshot before it queues for a permission; by its
- turn another member has committed, so its first round conflicts, always. It commits only
- through a retry that starts from the root the permission carries, built while the permission
- is still held. The runs stop at 200 rounds and converge (no fork, S4, H7)."
+"{ longest gap of each member (rounds without an acknowledged hot commit, over the first 200
+ rounds). acknowledged hot commits of each member. permissions that committed two rounds.
+ re-commits. lost updates }: modelled on proto_db test_cluster_permit_hot_key at DEPTH 0; a
+ model, not a port (proto_db's test is threaded; here a client is a sequence of events and a
+ transaction's snapshot is the newest root its node knows committed when it queues, as
+ Database.run reads it). Three members, lease 2400 ms, requestTimeout 100 ms; k clients per
+ member each run hot read-modify-writes of one key (10 retries, 1 ms builds), one after the
+ other, and b blind writers per member (commits that never conflict, 1 ms builds) beside them;
+ a permitHeld retry is queued after d virtual microseconds (its fn run again). A transaction
+ reads its snapshot before it queues for a permission; by its turn another member has
+ committed, so its first round conflicts, always. It commits only through a retry that starts
+ from the root the permission carries, built while the permission is still held. The runs stop
+ at 200 rounds and converge (no fork, S4, H7); lost updates are acknowledged commits missing
+ from the committed chain (proto_db's no-lost-update counter)."
 RoundFamilies class >> hotKey: aRules seed: n clients: k
+  ^ self hotKey: aRules seed: n clients: k blind: 0 heldDelay: 0.
+
+RoundFamilies class >> hotKey: aRules seed: n clients: k blind: b heldDelay: d
   | sim opts limit |
   opts := Dictionary new.
   opts at: #leaseDuration put: 2400; at: #requestTimeout put: 100.
   sim := self sim: aRules seed: n committed: true options: opts.
+  sim heldDelay: d.
   limit := 200.
   self three do: [:id |
-    1 to: k do: [:i | sim loop: id , 'c' , i printString at: id hot: true builds: #(1000) retries: 10]].
+    1 to: k do: [:i | sim loop: id , 'c' , i printString at: id hot: true builds: #(1000) retries: 10].
+    1 to: b do: [:i | sim loop: id , 'b' , i printString at: id hot: false builds: #(1000) retries: 10]].
   sim runUntil: [sim started >= limit] steps: 3000000.
   sim stopLoops.
   sim converge: 3000000.
   ^ { self three collect: [:id | sim longestGapOf: id upTo: limit].
     self three collect: [:id | sim acksOf: id].
     sim permitsWithSeveralCommits.
-    sim recommits size }.
+    sim recommits size.
+    sim lostUpdates }.
 
 "--- 2. a reserve refusal sends nothing and is retryable ---"
 
@@ -461,7 +515,9 @@ RoundFamilies class >> reserve: aRules seed: n
 "{ outcome. attempts. the last error names leaseDuration, sendReserve and the build time.
  PBReplicates. sends_refused_reserve at n0 }: every attempt of n0's commit builds for 700 ms,
  longer than any permission (the belief, 666 ms): every round is refused, nothing is ever sent,
- and the client ends after its retries with the reserve refusal's text (CC18), not silently."
+ and the client ends after its retries with the reserve refusal's text (CC18), not silently.
+ The permission has expired by then, so no refusal is counted (proto_db counts
+ sends_refused_reserve only for a valid permission)."
 RoundFamilies class >> buildLonger: aRules seed: n
   | sim last |
   sim := self sim: aRules seed: n committed: true options: Dictionary new.
@@ -551,3 +607,31 @@ RoundFamilies class >> unknown: aRules seed: n
     (sim errorsOf: 'u') anySatisfy: [:e | (e isKindOf: PBConflictError) and: [e permitHeld]].
     last isEmpty ifTrue: [nil] ifFalse: [last last at: 3].
     sim outcomeOf: 'v' }.
+
+"--- 7. every commit gets an outcome (spec 5.7) ---"
+
+"{ outcome of h. h's error is its own conflict. outcome of a }: in one round of n0, a builds and
+ h (no retries left, a read that always conflicts) conflicts; once the PBReplicate is handed
+ over, n0 is cut off and the replication ends #unknown. a ends PBOutcomeUnknownError; h, not
+ part of what was sent, gets its own conflict, so its client ends instead of waiting."
+RoundFamilies class >> conflictInUnknown: aRules seed: n
+  | sim |
+  sim := self sim: aRules seed: n committed: true options: Dictionary new.
+  sim onReplicate: [:id | sim partition: #(#('n0') #('n1' 'n2'))].
+  sim run: 'a' at: 'n0' hot: false builds: #(1000) retries: 0.
+  sim run: 'h' at: 'n0' hot: #always builds: #(1000) retries: 0.
+  self resolve: #('a' 'h') in: sim.
+  ^ { sim outcomeOf: 'h'.
+    (sim errorsOf: 'h') size = 1 and: [(sim errorsOf: 'h') first isKindOf: PBConflictError].
+    sim outcomeOf: 'a' }.
+
+"{ outcome of m. its error is a PBTimeoutError }: n0 is cut off from the start; its commit m
+ waits for a permission no majority can grant, which ends PBTimeoutError (acquireTimeout): the
+ round settles its batch with that error, so the client ends."
+RoundFamilies class >> minority: aRules seed: n
+  | sim |
+  sim := self sim: aRules seed: n committed: true options: Dictionary new.
+  sim partition: #(#('n0') #('n1' 'n2')).
+  sim run: 'm' at: 'n0' hot: false builds: #(1000) retries: 0.
+  self resolve: #('m') in: sim.
+  ^ { sim outcomeOf: 'm'. (sim errorsOf: 'm') anySatisfy: [:x | x isKindOf: PBTimeoutError] }.

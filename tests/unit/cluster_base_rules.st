@@ -1,4 +1,4 @@
-"EXPECT: ok 31"
+"EXPECT: ok 32"
 "The base choice (cluster/holder.st, CP 1.6) called directly, one guard per check (proto_db
  transactions.py _lease_base, _phase_1_floor, _base_needs_commit, _commit_base, refound,
  _guard_error; coordinator.py recover_root, _on_answer, replicate's pred). drive runs one
@@ -32,7 +32,8 @@
  a second round under it builds on that root, no commit needed, not #stale, whether or not the
  acceptor reported the commit, and the pred is that root. (29) A round that sent nothing
  (#none, under sendReserve) does not move the pred. (30) This node's own accepted root is in the
- recovery result. (31) An answer to another recovery round (its rid) is ignored."
+ recovery result. (31) An answer to another recovery round (its rid) is ignored. (32) L14 at the
+ send: a term below the acceptor's rejoin ballot sends nothing."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_base'.
@@ -331,5 +332,17 @@ s := core dispatch: (answer value: 'n1' value: tr + 100 value: { r1. r1. 'ok' })
 c that: 'an answer to another recovery round is ignored ({ settled }, answers recorded)'
   is: { (s effects select: [:e | e isKindOf: PBSettle]) size. ((core _choicesIn: s state) collect: [:x | x answers size]) asArray }
   equals: { 0. #(0) }.
+
+"(32) L14 at the send"
+p := perm value: r1 value: true.
+s := (decision value: core value: (stateOf value: k) value: p value: #() value: nil value: true) at: 3.
+"s with its acceptor's rejoin ballot set to n (set by rejoining, Task 16: written here directly)."
+st := [:n | | v | v := s acceptorView with: #(). v instVarNamed: 'rejoinBallot' put: n. s with: { #acceptorView -> v }].
+c that: 'L14 at the send: a term below the acceptor''s rejoin ballot sends nothing (#none); equal to it, sent'
+  is: { (core dispatch: (PBReplicateWanted permission: p root: rT pred: r1 waiter: #x) in: (st value: T + 1) now: 1000) effects
+      collect: [:f | f class name].
+    ((core dispatch: (PBReplicateWanted permission: p root: rT pred: r1 waiter: #x) in: (st value: T) now: 1000) effects
+      select: [:f | (f isKindOf: PBSend) and: [f message type = 'replicate']]) size }
+  equals: { #(#PBSettle). 2 }.
 
 c report.

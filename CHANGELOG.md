@@ -15,10 +15,14 @@
   `PBOutcomeUnknownError`, never retried). Held retries (D-LIVE-2): a conflicted commit whose
   caller retries at once gets `PBConflictError` with `permitHeld` true (new `PBConflictError
   held:`), and the permission is kept for min(`retryHold`, the time left) so its retry runs the
-  next round under it. `PBStep` also carries a `PBRoundState`. Tested by
+  next round under it; the round awaits every held caller (`PBRoundEntry caller`,
+  `PBDropKept caller:`). After `termRetries` (5) stale bases in a row the queued commits fail with
+  a conflict (`proto_db` `_TERM_RETRIES`). `dispatchReplicateWanted:` also refuses a term below
+  the acceptor's rejoin ballot at the send. `PBStep` also carries a `PBRoundState`. Tested by
   `tests/unit/sim_round_rules.st` (hot key on three nodes without starvation, reserve refusal,
-  a build longer than the belief, the group bound, a stale base, unknown never retried, and the
-  plants `PlantNoReserve` and `PlantNoKeep`; the round's simulator shell in
+  a build longer than the belief, the group bound, a stale base, unknown never retried, hot-key
+  clients beside blind writers, every commit getting an outcome, and the plants `PlantNoReserve`
+  and `PlantNoKeep`; the round's simulator shell in
   `tests/unit/_round.st`) and `tests/unit/cluster_round_rules.st` (one guard per check).
 - The base choice (`src/protobase/cluster/holder.st`, CP 1.6): `proto_db`'s `_lease_base`,
   `recover_root`, `_phase_1_floor`, `_base_needs_commit`, the refound and the hard guard, as rule

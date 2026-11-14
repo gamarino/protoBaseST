@@ -395,13 +395,15 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   decision (keep it, adopt a timing-only lost-renewal back-off here as a recorded deviation,
   or propose one to `proto_db` upstream) is carried by the plan's Task 20. *Cost:* network and
   acceptor-lane load for up to belief / 2 after such a loss.
-- **The rejoin-ballot refusal is in the commit round, before the send (L14).** `proto_db`'s
-  `replicate` refuses (`ProtoConflictError`) a term below the node's rejoin ballot. protoBaseST
-  makes the same refusal in the commit round (`mayReplicate:now:`, `cluster/holder.st`), from the
-  ballot the shell hands the `PBRoundState` (`withRejoinBallot:`, never lowered), so nothing is
-  sent and the commits get a retryable conflict, as `proto_db`'s. `dispatchReplicateWanted:`
-  itself does not repeat the check. Setting the ballot is rejoining (Task 16). *Cost:* none
-  until rejoining exists: a node that never rejoined has ballot 0.
+- **The rejoin-ballot refusal is made twice (L14).** `proto_db`'s `replicate` refuses
+  (`ProtoConflictError`) a term below the node's rejoin ballot, read under its lock at the send.
+  protoBaseST refuses first in the commit round (`mayReplicate:now:`, `cluster/holder.st`), from
+  the ballot the shell hands the `PBRoundState` (`withRejoinBallot:`, never lowered): nothing is
+  sent and the commits get a retryable conflict naming the ballot, as `proto_db`'s. Because the
+  shell performs the `PBReplicate` later, `dispatchReplicateWanted:` checks again against its
+  acceptor's ballot at the send, and then sends nothing (`#none`: the same retryable conflict,
+  with the generic text). Setting the ballot is rejoining (Task 16). *Cost:* none until rejoining
+  exists: a node that never rejoined has ballot 0.
 - **The commit round is a state machine (representation and timing, CC2, CC10).** `proto_db`'s
   `_run_round` is a thread that blocks on the permit, the base, each build and the replication,
   and waits on a condition for held retries. protoBaseST's `round:in:now:` is pure: each answer
@@ -411,8 +413,15 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   reserve refusal's text also names the round's longest build, the belief and `leaseDuration`
   (CC18), so a transaction whose build alone exceeds a permission says why it never commits.
   `proto_db`'s held-retry test that the outcome is not unknown is not written: here an unknown
-  outcome ends the permission before a round can hold anything. *Cost:* none on the wire; a
-  round under the group bound commits fewer entries per permission than its batch.
+  outcome ends the permission before a round can hold anything. Held retries are awaited by
+  caller, as `_await_retries` (`held <= queued`); `proto_db` leaves out the runner's own thread,
+  which cannot wait for the retry it must run itself and keeps the permission for "that retry,
+  or any commit queued meanwhile" (`_keep`). The state machine has no runner thread, so it
+  waits for every held caller, the runner's included: a commit of another caller never takes
+  the round a held retry was promised. The reserve refusal of a permission that already expired
+  keeps the CC18 text (`proto_db` raises "lease expired") and, as `proto_db`, is not counted.
+  *Cost:* none on the wire; a round under the group bound commits fewer entries per permission
+  than its batch.
 
 ## Errors and messages
 

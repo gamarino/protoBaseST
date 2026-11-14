@@ -1097,7 +1097,13 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     `proto_db` upstream (preferred, since the behaviour is `proto_db`'s); record the decision in
     docs/deviations.md. (g) Carried from Task 13 (review note): `stop` settles a replication in
     flight (`PBHolder replications`) `#unknown`, never `#none` (the root left the node;
-    `proto_db` `replicate` 3895-3897).
+    `proto_db` `replicate` 3895-3897). (h) Carried from Task 15 (review note, R148): the commit
+    round's `_endPermission:` emits `PBReportDone` and then, when commits are queued,
+    `PBAskPermit` in the same step; the shell performs them in order and issues that permit only
+    once the done has freed the node's write permission, or it reproduces `proto_db`'s pre-R148
+    "already holds a write permission" misuse error. (i) Carried from Task 15: the round runner
+    sets each `PBRoundEntry`'s `caller` to its client (`proto_db` `entry.thread`) and sends
+    `PBDropKept caller:` when a held caller will not retry (`Database.run` returned or raised).
     (CC24), `forceRejoin`, `committedRoot` (`PBLabeledRoot` from an `Atom`, never a message),
     `committedEpoch`, `needsConfirmation`, `isFenced`, `nodeId`, `config`.
   - For the round runner (all answer `Future`s, never wait): `_permit` → `PBPermission`
