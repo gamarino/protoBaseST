@@ -689,11 +689,12 @@ PBCount >> printOn: aStream
 
 Object subclass: #PBStep instanceVariableNames: 'state effects'.
 
-"The answer of a dispatcher rule: aState (a PBNodeState) and anArray of effects, performed in
- order. A PBLogAppend is PBValidationError here: only an acceptor step writes the log."
+"The answer of a dispatcher rule: aState (a PBNodeState, or the PBRoundState of a commit round:
+ holder.st round:in:now:) and anArray of effects, performed in order. A PBLogAppend is
+ PBValidationError here: only an acceptor step writes the log."
 PBStep class >> state: aState effects: anArray
-  (aState isKindOf: PBNodeState) ifFalse: [
-    ^ PBValidationError signal: 'PBStep: a state is a PBNodeState, not ' , aState printString].
+  ((aState isKindOf: PBNodeState) or: [aState isKindOf: PBRoundState]) ifFalse: [
+    ^ PBValidationError signal: 'PBStep: a state is a PBNodeState or a PBRoundState, not ' , aState printString].
   (anArray isArray and: [anArray allSatisfy: [:e | (e isKindOf: PBEffect) and: [(e isKindOf: PBLogAppend) not]]]) ifFalse: [
     ^ PBValidationError signal: 'PBStep: the effects are an Array of effects other than PBLogAppend, not ' , anArray printString].
   ^ self basicNew _setState: aState effects: anArray copy.

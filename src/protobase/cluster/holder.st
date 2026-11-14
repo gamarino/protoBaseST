@@ -1,4 +1,4 @@
-"-- cluster/holder.st: the base choice, the holder's replication and the commit point --
+"-- cluster/holder.st: the base choice, the holder's replication, the commit point and the commit round --
 
 The holder side of a commit round of proto_db's ClusterCoordinator (cluster/coordinator.py at
 v2.0.0rc3: replicate over a storage shared by every node, the ack branch of _on_answer, and the
@@ -66,8 +66,22 @@ no proposal). Nothing here reads a clock: t is the node's clock (CC3).
     (PBValidationError): acceptors trust the pred, so a wrong one is never sent. The record is
     forgotten when the permission's done report is made (owner.st dispatchDoneReport:).
 
-Not here: the rejoin ballot's refusal to replicate below it (L14, Task 16), bounded
-replication, copies and the gate (Phase D).
+  The commit round (spec 5.6, proto_db transactions.py _run_round, _permit_round, _keep,
+    _take_kept, _await_retries, _drop_kept): round:in:now:, a pure state machine over a
+    PBRoundState, whose effects the shell performs and whose answers come back as events. One
+    round at a time takes the whole queue under one permission; its base first (PBAskBase),
+    re-committed when it needs a commit (its unchanged root, one PBReplicate); each PBRoundEntry
+    builds on the previous root (stamp { term. epoch + 1 }), a conflict fails alone; before each
+    build after the first the group bound (CC11, groupBoundAllows:now:) asks for sendReserve +
+    the round's longest build, the rest back to the head of the queue; before any send
+    mayReplicate:now: refuses less than sendReserve left (R121, the CC18 text) and a term below
+    the rejoin ballot (L14), nothing sent, a retryable conflict. Outcomes as H7. Held retries
+    (D-LIVE-2): a conflicted entry that will retry gets PBConflictError held:, and the
+    permission is kept for min(retryHold, the time left) for its round. PBReportDone ends each
+    permission with its outcome.
+
+Not here: the rejoin ballot itself (set by rejoining, Task 16), bounded replication, copies and
+the gate (Phase D).
 
 Every value here is immutable: built once by its class-side constructor; with: answers a new
 value."
@@ -1029,3 +1043,957 @@ PBCoordinatorCore >> acceptRecovered: anEvent in: s now: t
   ^ PBAcceptorStep
     state: (s withGrants: s grants suspectTerm: 0 rejoined: s isRejoined tierFailed: s tierFailed loggedPromise: s loggedPromise)
     appends: #() reply: #().
+
+"=== The commit round: values ================================================"
+
+"--- PBRoundEntry ---"
+
+"One commit waiting for a round, or in one (proto_db _Entry): its token names it to the shell
+ (the waiter its PBSettle settles); willRetry, whether its caller retries a conflict at once
+ (proto_db entry.retrying: Database.run has retries left); deadline, the shell's (CC10: the
+ standalone runner's lockTimeout deadline, nil when none), carried and not read by the cluster
+ round's rules."
+PBProposerValue subclass: #PBRoundEntry.
+
+PBRoundEntry class >> fieldNames
+  ^ #(#token #willRetry #deadline).
+
+PBRoundEntry class >> token: aToken willRetry: aBoolean deadline: aDeadline
+  aToken isNil ifTrue: [^ PBValidationError signal: 'PBRoundEntry: a token is required'].
+  (aBoolean == true or: [aBoolean == false]) ifFalse: [
+    ^ PBValidationError signal: 'PBRoundEntry: willRetry is a Boolean, not ' , aBoolean printString].
+  (aDeadline isNil or: [aDeadline isInteger]) ifFalse: [
+    ^ PBValidationError signal: 'PBRoundEntry: a deadline is an Integer of microseconds or nil, not ' , aDeadline printString].
+  ^ self _from: (Dictionary new at: #token put: aToken; at: #willRetry put: aBoolean; at: #deadline put: aDeadline; yourself).
+
+PBRoundEntry >> token
+  ^ self _at: #token.
+
+PBRoundEntry >> willRetry
+  ^ self _at: #willRetry.
+
+PBRoundEntry >> deadline
+  ^ self _at: #deadline.
+
+PBRoundEntry >> printOn: aStream
+  aStream nextPutAll: 'PBRoundEntry('; nextPutAll: (PBCoreValue textOf: self token); nextPut: $).
+
+"--- PBRoundState ---"
+
+"The commit round of one node (proto_db _Group with the state of its runner, _run_round and
+ _permit_round), one round at a time: the config; the queue (PBRoundEntry, waiting); the phase
+ (#idle; #permit: a permission asked; #base: its base asked; #recommit: the unchanged root of a
+ base that needs a commit first is being built; #recommitting: that root is replicating; #build:
+ an entry is building; #replicate: the round's root is replicating; #held: the permission is kept
+ for held retries, D-LIVE-2); the batch (the entries that asked for the permission, proto_db
+ _run_round's batch); the permission and its outcome (#none, #committed, #unknown) with the root
+ committed under it; the round's base (the pred of its replicate) and current root (the next
+ entry builds on it); live (the entries of the round not built yet), building (the entry being
+ built), built ({ entry. root }), conflicted ({ entry. error }), longest (the longest build of
+ the round, microseconds), tried (builds started in the round); rounds (run under the
+ permission); awaiting (while the permission is kept: the retries the next round waits for); the
+ hold timer's token and the next token; rejoinBallot (this node's rejoin
+ ballot, L14: the shell hands in the acceptor's, withRejoinBallot:)."
+PBProposerValue subclass: #PBRoundState.
+
+PBRoundState class >> fieldNames
+  ^ #(#config #queue #phase #batch #permission #outcome #committed #base #current #live #building #built #conflicted
+      #longest #tried #rounds #awaiting #holdToken #nextToken #rejoinBallot).
+
+"The round of the node of aConfig, idle, nothing queued."
+PBRoundState class >> config: aConfig
+  (aConfig isKindOf: PBClusterConfig) ifFalse: [
+    ^ PBValidationError signal: 'PBRoundState: a config is a PBClusterConfig, not ' , aConfig printString].
+  ^ self _from: (Dictionary new
+    at: #config put: aConfig; at: #queue put: #(); at: #phase put: #idle; at: #batch put: #(); at: #permission put: nil;
+    at: #outcome put: #none; at: #committed put: nil; at: #base put: nil; at: #current put: nil; at: #live put: #();
+    at: #building put: nil; at: #built put: #(); at: #conflicted put: #(); at: #longest put: 0; at: #tried put: 0;
+    at: #rounds put: 0; at: #awaiting put: 0; at: #holdToken put: nil; at: #nextToken put: 1; at: #rejoinBallot put: 0; yourself).
+
+PBRoundState >> config
+  ^ self _at: #config.
+
+"The entries waiting for a round, a fresh Array."
+PBRoundState >> queue
+  ^ (self _at: #queue) copy.
+
+PBRoundState >> phase
+  ^ self _at: #phase.
+
+"The entries that asked for the permission being asked, a fresh Array."
+PBRoundState >> batch
+  ^ (self _at: #batch) copy.
+
+"The permission held (a PBPermission), nil when none."
+PBRoundState >> permission
+  ^ self _at: #permission.
+
+"The permission's outcome so far: #none, #committed or #unknown."
+PBRoundState >> outcome
+  ^ self _at: #outcome.
+
+"The root committed under the permission (the last), nil when none."
+PBRoundState >> committed
+  ^ self _at: #committed.
+
+"The base of the round: the root its replicate names as pred."
+PBRoundState >> base
+  ^ self _at: #base.
+
+"The root the next entry of the round builds on."
+PBRoundState >> current
+  ^ self _at: #current.
+
+"The entries of the round not built yet, a fresh Array."
+PBRoundState >> live
+  ^ (self _at: #live) copy.
+
+PBRoundState >> building
+  ^ self _at: #building.
+
+"{ entry. root } of every entry built in the round, in order, a fresh Array."
+PBRoundState >> built
+  ^ (self _at: #built) collect: [:e | e copy].
+
+"{ entry. error } of every entry of the round that conflicted, in order, a fresh Array."
+PBRoundState >> conflicted
+  ^ (self _at: #conflicted) collect: [:e | e copy].
+
+"The longest build of the round, microseconds."
+PBRoundState >> longest
+  ^ self _at: #longest.
+
+PBRoundState >> tried
+  ^ self _at: #tried.
+
+"The rounds run under the permission."
+PBRoundState >> rounds
+  ^ self _at: #rounds.
+
+PBRoundState >> holdToken
+  ^ self _at: #holdToken.
+
+"While the permission is kept: how many retries the next round waits for (proto_db
+ _await_retries)."
+PBRoundState >> awaiting
+  ^ self _at: #awaiting.
+
+PBRoundState >> nextToken
+  ^ self _at: #nextToken.
+
+PBRoundState >> rejoinBallot
+  ^ self _at: #rejoinBallot.
+
+"Whether the permission is kept for held retries (D-LIVE-2)."
+PBRoundState >> isHeld
+  ^ self phase = #held.
+
+"This state with aBallot as the rejoin ballot when it is higher (it never goes down: a ballot a
+ quorum promised stays promised)."
+PBRoundState >> withRejoinBallot: aBallot
+  (aBallot isInteger and: [aBallot >= 0]) ifFalse: [
+    ^ PBValidationError signal: 'PBRoundState: a rejoin ballot is an Integer >= 0, not ' , aBallot printString].
+  aBallot <= self rejoinBallot ifTrue: [^ self].
+  ^ self with: { #rejoinBallot -> aBallot }.
+
+PBRoundState >> printOn: aStream
+  aStream nextPutAll: 'PBRoundState('; nextPutAll: self phase; nextPutAll: ', '; print: self queue size; nextPutAll: ' queued, ';
+    nextPutAll: (PBCoreValue textOf: self permission); nextPut: $).
+
+"=== The commit round: events ================================================"
+
+"An event of a node's commit round (PBCoordinatorCore round:in:now:), never the dispatcher's."
+PBCoreValue subclass: #PBRoundEvent.
+
+"Sends aCore the round rule of this event's class."
+PBRoundEvent >> roundWith: aCore in: aRoundState now: t
+  ^ self subclassResponsibility.
+
+"--- PBRoundEnqueued ---"
+
+PBRoundEvent subclass: #PBRoundEnqueued instanceVariableNames: 'entry'.
+
+"A commit joins the node's group (proto_db _commit_in_group): anEntry, a PBRoundEntry."
+PBRoundEnqueued class >> entry: anEntry
+  (anEntry isKindOf: PBRoundEntry) ifFalse: [
+    ^ PBValidationError signal: 'PBRoundEnqueued: an entry is a PBRoundEntry, not ' , anEntry printString].
+  ^ self basicNew _setEntry: anEntry.
+
+PBRoundEnqueued >> _setEntry: anEntry
+  "Runs once, on a fresh instance."
+  entry isNil ifFalse: [^ PBUserError signal: 'PBRoundEnqueued is immutable'].
+  entry := anEntry.
+  ^ self.
+
+PBRoundEnqueued >> entry
+  ^ entry.
+
+PBRoundEnqueued >> roundWith: aCore in: aRoundState now: t
+  ^ aCore roundEnqueued: self in: aRoundState now: t.
+
+PBRoundEnqueued >> printOn: aStream
+  aStream nextPutAll: 'PBRoundEnqueued('; print: entry; nextPut: $).
+
+"--- PBPermitted ---"
+
+PBRoundEvent subclass: #PBPermitted instanceVariableNames: 'permission'.
+
+"The answer to PBAskPermit: aPermission (a PBPermission), or the error that ended the wait (an
+ Exception, not signalled: PBTimeoutError, a fence's error, ...)."
+PBPermitted class >> permission: aPermissionOrError
+  ((aPermissionOrError isKindOf: PBPermission) or: [aPermissionOrError isKindOf: Exception]) ifFalse: [
+    ^ PBValidationError signal: 'PBPermitted: a permission is a PBPermission or an Exception, not ' , aPermissionOrError printString].
+  ^ self basicNew _setPermission: aPermissionOrError.
+
+PBPermitted >> _setPermission: aPermissionOrError
+  "Runs once, on a fresh instance."
+  permission isNil ifFalse: [^ PBUserError signal: 'PBPermitted is immutable'].
+  permission := aPermissionOrError.
+  ^ self.
+
+PBPermitted >> permission
+  ^ permission.
+
+PBPermitted >> roundWith: aCore in: aRoundState now: t
+  ^ aCore roundPermitted: self in: aRoundState now: t.
+
+PBPermitted >> printOn: aStream
+  aStream nextPutAll: 'PBPermitted('; nextPutAll: (PBCoreValue textOf: permission); nextPut: $).
+
+"--- PBBaseDecided ---"
+
+PBRoundEvent subclass: #PBBaseDecided instanceVariableNames: 'decision'.
+
+"The answer to PBAskBase: aDecision (a PBBaseDecision, leaseBase:waiter:in:now:), or the error
+ the base choice ended with (an Exception, not signalled)."
+PBBaseDecided class >> decision: aDecisionOrError
+  ((aDecisionOrError isKindOf: PBBaseDecision) or: [aDecisionOrError isKindOf: Exception]) ifFalse: [
+    ^ PBValidationError signal: 'PBBaseDecided: a decision is a PBBaseDecision or an Exception, not ' , aDecisionOrError printString].
+  ^ self basicNew _setDecision: aDecisionOrError.
+
+PBBaseDecided >> _setDecision: aDecisionOrError
+  "Runs once, on a fresh instance."
+  decision isNil ifFalse: [^ PBUserError signal: 'PBBaseDecided is immutable'].
+  decision := aDecisionOrError.
+  ^ self.
+
+PBBaseDecided >> decision
+  ^ decision.
+
+PBBaseDecided >> roundWith: aCore in: aRoundState now: t
+  ^ aCore roundBaseDecided: self in: aRoundState now: t.
+
+PBBaseDecided >> printOn: aStream
+  aStream nextPutAll: 'PBBaseDecided('; print: decision; nextPut: $).
+
+"--- PBBuilt, PBBuildConflict, PBBuildFailed ---"
+
+PBRoundEvent subclass: #PBBuilt instanceVariableNames: 'entry root micros'.
+
+"The answer to PBBuild: the root built for anEntry (nil: the unchanged root of a base that needs
+ a commit first, proto_db _commit_base), aRoot (a PBLabeledRoot carrying the build's stamp: label
+ the term, epoch the base's + 1; nil for an entry with nothing to publish, proto_db ptr None),
+ built in someMicros (an Integer >= 0: the build's measured time, which feeds the group bound)."
+PBBuilt class >> entry: anEntryOrNil root: aRootOrNil micros: someMicros
+  (anEntryOrNil isNil or: [anEntryOrNil isKindOf: PBRoundEntry]) ifFalse: [
+    ^ PBValidationError signal: 'PBBuilt: an entry is a PBRoundEntry or nil, not ' , anEntryOrNil printString].
+  (aRootOrNil isNil or: [aRootOrNil isClassObject not and: [aRootOrNil class == PBLabeledRoot]]) ifFalse: [
+    ^ PBValidationError signal: 'PBBuilt: a root is a PBLabeledRoot or nil, not ' , aRootOrNil printString].
+  (someMicros isInteger and: [someMicros >= 0]) ifFalse: [
+    ^ PBValidationError signal: 'PBBuilt: micros is an Integer >= 0, not ' , someMicros printString].
+  ^ self basicNew _setEntry: anEntryOrNil root: aRootOrNil micros: someMicros.
+
+PBBuilt >> _setEntry: anEntryOrNil root: aRootOrNil micros: someMicros
+  "Runs once, on a fresh instance."
+  micros isNil ifFalse: [^ PBUserError signal: 'PBBuilt is immutable'].
+  entry := anEntryOrNil.
+  root := aRootOrNil.
+  micros := someMicros.
+  ^ self.
+
+PBBuilt >> entry
+  ^ entry.
+
+PBBuilt >> root
+  ^ root.
+
+PBBuilt >> micros
+  ^ micros.
+
+PBBuilt >> roundWith: aCore in: aRoundState now: t
+  ^ aCore roundBuilt: self in: aRoundState now: t.
+
+PBBuilt >> printOn: aStream
+  aStream nextPutAll: 'PBBuilt('; nextPutAll: (PBCoreValue textOf: entry); nextPutAll: ', ';
+    nextPutAll: (PBCoreValue textOf: root); nextPutAll: ', '; print: micros; nextPutAll: ' us)'.
+
+PBRoundEvent subclass: #PBBuildConflict instanceVariableNames: 'entry error'.
+
+"The build of anEntry conflicted (anError, a PBConflictError, not signalled): it fails alone
+ (proto_db _permit_round: a conflicting transaction fails alone)."
+PBBuildConflict class >> entry: anEntry error: anError
+  (anEntry isKindOf: PBRoundEntry) ifFalse: [
+    ^ PBValidationError signal: 'PBBuildConflict: an entry is a PBRoundEntry, not ' , anEntry printString].
+  (anError isKindOf: PBConflictError) ifFalse: [
+    ^ PBValidationError signal: 'PBBuildConflict: an error is a PBConflictError, not ' , anError printString].
+  ^ self basicNew _setEntry: anEntry error: anError.
+
+PBBuildConflict >> _setEntry: anEntry error: anError
+  "Runs once, on a fresh instance."
+  entry isNil ifFalse: [^ PBUserError signal: 'PBBuildConflict is immutable'].
+  entry := anEntry.
+  error := anError.
+  ^ self.
+
+PBBuildConflict >> entry
+  ^ entry.
+
+PBBuildConflict >> error
+  ^ error.
+
+PBBuildConflict >> roundWith: aCore in: aRoundState now: t
+  ^ aCore roundBuildConflict: self in: aRoundState now: t.
+
+PBBuildConflict >> printOn: aStream
+  aStream nextPutAll: 'PBBuildConflict('; nextPutAll: (PBCoreValue textOf: entry); nextPut: $).
+
+PBRoundEvent subclass: #PBBuildFailed instanceVariableNames: 'entry error'.
+
+"The build of anEntry (nil: of the unchanged root of a base that needs a commit first) failed
+ with anError (an Exception, not signalled, other than a conflict of an entry)."
+PBBuildFailed class >> entry: anEntryOrNil error: anError
+  (anEntryOrNil isNil or: [anEntryOrNil isKindOf: PBRoundEntry]) ifFalse: [
+    ^ PBValidationError signal: 'PBBuildFailed: an entry is a PBRoundEntry or nil, not ' , anEntryOrNil printString].
+  (anError isKindOf: Exception) ifFalse: [
+    ^ PBValidationError signal: 'PBBuildFailed: an error is an Exception, not ' , anError printString].
+  ^ self basicNew _setEntry: anEntryOrNil error: anError.
+
+PBBuildFailed >> _setEntry: anEntryOrNil error: anError
+  "Runs once, on a fresh instance."
+  error isNil ifFalse: [^ PBUserError signal: 'PBBuildFailed is immutable'].
+  entry := anEntryOrNil.
+  error := anError.
+  ^ self.
+
+PBBuildFailed >> entry
+  ^ entry.
+
+PBBuildFailed >> error
+  ^ error.
+
+PBBuildFailed >> roundWith: aCore in: aRoundState now: t
+  ^ aCore roundBuildFailed: self in: aRoundState now: t.
+
+PBBuildFailed >> printOn: aStream
+  aStream nextPutAll: 'PBBuildFailed('; nextPutAll: (PBCoreValue textOf: entry); nextPutAll: ', '; print: error class; nextPut: $).
+
+"--- PBReplicated ---"
+
+PBRoundEvent subclass: #PBReplicated instanceVariableNames: 'outcome'.
+
+"The answer to PBReplicate: anOutcome, #committed, #unknown or #none (H7, the settle of
+ dispatchReplicateWanted:in:now:)."
+PBReplicated class >> outcome: anOutcome
+  (#(#committed #unknown #none) includes: anOutcome) ifFalse: [
+    ^ PBValidationError signal: 'PBReplicated: an outcome is #committed, #unknown or #none, not ' , anOutcome printString].
+  ^ self basicNew _setOutcome: anOutcome asSymbol.
+
+PBReplicated >> _setOutcome: anOutcome
+  "Runs once, on a fresh instance."
+  outcome isNil ifFalse: [^ PBUserError signal: 'PBReplicated is immutable'].
+  outcome := anOutcome.
+  ^ self.
+
+PBReplicated >> outcome
+  ^ outcome.
+
+PBReplicated >> roundWith: aCore in: aRoundState now: t
+  ^ aCore roundReplicated: self in: aRoundState now: t.
+
+PBReplicated >> printOn: aStream
+  aStream nextPutAll: 'PBReplicated('; nextPutAll: outcome; nextPut: $).
+
+"--- PBHoldExpired, PBDropKept ---"
+
+PBRoundEvent subclass: #PBHoldExpired instanceVariableNames: 'token'.
+
+"The hold timer aToken came due (the event of the round's PBTimer): a permission still kept
+ under that token ends (proto_db _keep's expire)."
+PBHoldExpired class >> token: aToken
+  ^ self basicNew _setToken: (self _present: aToken named: 'token').
+
+PBHoldExpired >> _setToken: aToken
+  "Runs once, on a fresh instance."
+  token isNil ifFalse: [^ PBUserError signal: 'PBHoldExpired is immutable'].
+  token := aToken.
+  ^ self.
+
+PBHoldExpired >> token
+  ^ token.
+
+PBHoldExpired >> roundWith: aCore in: aRoundState now: t
+  ^ aCore roundHoldExpired: self in: aRoundState now: t.
+
+PBHoldExpired >> printOn: aStream
+  aStream nextPutAll: 'PBHoldExpired('; nextPutAll: (PBCoreValue textOf: token); nextPut: $).
+
+PBRoundEvent subclass: #PBDropKept.
+
+"The caller of a held conflict will not retry (proto_db _drop_kept: Database.run returned or
+ raised instead): a permission kept for it ends now."
+PBDropKept >> roundWith: aCore in: aRoundState now: t
+  ^ aCore roundDropKept: self in: aRoundState now: t.
+
+"=== The commit round: effects ==============================================="
+
+PBEffect subclass: #PBAskPermit.
+
+"Ask the node for a write permission (PBPermitWanted) and hand the round PBPermitted with its
+ answer."
+PBAskPermit >> applyTo: aShell
+  ^ aShell applyAskPermit: self.
+
+PBEffect subclass: #PBAskBase instanceVariableNames: 'permission'.
+
+"Ask the node for the base of a round under aPermission (PBBaseWanted) and hand the round
+ PBBaseDecided with its answer."
+PBAskBase class >> permission: aPermission
+  (aPermission isKindOf: PBPermission) ifFalse: [
+    ^ PBValidationError signal: 'PBAskBase: a permission is a PBPermission, not ' , aPermission printString].
+  ^ self basicNew _setPermission: aPermission.
+
+PBAskBase >> _setPermission: aPermission
+  "Runs once, on a fresh instance."
+  permission isNil ifFalse: [^ PBUserError signal: 'PBAskBase is immutable'].
+  permission := aPermission.
+  ^ self.
+
+PBAskBase >> permission
+  ^ permission.
+
+PBAskBase >> applyTo: aShell
+  ^ aShell applyAskBase: self.
+
+PBAskBase >> printOn: aStream
+  aStream nextPutAll: 'PBAskBase('; nextPutAll: (PBCoreValue textOf: permission); nextPut: $).
+
+PBEffect subclass: #PBBuild instanceVariableNames: 'entry base stamp'.
+
+"Build anEntry's transaction on aBase (a PBLabeledRoot) with aStamp ({ term. epoch }: the
+ permission's term, the base's epoch + 1, proto_db _ClusterStamp) and hand the round PBBuilt,
+ PBBuildConflict or PBBuildFailed. anEntry nil: save the unchanged root of aBase with aStamp (a
+ base that needs a commit first, proto_db _commit_base)."
+PBBuild class >> entry: anEntryOrNil base: aBase stamp: aStamp
+  (anEntryOrNil isNil or: [anEntryOrNil isKindOf: PBRoundEntry]) ifFalse: [
+    ^ PBValidationError signal: 'PBBuild: an entry is a PBRoundEntry or nil, not ' , anEntryOrNil printString].
+  (aBase isKindOf: PBLabeledRoot) ifFalse: [
+    ^ PBValidationError signal: 'PBBuild: a base is a PBLabeledRoot, not ' , aBase printString].
+  (aStamp isArray and: [aStamp size = 2 and: [aStamp allSatisfy: [:i | i isInteger and: [i >= 0]]]]) ifFalse: [
+    ^ PBValidationError signal: 'PBBuild: a stamp is { term. epoch }, not ' , aStamp printString].
+  ^ self basicNew _setEntry: anEntryOrNil base: aBase stamp: aStamp copy.
+
+PBBuild >> _setEntry: anEntryOrNil base: aBase stamp: aStamp
+  "Runs once, on a fresh instance."
+  stamp isNil ifFalse: [^ PBUserError signal: 'PBBuild is immutable'].
+  entry := anEntryOrNil.
+  base := aBase.
+  stamp := aStamp.
+  ^ self.
+
+PBBuild >> entry
+  ^ entry.
+
+PBBuild >> base
+  ^ base.
+
+"{ term. epoch }, a fresh Array."
+PBBuild >> stamp
+  ^ stamp copy.
+
+PBBuild >> applyTo: aShell
+  ^ aShell applyBuild: self.
+
+PBBuild >> printOn: aStream
+  aStream nextPutAll: 'PBBuild('; nextPutAll: (PBCoreValue textOf: entry); nextPutAll: ' on ';
+    nextPutAll: (PBCoreValue textOf: base); nextPutAll: ', '; print: stamp; nextPut: $).
+
+PBEffect subclass: #PBReplicate instanceVariableNames: 'permission root pred'.
+
+"Replicate aRoot, built under aPermission on aPred (the round's base), as PBReplicateWanted
+ permission: root: pred: waiter:, and hand the round PBReplicated with its outcome."
+PBReplicate class >> permission: aPermission root: aRoot pred: aPred
+  (aPermission isKindOf: PBPermission) ifFalse: [
+    ^ PBValidationError signal: 'PBReplicate: a permission is a PBPermission, not ' , aPermission printString].
+  ((aRoot isKindOf: PBLabeledRoot) and: [aPred isKindOf: PBLabeledRoot]) ifFalse: [
+    ^ PBValidationError signal: 'PBReplicate: a root and a pred are PBLabeledRoots, not ' , aRoot printString , ', ' , aPred printString].
+  ^ self basicNew _setPermission: aPermission root: aRoot pred: aPred.
+
+PBReplicate >> _setPermission: aPermission root: aRoot pred: aPred
+  "Runs once, on a fresh instance."
+  permission isNil ifFalse: [^ PBUserError signal: 'PBReplicate is immutable'].
+  permission := aPermission.
+  root := aRoot.
+  pred := aPred.
+  ^ self.
+
+PBReplicate >> permission
+  ^ permission.
+
+PBReplicate >> root
+  ^ root.
+
+PBReplicate >> pred
+  ^ pred.
+
+PBReplicate >> applyTo: aShell
+  ^ aShell applyReplicate: self.
+
+PBReplicate >> printOn: aStream
+  aStream nextPutAll: 'PBReplicate('; nextPutAll: (PBCoreValue textOf: root); nextPutAll: ' on ';
+    nextPutAll: (PBCoreValue textOf: pred); nextPut: $).
+
+PBEffect subclass: #PBReportDone instanceVariableNames: 'permission outcome root'.
+
+"End aPermission with anOutcome (#committed, #unknown or #none) and aRoot (the root committed
+ under it, nil unless #committed): PBDoneReport permission: outcome: root: to the node (proto_db
+ _end_permission, finish)."
+PBReportDone class >> permission: aPermission outcome: anOutcome root: aRootOrNil
+  (aPermission isKindOf: PBPermission) ifFalse: [
+    ^ PBValidationError signal: 'PBReportDone: a permission is a PBPermission, not ' , aPermission printString].
+  (PBDoneReport outcomes includes: anOutcome) ifFalse: [
+    ^ PBValidationError signal: 'PBReportDone: an outcome is #committed, #unknown or #none, not ' , anOutcome printString].
+  ((anOutcome = #committed) = aRootOrNil notNil) ifFalse: [
+    ^ PBValidationError signal: 'PBReportDone: a root exactly with #committed'].
+  ^ self basicNew _setPermission: aPermission outcome: anOutcome asSymbol root: aRootOrNil.
+
+PBReportDone >> _setPermission: aPermission outcome: anOutcome root: aRootOrNil
+  "Runs once, on a fresh instance."
+  permission isNil ifFalse: [^ PBUserError signal: 'PBReportDone is immutable'].
+  permission := aPermission.
+  outcome := anOutcome.
+  root := aRootOrNil.
+  ^ self.
+
+PBReportDone >> permission
+  ^ permission.
+
+PBReportDone >> outcome
+  ^ outcome.
+
+PBReportDone >> root
+  ^ root.
+
+PBReportDone >> applyTo: aShell
+  ^ aShell applyReportDone: self.
+
+PBReportDone >> printOn: aStream
+  aStream nextPutAll: 'PBReportDone('; nextPutAll: (PBCoreValue textOf: permission); nextPutAll: ', '; nextPutAll: outcome; nextPut: $).
+
+"=== PBCoordinatorCore: the commit round ====================================="
+
+"The step of the commit round of aRoundState for anEvent at t (microseconds of the node's clock):
+ a PBStep whose state is the new PBRoundState. A rule that answers anything else is
+ PBUnexpectedError."
+PBCoordinatorCore >> round: anEvent in: aRoundState now: t
+  | step |
+  (anEvent isKindOf: PBRoundEvent) ifFalse: [
+    ^ PBValidationError signal: 'PBCoordinatorCore: a round event is a PBRoundEvent, not ' , anEvent printString].
+  (aRoundState isKindOf: PBRoundState) ifFalse: [
+    ^ PBValidationError signal: 'PBCoordinatorCore: a round state is a PBRoundState, not ' , aRoundState printString].
+  t isInteger ifFalse: [^ PBValidationError signal: 'PBCoordinatorCore: now is an Integer of microseconds, not ' , t printString].
+  step := anEvent roundWith: self in: aRoundState now: t.
+  ((step isKindOf: PBStep) and: [step state isKindOf: PBRoundState]) ifFalse: [
+    ^ PBUnexpectedError signal: 'The round rule for ' , anEvent printString , ' answered ' , step printString , ', not a PBStep of a PBRoundState'].
+  ^ step.
+
+"The shell handed anEvent to a round in another phase than aPhase: PBValidationError (the shell
+ answers each effect once, with the event of its kind)."
+PBCoordinatorCore >> _expect: aPhase in: s for: anEvent
+  s phase = aPhase ifFalse: [
+    ^ PBValidationError signal: 'The round takes ' , anEvent printString , ' only in phase ' , aPhase , ', not in ' , s phase].
+
+"anEvent names the entry being built, else PBValidationError."
+PBCoordinatorCore >> _expectBuilding: anEvent in: s
+  (s building notNil and: [anEvent entry notNil and: [anEvent entry token = s building token]]) ifFalse: [
+    ^ PBValidationError signal: 'The round is building ' , (PBCoreValue textOf: s building) , ', not '
+      , (PBCoreValue textOf: anEvent entry)].
+
+"The stamp of a root built on aRoot under s's permission: { term. epoch + 1 } (proto_db
+ _ClusterStamp(permission.term, current.epoch + 1))."
+PBCoordinatorCore >> _stampOn: aRoot in: s
+  ^ { s permission term. aRoot epoch + 1 }.
+
+"aRoot was built on aBase with its stamp (label the term, epoch the base's + 1), else
+ PBValidationError: a root that does not extend the base by one epoch under the term is never
+ sent."
+PBCoordinatorCore >> _checkBuilt: aRoot on: aBase in: s for: anEvent
+  | stamp |
+  stamp := self _stampOn: aBase in: s.
+  (aRoot notNil and: [aRoot label = stamp first and: [aRoot epoch = stamp last]]) ifFalse: [
+    ^ PBValidationError signal: anEvent printString , ': a root built on ' , (PBCoreValue textOf: aBase) , ' under '
+      , (PBCoreValue textOf: s permission) , ' carries the stamp ' , stamp printString , ', not ' , (PBCoreValue textOf: aRoot)].
+
+"Each of someEntries settled with anOutcome (an error shared by them is one value: a shell that
+ signals it to several callers signals a copy to each, proto_db error_shared)."
+PBCoordinatorCore >> _finish: someEntries with: anOutcome effects: fx
+  someEntries do: [:e | fx add: (PBSettle waiter: e token outcome: anOutcome)].
+
+"Milliseconds of someMicros, rounded, as text."
+PBCoordinatorCore >> _ms: someMicros
+  ^ (someMicros / 1000) rounded printString.
+
+"--- joining, the permission ---"
+
+"proto_db _commit_in_group: a commit joins the node's group. With no round, the round takes the
+ whole queue and asks for a permission; under a permission kept for held retries, the next round
+ under it starts once the queue holds as many commits as it awaits (_retriesIn:, D-LIVE-2); else
+ it waits for the round that runs."
+PBCoordinatorCore >> roundEnqueued: anEvent in: s now: t
+  ^ self _step: [:fx | | state |
+    state := s with: { #queue -> (s queue copyWith: anEvent entry) }.
+    s phase = #idle ifTrue: [state := self _askPermit: state effects: fx].
+    (s phase = #held and: [self _retriesIn: state]) ifTrue: [state := self _takeKept: state now: t effects: fx].
+    state].
+
+"proto_db _await_retries: whether the retries a kept permission awaits are queued (the queue
+ holds at least as many commits: every held caller retries one commit). With one held retry, the
+ first commit queued (proto_db _keep: 'that retry, or any commit queued meanwhile')."
+PBCoordinatorCore >> _retriesIn: s
+  ^ s queue notEmpty and: [s queue size >= s awaiting].
+
+"One round at a time (proto_db _run_round's batch): the whole queue asks for one permission."
+PBCoordinatorCore >> _askPermit: s effects: fx
+  s queue isEmpty ifTrue: [^ s].
+  fx add: PBAskPermit new.
+  ^ s with: { #phase -> #permit. #batch -> s queue. #queue -> #() }.
+
+"proto_db _take_kept: a kept permission still valid runs the next round, with the whole queue;
+ one that is not ends, and the queue asks for a new one."
+PBCoordinatorCore >> _takeKept: s now: t effects: fx
+  (s permission isValidAt: t) ifTrue: [
+    ^ self _startRound: (s with: { #live -> s queue. #queue -> #(). #holdToken -> nil. #awaiting -> 0 }) now: t effects: fx].
+  ^ self _endPermission: s now: t effects: fx.
+
+"The answer to PBAskPermit (proto_db _run_round after coordinator.permit): with a permission, the
+ batch and every commit queued meanwhile run its first round (_drain_queue); an error settles the
+ batch with it, and a queue that formed meanwhile asks again."
+PBCoordinatorCore >> roundPermitted: anEvent in: s now: t
+  ^ self _step: [:fx | | p |
+    self _expect: #permit in: s for: anEvent.
+    p := anEvent permission.
+    (p isKindOf: PBPermission)
+      ifTrue: [
+        self _startRound: (s with: { #permission -> p. #outcome -> #none. #committed -> nil. #rounds -> 0.
+          #live -> (s batch , s queue). #batch -> #(). #queue -> #() }) now: t effects: fx]
+      ifFalse: [
+        self _finish: s batch with: p effects: fx.
+        self _askPermit: (s with: { #phase -> #idle. #batch -> #() }) effects: fx]].
+
+"A round under the permission (proto_db _permit_round): its base first (_lease_base, every
+ round)."
+PBCoordinatorCore >> _startRound: s now: t effects: fx
+  fx add: (PBAskBase permission: s permission).
+  ^ s with: { #phase -> #base. #rounds -> (s rounds + 1). #built -> #(). #conflicted -> #(). #longest -> 0. #tried -> 0.
+    #building -> nil. #base -> nil. #current -> nil }.
+
+"--- the base ---"
+
+"The base of the round (proto_db _permit_round after _lease_base): an error ends the round with
+ it, nothing sent; #stale requeues; #unreachable is a retryable conflict that abandons the term;
+ #ok builds on it, after re-committing it when it needs a commit first."
+PBCoordinatorCore >> roundBaseDecided: anEvent in: s now: t
+  ^ self _step: [:fx | | d |
+    self _expect: #base in: s for: anEvent.
+    d := anEvent decision.
+    (d isKindOf: PBBaseDecision)
+      ifFalse: [self _failRound: s with: d sent: false now: t effects: fx]
+      ifTrue: [
+        d outcome = #stale
+          ifTrue: [self _staleBase: s now: t effects: fx]
+          ifFalse: [
+            d outcome = #unreachable
+              ifTrue: [self _unreachableBase: s decision: d now: t effects: fx]
+              ifFalse: [self _based: s on: d now: t effects: fx]]]].
+
+"proto_db _permit_round, base None: nothing was sent; the commits go back to the head of the
+ queue (not as attempts) and the permission ends with an outcome its owner cannot take for
+ granted, 'unknown', so the owner abandons the term (D50) -- unless a round under it committed
+ already (a held retry's round: its done reports that commit)."
+PBCoordinatorCore >> _staleBase: s now: t effects: fx
+  | state |
+  state := s with: { #queue -> (s live , s queue). #live -> #() }.
+  s outcome = #committed ifFalse: [state := state with: { #outcome -> #unknown }].
+  ^ self _endPermission: state now: t effects: fx.
+
+"proto_db _BaseUnreachable (R133): nothing was sent, the commits get a retryable conflict, and
+ the permission ends 'unknown' so its owner abandons the term instead of issuing the base again."
+PBCoordinatorCore >> _unreachableBase: s decision: aDecision now: t effects: fx
+  ^ self _failRound: (s with: { #outcome -> #unknown })
+    with: (PBConflictError new messageText: 'Node ' , s config nodeId , ': the base root (label ' , aDecision base label printString
+      , ', epoch ' , aDecision base epoch printString , ') cannot be re-committed now: the shared storage cannot read its '
+      , 'SpaceRoot; nothing was replicated'; yourself)
+    sent: false now: t effects: fx.
+
+"An #ok base: bound by the core already. One that needs a commit first is re-committed before any
+ entry (proto_db _commit_base: an unchanged root on top, labelled with the term, epoch + 1)."
+PBCoordinatorCore >> _based: s on: aDecision now: t effects: fx
+  | state |
+  state := s with: { #base -> aDecision base. #current -> aDecision base }.
+  aDecision needsCommit ifTrue: [
+    fx add: (PBBuild entry: nil base: aDecision base stamp: (self _stampOn: aDecision base in: s)).
+    ^ state with: { #phase -> #recommit }].
+  ^ self _buildNext: state now: t effects: fx.
+
+"--- the builds ---"
+
+"CC11, the group-size bound (a protoBaseST liveness addition, Q4): before building a commit after
+ the first of the round, whether the permission has sendReserve + the longest build of the round
+ left. It never decides safety: the reserve check decides what is sent."
+PBCoordinatorCore >> groupBoundAllows: s now: t
+  ^ (s permission remainingAt: t) >= (s config sendReserve + s longest).
+
+"The next build of the round (proto_db _permit_round's loop): each entry on the root the previous
+ one produced; the first always, a later one while the group bound allows it (the rest go back to
+ the head of the queue, not as attempts); with every entry tried, the root is sent."
+PBCoordinatorCore >> _buildNext: s now: t effects: fx
+  | e |
+  s live isEmpty ifTrue: [^ self _afterBuilds: s now: t effects: fx].
+  (s tried > 0 and: [(self groupBoundAllows: s now: t) not]) ifTrue: [
+    ^ self _afterBuilds: (s with: { #queue -> (s live , s queue). #live -> #() }) now: t effects: fx].
+  e := s live first.
+  fx add: (PBBuild entry: e base: s current stamp: (self _stampOn: s current in: s)).
+  ^ s with: { #phase -> #build. #building -> e. #live -> (s live copyFrom: 2 to: s live size). #tried -> (s tried + 1) }.
+
+"The answer to PBBuild: the unchanged root of a re-commit is sent (after the checks of
+ mayReplicate:now:); an entry's root is the next build's base (nil: nothing to publish, settled
+ false)."
+PBCoordinatorCore >> roundBuilt: anEvent in: s now: t
+  ^ self _step: [:fx |
+    anEvent entry isNil
+      ifTrue: [self _recommitBuilt: anEvent in: s now: t effects: fx]
+      ifFalse: [self _entryBuilt: anEvent in: s now: t effects: fx]].
+
+PBCoordinatorCore >> _recommitBuilt: anEvent in: s now: t effects: fx
+  | refusal |
+  self _expect: #recommit in: s for: anEvent.
+  self _checkBuilt: anEvent root on: s base in: s for: anEvent.
+  refusal := self mayReplicate: s now: t.
+  refusal notNil ifTrue: [^ self _refuse: s with: refusal now: t effects: fx].
+  fx add: (PBReplicate permission: s permission root: anEvent root pred: s base).
+  ^ s with: { #phase -> #recommitting. #current -> anEvent root }.
+
+PBCoordinatorCore >> _entryBuilt: anEvent in: s now: t effects: fx
+  | state |
+  self _expect: #build in: s for: anEvent.
+  self _expectBuilding: anEvent in: s.
+  state := s with: { #building -> nil. #longest -> (s longest max: anEvent micros) }.
+  anEvent root isNil ifTrue: [
+    fx add: (PBSettle waiter: anEvent entry token outcome: false).
+    ^ self _buildNext: state now: t effects: fx].
+  self _checkBuilt: anEvent root on: s current in: s for: anEvent.
+  ^ self _buildNext: (state with: { #current -> anEvent root. #built -> ((s built) copyWith: { anEvent entry. anEvent root }) })
+    now: t effects: fx.
+
+"A conflicting entry fails alone (decided after the replication: proto_db conflicted)."
+PBCoordinatorCore >> roundBuildConflict: anEvent in: s now: t
+  ^ self _step: [:fx |
+    self _expect: #build in: s for: anEvent.
+    self _expectBuilding: anEvent in: s.
+    self _buildNext: (s with: { #building -> nil. #conflicted -> ((s conflicted) copyWith: { anEvent entry. anEvent error }) })
+      now: t effects: fx].
+
+"A build that failed (proto_db _permit_round: ProtoDBError, entry.finish(error)): an entry's fails
+ alone; the re-commit's ends the round with its error, and the outcome is unknown unless nothing
+ a voter may accept can have left (proto_db: 'sent' is set before _commit_base; nothing_sent
+ only for a conflict, validation or user error)."
+PBCoordinatorCore >> roundBuildFailed: anEvent in: s now: t
+  ^ self _step: [:fx |
+    anEvent entry isNil
+      ifTrue: [
+        self _expect: #recommit in: s for: anEvent.
+        self _failRound: s with: anEvent error sent: (self _nothingSent: anEvent error) not now: t effects: fx]
+      ifFalse: [
+        self _expect: #build in: s for: anEvent.
+        self _expectBuilding: anEvent in: s.
+        fx add: (PBSettle waiter: anEvent entry token outcome: anEvent error).
+        self _buildNext: (s with: { #building -> nil }) now: t effects: fx]].
+
+"proto_db _permit_round's except: an error that says nothing acceptable left the node."
+PBCoordinatorCore >> _nothingSent: anError
+  ^ (anError isKindOf: PBConflictError) or: [(anError isKindOf: PBValidationError) or: [anError isKindOf: PBUserError]].
+
+"--- sending ---"
+
+"Every entry tried: a round that built nothing sends nothing; else its root goes out, after the
+ checks of mayReplicate:now:."
+PBCoordinatorCore >> _afterBuilds: s now: t effects: fx
+  | refusal |
+  s built isEmpty ifTrue: [^ self _roundDone: s now: t effects: fx].
+  refusal := self mayReplicate: s now: t.
+  refusal notNil ifTrue: [^ self _refuse: s with: refusal now: t effects: fx].
+  fx add: (PBReplicate permission: s permission root: s current pred: s base).
+  ^ s with: { #phase -> #replicate }.
+
+"nil when the round may send its root now, else the PBConflictError of the refusal (nothing is
+ sent: truthful, retryable, H7): R121, less than sendReserve left of the permission
+ (_reserveRefusal:left:, CC18); L14, the permission's term below this node's rejoin ballot
+ (_belowRejoinBallot:)."
+PBCoordinatorCore >> mayReplicate: s now: t
+  | left |
+  left := s permission remainingAt: t.
+  left < s config sendReserve ifTrue: [^ self _reserveRefusal: s left: left].
+  ^ self _belowRejoinBallot: s.
+
+"CC18 (Review Focus 2): the reserve refusal names the time left, sendReserve, the longest build
+ of the round and leaseDuration, so a transaction whose build alone exceeds the permission window
+ says why it never commits (proto_db _check_reserve's text, with the build)."
+PBCoordinatorCore >> _reserveRefusal: s left: someMicros
+  | c |
+  c := s config.
+  ^ PBConflictError new messageText: 'Node ' , c nodeId , ': the permission had ' , (self _ms: someMicros)
+    , ' ms left, less than the ' , (self _ms: c sendReserve) , ' ms a replication needs (sendReserve); the longest build of '
+    , 'this round took ' , (self _ms: s longest) , ' ms, and a permission lasts at most the belief of ' , (self _ms: c belief)
+    , ' ms (leaseDuration ' , (self _ms: c leaseDuration) , ' ms less driftMargin ' , (self _ms: c driftMargin)
+    , ' ms): a commit whose build leaves less than sendReserve of it never commits; shorten the transaction or raise '
+    , 'leaseDuration. Nothing was replicated'; yourself.
+
+"L14 (proto_db replicate: label < _rejoin_ballot): this node's rejoin ballot was promised by
+ V - majority + 1 voters, so no term below it can gain a majority again; the refusal of a root of
+ a term below it is a conflict, nothing sent, nil when the term is not below it."
+PBCoordinatorCore >> _belowRejoinBallot: s
+  s permission term < s rejoinBallot ifFalse: [^ nil].
+  ^ PBConflictError new messageText: 'Node ' , s config nodeId , ': term ' , s permission term printString
+    , ' is below this node''s rejoin ballot ' , s rejoinBallot printString , ', which a quorum promised; nothing was replicated';
+    yourself.
+
+"The round refused to send (counted sends_refused_reserve when the time left is below the
+ reserve): nothing left the node, the round ends with the refusal."
+PBCoordinatorCore >> _refuse: s with: aRefusal now: t effects: fx
+  (s permission remainingAt: t) < s config sendReserve ifTrue: [fx add: (PBCount stat: 'sends_refused_reserve')].
+  ^ self _failRound: s with: aRefusal sent: false now: t effects: fx.
+
+"The answer to PBReplicate (H7): of the re-commit, #committed builds the entries on it; of the
+ round's root, #committed settles the built entries true. Otherwise the round ends: #none, a
+ retryable conflict (nothing acceptable left the node), #unknown, PBOutcomeUnknownError."
+PBCoordinatorCore >> roundReplicated: anEvent in: s now: t
+  ^ self _step: [:fx | | o |
+    o := anEvent outcome.
+    s phase = #recommitting
+      ifTrue: [
+        o = #committed
+          ifTrue: [self _buildNext: (s with: { #outcome -> #committed. #committed -> s current. #base -> s current }) now: t effects: fx]
+          ifFalse: [self _replicationFailed: s outcome: o now: t effects: fx]]
+      ifFalse: [
+        self _expect: #replicate in: s for: anEvent.
+        o = #committed
+          ifTrue: [
+            self _finish: (s built collect: [:b | b first]) with: true effects: fx.
+            self _roundDone: (s with: { #outcome -> #committed. #committed -> s current. #base -> s current. #built -> #() })
+              now: t effects: fx]
+          ifFalse: [self _replicationFailed: s outcome: o now: t effects: fx]]].
+
+"A replication that did not commit: #unknown (the root left this node) or #none (nothing a voter
+ may accept left it)."
+PBCoordinatorCore >> _replicationFailed: s outcome: anOutcome now: t effects: fx
+  anOutcome = #unknown ifTrue: [
+    ^ self _failRound: s with: (PBOutcomeUnknownError new messageText: 'Node ' , s config nodeId , ': the root of this commit '
+      , 'was sent under ' , (PBCoreValue textOf: s permission) , ' and no majority of the voters acknowledged it within the '
+      , 'permission: it may or may not be committed (the next phase 1 decides)'; yourself)
+      sent: true now: t effects: fx].
+  ^ self _failRound: s with: (PBConflictError new messageText: 'Node ' , s config nodeId , ': nothing a voter may accept left '
+    , 'this node under ' , (PBCoreValue textOf: s permission) , ' (it ended, or had too little time left, before the root '
+    , 'was sent); nothing was replicated'; yourself)
+    sent: false now: t effects: fx.
+
+"proto_db _permit_round's except branch: the round ends with anError. A conflicted entry gets its
+ own conflict (not part of what was sent, never held); every other entry of the round (built,
+ being built, not built yet) gets anError. With isSent, something a voter may accept left the
+ node: the permission's outcome is unknown. Then the permission ends."
+PBCoordinatorCore >> _failRound: s with: anError sent: isSent now: t effects: fx
+  | state |
+  s conflicted do: [:c | fx add: (PBSettle waiter: c first token outcome: c last)].
+  self _finish: (s built collect: [:b | b first]) , (s building isNil ifTrue: [#()] ifFalse: [{ s building }]) , s live
+    with: anError effects: fx.
+  state := s with: { #built -> #(). #conflicted -> #(). #building -> nil. #live -> #() }.
+  isSent ifTrue: [state := state with: { #outcome -> #unknown }].
+  ^ self _endPermission: state now: t effects: fx.
+
+"--- after a round: held retries (D-LIVE-2) ---"
+
+"proto_db _permit_round after the replication: whether the conflicted anEntry's retry is held
+ (permitHeld): the permission is kept for another round (isHold: rounds <= permitRetries), its
+ caller retries at once and the permission is still valid. (proto_db also asks that the outcome
+ is not unknown; here an unknown outcome always ends the round in _failRound:with:sent:now:effects:
+ first, so it never reaches _roundDone:now:effects:.)"
+PBCoordinatorCore >> _holds: anEntry hold: isHold valid: isValid in: s
+  ^ isHold and: [anEntry willRetry and: [isValid]].
+
+"The round ended without an error (its root committed, or it built nothing): each conflicted
+ entry gets its conflict, permitHeld when its retry is held (_holds:hold:valid:in:). Then
+ proto_db _run_round's loop: no conflict, permitRetries rounds run or the permission no longer
+ valid end the permission; otherwise it is kept for the retries."
+PBCoordinatorCore >> _roundDone: s now: t effects: fx
+  | hold valid held heldCount state |
+  hold := s rounds <= s config permitRetries.
+  valid := s permission isValidAt: t.
+  heldCount := 0.
+  s conflicted do: [:c |
+    (self _holds: c first hold: hold valid: valid in: s)
+      ifTrue: [
+        heldCount := heldCount + 1.
+        fx add: (PBSettle waiter: c first token outcome: (PBConflictError held: (c last messageText ifNil: [c last class name])))]
+      ifFalse: [fx add: (PBSettle waiter: c first token outcome: c last)]].
+  held := heldCount > 0.
+  state := s with: { #conflicted -> #(). #building -> nil }.
+  (s conflicted isEmpty or: [s rounds > s config permitRetries or: [valid not]]) ifTrue: [
+    ^ self _endPermission: state now: t effects: fx].
+  ^ self _keep: (state with: { #awaiting -> (held ifTrue: [heldCount] ifFalse: [s conflicted size]) })
+    hold: (held ifTrue: [s config retryHold min: (s permission remainingAt: t)] ifFalse: [s config retryWait]) now: t effects: fx.
+
+"proto_db _keep and _await_retries: the permission s awaits (its awaiting) is kept for someMicros
+ (a PBTimer whose PBHoldExpired ends the wait: min(retryHold, the time left) for held retries,
+ retryWait for conflicts nobody retries at once) for the retries of the round's conflicts; once
+ they are queued (_retriesIn:), the next round under it takes the whole queue."
+PBCoordinatorCore >> _keep: s hold: someMicros now: t effects: fx
+  | token state |
+  token := { #hold. s nextToken }.
+  state := s with: { #phase -> #held. #holdToken -> token. #nextToken -> (s nextToken + 1) }.
+  fx add: (PBTimer after: someMicros token: token event: (PBHoldExpired token: token)).
+  (self _retriesIn: state) ifFalse: [^ state].
+  ^ self _takeKept: state now: t effects: fx.
+
+"The hold timer of a permission still kept under its token: the wait ends (proto_db
+ _await_retries' deadline: what queued runs the next round; _keep's expire: nothing queued, the
+ permission ends)."
+PBCoordinatorCore >> roundHoldExpired: anEvent in: s now: t
+  ^ self _step: [:fx |
+    (s phase = #held and: [anEvent token = s holdToken])
+      ifTrue: [self _endWait: s now: t effects: fx]
+      ifFalse: [s]].
+
+"proto_db _drop_kept: a held caller will not retry. One retry fewer is awaited; none left, the
+ wait ends."
+PBCoordinatorCore >> roundDropKept: anEvent in: s now: t
+  ^ self _step: [:fx | | state |
+    s phase = #held
+      ifTrue: [
+        state := s with: { #awaiting -> (s awaiting - 1 max: 0) }.
+        (state awaiting = 0 or: [self _retriesIn: state])
+          ifTrue: [self _endWait: state now: t effects: fx]
+          ifFalse: [state]]
+      ifFalse: [s]].
+
+"The wait of a kept permission ends: the commits queued run the next round under it; none, the
+ permission ends."
+PBCoordinatorCore >> _endWait: s now: t effects: fx
+  s queue isEmpty ifTrue: [^ self _endPermission: s now: t effects: fx].
+  ^ self _takeKept: s now: t effects: fx.
+
+"proto_db _end_permission (finish): the permission ends with its outcome and the root committed
+ under it (PBReportDone, the node's done); a queue that formed asks for the next permission."
+PBCoordinatorCore >> _endPermission: s now: t effects: fx
+  fx add: (PBReportDone permission: s permission outcome: s outcome
+    root: (s outcome = #committed ifTrue: [s committed] ifFalse: [nil])).
+  ^ self _askPermit: (s with: { #phase -> #idle. #permission -> nil. #outcome -> #none. #committed -> nil. #base -> nil.
+    #current -> nil. #rounds -> 0. #awaiting -> 0. #holdToken -> nil. #built -> #(). #conflicted -> #(). #live -> #(). #building -> nil.
+    #longest -> 0. #tried -> 0 }) effects: fx.

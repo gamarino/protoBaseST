@@ -2,6 +2,24 @@
 
 ## 0.2.0 (unreleased)
 
+- The commit round (`src/protobase/cluster/holder.st`, spec 5.6): `proto_db`'s `_run_round`,
+  `_permit_round`, `_keep`, `_take_kept` and `_await_retries` as a pure state machine,
+  `PBCoordinatorCore >> round:in:now:` over a `PBRoundState` of `PBRoundEntry` commits, with the
+  events `PBRoundEnqueued`, `PBPermitted`, `PBBaseDecided`, `PBBuilt`, `PBBuildConflict`,
+  `PBBuildFailed`, `PBReplicated`, `PBHoldExpired`, `PBDropKept` and the effects `PBAskPermit`,
+  `PBAskBase`, `PBBuild`, `PBReplicate`, `PBReportDone`. One round at a time takes the whole queue;
+  a base that needs a commit is re-committed first; conflicts fail alone; the group bound (CC11)
+  leaves the rest queued for the next round; the reserve check (R121, with the CC18 text naming
+  `sendReserve`, the longest build and `leaseDuration`) and the rejoin ballot (L14) refuse a send
+  with a retryable conflict and nothing sent; outcomes follow H7 (`#unknown` is a
+  `PBOutcomeUnknownError`, never retried). Held retries (D-LIVE-2): a conflicted commit whose
+  caller retries at once gets `PBConflictError` with `permitHeld` true (new `PBConflictError
+  held:`), and the permission is kept for min(`retryHold`, the time left) so its retry runs the
+  next round under it. `PBStep` also carries a `PBRoundState`. Tested by
+  `tests/unit/sim_round_rules.st` (hot key on three nodes without starvation, reserve refusal,
+  a build longer than the belief, the group bound, a stale base, unknown never retried, and the
+  plants `PlantNoReserve` and `PlantNoKeep`; the round's simulator shell in
+  `tests/unit/_round.st`) and `tests/unit/cluster_round_rules.st` (one guard per check).
 - The base choice (`src/protobase/cluster/holder.st`, CP 1.6): `proto_db`'s `_lease_base`,
   `recover_root`, `_phase_1_floor`, `_base_needs_commit`, the refound and the hard guard, as rule
   methods of `PBCoordinatorCore` (`leaseBase:waiter:in:now:`, the default rule of

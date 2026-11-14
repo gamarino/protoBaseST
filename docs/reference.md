@@ -607,6 +607,39 @@ For tests, tools and readers of the format. An application does not need them.
   committed root, which counts as committed knowledge. `PBRecoverWanted every:waiter:`
   (`dispatchRecoverWanted:in:now:`) runs a round alone and settles `{ known. root }` or its
   `PBConflictError`. See [deviations.md](deviations.md#cluster-mode).
+- **Commit round** (`cluster/holder.st`, spec 5.6, D-LIVE-2, CC11, CC18): `proto_db`'s
+  `_run_round`, `_permit_round`, `_keep`, `_take_kept`, `_await_retries` and `_drop_kept` as a
+  pure state machine, `PBCoordinatorCore >> round:in:now:` (an event, a `PBRoundState`, the
+  node's clock) answering a `PBStep` whose state is the new `PBRoundState` (`config:`; `queue`,
+  `phase`, `batch`, `permission`, `outcome`, `committed`, `base`, `current`, `live`, `building`,
+  `built`, `conflicted`, `longest`, `tried`, `rounds`, `awaiting`, `holdToken`, `rejoinBallot`,
+  `isHeld`, `withRejoinBallot:`, which never lowers it). A commit is a `PBRoundEntry
+  token:willRetry:deadline:` (`willRetry`: its caller retries a conflict at once; `deadline`
+  carried for the standalone shell). Events (`PBRoundEvent`, `roundWith:in:now:`):
+  `PBRoundEnqueued entry:`, `PBPermitted permission:` (a `PBPermission` or an error value),
+  `PBBaseDecided decision:` (a `PBBaseDecision` or an error value), `PBBuilt entry:root:micros:`
+  (entry `nil` for the re-commit of a base that needs one; root `nil` for nothing to publish),
+  `PBBuildConflict entry:error:`, `PBBuildFailed entry:error:`, `PBReplicated outcome:`,
+  `PBHoldExpired token:`, `PBDropKept`. Effects: `PBAskPermit`, `PBAskBase permission:`,
+  `PBBuild entry:base:stamp:` (stamp `{ term. base epoch + 1 }`), `PBReplicate
+  permission:root:pred:`, `PBSettle` of an entry's token (`true`, `false`, or an error value),
+  `PBReportDone permission:outcome:root:` (a root exactly with `#committed`), `PBCount`, and the
+  hold `PBTimer`. One round at a time takes the whole queue under one permission; a base that
+  needs a commit is re-committed first (its unchanged root, one replication); each entry builds
+  on the previous root and a conflict fails alone; before each build after the first,
+  `groupBoundAllows:now:` (CC11) asks for `sendReserve` plus the longest build of the round, the
+  rest going back to the head of the queue, not as attempts; before any send `mayReplicate:now:`
+  refuses, with a retryable `PBConflictError` and nothing sent, less than `sendReserve` left
+  (R121, `'sends_refused_reserve'`; the text names the time left, `sendReserve`, the round's
+  longest build, the belief and `leaseDuration`, CC18) and a term below the rejoin ballot (L14).
+  `#committed` settles the built entries `true`; `#none` is a retryable conflict; `#unknown` is a
+  `PBOutcomeUnknownError` for every built entry, never retried. A `#stale` base requeues the
+  round and ends the permission `#unknown` (unless a round under it committed); `#unreachable`
+  is a retryable conflict ending it `#unknown`. A conflicted entry that will retry, while the
+  permission is valid and at most `permitRetries` rounds ran, gets a `PBConflictError` with
+  `permitHeld` true (`PBConflictError held:`), and the permission is kept for min(`retryHold`,
+  the time left) (`retryWait` when no retry is held); once the held retries are queued (or a
+  `PBDropKept` says one is not coming) the next round runs under it; its `PBHoldExpired` ends it.
 - **Root order** (`cluster/rootlog.st`): `PBLabeledRoot` (`label:record:`, the record `nil` for
   the empty space; `label`, `record`, `epoch`, `key`: label, epoch, segment bytes, offset) and
   `PBRootOrder` (`compare:with:`, `max:with:`, and `compareKey:with:`, which takes only keys answered

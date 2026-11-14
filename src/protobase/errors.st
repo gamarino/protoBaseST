@@ -39,8 +39,26 @@ PBOutcomeUnknownError comment: 'The outcome of a write (typically a root publish
 PBDBError subclass: #PBLockingError.
 PBLockingError comment: 'A failure to take a lock or to commit because of concurrent writers. Counterpart of ProtoBase ProtoLockingError.'.
 
-PBLockingError subclass: #PBConflictError.
+PBLockingError subclass: #PBConflictError instanceVariableNames: 'permitHeld'.
 PBConflictError comment: 'A commit conflicts with a commit made after the transaction started. Retrying the whole transaction may succeed. Counterpart of ProtoBase ProtoConflictError.'.
+
+"A PBConflictError with aText whose round keeps its write permission for the retry (proto_db
+ ProtoConflictError.permit_held, D-LIVE-2): the caller's retry should start at once, from the
+ root that permission committed."
+PBConflictError class >> held: aText
+  ^ self new _setPermitHeld: true text: aText.
+
+PBConflictError >> _setPermitHeld: aBoolean text: aText
+  "Runs once, on a fresh instance."
+  permitHeld isNil ifFalse: [^ PBUserError signal: 'PBConflictError: permitHeld is set once'].
+  permitHeld := aBoolean.
+  self messageText: aText.
+  ^ self.
+
+"Whether the round that answered this conflict keeps its permission for the retry (D-LIVE-2);
+ false unless made by held:."
+PBConflictError >> permitHeld
+  ^ permitHeld == true.
 
 PBLockingError subclass: #PBTimeoutError.
 PBTimeoutError comment: 'A lock was not obtained within its timeout (milliseconds). It is not protoST TimeoutError, which signals a passed deadline of a Future. Counterpart of ProtoBase ProtoTimeoutError.'.

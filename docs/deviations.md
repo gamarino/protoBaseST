@@ -395,10 +395,24 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   decision (keep it, adopt a timing-only lost-renewal back-off here as a recorded deviation,
   or propose one to `proto_db` upstream) is carried by the plan's Task 20. *Cost:* network and
   acceptor-lane load for up to belief / 2 after such a loss.
-- **No rejoin-ballot refusal on the holder yet (until Task 16).** `proto_db`'s `replicate` refuses
-  (`ProtoConflictError`) a term below the node's rejoin ballot (L14); rejoining is Task 16, so
-  a protoBaseST node has no rejoin ballot to compare yet and the check comes with it. *Cost:*
-  none until rejoining exists: a node that never rejoined has ballot 0.
+- **The rejoin-ballot refusal is in the commit round, before the send (L14).** `proto_db`'s
+  `replicate` refuses (`ProtoConflictError`) a term below the node's rejoin ballot. protoBaseST
+  makes the same refusal in the commit round (`mayReplicate:now:`, `cluster/holder.st`), from the
+  ballot the shell hands the `PBRoundState` (`withRejoinBallot:`, never lowered), so nothing is
+  sent and the commits get a retryable conflict, as `proto_db`'s. `dispatchReplicateWanted:`
+  itself does not repeat the check. Setting the ballot is rejoining (Task 16). *Cost:* none
+  until rejoining exists: a node that never rejoined has ballot 0.
+- **The commit round is a state machine (representation and timing, CC2, CC10).** `proto_db`'s
+  `_run_round` is a thread that blocks on the permit, the base, each build and the replication,
+  and waits on a condition for held retries. protoBaseST's `round:in:now:` is pure: each answer
+  is an event and each wait a `PBTimer` (`PBHoldExpired`). Two refinements, timing only: the
+  group bound (CC11, `groupBoundAllows:now:`) is protoBaseST's addition (`proto_db` builds the
+  whole batch, so a round whose last build crosses `sendReserve` is refused whole); and the
+  reserve refusal's text also names the round's longest build, the belief and `leaseDuration`
+  (CC18), so a transaction whose build alone exceeds a permission says why it never commits.
+  `proto_db`'s held-retry test that the outcome is not unknown is not written: here an unknown
+  outcome ends the permission before a round can hold anything. *Cost:* none on the wire; a
+  round under the group bound commits fewer entries per permission than its batch.
 
 ## Errors and messages
 

@@ -97,3 +97,16 @@ PBRootProbed>>_setToken:readable:
 PBRecovered>>_setSuspected:
 PBReadPersisted>>_setToken:
 PBProbeRoot>>_setRoot:token:
+PBConflictError>>_setPermitHeld:text:
+PBRoundEnqueued>>_setEntry:
+PBPermitted>>_setPermission:
+PBBaseDecided>>_setDecision:
+PBBuilt>>_setEntry:root:micros:
+PBBuildConflict>>_setEntry:error:
+PBBuildFailed>>_setEntry:error:
+PBReplicated>>_setOutcome:
+PBHoldExpired>>_setToken:
+PBAskBase>>_setPermission:
+PBBuild>>_setEntry:base:stamp:
+PBReplicate>>_setPermission:root:pred:
+PBReportDone>>_setPermission:outcome:root:
