@@ -1,4 +1,4 @@
-"EXPECT: ok 31"
+"EXPECT: ok 33"
 "The commit round (cluster/holder.st, PBCoordinatorCore round:in:now:) called directly, one guard
  per check (proto_db transactions.py _run_round, _permit_round, _keep, _take_kept,
  _await_retries, _drop_kept; coordinator.py replicate's _check_reserve and rejoin-ballot
@@ -34,7 +34,9 @@
  take its round (reviewer probe P3). (28) Commits left queued by the group bound do not stand
  for the held retry. (29) #none: a retryable conflict, never held; the permission ends #none, or
  #committed after a committed round. (30) A build error: a PBDBError fails its commit alone, any
- other error ends the round. Also: an expired permission's refusal is not counted (7); a held
+ other error ends the round. (31) With no held caller, a kept permission waits for as many
+ commits as the round had conflicts. (32) The stale limit fails every queued commit, those
+ queued after the round's too. Also: an expired permission's refusal is not counted (7); a held
  hold is at least retryWait (11); rounds 2 to permitRetries hold, the next does not (13); a
  stale round's commits go back to the head of the queue (18); a PBDropKept of a caller not
  awaited changes nothing (12, 16)."
@@ -347,5 +349,25 @@ c that: 'a build error: a PBDBError fails its commit alone; any other error ends
   is: { (settles value: st last) collect: [:q | { q first. q last messageText }]. reportOf value: st last.
     (settles value: x last) collect: [:q | q first]. x first phase }
   equals: { #(#('a' 'bug') #('b' 'bug')). #(#none). #('a'). #build }.
+
+"(31) n1: with no held caller, the kept permission waits for as many commits as conflicts"
+st := go value: core value: fresh value: {
+  permitted. { PBRoundEnqueued entry: (e value: 'h' value: false). 0 }. { PBRoundEnqueued entry: (e value: 'k' value: false). 0 }.
+  { PBPermitted permission: perm. 0 }. { ok. 1000 }.
+  { PBBuilt entry: (e value: 'a' value: false) root: (rec value: T value: 2) micros: 1000. 2000 }.
+  { conflict value: 'h' value: false. 3000 }. { conflict value: 'k' value: false. 3500 }. { PBReplicated outcome: #committed. 4000 } }.
+x := go value: core value: st first value: { { PBRoundEnqueued entry: (e value: 'h' value: false). 4100 } }.
+c that: 'two conflicts nobody holds: the next round waits for two commits'
+  is: { st first awaitCount. x first phase.
+    (go value: core value: x first value: { { PBRoundEnqueued entry: (e value: 'k' value: false). 4200 } }) first phase }
+  equals: { 2. #held. #base }.
+
+"(32) n2: the stale limit fails the whole queue, not only the round's commits (proto_db pending)"
+st := staleRun value: (go value: core value: fresh value: { permitted }) first value: core termRetries - 1.
+st := go value: core value: st first value: { { PBPermitted permission: perm. 9000 }.
+  { PBRoundEnqueued entry: (e value: 'q' value: false). 9001 }. { stale. 9002 } }.
+c that: 'after termRetries stale permissions, a commit queued meanwhile fails too'
+  is: { (settles value: st last) collect: [:q | q first]. st first phase. st first queue }
+  equals: { #('a' 'q'). #idle. #() }.
 
 c report.

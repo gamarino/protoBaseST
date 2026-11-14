@@ -1104,6 +1104,10 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     "already holds a write permission" misuse error. (i) Carried from Task 15: the round runner
     sets each `PBRoundEntry`'s `caller` to its client (`proto_db` `entry.thread`) and sends
     `PBDropKept caller:` when a held caller will not retry (`Database.run` returned or raised).
+    (j) Carried from Task 15 (re-review): the round is never driven synchronously from inside a
+    held caller's own thread (its fn or its wait): the round runner is its own actor, so a kept
+    permission waiting for that caller's retry never waits on the thread that must make it
+    (`proto_db` excludes the runner's own thread from `held` for this reason).
     (CC24), `forceRejoin`, `committedRoot` (`PBLabeledRoot` from an `Atom`, never a message),
     `committedEpoch`, `needsConfirmation`, `isFenced`, `nodeId`, `config`.
   - For the round runner (all answer `Future`s, never wait): `_permit` → `PBPermission`
