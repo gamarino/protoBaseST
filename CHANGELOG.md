@@ -2,6 +2,25 @@
 
 ## 0.2.0 (unreleased)
 
+- The coordinator shell (Task 20, `cluster/coordinator.st`, `proto_db`'s `ClusterCoordinator`):
+  `PBClusterCoordinator nodeId:peers:options:` runs a cluster node on two high-band actors, a
+  dispatcher (the core's `dispatch:in:now:`, timers by `Future after:`, waiters settled from
+  `PBSettle`) and an acceptor (the core's `accept:in:now:`: appends written through the tier,
+  then the state published, then the reply). `start`, `stop` (a `Future`; a replication in
+  flight settles `#unknown`, every other waiter `PBClosedError`), `stats` (every counter, the
+  health keys), `forceRejoin`, `committedRoot`, `committedEpoch`, `needsConfirmation`,
+  `isFenced`; the round runner's `_permit`, `_baseFor:`, `_replicate:under:`, `_done:outcome:`,
+  `_confirmed`; the tier's `_attach:` (a fresh `PBLoggedRoots` each time; a short
+  `#startupGrace` refused over a log that served before, L17) and `_detach`. A failed tier write
+  fails the tier (R57); any other error escaping an actor fences the node. The core gains the
+  detached acceptor (`PBAcceptorState config:detachedAt:`, `attached:`, `detached`,
+  `withFenced:`: `no_storage` refusals, `unknown` answers, the lease activity kept across a
+  re-attach) and `PBLogDetached log:` (review m10). Tests: `tests/unit/cluster_coordinator_shell.st`,
+  `tests/unit/cluster_coordinator_attach.st`, `tests/unit/cluster_detached_rules.st`,
+  `tests/unit/cluster_rejoin_rules.st` check 24; the 22 checklist rows deferred to Task 20 are
+  ported (13), `n/a` (8) or deferred to Task 23 (x4, a protocol violation reported as an unknown
+  outcome). Deviations: [deviations.md](docs/deviations.md#cluster-mode).
+
 - The cluster core follows `proto_db` `88ca21d` (post-rc3, gamarino/ProtoDB#1, rulings R149 and
   R149a; Task 19b): an owner whose renewal a majority refused no longer renews again once per
   round trip. When the permanent refusals (`stale_term`, `term_taken`, or a highest term above

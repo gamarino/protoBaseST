@@ -26,6 +26,7 @@ Import from: 'protobase/cluster/proposer'.
 Import from: 'protobase/cluster/owner'.
 Import from: 'protobase/cluster/holder'.
 Import from: 'protobase/cluster/rejoin'.
+Import from: 'protobase/cluster/coordinator'.
 Import from: 'protobase/avl'.
 Import from: 'protobase/collections'.
 Import from: 'protobase/records'.

@@ -1,4 +1,4 @@
-"EXPECT: ok 23"
+"EXPECT: ok 24"
 "The rejoin's rules (cluster/rejoin.st) called directly, one guard per check (proto_db
  coordinator.py _rejoin_answers, _rejoin_decision, _rejoin_round, _gather, _complete_rejoin,
  _publish_rejoin, _on_ballot_query, force_rejoin, needs_confirmation, confirmed). drive runs a
@@ -35,7 +35,9 @@
  tier refused fails it, with the reason. (21) A forceRejoin during a ballot round blocks it.
  (22) An adoption for a detached log changes nothing on the log attached next; a late report of
  the detached log starts no rejoin; a forceRejoin while detached carries to the next log. (23)
- A forceRejoin is bound to the log reported then."
+ A forceRejoin is bound to the log reported then. (24) PBLogDetached names its log (m10): a
+ detach before the log's first report, a late report of it, then the next log's report keeps a
+ forced flag; a detached view starts no rejoin."
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -310,7 +312,7 @@ v := rejoining value: 'n0'.
 s := (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v now: 0)) in: (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) now: 0) state.
 s := (core dispatch: PBRejoinWanted new in: s now: 0) state.
 out := { s rejoin isForced. s rejoin log == v log.
-  [:st | { phaseOf value: st. forcedOf value: st }] value: (core dispatch: PBLogDetached new in: s now: 0) state.
+  [:st | { phaseOf value: st. forcedOf value: st }] value: (core dispatch: (PBLogDetached log: v log) in: s now: 0) state.
   [:st | { st rejoin isForced. st rejoin phase. st rejoin log == v log }]
     value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: (rejoining value: 'n0') now: 0)) in: s now: 0) state.
   [:st | | v2 st2 | v2 := rejoining value: 'n0'.
@@ -358,7 +360,7 @@ c that: 'a forceRejoin during the ballot round blocks it (forced is not witnesse
 v := rejoining value: 'n0'.
 s := (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v now: 0)) in: (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) now: 0) state.
 s := (core dispatch: PBRejoinWanted new in: s now: 0) state.
-s := (core dispatch: PBLogDetached new in: s now: 0) state.
+s := (core dispatch: (PBLogDetached log: v log) in: s now: 0) state.
 v2 := rejoining value: 'n0'.
 out := { [:st | { st appends. st state isRejoined. st state == v2 }]
     value: (core accept: (PBRejoinLearnt learnt: 4096 seen: 0 accepted: r1 committed: nil ballot: 0 log: v log) in: v2 now: 1000).
@@ -383,5 +385,28 @@ c that: 'forceRejoin on a tier-failed view is bound to that log: a report over a
     [:st | { phaseOf value: st. forcedOf value: st }]
       value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: (rejoining value: 'n0') now: 0)) in: s now: 0) state }
   equals: { true. true. { #gather. false } }.
+
+"(24) PBLogDetached names the detached log (Task 16 review m10): a detach before that log's
+ first report still marks it, so a late report of it starts nothing, and the next log's first
+ report keeps a forced flag set while detached; PBLogDetached new is refused. A detached view
+ (Task 20: no log attached) starts no rejoin."
+v := rejoining value: 'n0'.
+s := PBNodeState config: (cfg value: 'n0' value: three) inc: 5.
+s := (core dispatch: (PBLogDetached log: v log) in: s now: 0) state.
+s := (core dispatch: PBRejoinWanted new in: s now: 0) state.
+v2 := rejoining value: 'n0'.
+out := { s rejoin log == v log. forcedOf value: s.
+  [:st | { phaseOf value: st. forcedOf value: st }]
+    value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v now: 0)) in: s now: 0) state.
+  [:st | | st2 | st2 := (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v2 now: 0)) in: st now: 0) state.
+    { phaseOf value: st2. forcedOf value: st2. st2 rejoin log == v2 log }]
+    value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new in: v now: 0)) in: s now: 0) state.
+  [PBLogDetached new. false] on: PBValidationError do: [:e | true].
+  [:st | st rejoin] value: (core dispatch: (PBAcceptorDecided step: (core accept: PBStartNode new
+    in: (PBAcceptorState config: (cfg value: 'n0' value: three) detachedAt: 0) now: 0))
+    in: (PBNodeState config: (cfg value: 'n0' value: three) inc: 5) now: 0) state }.
+c that: 'a detach before the first report marks the log it names; a late report of it starts nothing; the next log keeps the forced flag'
+  is: out
+  equals: { true. true. { #detached. true }. { #gather. true. true }. true. nil }.
 
 c report displayNl.

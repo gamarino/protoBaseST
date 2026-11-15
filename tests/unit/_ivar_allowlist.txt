@@ -122,3 +122,8 @@ _PBTcpListener>>_setTransport:server:
 _PBTcpReader>>_setTransport:socket:nodeId:key:handler:
 _PBTcpSender>>_setTransport:peer:queue:link:proxy:
 _PBSendQueue>>_setFrames:bytes:draining:closed:
+PBLogDetached>>_setLog:
+_PBNodeCells>>_setConfig:node:acceptorState:committed:counters:fence:stopped:waiters:dispatcher:acceptor:transport:dispatchMax:tokens:
+_PBDispatcher>>_setCells:rules:
+_PBAcceptor>>_setCells:rules:tier:
+PBClusterCoordinator>>_setConfig:rules:acceptorClass:cells:run:

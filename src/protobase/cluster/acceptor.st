@@ -16,7 +16,7 @@ durable before it performs the reply (R55, R81).
     difference only, docs/deviations.md).
   acceptRequest:in:now:, acceptRenew:in:now: (proto_db _on_request, _decide): a fenced node
     answers nothing (proto_db _enqueue); a refusal of the acceptor's state first (learner,
-    tier_failed, rejoining, in proto_db _refusal's order), then PBGrantState decideRequest: or renew: (bad_ballot, starting, stale_term,
+    no_storage, tier_failed, rejoining, in proto_db _refusal's order), then PBGrantState decideRequest: or renew: (bad_ballot, starting, stale_term,
     busy, term_taken). A grant of a term above loggedPromise appends a synced promise; a
     renewal or a duplicate of a term already logged appends nothing (D50). The reply is a
     grant (accepted root, committed root, certain) or a reject (accepted root, certain, reason,
@@ -44,9 +44,11 @@ durable before it performs the reply (R55, R81).
     the failed step's state (core.st, PBAcceptorStep), so loggedPromise never holds a promise
     that was not written.
 
-Not representable here: proto_db's no_storage refusal (no acceptor log attached). An acceptor
-state exists only over a loaded log (PBAcceptorState config:logged:now:); before the attach
-the shell has no acceptor (Task 20).
+No acceptor log attached (PBAcceptorState config:detachedAt:, before the first attach and after
+a detach, Task 20): a request or renewal is refused no_storage (after learner, proto_db _refusal's
+order), counted grants_refused_no_storage for a peer (proto_db _decide; this node's own vote is
+not counted); a plain query is answered unknown (proto_db _witness_state); acceptStart and every
+committed root learnt append nothing; a replication is refused (the refusal of _mayAccept:).
 
 This node's own messages (CC1, proposer.st): its own request and renewal are decided by
 _decide: as a peer's (proto_db _open_attempt and _renew decide the own vote with the same
@@ -202,9 +204,10 @@ PBCoordinatorCore >> acceptRenew: anEvent in: anAcceptorState now: t
 "Why this acceptor may not vote now, or nil (proto_db _refusal, in its order). fenced is not
  a reply here: a fenced node sends nothing (proto_db _enqueue drops the lane's messages once
  fenced; its 'fenced' reject only answers a message queued before the fence, which a serial lane
- whose state holds the fence cannot have). no_storage is not representable (module comment)."
+ whose state holds the fence cannot have). no_storage: no acceptor log is attached."
 PBCoordinatorCore >> _refusalIn: s
   (s config membership isVoter: s config nodeId) ifFalse: [^ 'learner'].
+  s isAttached ifFalse: [^ 'no_storage'].
   s tierFailed notNil ifTrue: [^ 'tier_failed'].
   s isRejoined ifFalse: [^ 'rejoining'].
   ^ nil.
@@ -232,8 +235,12 @@ PBCoordinatorCore >> _decide: anEvent in: s now: t renew: isRenew
   term := m at: 'term'.
   refusal := self _refusalIn: s.
   refusal notNil ifTrue: [
+    "proto_db _decide counts a peer's request refused for want of a log; its own vote is not
+     counted."
     ^ self _answer: m with: (self _reject: m reason: refusal highest: s grants highestSeen remaining: 0
-      suspect: s suspectTerm in: s) in: s appends: #() counts: #()].
+      suspect: s suspectTerm in: s) in: s appends: #()
+      counts: ((refusal = 'no_storage' and: [m from ~= s config nodeId])
+        ifTrue: [{ PBCount stat: 'grants_refused_no_storage' }] ifFalse: [#()])].
   decision := isRenew
     ifTrue: [s grants renew: m from inc: (m at: 'inc') term: term now: t config: s config]
     ifFalse: [s grants decideRequest: m from inc: (m at: 'inc') term: term now: t config: s config].
@@ -298,10 +305,10 @@ PBCoordinatorCore >> acceptRelease: anEvent in: s now: t
       state := state with: { #suspectTerm -> (state suspectTerm max: (m at: 'term')) }]].
   ^ PBAcceptorStep state: state appends: appends reply: reply vote: nil learnt: learnt.
 
-"What this acceptor's answers are worth (proto_db _witness_state): 'unknown' when its tier
- failed, 'learner', 'empty' while it rejoins, else 'ok'."
+"What this acceptor's answers are worth (proto_db _witness_state): 'unknown' with no log
+ attached or when its tier failed, 'learner', 'empty' while it rejoins, else 'ok'."
 PBCoordinatorCore >> _witnessStateIn: s
-  s tierFailed notNil ifTrue: [^ 'unknown'].
+  (s isAttached not or: [s tierFailed notNil]) ifTrue: [^ 'unknown'].
   (s config membership isVoter: s config nodeId) ifFalse: [^ 'learner'].
   s isRejoined ifFalse: [^ 'empty'].
   ^ 'ok'.
@@ -342,6 +349,8 @@ PBCoordinatorCore >> _answer: aMessage state: aState ballot: aBallot in: s
  voters rejoins (rejoin.st). The grace and the restore are not rebuilt (Task 9 ruling)."
 PBCoordinatorCore >> acceptStart: anEvent in: s now: t
   | membership id published |
+  "No log attached: nothing to restore or mark (proto_db start opens nothing before attach)."
+  s isAttached ifFalse: [^ self _unchangedAcceptor: s].
   "proto_db _attach_locked restores _committed from the log: the node knows it committed from
    the start, so the restored committed root is published (again, harmlessly, on a start
    delivered twice)."
@@ -402,7 +411,7 @@ PBCoordinatorCore >> _learnCommitted: aRoot accept: isAccept logged: isLogged in
   pair := self _observeCommitted: aRoot accept: isAccept in: s.
   pair last ifFalse: [^ { pair first. #(). #() }].
   ^ { pair first.
-    (isLogged and: [s tierFailed isNil])
+    (isLogged and: [s tierFailed isNil and: [s isAttached]])
       ifTrue: [{ PBLogAppend kind: #committed label: aRoot label root: aRoot record sync: false }]
       ifFalse: [#()].
     { PBPublishCommitted root: aRoot } }.

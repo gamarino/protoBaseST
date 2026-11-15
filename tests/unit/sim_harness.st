@@ -19,7 +19,8 @@
  commit on one member only, a commit answered none that a member holds (H7), and two committed
  chains that diverge (a fork); a commit every member learns converges. (11) converge: answers
  whether the queue emptied. (12) No file of the simulator or of the core in src/protobase/cluster
- (every file there but the shells: transport.st, whose sender times its reconnection back-off)
+ (every file there but the shells: transport.st, whose sender times its reconnection back-off,
+ and coordinator.st, whose actors read the node's clock and run its timers)
  reads a clock of protoST's (Time, Date, DateTime, the clock primitives, Future after:, Delay);
  each name the exemption lists must be a file that exists. (13) Delays with reorder: true
  deliver every one of 50 messages from n0 to n1, out of send order for seed 11; with reorder:
@@ -415,9 +416,9 @@ a := a , { planted converge: 100. (lines value: planted value: 'converge: still 
 c that: 'converge: answers whether the queue emptied' is: a equals: #(true false 1).
 
 "(12) No file of the simulator or of the core in src/protobase/cluster reads a clock (STPATH names
- <repo>/src). The shells (transport.st) are the files that may; the list of core files is every
+ <repo>/src). The shells (transport.st, coordinator.st) are the files that may; the list of core files is every
  file of the directory less them, so a new core file is checked without being named here."
-failure := OSProcess shell: 'src="${STPATH%%:*}"; test -f "$src/protobase/cluster/transport.st" || { echo "an exempt shell is missing: transport.st"; exit 2; }; core=$(ls "$src"/protobase/cluster/*.st | grep -v -E ''/(transport)\.st$''); grep -l -E ''millisecondClockValue|microsecondClockValue|utcMicroseconds|nowUTC|__clock|Time now|Date today|DateTime now|millisecondsToRun|timeToRun|Future after|Delay'' "$src/../tests/unit/_sim.st" $core'.
+failure := OSProcess shell: 'src="${STPATH%%:*}"; for f in transport coordinator; do test -f "$src/protobase/cluster/$f.st" || { echo "an exempt shell is missing: $f.st"; exit 2; }; done; core=$(ls "$src"/protobase/cluster/*.st | grep -v -E ''/(transport|coordinator)\.st$''); grep -l -E ''millisecondClockValue|microsecondClockValue|utcMicroseconds|nowUTC|__clock|Time now|Date today|DateTime now|millisecondsToRun|timeToRun|Future after|Delay'' "$src/../tests/unit/_sim.st" $core'.
 c that: 'no file of the simulator or of the core in src/protobase/cluster reads a clock'
   is: { failure exitCode. failure output } equals: { 1. '' }.
 

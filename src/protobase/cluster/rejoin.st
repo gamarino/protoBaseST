@@ -155,8 +155,28 @@ PBForceRejoin >> acceptWith: aCore in: anAcceptorState now: t
 
 "--- PBLogDetached (a dispatcher event) ---"
 
-"The shell detached the node's acceptor log (proto_db detach; Task 20 sends it)."
-PBCoreEvent subclass: #PBLogDetached.
+"The shell detached the node's acceptor log aLoggedRoots (proto_db detach; the coordinator shell
+ sends it). The event names the log (Task 16 review m10): a detach that arrives before that log's
+ first report still marks it, so a late report of it starts nothing."
+PBCoreEvent subclass: #PBLogDetached instanceVariableNames: 'log'.
+
+PBLogDetached class >> new
+  ^ PBValidationError signal: 'PBLogDetached names the detached log: PBLogDetached log: aLoggedRoots'.
+
+PBLogDetached class >> log: aLoggedRoots
+  (aLoggedRoots isKindOf: PBLoggedRoots) ifFalse: [
+    ^ PBValidationError signal: 'PBLogDetached: a log is a PBLoggedRoots, not ' , aLoggedRoots printString].
+  ^ self basicNew _setLog: aLoggedRoots.
+
+PBLogDetached >> _setLog: aLoggedRoots
+  "Runs once, on a fresh instance."
+  log isNil ifFalse: [^ PBUserError signal: 'PBLogDetached is immutable'].
+  log := aLoggedRoots.
+  ^ self.
+
+"The PBLoggedRoots of the log detached."
+PBLogDetached >> log
+  ^ log.
 
 PBLogDetached >> dispatchWith: aCore in: aNodeState now: t
   ^ aCore rejoinDetached: self in: aNodeState now: t.
@@ -367,7 +387,9 @@ PBCoordinatorCore >> rejoinBlockedIn: s
 PBCoordinatorCore >> rejoinCheck: aState now: t effects: fx
   | s view r h |
   view := aState acceptorView.
-  view isNil ifTrue: [^ aState].
+  "No log attached (a detached acceptor, Task 20): there is no log to rejoin over; the #detached
+   marker waits for the next log's report."
+  (view isNil or: [view isAttached not]) ifTrue: [^ aState].
   s := aState.
   r := s rejoin.
   (r notNil and: [r phase = #detached]) ifTrue: [
@@ -397,8 +419,7 @@ PBCoordinatorCore >> rejoinCheck: aState now: t effects: fx
  a #detached PBRejoin naming the detached log, so a late report of that log starts no rejoin
  (rejoinCheck:); a forceRejoin meanwhile is for the next log attached."
 PBCoordinatorCore >> rejoinDetached: anEvent in: s now: t
-  ^ PBStep state: (s with: { #rejoin -> (PBRejoin idle with: { #phase -> #detached.
-      #log -> (s acceptorView isNil ifTrue: [nil] ifFalse: [s acceptorView log]) }) }) effects: #().
+  ^ PBStep state: (s with: { #rejoin -> (PBRejoin idle with: { #phase -> #detached. #log -> anEvent log }) }) effects: #().
 
 "Why a rejoin whose adoption could not be written fails (proto_db _complete_rejoin)."
 PBCoordinatorCore >> _adoptFailed

@@ -440,7 +440,13 @@ For tests, tools and readers of the format. An application does not need them.
   grant, reject or ack of the node's own request, renewal, release or replication, which the acceptor answers to
   its dispatcher in the step instead of a `PBSend` (`state:appends:reply:` is the vote nil), and
   `state:appends:reply:vote:learnt:` adds `learnt`, the highest root label the step observed (0
-  for none), from which the dispatcher clears its suspicion; `PBAcceptorState config:logged:now:` (a `PBLoggedRoots`: the
+  for none), from which the dispatcher clears its suspicion; `PBAcceptorState config:detachedAt:` is the
+  acceptor of a node with no acceptor log attached (`isAttached` false: a request refused
+  `'no_storage'`, counted `'grants_refused_no_storage'` for a peer, a plain query answered
+  `'unknown'`, nothing appended), `attached:` attaches it to a `PBLoggedRoots` (the lease activity
+  kept, the roots, marker and promise the new log's, `tierFailed` cleared; `PBUserError` when
+  attached), `detached` drops the log and `withFenced:` takes the shell's fence (the first reason
+  kept); `PBAcceptorState config:logged:now:` (the detached acceptor of that start `attached:` to a `PBLoggedRoots`: the
   grant state starts its grace at that time and restores the logged promise; the accepted root
   is the higher in root order of the logged accepted and committed roots) answers `config`,
   `grants`, `accepted`, `committed`, `seqSeen`, `suspectTerm`, `isRejoined`, `rejoinBallot`,
@@ -701,8 +707,9 @@ For tests, tools and readers of the format. An application does not need them.
   other state answers as a plain query; a fenced node answers none. `PBRejoinWanted`
   (`dispatchRejoinWanted:in:now:`, the operator's forceRejoin) forces a rejoin not completed
   yet and hands the acceptor `PBForceRejoin` (`acceptForceRejoin:in:now:`): a survivor forgets a
-  committed root above its accepted root and needs a confirmation again. `PBLogDetached`
-  (`rejoinDetached:in:now:`, `proto_db`'s detach) drops the rejoin and its forced flag (a late
+  committed root above its accepted root and needs a confirmation again. `PBLogDetached log:`
+  (it names the `PBLoggedRoots` detached; `new` is `PBValidationError`;
+  `rejoinDetached:in:now:`, `proto_db`'s detach) drops the rejoin and its forced flag (a late
   report of the detached log starts nothing; a forceRejoin meanwhile is for the next log), and a
   report over another log than the one a rejoin runs for starts a fresh one. `PBConfirmed`
   (`dispatchConfirmed:in:now:`, `acceptConfirmed:in:now:`) clears `needsConfirmation`. See
@@ -802,6 +809,31 @@ For tests, tools and readers of the format. An application does not need them.
     microseconds to twice it) during which the frames to that peer are dropped. The handler is called on the readers,
     concurrently with several peers. The differences from `proto_db` are in
     [deviations.md](deviations.md#cluster-mode).
+- **The coordinator shell** (`cluster/coordinator.st`, `proto_db`'s `ClusterCoordinator`):
+  `PBClusterCoordinator nodeId: anId peers: anArrayOfPBPeer options: aDictionary` (the options of
+  `PBClusterConfig`; `#transport` is a test seam, an unstarted `PBClusterTransport`, else a
+  `PBTcpTransport` listens on the member's port with `requestTimeout`). `start` opens the
+  transport and starts the node with no acceptor log; `_attach: aTier` (a `Future`) loads the
+  tier's roots into a fresh `PBLoggedRoots` and attaches the acceptor, refusing with
+  `PBValidationError` a `#startupGrace` below `leaseDuration + driftMargin` over a log that is not
+  empty (L17) and with `PBUserError` a second attach; `_detach` (a `Future` of the tier) hands the
+  dispatcher `PBLogDetached`. `stop` answers a `Future` that settles once every pending `Future`
+  is settled (a replication in flight `#unknown`, the rest `PBClosedError`), every acceptor step
+  queued has run and the transport stopped. `stats` (CC24) holds every counter of the rules (0
+  until counted), `'messages_ignored'` (messages whose sender is not another member) and
+  `'healthy'`, `'fenced'`, `'tier_failed'`, `'persisting'`, `'rejoining'`, `'rejoin_blocked'`,
+  `'failure'`, `'dispatch_seconds_max'`. `forceRejoin`, `committedRoot` (a `PBLabeledRoot` read from an Atom),
+  `committedEpoch`, `needsConfirmation`, `isFenced`, `isRunning`, `nodeId`, `config`,
+  `acceptorState` and `nodeState` (the published states). For the round runner, all `Future`s:
+  `_permit` (a `PBPermission`, or rejected with `PBTimeoutError`, `PBUnexpectedError` when fenced,
+  `PBClosedError` when not running), `_baseFor:` (a `PBBaseDecision`), `_replicate:under:`
+  (`#committed`, `#none` or `#unknown`), `_done:outcome:` and `_done:outcome:root:`,
+  `_confirmed`. A tier answers the protocol the shared tier of Task 21 implements: loadRoots,
+  logAccepted:, logCommitted:, logPromise:, logRejoined, readPersisted and canRead:; a write that signals a `PBDBError` or a
+  `FileSystemError` fails the tier (the step discarded, `'tier_failed'`), any other error escaping
+  the dispatcher or acceptor actor fences the node for the life of the process. The test seam
+  `nodeId:peers:options:rules:acceptorClass:` takes other rules and a subclass of `_PBAcceptor`.
+  The differences from `proto_db` are in [deviations.md](deviations.md#cluster-mode).
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.

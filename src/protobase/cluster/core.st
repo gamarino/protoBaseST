@@ -56,8 +56,11 @@ clock, a socket or a file, sends, logs or waits.
                    PBLabeledRoot or nil), seqSeen ({ term. seq } of the highest permission
                    accepted), suspectTerm, rejoined (the log holds the rejoined marker),
                    rejoinBallot, tierFailed, fenced, log (the PBLoggedRoots of the log it
-                   is attached to: the log's identity) and loggedPromise (the highest promise
-                   written to that log, proto_db _logged_promise = (tier, term)).
+                   is attached to: the log's identity; nil while no log is attached, the
+                   detached acceptor of config:detachedAt:, Task 20) and loggedPromise (the
+                   highest promise written to that log, proto_db _logged_promise = (tier,
+                   term)). attached: and detached move it between logs; withFenced: is the
+                   shell's fence.
   PBCoordinatorCore  dispatch: anEvent in: aNodeState now: t and accept: anEvent in:
                    anAcceptorState now: t. The event picks its rule method by double dispatch
                    (dispatchWith:in:now:, acceptWith:in:now:), one per event class, never by
@@ -892,8 +895,9 @@ PBNodeState >> printOn: aStream
 Object subclass: #PBAcceptorState instanceVariableNames: 'config grants accepted committed seqSeen suspectTerm rejoined rejoinBallot tierFailed fenced log loggedPromise confirmed'.
 
 "The acceptor of the node of aConfig started at t over aLoggedRoots (what its acceptor log holds,
- PBAcceptorLog load): the grant state refuses every request until t + startupGrace and honours
- the logged promise and the accepted root's label (PBGrantState initial:now:, restore:,
+ PBAcceptorLog load): the detached acceptor of that start (config:detachedAt:) attached to
+ aLoggedRoots (attached:). The grant state refuses every request until t + startupGrace and
+ honours the logged promise and the accepted root's label (PBGrantState initial:now:, restore:,
  coordinator.py _attach_locked); committed, rejoined and the logged promise are the log's
  (proto_db _logged_promise = (tier, promised)), and aLoggedRoots is the log's identity. The
  accepted root is the higher, in root order, of the logged accepted and committed roots: a
@@ -901,14 +905,18 @@ Object subclass: #PBAcceptorState instanceVariableNames: 'config grants accepted
  root with accept=True). A new acceptor state needs a confirmation (L18, proto_db
  needs_confirmation is reset at every attach)."
 PBAcceptorState class >> config: aConfig logged: aLoggedRoots now: t
+  ^ (self config: aConfig detachedAt: t) attached: aLoggedRoots.
+
+"The acceptor of the node of aConfig started at t with no acceptor log attached yet (proto_db
+ start before attach, and detach): its grace runs from t; it holds no root and no promise, is not
+ rejoined (no log holds a marker), and every request is refused no_storage, every plain query
+ answered unknown (acceptor.st). Task 20, carry-over (a)."
+PBAcceptorState class >> config: aConfig detachedAt: t
   (aConfig isKindOf: PBClusterConfig) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorState: a config is a PBClusterConfig, not ' , aConfig printString].
-  (aLoggedRoots isKindOf: PBLoggedRoots) ifFalse: [
-    ^ PBValidationError signal: 'PBAcceptorState: the logged roots are a PBLoggedRoots, not ' , aLoggedRoots printString].
-  ^ self basicNew _setConfig: aConfig grants: ((PBGrantState initial: aConfig now: t) restore: aLoggedRoots)
-    accepted: (PBRootOrder max: aLoggedRoots accepted with: aLoggedRoots committed) committed: aLoggedRoots committed
-    seqSeen: #(0 0) suspectTerm: 0 rejoined: aLoggedRoots isRejoined rejoinBallot: 0 tierFailed: nil fenced: nil log: aLoggedRoots
-    loggedPromise: { aLoggedRoots. aLoggedRoots promise }.
+  ^ self basicNew _setConfig: aConfig grants: (PBGrantState initial: aConfig now: t)
+    accepted: nil committed: nil seqSeen: #(0 0) suspectTerm: 0 rejoined: false rejoinBallot: 0 tierFailed: nil
+    fenced: nil log: nil loggedPromise: { nil. 0 }.
 
 PBAcceptorState >> _setConfig: aConfig grants: aGrantState accepted: anAccepted committed: aCommitted seqSeen: aPair suspectTerm: aTerm rejoined: aBoolean rejoinBallot: aBallot tierFailed: aFailure fenced: aReason log: aLog loggedPromise: aPromise
   "Runs once, on a fresh instance: not confirmed yet."
@@ -988,6 +996,42 @@ PBAcceptorState >> log
  (proto_db _on_request, D50)."
 PBAcceptorState >> loggedPromise
   ^ loggedPromise first == log ifTrue: [loggedPromise last] ifFalse: [0].
+
+"Whether an acceptor log is attached (log notNil)."
+PBAcceptorState >> isAttached
+  ^ log notNil.
+
+"This state attached to aLoggedRoots, a freshly loaded PBLoggedRoots (proto_db _attach_locked
+ 1113-1121, carry-over (b)): the lease activity is kept (the grants, their grace end included,
+ restored with the new log's promise and accepted label; suspectTerm, seqSeen, rejoinBallot,
+ fenced), and log, loggedPromise, accepted (the higher of the logged accepted and committed
+ roots), committed and rejoined are the new log's; tierFailed is cleared (a tier failure belongs
+ to the tier) and the state needs a confirmation again. PBValidationError when aLoggedRoots is no
+ PBLoggedRoots, PBUserError when a log is attached already."
+PBAcceptorState >> attached: aLoggedRoots
+  (aLoggedRoots isKindOf: PBLoggedRoots) ifFalse: [
+    ^ PBValidationError signal: 'PBAcceptorState: the logged roots are a PBLoggedRoots, not ' , aLoggedRoots printString].
+  log isNil ifFalse: [^ PBUserError signal: 'PBAcceptorState: an acceptor log is attached already; detach it first'].
+  ^ self class basicNew _setConfig: config grants: (grants restore: aLoggedRoots)
+    accepted: (PBRootOrder max: aLoggedRoots accepted with: aLoggedRoots committed) committed: aLoggedRoots committed
+    seqSeen: seqSeen suspectTerm: suspectTerm rejoined: aLoggedRoots isRejoined rejoinBallot: rejoinBallot tierFailed: nil
+    fenced: fenced log: aLoggedRoots loggedPromise: { aLoggedRoots. aLoggedRoots promise } confirmed: false.
+
+"This state with no acceptor log (proto_db detach): the log, its promise, its marker and its tier
+ failure go with it; the lease activity and the roots stay, until the next attach replaces the
+ roots."
+PBAcceptorState >> detached
+  ^ self class basicNew _setConfig: config grants: grants accepted: accepted committed: committed
+    seqSeen: seqSeen suspectTerm: suspectTerm rejoined: false rejoinBallot: rejoinBallot tierFailed: nil
+    fenced: fenced log: nil loggedPromise: { nil. 0 } confirmed: false.
+
+"This state fenced for aReason (a String; the first reason is kept): the shell's fence (Task 20,
+ PBFence)."
+PBAcceptorState >> withFenced: aReason
+  aReason isString ifFalse: [^ PBValidationError signal: 'PBAcceptorState: a fence reason is a String, not ' , aReason printString].
+  ^ self class basicNew _setConfig: config grants: grants accepted: accepted committed: committed
+    seqSeen: seqSeen suspectTerm: suspectTerm rejoined: rejoined rejoinBallot: rejoinBallot tierFailed: tierFailed
+    fenced: (fenced ifNil: [aReason]) log: log loggedPromise: loggedPromise confirmed: confirmed.
 
 "This state with aGrantState, aTerm as suspectTerm, aBoolean as rejoined, aFailure as
  tierFailed (nil: none) and aPromise as the promise written to the attached log; the rest

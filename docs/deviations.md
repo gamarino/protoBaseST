@@ -533,6 +533,34 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   (`tests/unit/sim_harness.st` check 13: with seed 11 all 50 messages arrive, out of send
   order, and with `reorder: false` in order). The network has no `stats` of its own and no `close` (nothing is in flight outside the
   endpoints); the endpoints count their frames (`stats`).
+- **The coordinator shell (`cluster/coordinator.st`, Task 20).** Actors stand for `proto_db`'s
+  threads and locks: the dispatcher and the acceptor are one high-band actor each, and attach,
+  detach and every acceptor step are messages of the acceptor actor, so they never interleave
+  (`proto_db` serialises them with `_log_lock`; the checklist rows that test those interleavings
+  are `n/a`, Python-only API). Differences, timing or reporting only unless stated:
+  - A message whose sender is not another member, or is the node itself, is dropped as
+    `proto_db` `_route` does and also **counted** in `stats` `'messages_ignored'` (`proto_db`
+    only logs it). The transport cannot check the sender (one-way connections, an HMAC that
+    binds the receiver, CC4), so the count is the operator's only sign of it.
+  - A tier write fails the tier (R57) when it signals a `PBDBError` or a `FileSystemError`
+    (`proto_db`'s `ProtoDBError` or `OSError`); any other error fences the node, as `proto_db`'s
+    lane does. A peer's replication whose accepted append failed is decided again over the
+    failed tier and refused with `ack(ok = false)` (`proto_db`'s behaviour); a grant whose promise
+    append failed is never answered, as `proto_db`.
+  - A fence settles a replication in flight `#unknown` (its root may have left the node) and
+    rejects every other waiter with `PBUnexpectedError` (`'Node n is fenced after an internal
+    failure: ...'`). A `PBCorruptionError` that escapes an actor (a protocol violation) fences
+    the node too, so the replication it interrupted is `#unknown`, where `proto_db` reports the
+    violation to the replicator (`test_x4_...`, deferred to Task 23: an open item).
+  - `stats` `'rejoining'` is derived from the published acceptor state (attached, no rejoined
+    marker, healthy) rather than from a thread flag; `'persisting'` is `true` until the
+    persister exists (Task 25); `'dispatch_seconds_max'` is the longest single dispatcher step.
+  - The L17 refusal of a short `#startupGrace` states the durations in milliseconds, the unit of
+    the options, where `proto_db` states seconds.
+  - Before a tier is attached the acceptor is `PBAcceptorState config:detachedAt:`: requests are
+    refused `no_storage` after `learner` (`proto_db` `_refusal`'s order, `fenced` aside: a
+    fenced node sends nothing), counted `grants_refused_no_storage` for a peer; a plain query
+    is answered `'unknown'`.
 
 ## Errors and messages
 
