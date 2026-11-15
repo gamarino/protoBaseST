@@ -457,11 +457,11 @@ by Python are dumped identically by protoST, commits from both languages stack o
 and concurrent commits from both get `proto_db`'s outcomes in 27 scenarios.
 `examples/erp/` is a worked demo: Python creates customers and invoices, protoST records payments
 and renames a customer, a blind write from each language merges, and both print the same as-of
-report. See [examples/erp/README.md](../examples/erp/README.md).
+report. See [examples/erp/README.md](../../examples/erp/README.md).
 
 Not proven: anything outside those scenarios, any `proto_db` release other than `v2.0.0rc2`, and
 behaviour under load (the AVL structures are many times slower than `proto_db`'s; the dated figures
-are in [deviations.md](deviations.md#performance)).
+are in [deviations.md](../deviations.md#performance)).
 
 ## 15. Where to go next
 
@@ -471,9 +471,11 @@ dir deleteAll.
 space isClosed.                               "=> true"
 ```
 
-- [reference.md](reference.md): every public class and message.
-- [deviations.md](deviations.md): everything that differs from `proto_db`, and every refusal.
-- [not-done.md](not-done.md): what is not here, and the cost of each omission.
-- [decisions.md](decisions.md): the choices, with what each one costs if it is wrong.
+- [reference.md](../reference.md): every public class and message.
+- [deviations.md](../deviations.md): everything that differs from `proto_db`, and every refusal.
+- [not-done.md](../not-done.md): what is not here, and the cost of each omission.
+- [decisions.md](../decisions.md): the choices, with what each one costs if it is wrong.
+- [README.md](README.md): the chaptered tutorial, twelve small self-checking programs one
+  concept each, and two orientation chapters, coming from GemStone/S and coming from Soil.
 
 The questions this prototype exists to ask the workshop are in the README.
