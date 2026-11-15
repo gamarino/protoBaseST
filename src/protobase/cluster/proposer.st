@@ -776,7 +776,7 @@ PBCoordinatorCore >> dispatchAcceptorDiscarded: anEvent in: s now: t
         in: s now: t effects: fx]
       ifFalse: [
         (vote notNil and: [vote type = 'ack'])
-          ifTrue: [self _ownAckFailed: vote in: s now: t effects: fx]
+          ifTrue: [self _ownAckFailed: vote reason: anEvent reason in: s now: t effects: fx]
           ifFalse: [self rejoinDiscarded: anEvent step in: s]]].
 
 "=== PBCoordinatorCore: owning ==============================================="

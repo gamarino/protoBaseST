@@ -119,7 +119,7 @@ c that: 'a reply of another incarnation is counted and dropped; a learner''s rep
 
 "(6) A discarded own grant."
 s := att state.
-pair := step value: (PBAcceptorDiscarded step: own) value: s value: t0 + 3000.
+pair := step value: (PBAcceptorDiscarded step: own reason: 'disk full') value: s value: t0 + 3000.
 c that: 'a discarded own grant is the refusal promise_failed'
   is: { pair state proposer attempt replies. pair state proposer attempt state.
     ((step value: (reject value: 'n2' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: 0.5) value: pair state value: t0 + 4000) effects

@@ -1137,7 +1137,7 @@ PBSim >> _accept: anEvent at: aNode
     self _trace: aNode id , '   append failed, the step is discarded and not replied'.
     aNode lane addFirst: (PBAppendFailed reason: 'simulated append failure').
     aNode laneBusy: false.
-    self _schedule: #dispatch node: aNode payload: (PBAcceptorDiscarded step: step) at: now.
+    self _schedule: #dispatch node: aNode payload: (PBAcceptorDiscarded step: step reason: 'simulated append failure') at: now.
     ^ self _runLane: aNode].
   aNode acceptor: step state.
   last := 0.

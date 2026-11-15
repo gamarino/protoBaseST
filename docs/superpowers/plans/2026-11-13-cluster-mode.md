@@ -1458,7 +1458,7 @@ found here is fixed in the owning module, fail-first.
 - [ ] **Step 1:** run the whole suite with the venv present. Expected: all PASS, no `SKIP` under
   `tests/conformance/cluster.st`, `cluster_checklist.sh` passing with 261 rows. Then run the
   checklist in final mode with the checkout named: `CHECKLIST_FINAL=1
-  PROTOBASE_REPO=/home/gamarino/Documentos/proyectos/ProtoBase tests/unit/cluster_checklist.sh`.
+  PROTOBASE_REPO=<a ProtoBase checkout holding v2.0.0rc3> tests/unit/cluster_checklist.sh`.
   Expected: PASS, no `deferred` row left (each is `ported` or re-justified `n/a`).
 - [ ] **Step 1b:** run the timer audit: `tests/run_tests.sh tests/audit`. Expected: all parts
   PASS at their declared floors. A floor that moved with a deliberate core change is re-measured

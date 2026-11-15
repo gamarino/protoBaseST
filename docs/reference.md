@@ -420,7 +420,7 @@ For tests, tools and readers of the format. An application does not need them.
   `PBStartNode`, `PBStopNode`, `PBPermitWanted waiter:`, `PBBaseWanted permission:waiter:`,
   `PBReplicateWanted permission:root:pred:waiter:` (the root built and the root it was built on), `PBDoneReport permission:outcome:` (`#committed`,
   `#unknown` or `#none`), `PBRejoinWanted`, `PBAcceptorDecided step:`, `PBAcceptorDiscarded
-  step:` (the step the shell discarded because its append failed; `dispatchAcceptorDiscarded:in:now:`). Effects, each answering
+  step:reason:` (the step the shell discarded because its append failed, and the failure's text; `dispatchAcceptorDiscarded:in:now:`). Effects, each answering
   `applyTo:` with one message the shell implements (applySend:, applyToAcceptor:, applyTimer:,
   applySettle:, applyPublishCommitted:, applyPublishAcceptor:, applyFence:, and for the base
   choice applyReadPersisted: and applyProbeRoot:): `PBSend
@@ -581,8 +581,8 @@ For tests, tools and readers of the format. An application does not need them.
   lease had ended)`, `<k> members refused the root, and only <n> of the <m> acknowledgements
   needed arrived` or `only <n> of the <m> acknowledgements needed arrived before the lease ended`;
   a failed own append is `Node <id>: the commit of root epoch <e> failed after the root was sent
-  (its own acceptance could not be made durable); peers may have acknowledged it, so it may or
-  may not take effect`.
+  (<the failure>); peers may have acknowledged it, so it may or may not take effect`, the
+  failure being the reason of the `PBAcceptorDiscarded`.
 - **Base choice** (`cluster/holder.st`, CP 1.6): `proto_db`'s `_lease_base`, `recover_root`,
   `_phase_1_floor`, `_base_needs_commit` and the refound and hard guard, as rules over the values
   `PBBaseDecision base:needsCommit:outcome:` (`base`, `needsCommit`, `outcome`: `#ok`, `#stale` or

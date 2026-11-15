@@ -72,7 +72,7 @@ PBBaseWanted>>_setPermission:waiter:
 PBReplicateWanted>>_setPermission:root:pred:waiter:
 PBDoneReport>>_setPermission:outcome:root:
 PBAcceptorDecided>>_setStep:
-PBAcceptorDiscarded>>_setStep:
+PBAcceptorDiscarded>>_setStep:reason:
 PBSend>>_setTo:message:
 PBToAcceptor>>_setEvent:
 PBLogAppend>>_setKind:label:root:sync:
@@ -104,7 +104,7 @@ PBBaseDecided>>_setDecision:
 PBBuilt>>_setEntry:root:micros:
 PBBuildConflict>>_setEntry:error:
 PBBuildFailed>>_setEntry:error:
-PBReplicated>>_setOutcome:
+PBReplicated>>_setOutcome:error:
 PBHoldExpired>>_setToken:
 PBAskBase>>_setPermission:
 PBBuild>>_setEntry:base:stamp:

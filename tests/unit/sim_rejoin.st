@@ -82,7 +82,7 @@ c that: 'every clock stopped: the ballot rejoin completes, a waiting one never d
 "(9-10)"
 c that: 'two wiped acknowledgers of five learn the committed root by their rejoin ({ violation. a, b. ballots. b on a. a never reached n3, n4 })'
   is: (#(1 2) collect: [:seed | (RejoinFamilies wiped: RejoinRules new seed: seed) asArray])
-  equals: ((1 to: 2) collect: [:i | { nil. #(#acknowledged #acknowledged). #(1 1). true. #(false false) }]).
+  equals: ((1 to: 2) collect: [:i | { nil. #(#acknowledged #acknowledged). #(1 1). true. #(#(false true) #(false true)) }]).
 out := RejoinFamilies wiped: PlantRejoinLearnsNothing new seed: 1.
 c that: 'PlantRejoinLearnsNothing is caught (S4: a acknowledged, then lost)'
   is: { (out first ifNil: ['']) includesSubstring: 'S4: the acknowledged commit ''a'''. out at: 2. out at: 4 }

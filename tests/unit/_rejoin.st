@@ -317,13 +317,15 @@ RejoinFamilies class >> wiped: aRules seed: n
     #('n1' 'n2') do: [:id | sim restart: id].
     sim runUntil: [#('n1' 'n2') allSatisfy: [:id | self isRejoined: id in: sim]] steps: 2000000.
     out at: 3 put: (#('n1' 'n2') collect: [:id | sim countOf: 'rejoin_ballots' at: id]).
+    "Taken before b exists: n3 and n4 still hold r1, so a reached only n0, n1 and n2 and the
+     rejoiners can learn it from n0 alone."
+    out at: 5 put: (#('n3' 'n4') collect: [:id | | acc |
+      acc := (sim nodeAt: id) acceptor accepted.
+      { acc notNil and: [acc key = (sim rootOf: 'a') key]. acc notNil and: [acc key = r1 key] }]).
     sim undrop.
     sim partition: #(#('n0') #('n1' 'n2' 'n3' 'n4')).
     sim on: 'base' at: 'n3' do: [:decision | base := decision].
     (out at: 2) add: (BaseFamilies commit: 'b' at: 'n3' in: sim).
-    out at: 5 put: (#('n3' 'n4') collect: [:id | | acc |
-      acc := (sim nodeAt: id) acceptor accepted.
-      acc notNil and: [acc key = (sim rootOf: 'a') key]]).
     sim heal.
     sim converge: 2000000]).
   out at: 2 put: (out at: 2) asArray.

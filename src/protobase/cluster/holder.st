@@ -344,14 +344,15 @@ PBCoordinatorCore >> _ownAck: anAck in: s now: t effects: fx
 "The own acceptance of a replication could not be made durable (the tier failed, R57): the root
  left this node already, so its outcome is unknown (proto_db: the own log write raises after the
  sends)."
-PBCoordinatorCore >> _ownAckFailed: anAck in: s now: t effects: fx
+PBCoordinatorCore >> _ownAckFailed: anAck reason: aReason in: s now: t effects: fx
   | rep |
   rep := self _replication: (anAck at: 'rid') in: s.
   rep isNil ifTrue: [^ s].
-  "proto_db's text for a failure after the root was sent; the failure is the own log write."
+  "proto_db's text for a failure after the root was sent (coordinator.py replicate's outer
+   handler), the failure being the own log write's error, aReason."
   ^ self _endReplication: rep unknown: 'Node ' , s config nodeId , ': the commit of root epoch '
-    , (self _epochOf: rep root) printString , ' failed after the root was sent (its own acceptance could not be made '
-    , 'durable); peers may have acknowledged it, so it may or may not take effect' in: s effects: fx.
+    , (self _epochOf: rep root) printString , ' failed after the root was sent (' , aReason
+    , '); peers may have acknowledged it, so it may or may not take effect' in: s effects: fx.
 
 "The timer of a replication: its permission ended (re-armed when it came early)."
 PBCoordinatorCore >> _replicationTimer: anEvent in: s now: t effects: fx

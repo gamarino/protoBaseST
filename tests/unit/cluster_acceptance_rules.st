@@ -1,4 +1,4 @@
-"EXPECT: ok 28"
+"EXPECT: ok 29"
 "The acceptance rules (cluster/acceptor.st) and the holder's replication and commit point
  (cluster/holder.st) called directly, one guard per check (proto_db coordinator.py _may_accept,
  _apply_replicate, _refuse_queued, _on_done, _on_release, _observe_accepted, _observe_committed,
@@ -43,7 +43,7 @@ Import from: '_check'.
 
 | c core peers config three five marker logged acceptorOf T OLD rec accept node r1 r2 r3 base sibling k k1 old newer
   vs msg repl step ackOf counts s granted nodeOf perm view eff toAcc settled t0 rep holderOf learn s2 v own stats
-  timers hintAck done unknown late few refused ownFailed |
+  timers hintAck done unknown late few refused ownFailed discarded |
 c := Check new.
 core := PBCoordinatorCore new.
 peers := [:someIds | (1 to: someIds size) asArray collect: [:i | PBPeer nodeId: (someIds at: i) host: '127.0.0.1' port: 7000 + i]].
@@ -244,8 +244,8 @@ late := [:n | unknown value: 'the lease ended before this node observed the outc
 few := [:n | unknown value: 'only ' , n printString , ' of the 2 acknowledgements needed arrived before the lease ended'].
 refused := [:n :m | unknown value: n printString , ' members refused the root, and only ' , m printString
   , ' of the 2 acknowledgements needed arrived'].
-ownFailed := 'Node n0: the commit of root epoch 10 failed after the root was sent (its own acceptance could not be made '
-  , 'durable); peers may have acknowledged it, so it may or may not take effect'.
+ownFailed := 'Node n0: the commit of root epoch 10 failed after the root was sent (No space left on device); '
+  , 'peers may have acknowledged it, so it may or may not take effect'.
 step := [:p :id :someIds :t | core dispatch: (PBReplicateWanted permission: p root: r1 pred: base waiter: #w) in: (nodeOf value: id value: someIds) now: t].
 c that: 'nothing is sent past the permission (a reserve of 0 too) or under the reserve; else the replicate, the own acceptance and a timer; a root of another term is refused'
   is: { settled value: (step value: (perm value: 500000) value: 'n0' value: three value: t0 + 500000).
@@ -285,6 +285,10 @@ c that: 'decided only after its own acceptance; a majority commits, teaching the
 "(19) Unknown outcomes."
 step := own value: (v value: (v value: s value: 'n1' value: true value: t0 + 2000) state value: 'n2' value: true value: t0 + 600000) state
   value: true value: t0 + 600000.
+discarded := [:why | core dispatch: (PBAcceptorDiscarded step: (PBAcceptorStep state: view appends: #() reply: #()
+    vote: (PBClusterMessage type: 'ack' from: 'n0' fields: { 'term' -> T. 'rid' -> (rep value: s) rid. 'inc' -> 5. 'ok' -> true.
+      'root' -> nil. 'stored' -> false })) reason: why)
+  in: (v value: (v value: s value: 'n1' value: true value: t0 + 2000) state value: 'n2' value: true value: t0 + 3000) state now: t0 + 4000].
 timers := [:aStep | { settled value: aStep. (aStep effects select: [:e | e isKindOf: PBTimer]) collect: [:e | e after] }].
 c that: 'a majority observed past the permission, its timer (once the own acceptance answered; re-armed when early), a failed own acceptance: unknown, counted, suspect'
   is: { settled value: step. (step effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat]. step state suspectTerm.
@@ -293,11 +297,17 @@ c that: 'a majority observed past the permission, its timer (once the own accept
     timers value: (core dispatch: (PBTimerFired token: (rep value: s) token event: #replicate) in: (own value: s value: true value: t0 + 2000) state now: t0 + 400000).
     timers value: (core dispatch: (PBTimerFired token: (rep value: s) token event: #replicate) in: s now: t0 + 400000).
     settled value: (core dispatch: (PBTimerFired token: (rep value: s) token event: #replicate) in: s now: t0 + 500000).
-    settled value: (core dispatch: (PBAcceptorDiscarded step: (PBAcceptorStep state: view appends: #() reply: #()
-      vote: (PBClusterMessage type: 'ack' from: 'n0' fields: { 'term' -> T. 'rid' -> (rep value: s) rid. 'inc' -> 5. 'ok' -> true.
-        'root' -> nil. 'stored' -> false }))) in: (v value: (v value: s value: 'n1' value: true value: t0 + 2000) state value: 'n2' value: true value: t0 + 3000) state now: t0 + 4000) }
+    settled value: (discarded value: 'No space left on device') }
   equals: { { late value: 3 }. #('replication_failures'). T. #(#PBSuspect). { few value: 1 }. { #(). #(100000) }. { #(). #(100000) }. #().
     { ownFailed } }.
+"proto_db names the own log write's error in the text (coordinator.py replicate, outer handler)."
+c that: 'a failed own acceptance names its failure in the unknown outcome; a discard without a reason is refused'
+  is: { #('No space left on device' 'acceptor log closed') collect: [:why | | text |
+      text := (settled value: (discarded value: why)) first.
+      { text includesSubstring: '(' , why , ')'. text endsWith: 'so it may or may not take effect' }].
+    [PBAcceptorDiscarded step: (PBAcceptorStep state: view appends: #() reply: #()) reason: nil. #accepted]
+      on: PBValidationError do: [:e | #refused] }
+  equals: { #(#(true true) #(true true)). #refused }.
 
 "(20) Refusals."
 c that: 'more refusals than a majority allows end it unknown at once; an own refusal is neither (proto_db), peers alone can commit'

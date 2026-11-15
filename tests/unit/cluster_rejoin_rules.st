@@ -98,7 +98,7 @@ drive := [:aState :aView :somePeers :aTamper :isReadable :isDiscarded :aFirst | 
       (e isKindOf: PBToAcceptor) ifTrue: [ | astep |
         astep := core accept: e event in: view now: 1000.
         (isDiscarded and: [e event isKindOf: PBRejoinLearnt])
-          ifTrue: [queue add: (PBAcceptorDiscarded step: astep)]
+          ifTrue: [queue add: (PBAcceptorDiscarded step: astep reason: 'disk full')]
           ifFalse: [
             view := astep state.
             queue add: (PBAcceptorDecided step: astep)]].

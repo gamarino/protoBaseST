@@ -15,8 +15,9 @@ clock, a socket or a file, sends, logs or waits.
     #unknown or #none: proto_db's done outcomes, and the root it committed), PBRejoinWanted (the operator's forceRejoin)
     PBAcceptorDecided step: (an acceptor step whose appends are durable, handed back to the
     dispatcher: the reply to this node's own vote and acceptance travels this way, CC1) and
-    PBAcceptorDiscarded step: (an acceptor step whose append failed, discarded by the shell:
-    the dispatcher withdraws the own vote it carried).
+    PBAcceptorDiscarded step: reason: (an acceptor step whose append failed, discarded by the
+    shell, and the failure's text, the reason it gives PBAppendFailed: the dispatcher withdraws
+    the own vote it carried).
   Effects (PBEffect): PBSend to: message:, PBToAcceptor event: (an event for this node's own
     acceptor, never through the transport: CC1), PBLogAppend kind: label: root: sync: (an
     acceptor-log entry: only in the appends of an acceptor step), PBTimer after: token: event:
@@ -43,7 +44,7 @@ clock, a socket or a file, sends, logs or waits.
                    discarded: the shell keeps the acceptor state it had before that step,
                    performs none of its reply, hands the acceptor PBAppendFailed (acceptor.st)
                    before anything else, so the state never holds what the log does not, and
-                   hands the dispatcher PBAcceptorDiscarded with the step.
+                   hands the dispatcher PBAcceptorDiscarded with the step and that reason.
   PBNodeState      the dispatcher's state of one node: config, inc (this incarnation, as
                    proto_db's random _inc), acceptorView (the acceptor state last handed back,
                    for hints only: CC2), hints, proposer, ownership, waiters, suspectTerm,
@@ -381,23 +382,31 @@ PBAcceptorDecided >> dispatchWith: aCore in: aNodeState now: t
 
 "--- PBAcceptorDiscarded ---"
 
-PBCoreEvent subclass: #PBAcceptorDiscarded instanceVariableNames: 'step'.
+PBCoreEvent subclass: #PBAcceptorDiscarded instanceVariableNames: 'step reason'.
 
 "aStep, a PBAcceptorStep of this node's acceptor whose append failed: the shell discarded it
- (nothing of it is durable, its reply was never performed)."
-PBAcceptorDiscarded class >> step: aStep
+ (nothing of it is durable, its reply was never performed). aReason, a non-empty String, is the
+ failure (the reason of the PBAppendFailed the acceptor is handed): proto_db names it in the
+ text of an own acceptance that could not be made durable."
+PBAcceptorDiscarded class >> step: aStep reason: aReason
   (aStep isKindOf: PBAcceptorStep) ifFalse: [
     ^ PBValidationError signal: 'PBAcceptorDiscarded: a step is a PBAcceptorStep, not ' , aStep printString].
-  ^ self basicNew _setStep: aStep.
+  ((aReason isKindOf: String) and: [aReason notEmpty]) ifFalse: [
+    ^ PBValidationError signal: 'PBAcceptorDiscarded: a reason is a non-empty String, not ' , aReason printString].
+  ^ self basicNew _setStep: aStep reason: aReason.
 
-PBAcceptorDiscarded >> _setStep: aStep
+PBAcceptorDiscarded >> _setStep: aStep reason: aReason
   "Runs once, on a fresh instance."
   step isNil ifFalse: [^ PBUserError signal: 'PBAcceptorDiscarded is immutable'].
   step := aStep.
+  reason := aReason.
   ^ self.
 
 PBAcceptorDiscarded >> step
   ^ step.
+
+PBAcceptorDiscarded >> reason
+  ^ reason.
 
 PBAcceptorDiscarded >> dispatchWith: aCore in: aNodeState now: t
   ^ aCore dispatchAcceptorDiscarded: self in: aNodeState now: t.
