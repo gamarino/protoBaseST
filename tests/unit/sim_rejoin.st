@@ -1,4 +1,4 @@
-"EXPECT: ok 8"
+"EXPECT: ok 9"
 "The rejoin of an empty acceptor log (cluster/rejoin.st, CP 'A node that lost its disk', R51,
  R78a, L13, L14) in the simulator (_sim.st), proto_db test_cluster_rejoin, _rejoin_fresh and
  _rejoin_records. The families, the hooked simulator and the planted wrong rules are in
@@ -15,7 +15,10 @@
  PBCorruptionError naming forceRejoin, and forceRejoin on it forgets the lost commit. (7) The
  R78b boundary (5x, (D + m)/(D - m) with m = 2/3 D) with the holder's timer running: the
  waiting plant is safe at 5 and loses a at 6; the product is safe at 8. (8) proto_db's literal
- check: with every clock stopped the ballot rejoin completes, the waiting one never does."
+ check: with every clock stopped the ballot rejoin completes, the waiting one never does. (9)
+ Two wiped acknowledgers of five rejoin, then one acquires and commits (its base is the commit
+ they lost), loses its disk again and commits under a higher term of its rank: no acknowledged
+ commit lost (S4), no term owned twice (S1)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_rejoin'.
@@ -71,5 +74,10 @@ c that: 'R78b boundary, holder running: PlantRejoinByWaiting safe at 5, loses a 
 c that: 'every clock stopped: the ballot rejoin completes, a waiting one never does (L13)'
   is: { RejoinFamilies frozen: RejoinRules new seed: 1. RejoinFamilies frozen: PlantRejoinByWaiting new seed: 1 }
   equals: #(#(true 1) #(false 0)).
+
+"(9)"
+c that: 'two wiped acknowledgers of five, then a wiped proposer: no commit lost, no term owned twice'
+  is: (#(1 2) collect: [:seed | (RejoinFamilies wiped: RejoinRules new seed: seed) asArray])
+  equals: ((1 to: 2) collect: [:i | { nil. #(#acknowledged #acknowledged #acknowledged). #(1 1). true. #(1 1) }]).
 
 c report displayNl.

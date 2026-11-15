@@ -1,4 +1,4 @@
-"EXPECT: ok 20"
+"EXPECT: ok 26"
 "The proposer's rules (cluster/proposer.st) called directly, one rule per check (proto_db
  coordinator.py permit, _become_owner, _open_attempt, _on_reply, _close_attempt, _back_off,
  release, _own_loop_body, _renew, the fairness hints).
@@ -42,7 +42,7 @@ PlantLateWin >> _inTime: anAttempt in: s now: t
   ^ true.
 
 | c core peers config three four vs marker logged view stateIn ready step eff sends msg granted reject
-  request s own att t0 pair sim owned renewing late lateRenewal plant stats lapsed |
+  request s own att t0 pair sim owned renewing late lateRenewal plant stats lapsed rel want hintsAfter grantAfter |
 c := Check new.
 core := PBCoordinatorCore new.
 peers := [:someIds | (1 to: someIds size) asArray collect: [:i | PBPeer nodeId: (someIds at: i) host: '127.0.0.1' port: 7000 + i]].
@@ -216,6 +216,18 @@ c that: 'ownerIdleRelease ends a term without local demand'
   is: { (s ownership token) notNil. pair state ownership. (pair effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat] }
   equals: { true. nil. #('terms_released_idle_local') }.
 
+"(13b) Without ownerIdleRelease (the default nil) the same term is kept at the same instant
+ (proto_db test_without_owner_idle_release_a_requested_term_is_kept)."
+s := (step value: (PBPermitWanted waiter: #w1) value: (stateIn value: 'n1' value: three value: { marker } value: Dictionary new) value: t0) state.
+s := (step value: (PBAcceptorDecided step: (core accept: (PBReceived message: (PBClusterMessage type: 'request' from: 'n1' fields: {
+  'term' -> 1. 'rid' -> 1. 'inc' -> 5. 'vs' -> vs })) in: (view value: 'n1' value: three value: { marker }) now: t0)) value: s value: t0) state.
+s := (step value: (granted value: 'n0' value: 1 value: 1 value: 5) value: s value: t0) state.
+s := s with: { #ownership -> (s ownership with: { #queue -> #(). #pipeline -> #() }) }.
+pair := step value: (PBTimerFired token: s ownership token event: #owner) value: s value: t0 + 100001.
+c that: 'without ownerIdleRelease a term serving no local demand is kept'
+  is: { s config ownerIdleRelease. pair state ownership notNil. ((pair effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat]) includes: 'terms_released_idle_local' }
+  equals: { nil. true. false }.
+
 "(14) The owner hint."
 s := ready value: 'n1'.
 c that: 'the owner hint is learnt from a renewal, not from a request'
@@ -269,5 +281,56 @@ c that: 'a waiter that arrived while the lease lapsed joins the renewed lease''s
   is: { s ownership renewal notNil. lapsed waiters. lapsed ownership queue. pair state ownership lease validUntil.
     pair state ownership queue. pair state ownership pipeline collect: [:e | e seq]. pair state waiters. pair state ownership lastDemand }
   equals: { true. #(#w2). #(). t0 + 1000000. #(). #(2). #(). t0 + 800000 }.
+
+"(20-24) Fairness (Task 18: the rows of proto_db test_cluster_fairness.py the families above do
+ not cover), at n1, from the hints: a release, held or a cancel, of a member."
+rel := [:from :term :next :more | msg value: 'release' value: from value: { 'term' -> term. 'inc' -> 1. 'root' -> nil.
+  'committed' -> nil. 'certain' -> true. 'held' -> true. 'next' -> next. 'more' -> more }].
+want := [:from | msg value: 'want' value: from value: #()].
+hintsAfter := [:aState :events | | st | st := aState.
+  events do: [:pairOf | st := (step value: pairOf first value: st value: pairOf last) state].
+  st].
+s := hintsAfter value: (ready value: 'n1') value: { { want value: 'n2'. t0 }. { want value: 'n0'. t0 + 1 }.
+  { rel value: 'n0' value: 4096 value: 'n2' value: false. t0 + 2 } }.
+c that: 'a silent named member is not named again until it asks, and keeps its place'
+  is: { s hints waiting. s hints turn.
+    (core _nextTurn: (hintsAfter value: s value: { { want value: 'n0'. t0 + 3 } }) hints) first.
+    (core _nextTurn: (hintsAfter value: s value: { { want value: 'n0'. t0 + 3 }. { want value: 'n2'. t0 + 4 } }) hints) first }
+  equals: { #(). { 'n2'. t0 + 2. nil }. 'n0'. 'n2' }.
+s := hintsAfter value: (stateIn value: 'n1' value: four value: { marker } value: Dictionary new)
+  value: { { want value: 'n0'. t0 }. { want value: 'n2'. t0 + 1 }. { want value: 'n3'. t0 + 2 }.
+    { rel value: 'n0' value: 4096 value: 'n2' value: true. t0 + 5 } }.
+c that: 'a releaser that still wants the lease says more and is queued at the tail'
+  is: { s hints waiting. (core _nextTurn: s hints) first }
+  equals: { { { 'n3'. t0 + 2 }. { 'n0'. t0 + 5 } }. 'n3' }.
+s := hintsAfter value: (ready value: 'n1') value: { { want value: 'n2'. t0 }. { rel value: 'n0' value: 4096 value: 'n2' value: false. t0 + 2 } }.
+pair := { (hintsAfter value: s value: { { rel value: 'n0' value: 4096 value: 'n2' value: false. t0 + 3 } }) hints turn.
+  (hintsAfter value: s value: { { rel value: 'n0' value: 4096 value: 'n2' value: false. t0 + 3 }.
+    { msg value: 'request' value: 'n2' value: { 'term' -> 4098. 'rid' -> 1. 'inc' -> 1. 'vs' -> vs }. t0 + 4 } }) hints turn }.
+s := hintsAfter value: s value: { { msg value: 'request' value: 'n2' value: { 'term' -> 4098. 'rid' -> 1. 'inc' -> 1. 'vs' -> vs }. t0 + 4 }.
+  { rel value: 'n2' value: 4098 value: nil value: false. t0 + 10 }. { rel value: 'n0' value: 4096 value: 'n2' value: false. t0 + 11 } }.
+own := core _step: [:fx | core _awaitTurn: (s with: { #waiters -> #(#w). #proposer -> PBProposer start.
+    #holder -> (PBHolder empty with: { #deadlines -> { { #w. t0 + 10000000 } } }) })
+  now: t0 + 11 + s config turnSilence effects: fx].
+c that: 'a duplicated, stale or reordered release costs at most one bound'
+  is: { pair first. pair last. s hints turn. ((own effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat]) first.
+    own state hints turn }
+  equals: { { 'n2'. t0 + 3. nil }. { 'n2'. t0 + 3. t0 + 4 }. { 'n2'. t0 + 11. nil }. 'deferral_timeouts'. nil }.
+c that: 'a wrong next: a non-member is ignored, the receiver asks at once, the sender costs one bound'
+  is: { (hintsAfter value: (ready value: 'n1') value: { { rel value: 'n0' value: 4096 value: 'zz' value: false. t0 } }) hints turn.
+    [ | h | h := (hintsAfter value: (ready value: 'n1') value: { { rel value: 'n0' value: 4096 value: 'n1' value: false. t0 } }) hints.
+      { h myTurn. h turn } ] value.
+    (hintsAfter value: (ready value: 'n1') value: { { rel value: 'n0' value: 4096 value: 'n0' value: false. t0 } }) hints turn }
+  equals: { nil. { true. nil }. { 'n0'. t0. nil } }.
+grantAfter := [:next :more | | v st |
+  v := core accept: (msg value: 'request' value: 'n0' value: { 'term' -> 4096. 'rid' -> 1. 'inc' -> 1. 'vs' -> vs })
+    in: (view value: 'n1' value: three value: { marker }) now: t0.
+  st := core accept: (rel value: 'n0' value: 4096 value: next value: more) in: v state now: t0 + 10.
+  st := core accept: (msg value: 'request' value: 'n2' value: { 'term' -> 4098. 'rid' -> 1. 'inc' -> 1. 'vs' -> vs })
+    in: st state now: t0 + 20.
+  { st state grants printString. st state grants highestGranted. ((st reply select: [:e | e isKindOf: PBSend]) collect: [:e | e message type]) asArray }].
+c that: 'the fairness hints never change a grant'
+  is: { grantAfter value: 'n2' value: true. grantAfter value: 'zz' value: false. (grantAfter value: nil value: false) last }
+  equals: { grantAfter value: nil value: false. grantAfter value: nil value: false. #('grant') }.
 
 c report displayNl.

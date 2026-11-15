@@ -1,4 +1,4 @@
-"EXPECT: ok 16"
+"EXPECT: ok 18"
 "The owner's rules and the holder side of a permit request (cluster/owner.st, with the deadline
  caps of cluster/proposer.st) called directly, one guard per check (proto_db coordinator.py
  _dispatch, _on_permit_req, _permit_outcome, _abandon, _refuse_queue, _own_loop_body, release,
@@ -196,5 +196,32 @@ c that: 'a local waiter queued at the ownership leaves it with PBTimeoutError at
   is: { (timers value: pair) first <= 299000. settled value: pair.
     (settled value: fx) collect: [:e | { e first. e last class name }]. fx state ownership queue. fx state holder deadlines }
   equals: { true. #(). #(#(#w1 #PBTimeoutError)). #(). #() }.
+
+"(17) O5, O6 (Task 18: proto_db test_cluster_pipeline_owner.py o5 and o6 at DEPTH 0): a 'none'
+ from the only entry removes it and the next permit reuses the committed base; a done told by
+ another incarnation than the one the permit was issued to abandons the term."
+pair := core dispatch: (req value: 'n2' value: 1 value: 7 value: 3) in: (owner value: r value: true) now: t0 + 1000.
+fx := core dispatch: (msg value: 'done' value: 'n2' value: { 'term' -> 1. 'seq' -> 1. 'inc' -> 3. 'outcome' -> 'none'.
+  'root' -> nil. 'copies' -> #(). 'ranges' -> nil }) in: pair state now: t0 + 2000.
+s := core dispatch: (req value: 'n0' value: 1 value: 9 value: 4) in: fx state now: t0 + 3000.
+r2 := core dispatch: (msg value: 'done' value: 'n2' value: { 'term' -> 1. 'seq' -> 1. 'inc' -> 4. 'outcome' -> 'committed'.
+  'root' -> (PBClusterMessage rootValue: r). 'copies' -> #(). 'ranges' -> nil }) in: pair state now: t0 + 2000.
+c that: 'a lone none restores the committed base; a done of another incarnation abandons'
+  is: { fx state ownership pipeline size. (stats value: fx) includes: 'terms_abandoned'.
+    (permitOf value: s) at: 'seq'. (permitOf value: s) at: 'certain'.
+    (PBClusterMessage rootFrom: ((permitOf value: s) at: 'root')) key = r key.
+    (stats value: r2) includes: 'terms_abandoned'. r2 state suspectTerm }
+  equals: { 0. false. 2. true. true. true. 1 }.
+r2 := PBLabeledRoot label: 1 record: (PBRootRecord segment: (ByteArray new: 16) offset: 8 epoch: 2).
+
+"(18) proto_db test_a_permit_arriving_after_its_request_gave_up_is_handed_back_at_once: a permit
+ no ask of this incarnation waits for is answered done 'none' at once, and settles nothing."
+holderState := (stateIn value: 'n2' value: { marker }) with: { #hints -> ((PBHints seed: 1) with: { #ownerTerm -> 1. #ownerNode -> 'n1' }) }.
+fx := core dispatch: (msg value: 'permit' value: 'n1' value: { 'term' -> 1. 'rid' -> 9. 'seq' -> 4. 'inc' -> 5.
+  'root' -> (PBClusterMessage rootValue: r). 'certain' -> true. 'valid' -> 0.3. 'after' -> nil }) in: holderState now: t0.
+c that: 'a permit nobody waits for is handed back at once with done none'
+  is: { (sendsOf value: fx value: 'done') collect: [:m | { m at: 'term'. m at: 'seq'. m at: 'inc'. m at: 'outcome'. m at: 'root' }].
+    ((fx effects select: [:e | e isKindOf: PBSend]) collect: [:e | e to]) asArray. settled value: fx }
+  equals: { { { 1. 4. 5. 'none'. nil } }. #('n1'). #() }.
 
 c report displayNl.

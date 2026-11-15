@@ -1,4 +1,4 @@
-"EXPECT: ok 22"
+"EXPECT: ok 28"
 "PBClusterMessage (cluster/protocol.st): the protocol-13 messages of proto_db
  cluster/protocol.py (validate_message, _check_field, decode_labeled_root). A received map
  is validated against the field table of its type: extra fields are ignored and never
@@ -17,7 +17,7 @@
  3-item root form (never written, CC17) is PBValidationError."
 Import from: 'protobase'.
 Import from: '_check'.
-| c raw head seg request fields root rejectFields |
+| c raw head seg request fields root rejectFields refuses done permit release |
 c := Check new.
 raw := [:assocs | MessagePack encode: (MessagePackMap withAll: assocs)].
 head := [:type | { 'v' -> 13. 'type' -> type. 'from' -> 'n1' }].
@@ -92,4 +92,37 @@ c that: 'a range end of 2^64 is refused when built' signals: PBValidationError c
     'ranges' -> { { seg. 26. 2 raisedTo: 64 } } }].
 c that: 'the 3-item root form is refused when built' signals: PBValidationError containing: 'root'
   during: [PBClusterMessage type: 'commit_query' from: 'n1' fields: { 'rid' -> 9. 'inc' -> 43. 'root' -> { 3. seg. 16534 } }].
+
+"The rows of proto_db test_cluster_protocol.py the families above do not cover (Task 18): a
+ received field of the wrong shape is refused, whatever the message type."
+refuses := [:type :assocs | [PBClusterMessage decode: (raw value: (head value: type) , assocs). 'decoded']
+  on: PBClusterProtocolError do: [:e | 'refused']].
+done := [:copies | { 'term' -> 1. 'seq' -> 1. 'inc' -> 1. 'outcome' -> 'committed'. 'root' -> { 2. seg. 64. 4 }.
+  'copies' -> copies. 'ranges' -> nil }].
+c that: 'copies must be an Array of member ids' is:
+  ({ nil. 'n1'. #(1). { #[110 49] }. #('n1' 'n2') } collect: [:bad | refuses value: 'done' value: (done value: bad)])
+  equals: #('refused' 'refused' 'refused' 'refused' 'decoded').
+permit := { 'term' -> 9. 'rid' -> 2. 'seq' -> 5. 'inc' -> 7. 'root' -> nil. 'certain' -> false. 'valid' -> 0.5 }.
+c that: 'a permit after is nil or a positive seq and a member, and required' is:
+  (({ #(0 'n2'). #(4). #(4 2). 'n2'. #(4 'n2' 1). nil. #(4 'n2') } collect: [:bad |
+      refuses value: 'permit' value: permit , { 'after' -> bad }]) copyWith: (refuses value: 'permit' value: permit))
+  equals: #('refused' 'refused' 'refused' 'refused' 'refused' 'decoded' 'decoded' 'refused').
+release := { 'term' -> 9. 'inc' -> 11. 'root' -> nil. 'committed' -> nil. 'certain' -> true. 'held' -> true }.
+c that: 'the release fairness hints are typed' is:
+  ({ { 'next' -> 3. 'more' -> true }. { 'next' -> #[110 50]. 'more' -> true }. { 'next' -> 'n2'. 'more' -> 1 }.
+     { 'next' -> 'n2' }. { 'next' -> nil. 'more' -> false } } collect: [:bad | refuses value: 'release' value: release , bad])
+  equals: #('refused' 'refused' 'refused' 'refused' 'decoded').
+c that: 'another protocol version is refused' signals: PBClusterProtocolError containing: 'version'
+  during: [PBClusterMessage decode: (raw value: { 'v' -> 14. 'type' -> 'request'. 'from' -> 'n1' } , fields)].
+c that: 'garbage bytes and a map that is not one are refused' is:
+  ({ #[193 193 193]. MessagePack encode: #(1 2 3) } collect: [:bytes |
+    [PBClusterMessage decode: bytes. 'decoded'] on: PBClusterProtocolError do: [:e | 'refused']])
+  equals: #('refused' 'refused').
+c that: 'records and segments are validated; replicate has no pred_committed' is:
+  { refuses value: 'records' value: { 'term' -> 1. 'rid' -> 1. 'inc' -> 1. 'index' -> 0. 'records' -> { { #[1 2 3 4 5]. 1. nil } } }.
+    refuses value: 'records' value: { 'term' -> 1. 'rid' -> 1. 'inc' -> 1. 'index' -> 0. 'records' -> { { seg. 1. nil } } }.
+    refuses value: 'fetch' value: { 'rid' -> 1. 'inc' -> 1. 'segment' -> #[120]. 'offset' -> 0 }.
+    ((PBClusterMessage schema at: 'replicate') anySatisfy: [:f | f key = 'pred_committed']).
+    PBClusterMessage protocolVersion }
+  equals: { 'refused'. 'decoded'. 'refused'. false. 13 }.
 c report displayNl.

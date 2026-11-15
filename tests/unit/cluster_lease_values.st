@@ -1,4 +1,4 @@
-"EXPECT: ok 16"
+"EXPECT: ok 26"
 "PBGrantState, PBAttempt, PBLease and PBPermission (cluster/lease.st): the lease rules of
  proto_db cluster/lease.py (PeerGrants, LeaseAttempt, Lease, Permission) and the ballot check of
  coordinator.py _decide, as immutable values. Time is a parameter (microseconds): nothing here
@@ -156,6 +156,59 @@ c that: 'term 0 is decided by the rules and restore: 0 seen: 0 is a no-op' is:
     (s1 promise: 0) last. (s1 promise: 0) first grantedTop.
     (PBPermission term: 4097 seq: 0 rid: 0 owner: 'n1' root: nil certain: false sentAt: 0 valid: 0) seq }
   equals: { 0. 0. 0. 'term_taken'. 0. 'bad_ballot'. 'term_taken'. 0. 4097. 0. 4097. 0 }.
+"The rows of proto_db test_cluster_lease.py the families above do not cover (Task 18)."
+c that: 'a release of another holder, term or incarnation frees nothing' is:
+  ({ s1 release: 'n2' inc: 9 term: 4097 now: grace + 100.
+     s1 release: 'n1' inc: 7 term: 8193 now: grace + 100.
+     s1 release: 'n1' inc: 8 term: 4097 now: grace + 100 } collect: [:r | grantOf value: r first])
+  equals: ((1 to: 3) collect: [:i | { 'n1'. 7. 4097. grace + 2000000 }]) asArray.
+g := (busy newState release: 'n1' inc: 7 term: 4097 now: grace + 600000) first
+  decideRequest: 'n2' inc: 9 term: 4098 now: grace + 700000 config: cfg.
+c that: 'a term seen in a busy refusal is granted to it once the grant ends' is:
+  { g verdict. g promiseToLog. grantOf value: g newState }
+  equals: { #grant. 4098. { 'n2'. 9. 4098. grace + 2700000 } }.
+rel := s0 release: 'n1' inc: 7 term: 4097 now: grace.
+g := rel first decideRequest: 'n1' inc: 7 term: 4097 now: grace + 10 config: cfg.
+c that: 'a release overtaking its request closes the term' is:
+  { g verdict. g reason. grantOf value: g newState. rel first grantedTop. rel first highestGranted }
+  equals: { #reject. 'term_taken'. nil. 0. 4097 }.
+g := s1 decideRequest: 'n1' inc: 7 term: 8193 now: grace + 100 config: cfg.
+c that: 'the holder may ask a higher term while its grant runs' is:
+  { g verdict. g promiseToLog. g endedTerm. grantOf value: g newState }
+  equals: { #grant. 8193. 0. { 'n1'. 7. 8193. grace + 2000100 } }.
+a := PBAttempt term: 4096 rid: 1 sentAt: 0 voters: 3.
+a := (a withGrant: 'n0' root: nil committed: nil certain: true) withGrant: 'n0' root: nil committed: nil certain: true.
+won := a withReject: 'n0' reason: 'busy' highest: 8193 remaining: 5.
+c that: 'an attempt counts a peer once, by its first reply' is:
+  { a state. a replies. won replies. won highestSeen. won busyRemaining.
+    (won withGrant: 'n1' root: nil committed: nil certain: true) state }
+  equals: { #pending. 1. 1. 8193. 0. #won }.
+g := s1 decideRequest: 'n1' inc: 8 term: 8193 now: grace + 100 config: cfg.
+ended := s1 decideRequest: 'n1' inc: 8 term: 4097 now: grace + 100 config: cfg.
+c that: 'a request of a new incarnation ends the grant of the old one' is:
+  { g verdict. g endedTerm. grantOf value: g newState. ended reason. ended endedTerm. grantOf value: ended newState }
+  equals: { #grant. 4097. { 'n1'. 8. 8193. grace + 2000100 }. 'term_taken'. 4097. nil }.
+c that: 'grantedTop ignores the terms a release closed' is:
+  { (s1 release: 'n1' inc: 7 term: 8193 now: grace + 1) first grantedTop.
+    (s1 release: 'n1' inc: 7 term: 8193 now: grace + 1) first highestGranted. s1 grantedTop }
+  equals: { 4097. 8193. 4097 }.
+c that: 'termsSeen counts lease activity, not label floors' is:
+  { s0 termsSeen.
+    (s0 decideRequest: 'n1' inc: 7 term: 4097 now: 1000 config: cfg) newState termsSeen.
+    (s0 release: 'n1' inc: 7 term: 8193 now: 1000) first termsSeen.
+    (s0 restore: 12288 seen: 20000) termsSeen.
+    (s0 restore: 12288 seen: 4096) termsSeen.
+    (s0 restore: 12288 seen: 4096) highestGranted }
+  equals: { 0. 4097. 8193. 12288. 4096. 12288 }.
+c that: 'a renewal of an expired or released term is never granted' is:
+  { (s1 renew: 'n1' inc: 7 term: 4097 now: grace + 2000000 config: cfg) reason.
+    (s1 renew: 'n1' inc: 7 term: 4097 now: grace + 2000000 config: cfg) endedTerm.
+    ((s1 release: 'n1' inc: 7 term: 4097 now: grace + 100) first renew: 'n1' inc: 7 term: 4097 now: grace + 200 config: cfg) reason }
+  equals: { 'term_taken'. 4097. 'term_taken' }.
+g := s1 renew: 'n1' inc: 8 term: 4097 now: grace + 100 config: cfg.
+c that: 'a renewal of another incarnation is not an extension' is:
+  { g verdict. g reason. g endedTerm. grantOf value: g newState }
+  equals: { #reject. 'term_taken'. 4097. nil }.
 c that: 'a nil holder, term or seq is refused' is:
   ({ [s1 decideRequest: nil inc: 7 term: 4097 now: grace config: cfg].
      [s1 decideRequest: 'n1' inc: 7 term: nil now: grace config: cfg].

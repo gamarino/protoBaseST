@@ -1,0 +1,263 @@
+# proto_db v2.0.0rc3 tests/unit/test_cluster_*.py, one row per test function (cluster_checklist.sh).
+# Columns (tab-separated): file::function, status, then: ported <file> <family> | deferred <task> <reason> | n/a <category> <reason>.
+test_cluster_acceptor_durability.py::test_a_granter_that_loses_power_never_grants_a_term_twice	ported	tests/unit/sim_grants.st	no reply before the promise is synced
+test_cluster_acceptor_durability.py::test_a_proposer_that_loses_power_never_wins_its_ballot_twice	ported	tests/unit/sim_grants.st	restart restores the promise from the log, never below it (L17)
+test_cluster_acceptor_durability.py::test_acceptor_log_entries_are_synced_before_the_reply_they_justify	ported	tests/unit/sim_acceptance.st	ack only after the synced append
+test_cluster_acceptor_durability.py::test_a_new_acceptor_log_and_its_directories_survive_a_power_loss	deferred	21	directory fsync of a new acceptor log belongs to the file-backed log shell
+test_cluster_acceptor_writes.py::test_n1_an_acceptance_being_logged_finishes_before_the_space_closes	deferred	20	close ordering against an in-flight acceptor write is a property of the threaded shell
+test_cluster_acceptor_writes.py::test_n1_an_acceptance_decided_after_a_reattach_is_refused	deferred	20	reattach of a space to a coordinator is done by the shell, not the pure core
+test_cluster_acceptor_writes.py::test_n1_a_decision_after_a_move_to_another_disk_writes_nothing_on_the_old_one	deferred	20	moving the acceptor log to another disk is a shell attach and detach operation
+test_cluster_acceptor_writes.py::test_n1_a_move_to_another_disk_waits_for_the_acceptance_being_logged	deferred	20	waiting for an in-flight append during a move is a shell concern
+test_cluster_acceptor_writes.py::test_n1_an_acceptor_whose_log_was_closed_under_it_acknowledges_nothing	deferred	20	a log closed under a running acceptor needs the shell's real log handle
+test_cluster_acceptor_writes.py::test_n1_a_holder_whose_log_was_closed_under_it_does_not_count_itself	ported	tests/unit/cluster_acceptance_rules.st	a majority observed past the permission
+test_cluster_acceptor_writes.py::test_n1_a_holder_moved_to_another_disk_mid_commit_does_not_accept_on_the_old_one	deferred	20	a move mid commit needs the shell's attach and detach of real logs
+test_cluster_acceptor_writes.py::test_a_closed_acceptor_log_handle_refuses_writes_on_every_backend	ported	tests/unit/cluster_acceptor_log.st	closed log refuses
+test_cluster_acceptor_writes.py::test_a_commit_whose_space_was_reopened_replicates_nothing	deferred	23	a reopened space and its commit path belong to the transaction integration task
+test_cluster_acceptor_writes.py::test_a1_a_worker_whose_tier_closed_under_its_apply_refuses_and_stays_healthy	n/a	tiered	the apply worker of a tiered storage does not exist in protoBaseST
+test_cluster_chain_rule.py::test_a_root_extending_the_accepted_root_is_accepted	ported	tests/unit/cluster_acceptance_rules.st	a root extending the accepted root is accepted, and a duplicate
+test_cluster_chain_rule.py::test_a_sibling_in_the_same_term_is_refused_without_a_protocol_violation	ported	tests/unit/cluster_acceptance_rules.st	a sibling in the same term is refused without a protocol violation
+test_cluster_chain_rule.py::test_a_root_not_built_on_the_accepted_root_is_refused_until_its_base_is_learnt_committed	ported	tests/unit/cluster_acceptance_rules.st	a root not built on the accepted root is refused until its pred is learnt committed
+test_cluster_chain_rule.py::test_a_later_root_of_a_term_never_follows_an_accepted_root_of_an_older_term	ported	tests/unit/cluster_acceptance_rules.st	a later root of a term never follows an accepted root of an older term
+test_cluster_chain_rule.py::test_a_node_that_accepted_nothing_takes_only_the_first_root_of_a_term	ported	tests/unit/cluster_acceptance_rules.st	a node that accepted nothing takes only the first root of a term
+test_cluster_chain_rule.py::test_a_stale_permission_sequence_is_refused	ported	tests/unit/cluster_acceptance_rules.st	a stale permission sequence is refused
+test_cluster_chain_rule.py::test_the_first_root_of_a_newer_term_follows_the_ballot_rule_only	ported	tests/unit/cluster_acceptance_rules.st	the first root of a newer term follows the ballot rule only
+test_cluster_coordinator.py::test_constructor_validates_membership_and_timing	ported	tests/unit/cluster_config.st	driftMargin 1333 ms is refused
+test_cluster_coordinator.py::test_acquire_before_start_or_after_stop_raises	deferred	20	start and stop of a coordinator are lifecycle operations of the shell
+test_cluster_coordinator.py::test_single_node_cluster_acquires_and_releases	deferred	20	a single node acquiring over real threads needs the coordinator shell
+test_cluster_coordinator.py::test_three_nodes_never_hold_overlapping_leases_and_terms_increase	ported	tests/unit/sim_leases_terms_a.st	one owner per term under drop/dup/reorder (seeds failed)
+test_cluster_coordinator.py::test_a_minority_cannot_acquire_while_the_majority_can	ported	tests/unit/sim_permits.st	minority side times out; owners are forgotten only for the term asked under
+test_cluster_coordinator.py::test_a_crashed_holder_blocks_others_until_its_lease_expires	ported	tests/unit/cluster_lease_values.st	busy for another holder, with the remaining promise
+test_cluster_coordinator.py::test_a_restarted_peer_honours_promises_through_its_startup_grace	ported	tests/unit/sim_grants.st	startup grace refuses (efficiency only)
+test_cluster_coordinator.py::test_a_waiting_requester_is_woken_by_the_release	ported	tests/unit/cluster_proposer_rules.st	a cancel ends only the busy extension; a held release ends the back-off
+test_cluster_coordinator.py::test_stop_wakes_a_blocked_acquirer	deferred	20	waking a blocked acquirer thread on stop is a shell lifecycle concern
+test_cluster_coordinator.py::test_known_root_never_goes_backwards	ported	tests/unit/cluster_acceptance_rules.st	a done committed teaches a newer root, unsynced; an older one
+test_cluster_coordinator.py::test_release_propagates_the_replicated_root_to_every_peer	ported	tests/unit/cluster_acceptance_rules.st	a held release teaches its committed root
+test_cluster_coordinator.py::test_unknown_roots_make_the_holder_recover	ported	tests/unit/cluster_lease_values.st	uncertain when a granter reports no root or a suspicion
+test_cluster_coordinator.py::test_a_peer_that_missed_a_release_makes_the_next_holder_recover	ported	tests/unit/cluster_acceptor_rules.st	ending an expired grant makes the node suspect: certain false
+test_cluster_coordinator.py::test_a_failed_replication_makes_the_holders_next_lease_uncertain	ported	tests/unit/cluster_owner_rules.st	an abandoned term makes the acceptor suspect it and the node uncertain
+test_cluster_coordinator.py::test_a_node_without_a_tier_neither_grants_nor_counts	deferred	20	a coordinator attached without a tier is a shell attach state
+test_cluster_coordinator.py::test_fetch_timeout_must_leave_part_of_the_lease	ported	tests/unit/cluster_config.st	fetchTimeout is Phase D
+test_cluster_coordinator.py::test_the_default_startup_grace_lasts_one_lease_plus_the_drift_margin	ported	tests/unit/cluster_config.st	defaults in microseconds
+test_cluster_coordinator.py::test_a_holder_never_replicates_under_a_term_below_its_rejoin_ballot	ported	tests/unit/cluster_round_rules.st	L14: below the rejoin ballot nothing is replicated; equal to it, sent
+test_cluster_dispatcher.py::test_the_dispatcher_never_waits_on_an_acceptor_log_write	deferred	20	the dispatcher and acceptor threads and their lanes are the shell
+test_cluster_dispatcher.py::test_a_grant_is_sent_only_after_its_promise_is_durable_even_when_duplicated	ported	tests/unit/sim_grants.st	no reply before the promise is synced
+test_cluster_dispatcher.py::test_an_owner_serving_only_others_ends_its_term_after_owner_idle_release	ported	tests/unit/cluster_proposer_rules.st	ownerIdleRelease ends a term without local demand
+test_cluster_dispatcher.py::test_without_owner_idle_release_a_requested_term_is_kept	ported	tests/unit/cluster_proposer_rules.st	without ownerIdleRelease a term serving no local demand is kept
+test_cluster_durability.py::test_a_shared_file_storage_commit_survives_a_whole_cluster_crash_before_any_persistence	deferred	24	a whole-cluster crash over real spaces is the end-to-end cluster test task
+test_cluster_durability.py::test_a_node_restarted_after_a_refound_never_reloads_the_dead_branch	deferred	25	the dead branch after a refound is read by the persister and space reload
+test_cluster_durability.py::test_a_commit_larger_than_a_frame_is_chunked_and_an_unreplicable_record_is_refused	n/a	tiered	record chunking ships tiered storage records the port never replicates
+test_cluster_durability.py::test_an_unexpected_worker_failure_fences_the_node	deferred	20	worker threads and their failure fencing exist only in the shell
+test_cluster_durability.py::test_an_unexpected_persister_failure_stops_persisting_but_not_voting	deferred	25	the persister thread and its failure handling are the persistence task
+test_cluster_durability.py::test_a_base_with_the_snapshot_epoch_but_another_root_is_validated	deferred	23	validating a base against the space snapshot needs the transaction integration
+test_cluster_durability.py::test_a_verified_dead_branch_root_never_shortens_the_persisters_walk	n/a	tiered	the persister walk over tiered storage segments has no protoBaseST counterpart
+test_cluster_durability.py::test_a_commit_racing_the_close_of_the_space_has_an_unknown_outcome	deferred	23	a commit racing the space close is part of the transaction integration
+test_cluster_durability.py::test_a_holder_never_ships_own_records_it_has_not_made_durable_locally	deferred	23	the local flush before replication (L11 flushLocal) is wired by transactions
+test_cluster_fairness.py::test_a_release_names_the_member_waiting_longest_then_the_next	ported	tests/unit/sim_leases.st	releases name the longest waiter and the turns rotate
+test_cluster_fairness.py::test_without_waiting_members_a_release_names_nobody_and_nobody_defers	ported	tests/unit/cluster_proposer_rules.st	without demand for idleEnd the owner releases
+test_cluster_fairness.py::test_the_releaser_defers_to_the_member_it_named_until_that_member_has_been_served	ported	tests/unit/cluster_proposer_rules.st	a release names the member waiting longest, says more, and its releaser defers, saying want
+test_cluster_fairness.py::test_a_named_member_that_does_not_ask_costs_one_silence_and_is_not_named_again	ported	tests/unit/cluster_proposer_rules.st	a silent named member is not named again until it asks, and keeps its place
+test_cluster_fairness.py::test_a_member_nobody_queues_says_want_before_it_defers	ported	tests/unit/cluster_proposer_rules.st	a release names the member waiting longest, says more, and its releaser defers, saying want
+test_cluster_fairness.py::test_fairness_hints_never_change_a_grant	ported	tests/unit/cluster_proposer_rules.st	the fairness hints never change a grant
+test_cluster_fairness.py::test_a_releaser_with_threads_still_waiting_says_more_and_is_queued_at_the_tail	ported	tests/unit/cluster_proposer_rules.st	a releaser that still wants the lease says more and is queued at the tail
+test_cluster_fairness.py::test_a_duplicated_release_costs_no_more_than_one_bound	ported	tests/unit/cluster_proposer_rules.st	a duplicated, stale or reordered release costs at most one bound
+test_cluster_fairness.py::test_a_stale_release_delivered_after_the_named_member_was_served_costs_one_bound	ported	tests/unit/cluster_proposer_rules.st	a duplicated, stale or reordered release costs at most one bound
+test_cluster_fairness.py::test_releases_delivered_in_reverse_order_cost_one_bound	ported	tests/unit/cluster_proposer_rules.st	a duplicated, stale or reordered release costs at most one bound
+test_cluster_fairness.py::test_a_wrong_next_never_changes_a_grant_and_costs_at_most_one_bound	ported	tests/unit/cluster_proposer_rules.st	a wrong next: a non-member is ignored, the receiver asks at once, the sender costs one bound
+test_cluster_lease.py::test_majority_is_floor_half_plus_one	ported	tests/unit/cluster_members.st	the majority of 3 voters is 2
+test_cluster_lease.py::test_first_request_is_granted	ported	tests/unit/cluster_lease_values.st	a grant above grantedTop asks for its promise to be logged
+test_cluster_lease.py::test_at_most_one_holder_while_the_lease_runs	ported	tests/unit/cluster_lease_values.st	busy for another holder, with the remaining promise
+test_cluster_lease.py::test_grant_after_expiry_on_the_peer_clock_and_reports_the_missed_release	ported	tests/unit/cluster_lease_values.st	term_taken after the expiry, and bad_ballot
+test_cluster_lease.py::test_a_released_grant_frees_the_peer_without_marking_an_expiry	ported	tests/unit/cluster_lease_values.st	a release frees the grant and closes the term
+test_cluster_lease.py::test_release_of_another_holder_or_term_does_not_free_the_grant	ported	tests/unit/cluster_lease_values.st	a release of another holder, term or incarnation frees nothing
+test_cluster_lease.py::test_lower_terms_are_rejected	ported	tests/unit/cluster_lease_values.st	stale_term below the highest seen
+test_cluster_lease.py::test_a_term_is_granted_to_one_holder_only_even_after_release	ported	tests/unit/cluster_lease_values.st	a release frees the grant and closes the term
+test_cluster_lease.py::test_a_term_seen_in_a_rejected_request_can_still_be_granted_to_another_requester	ported	tests/unit/cluster_lease_values.st	a term seen in a busy refusal is granted to it once the grant ends
+test_cluster_lease.py::test_a_duplicate_request_is_idempotent_and_never_extends_the_promise	ported	tests/unit/cluster_lease_values.st	a renew extends the active grant; a duplicate does not
+test_cluster_lease.py::test_a_late_duplicate_request_after_release_is_rejected	ported	tests/unit/cluster_lease_values.st	a release frees the grant and closes the term
+test_cluster_lease.py::test_a_release_overtaking_its_request_closes_the_term	ported	tests/unit/cluster_lease_values.st	a release overtaking its request closes the term
+test_cluster_lease.py::test_a_holder_may_renew_with_a_higher_term	ported	tests/unit/cluster_lease_values.st	the holder may ask a higher term while its grant runs
+test_cluster_lease.py::test_startup_grace_refuses_every_grant_for_its_duration	ported	tests/unit/cluster_lease_values.st	starting during the grace
+test_cluster_lease.py::test_attempt_is_won_at_a_majority_and_counts_a_peer_once	ported	tests/unit/cluster_lease_values.st	an attempt counts a peer once, by its first reply
+test_cluster_lease.py::test_attempt_is_lost_once_a_majority_is_impossible	ported	tests/unit/cluster_lease_values.st	an attempt is won at needed grants, lost past reach
+test_cluster_lease.py::test_a_grant_after_a_reject_from_the_same_peer_is_ignored	ported	tests/unit/cluster_lease_values.st	an attempt counts a peer once, by its first reply
+test_cluster_lease.py::test_valid_until_is_measured_from_the_send_time	ported	tests/unit/cluster_lease_values.st	a lease is measured from the send, not the win
+test_cluster_lease.py::test_best_root_is_the_highest_label_then_epoch_and_certain_unless_a_granter_is_unsure	ported	tests/unit/cluster_lease_values.st	the best root is the highest in root order
+test_cluster_lease.py::test_a_request_from_a_new_incarnation_ends_the_old_grant	ported	tests/unit/cluster_lease_values.st	a request of a new incarnation ends the grant of the old one
+test_cluster_lease.py::test_granted_top_ignores_terms_closed_by_releases	ported	tests/unit/cluster_lease_values.st	grantedTop ignores the terms a release closed
+test_cluster_lease.py::test_terms_seen_counts_lease_activity_not_label_floors	ported	tests/unit/cluster_lease_values.st	termsSeen counts lease activity, not label floors
+test_cluster_lease.py::test_lease_is_valid_until_its_deadline_or_release	ported	tests/unit/cluster_lease_values.st	a lease is measured from the send, not the win
+test_cluster_lease.py::test_fencing_token_combines_term_and_the_base_epoch	n/a	Python-only API	FencingToken is unused by the port: the fencing token is the term itself (spec 1.5)
+test_cluster_lease.py::test_fencing_tokens_order_by_term_first	n/a	Python-only API	FencingToken ordering is unused by the port: the term alone orders (spec 1.5)
+test_cluster_lease.py::test_a_renewal_extends_the_active_grant_from_now	ported	tests/unit/cluster_lease_values.st	a renew extends the active grant; a duplicate does not
+test_cluster_lease.py::test_a_plain_duplicate_never_extends_the_grant	ported	tests/unit/cluster_lease_values.st	a renew extends the active grant; a duplicate does not
+test_cluster_lease.py::test_a_renewal_of_an_expired_or_released_term_is_never_granted	ported	tests/unit/cluster_lease_values.st	a renewal of an expired or released term is never granted
+test_cluster_lease.py::test_a_renewal_of_another_incarnation_is_not_an_extension	ported	tests/unit/cluster_lease_values.st	a renewal of another incarnation is not an extension
+test_cluster_lease.py::test_a_refused_higher_request_does_not_block_the_renewal	ported	tests/unit/sim_grants.st	a refused higher request does not end the owner''s renewals
+test_cluster_permit_backoff.py::test_cancels_do_not_end_the_back_off_of_a_refused_permit_request	ported	tests/unit/sim_leases.st	a cancel does not end the back-off of a refused request
+test_cluster_permit_backoff.py::test_a_winners_release_ends_the_back_off_at_once	ported	tests/unit/cluster_proposer_rules.st	a cancel ends only the busy extension; a held release ends the back-off
+test_cluster_permit_deferral.py::test_a_deferred_request_is_served_by_the_busy_owner	ported	tests/unit/sim_permits.st	first come first served, own threads included
+test_cluster_permit_deferral.py::test_a_refusal_of_an_older_terms_request_keeps_the_owner_learnt_since	ported	tests/unit/cluster_owner_rules.st	a request for a term no longer served is refused ending, another term not_owner, under the highest term
+test_cluster_permit_deferral.py::test_a_silent_owner_is_forgotten_only_for_the_term_asked_under	ported	tests/unit/sim_permits.st	minority side times out; owners are forgotten only for the term asked under
+test_cluster_permit_incarnations.py::test_a_restarted_holder_drops_a_permit_of_its_previous_incarnation	ported	tests/unit/sim_permits.st	a restarted holder''s done never retires a permission it did not hold
+test_cluster_permit_incarnations.py::test_an_owner_counts_a_done_only_from_the_incarnation_it_issued_to	ported	tests/unit/sim_permits.st	a restarted holder''s done never retires a permission it did not hold
+test_cluster_permit_incarnations.py::test_a_lost_permit_is_resent_on_a_retried_request	ported	tests/unit/cluster_owner_rules.st	an unanswered permit request is sent again every requestTimeout, with the same rid
+test_cluster_permit_incarnations.py::test_a_faulty_owner_issuing_one_base_twice_cannot_lose_a_commit	ported	tests/unit/sim_permits.st	a faulty owner issuing one base twice
+test_cluster_permit_incarnations.py::test_an_owner_whose_lease_expires_with_a_permission_outstanding_releases_as_uncertain	ported	tests/unit/sim_permits.st	a dead holder''s late done
+test_cluster_permit_incarnations.py::test_a_permit_refusal_to_another_incarnation_is_dropped	ported	tests/unit/cluster_owner_rules.st	a duplicate permit and a refusal of another incarnation are dropped
+test_cluster_permit_incarnations.py::test_a_permit_arriving_after_its_request_gave_up_is_handed_back_at_once	ported	tests/unit/cluster_owner_rules.st	a permit nobody waits for is handed back at once with done none
+test_cluster_persistence.py::test_commits_are_persisted_asynchronously_and_sync_waits_for_them	deferred	25	asynchronous persistence and sync waiting are the persistence task
+test_cluster_persistence.py::test_an_object_store_outage_never_stops_commits_and_catch_up_converges	n/a	tiered	an object store outage and catch up concern tiered storage only
+test_cluster_persistence.py::test_a_fresh_peer_joining_during_an_outage_recovers_from_its_peers	n/a	tiered	recovery of a fresh peer from peers uses tiered storage transfer
+test_cluster_persistence.py::test_a_restarted_cluster_on_empty_disks_recovers_from_the_object_store	deferred	25	a restarted cluster recovering from the persisted root is persistence
+test_cluster_persistence.py::test_a_node_restart_loses_nothing	deferred	28	a node restart losing nothing is the fault-injection soak task
+test_cluster_persistence.py::test_the_whole_cluster_restarting_on_its_disks_loses_nothing_unpersisted	deferred	24	the whole cluster restarting on its disks is an end-to-end test
+test_cluster_persistence.py::test_losing_a_minority_loses_nothing	deferred	28	losing a minority of nodes is the fault-injection soak task
+test_cluster_persistence.py::test_losing_a_majority_before_persistence_loses_only_unpersisted_commits	deferred	25	losing a majority before persistence is bounded by the persisted root
+test_cluster_persistence.py::test_losing_a_majority_with_the_survivor_outside_the_quorum_rolls_back_to_the_persisted_state	deferred	25	rolling back to the persisted state after majority loss is persistence
+test_cluster_persistence.py::test_steady_state_commits_write_nothing_in_the_object_store_under_the_lease	n/a	tiered	steady state writes to the object store concern tiered storage only
+test_cluster_persistence.py::test_concurrent_steady_state_bounds_misses_after_warming	n/a	tiered	warming bounds misses of tiered storage caches only
+test_cluster_persistence.py::test_the_backlog_limit_refuses_commits_until_the_store_drains_it	n/a	tiered	the store backlog limit is a tiered storage mechanism
+test_cluster_persistence.py::test_a_fresh_peer_joining_after_persistence_reads_from_the_object_store	n/a	tiered	a fresh peer reading the object store is tiered storage transfer
+test_cluster_persistence.py::test_no_thread_outlives_the_cluster	deferred	20	no thread outliving the cluster is the shell's lifecycle check
+test_cluster_pipeline_holder.py::test_h2_a_permit_on_a_proposal_is_never_certain_and_teaches_nothing_committed	ported	tests/unit/cluster_owner_rules.st	a held permission is certain only with a base and no after (H2)
+test_cluster_pipeline_holder.py::test_h2_a_proposal_base_is_never_re_proposed	n/a	DEPTH = 1	DEPTH 0 never sends a proposal; this holder pipelining rule needs DEPTH = 1
+test_cluster_pipeline_holder.py::test_h5_the_gate_opens_on_committed_knowledge_of_its_base	n/a	DEPTH = 1	DEPTH 0 never sends a proposal; this holder pipelining rule needs DEPTH = 1
+test_cluster_pipeline_holder.py::test_h5_a_committed_root_read_from_storage_does_not_open_the_gate	n/a	DEPTH = 1	DEPTH 0 never sends a proposal; this holder pipelining rule needs DEPTH = 1
+test_cluster_pipeline_holder.py::test_h5_the_fallback_query_goes_to_the_proposals_holder_and_the_voters	n/a	DEPTH = 1	DEPTH 0 never sends a proposal; this holder pipelining rule needs DEPTH = 1
+test_cluster_pipeline_holder.py::test_h5_an_answer_with_another_committed_root_does_not_open_the_gate	n/a	DEPTH = 1	DEPTH 0 never sends a proposal; this holder pipelining rule needs DEPTH = 1
+test_cluster_pipeline_holder.py::test_h5_the_gate_closes_and_stays_closed	n/a	DEPTH = 1	DEPTH 0 never sends a proposal; this holder pipelining rule needs DEPTH = 1
+test_cluster_pipeline_holder.py::test_m4_the_gate_closes_early_only_on_its_predecessors_failed_done	n/a	DEPTH = 1	DEPTH 0 never sends a proposal; this holder pipelining rule needs DEPTH = 1
+test_cluster_pipeline_holder.py::test_m4_the_fallback_query_is_asked_again_every_request_timeout	n/a	DEPTH = 1	DEPTH 0 never sends a proposal; this holder pipelining rule needs DEPTH = 1
+test_cluster_pipeline_owner.py::test_o1_the_next_permit_waits_for_the_newest_entrys_proposal	n/a	DEPTH = 1	this owner pipelining rule needs two entries; DEPTH 0 issues one permission at a time
+test_cluster_pipeline_owner.py::test_o1_depth_one_issues_no_third_permit_before_the_oldest_is_done	n/a	DEPTH = 1	this owner pipelining rule needs two entries; DEPTH 0 issues one permission at a time
+test_cluster_pipeline_owner.py::test_o2_a_proposal_is_issued_on_once	n/a	DEPTH = 1	this owner pipelining rule needs two entries; DEPTH 0 issues one permission at a time
+test_cluster_pipeline_owner.py::test_o3_a_successors_commit_retires_its_predecessor_and_moves_the_base	n/a	DEPTH = 1	this owner pipelining rule needs two entries; DEPTH 0 issues one permission at a time
+test_cluster_pipeline_owner.py::test_o3_a_proposing_entry_that_commits_another_root_abandons	n/a	DEPTH = 1	this owner pipelining rule needs two entries; DEPTH 0 issues one permission at a time
+test_cluster_pipeline_owner.py::test_o4_precedence_abandons	n/a	DEPTH = 1	this owner pipelining rule needs two entries; DEPTH 0 issues one permission at a time
+test_cluster_pipeline_owner.py::test_o4_a_proposal_from_an_unknown_sender_or_incarnation_is_ignored	n/a	DEPTH = 1	this owner pipelining rule needs two entries; DEPTH 0 issues one permission at a time
+test_cluster_pipeline_owner.py::test_o5_a_lone_none_restores_the_committed_base	ported	tests/unit/cluster_owner_rules.st	a lone none restores the committed base; a done of another incarnation abandons
+test_cluster_pipeline_owner.py::test_o5_a_lone_none_after_a_proposal_base_restores_the_predecessors_committed_root	n/a	DEPTH = 1	a proposal base exists only at DEPTH 1; DEPTH 0 never issues one
+test_cluster_pipeline_owner.py::test_o5_every_other_none_abandons	n/a	DEPTH = 1	this owner pipelining rule needs two entries; DEPTH 0 issues one permission at a time
+test_cluster_pipeline_owner.py::test_o6_unknown_and_foreign_incarnation_done_abandon	ported	tests/unit/cluster_owner_rules.st	a lone none restores the committed base; a done of another incarnation abandons
+test_cluster_pipeline_owner.py::test_o6_each_entry_has_its_deadline_and_a_lease_end_with_two_entries_abandons	n/a	DEPTH = 1	this owner pipelining rule needs two entries; DEPTH 0 issues one permission at a time
+test_cluster_pipeline_owner.py::test_o7_a_retried_request_gets_its_entrys_permit_again	ported	tests/unit/cluster_owner_rules.st	a retried request gets the same permit again, never a second
+test_cluster_pipeline_owner.py::test_owner_schedules_never_issue_one_base_twice_outside_o5	n/a	DEPTH = 1	the Hypothesis schedules of proposals and two entries need DEPTH = 1
+test_cluster_protocol.py::test_every_message_carries_the_protocol_version_and_sender	ported	tests/conformance/messages.st	invalid message-*
+test_cluster_protocol.py::test_message_roundtrip_through_a_frame	ported	tests/conformance/messages.st	one frame of each of the 22 types
+test_cluster_protocol.py::test_copies_must_be_a_list_of_member_ids	ported	tests/unit/cluster_messages.st	copies must be an Array of member ids
+test_cluster_protocol.py::test_ranges_must_be_segment_start_end_triples	ported	tests/unit/cluster_messages.st	a range with start > end is refused
+test_cluster_protocol.py::test_permit_after_names_a_positive_seq_and_a_member	ported	tests/unit/cluster_messages.st	a permit after is nil or a positive seq and a member, and required
+test_cluster_protocol.py::test_replicate_no_longer_carries_pred_committed	ported	tests/unit/cluster_messages.st	records and segments are validated; replicate has no pred_committed
+test_cluster_protocol.py::test_release_fairness_hints_are_typed	ported	tests/unit/cluster_messages.st	the release fairness hints are typed
+test_cluster_protocol.py::test_make_message_rejects_unknown_types_and_missing_fields	ported	tests/unit/cluster_messages.st	building a message without one of its fields is refused
+test_cluster_protocol.py::test_decode_rejects_another_protocol_version	ported	tests/unit/cluster_messages.st	another protocol version is refused
+test_cluster_protocol.py::test_decode_rejects_garbage_and_non_maps	ported	tests/unit/cluster_messages.st	garbage bytes and a map that is not one are refused
+test_cluster_protocol.py::test_frames_split_across_chunks_and_coalesced_in_one_chunk	deferred	19	reassembly of split and coalesced frames is the TCP transport's read loop
+test_cluster_protocol.py::test_an_oversized_frame_is_rejected_before_it_is_buffered	ported	tests/unit/cluster_frames.st	a length over 64 MiB is refused from the length bytes
+test_cluster_protocol.py::test_root_encoding_distinguishes_unknown_empty_and_a_record	ported	tests/unit/cluster_messages.st	[0, nil, nil, 9] is the empty space of label 9
+test_cluster_protocol.py::test_roots_carry_their_label_term	ported	tests/unit/cluster_messages.st	the 3-item root reads with label 0
+test_cluster_protocol.py::test_replicate_records_are_validated	ported	tests/unit/cluster_messages.st	records and segments are validated; replicate has no pred_committed
+test_cluster_protocol.py::test_decode_root_rejects_malformed_values	ported	tests/unit/cluster_messages.st	a root of a 15-byte segment is refused
+test_cluster_recovery_base.py::test_c1_a_recovery_ended_at_a_majority_never_drops_the_phase_1_root	ported	tests/unit/sim_base_choice.st	C1: R'' is acknowledged and never dropped
+test_cluster_recovery_base.py::test_c1_an_uncertain_permission_base_never_orders_below_its_issued_root	ported	tests/unit/cluster_base_rules.st	the phase-1 floor raises the base above the recovery result
+test_cluster_recovery_base.py::test_c1_a_recovery_root_above_the_phase_1_root_is_still_adopted	ported	tests/unit/cluster_base_rules.st	a recovery result above the floor root is the base
+test_cluster_recovery_base.py::test_m6_a_recovery_with_every_waits_for_the_holder_that_knows_the_commit	ported	tests/unit/sim_base_choice.st	M6: every waits for the holder that knows the commit
+test_cluster_recovery_base.py::test_i1_a_floor_base_whose_records_are_unreachable_abandons_the_term	ported	tests/unit/sim_base_choice.st	I1: an unreachable floor base abandons the term
+test_cluster_rejoin.py::test_x1_a_rejoined_acknowledger_reports_the_committed_root_it_lost	ported	tests/unit/sim_rejoin.st	two wiped acknowledgers of five, then a wiped proposer: no commit lost, no term owned twice
+test_cluster_rejoin.py::test_x1_guard_a_base_older_than_the_known_committed_root_is_refused	ported	tests/unit/cluster_base_rules.st	the hard guard: no persisted root, or one below the committed root: PBCorruptionError naming forceRejoin
+test_cluster_rejoin.py::test_x1_guard_a_holder_overtaken_by_a_later_term_acquires_again_instead_of_raising	ported	tests/unit/cluster_base_rules.st	a committed root of a later term supersedes the base
+test_cluster_rejoin.py::test_x2_an_unattached_coordinator_is_never_a_rejoin_witness	deferred	20	an unattached coordinator exists only once the shell attaches spaces
+test_cluster_rejoin.py::test_x2_a_node_whose_log_is_still_loading_neither_answers_nor_grants	deferred	20	a log still loading is a state of the shell's asynchronous attach
+test_cluster_rejoin.py::test_x3_majority_disk_loss_needs_force_rejoin	ported	tests/unit/sim_rejoin.st	majority loss: stuck until forceRejoin
+test_cluster_rejoin.py::test_x3_a_new_cluster_starts_even_when_members_finish_their_first_rejoin_at_different_times	ported	tests/unit/sim_rejoin.st	first start: new, no ballot, termsSeen 0, a commits
+test_cluster_rejoin.py::test_x4_a_protocol_violation_after_the_root_was_sent_is_not_an_unknown_outcome	deferred	20	the PBCorruptionError of the acceptor step must reach the waiter through the shell
+test_cluster_rejoin.py::test_x5_every_rejoin_thread_is_joined_by_stop	deferred	20	rejoin threads joined by stop are part of the shell lifecycle
+test_cluster_rejoin.py::test_x2_a_recovery_counts_only_witness_answers	ported	tests/unit/cluster_base_rules.st	non-witnesses never count
+test_cluster_rejoin.py::test_probe_inflight_a_granter_wiped_during_a_lease	ported	tests/unit/sim_rejoin.st	L14: a rejoined node sends nothing below its ballot
+test_cluster_rejoin.py::test_probe_inflight_a_holder_wiped_during_its_lease	ported	tests/unit/sim_rejoin.st	R78a: no commit lost at wiped rates 1.3, 2, 3, holder running or stalled
+test_cluster_rejoin_fresh.py::test_c1_a_rejoin_with_the_default_grace_ignores_answers_gathered_before_the_safe_grace_network_faults	ported	tests/unit/sim_rejoin.st	R78a: no commit lost at wiped rates 1.3, 2, 3, holder running or stalled
+test_cluster_rejoin_fresh.py::test_c1_a_rejoin_with_the_default_grace_ignores_answers_gathered_before_the_safe_grace_paused_holder	ported	tests/unit/sim_rejoin.st	R78a: no commit lost at wiped rates 1.3, 2, 3, holder running or stalled
+test_cluster_rejoin_fresh.py::test_c1_a_rootless_rejoin_does_not_complete_on_a_stale_snapshot	ported	tests/unit/cluster_rejoin_rules.st	the decision: new, rootless, witnesses, forced, or none
+test_cluster_rejoin_fresh.py::test_c1_plain_answers_delivered_late_never_complete_a_rejoin	ported	tests/unit/cluster_rejoin_rules.st	an ok answer that does not echo the ballot (0 or another ballot) counts as unknown
+test_cluster_rejoin_fresh.py::test_a_recovery_round_does_not_clear_a_suspicion_that_arose_after_it_was_sent	ported	tests/unit/cluster_base_rules.st	the suspicion held at the send is cleared on both sides; a higher one is kept
+test_cluster_rejoin_fresh.py::test_c2_a_reattach_over_an_empty_disk_rejoins_by_ballot	deferred	20	reattaching a space over an empty disk is a shell attach operation
+test_cluster_rejoin_fresh.py::test_c2_audit_a_reattached_log_replaces_the_acceptor_state_held_in_memory	ported	tests/unit/cluster_rejoin_rules.st	an adoption for the detached log changes nothing on the new log
+test_cluster_rejoin_fresh.py::test_c2_audit_a_forced_rejoin_does_not_outlive_the_log_it_was_forced_for	ported	tests/unit/cluster_rejoin_rules.st	a forced rejoin is dropped at detach and by a report over another log
+test_cluster_rejoin_fresh.py::test_r7_a_rejoin_is_safe_whatever_the_rate_of_the_wiped_nodes_timer	ported	tests/unit/sim_rejoin.st	R78b boundary, holder running: PlantRejoinByWaiting safe at 5, loses a at 6 (S4); the product safe at 8
+test_cluster_rejoin_records.py::test_y1_sequential_single_disk_losses_with_the_store_down_lose_nothing	n/a	tiered	the store-down record copies of tiered storage do not exist in the port
+test_cluster_rejoin_records.py::test_y1_a_rejoin_copies_the_records_of_the_unacknowledged_root_it_adopts	n/a	tiered	record copies of an adopted root ship tiered storage segments
+test_cluster_rejoin_records.py::test_y1_a_rejoin_whose_records_are_unobtainable_stays_unavailable_and_says_why	ported	tests/unit/cluster_rejoin_rules.st	an unreadable adopted root blocks the rejoin, which retries
+test_cluster_rejoin_records.py::test_y1_a_recommitted_base_carries_its_records	n/a	tiered	a recommitted base carrying its records is a tiered storage shipment
+test_cluster_rejoin_records.py::test_y1_any_acknowledger_of_a_recommitted_base_can_persist_it	n/a	tiered	persisting a recommitted base reads tiered storage records
+test_cluster_rejoin_records.py::test_a_restart_on_a_log_needs_a_grace_of_one_lease_plus_the_drift_margin	deferred	20	refusing an unsafe startupGrace over a non-empty log is the shell's attach check
+test_cluster_rejoin_records.py::test_a_wiped_node_rejoins_by_a_ballot_whatever_its_startup_grace	ported	tests/unit/sim_rejoin.st	every clock stopped: the ballot rejoin completes, a waiting one never does (L13)
+test_cluster_rejoin_records.py::test_i1_a_wiped_granter_ends_the_lease_it_granted_by_its_rejoin_ballot	ported	tests/unit/sim_rejoin.st	R78a: no commit lost at wiped rates 1.3, 2, 3, holder running or stalled
+test_cluster_rejoin_records.py::test_a_late_first_start_member_after_a_term_was_requested_completes_by_ballot	ported	tests/unit/sim_rejoin.st	late first start: rootless, by ballot
+test_cluster_rejoin_records.py::test_i1_a_genuine_first_start_with_a_grace_of_zero_does_not_wait	ported	tests/unit/sim_rejoin.st	first start: new, no ballot, termsSeen 0, a commits
+test_cluster_rejoin_records.py::test_a_late_first_start_member_cut_off_by_a_partition_rejoins_once_it_heals	deferred	20	a partition during a real background rejoin needs the shell's threads and clocks
+test_cluster_rejoin_records.py::test_a_majority_counted_after_the_lease_ended_is_reported_as_such	ported	tests/unit/cluster_acceptance_rules.st	a majority observed past the permission
+test_cluster_rejoin_records.py::test_too_few_acknowledgements_are_still_reported_as_too_few	ported	tests/unit/cluster_acceptance_rules.st	more refusals than a majority allows end it unknown at once
+test_cluster_rejoin_records.py::test_y3_a_forced_rejoin_does_not_inherit_a_committed_root_above_what_it_adopted	ported	tests/unit/cluster_rejoin_rules.st	forced: one loaded answer after a plain round, no ballot, a committed root above the adopted one dropped
+test_cluster_rejoin_records.py::test_y3_the_guard_names_its_remedy_and_force_rejoin_on_the_survivor_applies_it	ported	tests/unit/sim_rejoin.st	majority loss: stuck until forceRejoin, the guard names forceRejoin, forceRejoin on the survivor
+test_cluster_rejoin_records.py::test_y3_a_persisted_root_the_witnesses_lost_is_refounded_from_not_refused	ported	tests/unit/cluster_base_rules.st	the hard guard: a persisted root at or above the committed one is a refound from it
+test_cluster_rejoin_records.py::test_committed_knowledge_force_rejoin_drops_is_not_reloaded_by_a_restart	ported	tests/unit/cluster_rejoin_rules.st	forceRejoin on a survivor forgets a committed root above its accepted root and asks to confirm
+test_cluster_rejoin_records.py::test_committed_knowledge_from_a_release_is_logged_accepted_and_kept_by_force_rejoin	ported	tests/unit/cluster_acceptance_rules.st	learning committed: accepted knowledge or not
+test_cluster_renewal.py::test_a_refused_higher_request_does_not_end_the_owners_term	deferred	23	real commits through a tiered cluster renewing under load need transactions
+test_cluster_renewal.py::test_renewals_after_a_refused_higher_request_keep_the_term_deterministically	ported	tests/unit/sim_grants.st	a refused higher request does not end the owner''s renewals
+test_cluster_renewal.py::test_a_term_ends_by_idle_or_by_expiry_only_while_its_renewals_succeed	ported	tests/unit/cluster_proposer_rules.st	an owner with demand renews at half the belief left; a won renewal extends the lease
+test_cluster_root_certainty.py::test_a_wiped_acknowledger_granting_another_holder_reports_the_committed_root	ported	tests/unit/sim_rejoin.st	R78a: no commit lost at wiped rates 1.3, 2, 3, holder running or stalled
+test_cluster_root_certainty.py::test_a_wiped_acknowledger_requesting_the_lease_builds_on_the_committed_root	ported	tests/unit/sim_rejoin.st	two wiped acknowledgers of five, then a wiped proposer: no commit lost, no term owned twice
+test_cluster_root_certainty.py::test_two_wiped_acknowledgers_of_five_report_the_committed_root	ported	tests/unit/sim_rejoin.st	two wiped acknowledgers of five, then a wiped proposer: no commit lost, no term owned twice
+test_cluster_send_reserve.py::test_a_holder_with_less_than_the_reserve_left_sends_nothing_and_gets_a_retryable_conflict	ported	tests/unit/cluster_round_rules.st	R121: under sendReserve left, nothing replicated, counted, CC18 text, retryable, #none
+test_cluster_send_reserve.py::test_a_holder_with_the_reserve_left_replicates_as_before	ported	tests/unit/cluster_acceptance_rules.st	nothing is sent past the permission (a reserve of 0 too) or under the reserve; else the replicate
+test_cluster_send_reserve.py::test_the_reserve_is_configurable_and_must_leave_room_in_the_belief	ported	tests/unit/cluster_config.st	sendReserve 200 ms is refused
+test_cluster_send_reserve.py::test_a_permission_issued_at_the_d4_threshold_is_usable_whatever_the_request_timeout	ported	tests/unit/cluster_config.st	other options derive their defaults from the lease
+test_cluster_send_reserve.py::test_a_reserve_refusal_after_the_gate_leaves_no_suspicion_and_no_replication_failure	n/a	DEPTH = 1	the H5 gate before which a reserve refusal is checked exists only at DEPTH = 1
+test_cluster_send_reserve.py::test_a_gated_data_stage_that_stored_nothing_leaves_no_suspicion_and_no_replication_failure	n/a	tiered	a gated data stage stores tiered storage records the port never ships
+test_cluster_terms.py::test_a_restarted_peer_never_grants_a_term_twice_and_the_committed_root_survives	ported	tests/unit/sim_grants.st	restart restores the promise from the log, never below it (L17)
+test_cluster_terms.py::test_equal_label_and_epoch_with_different_roots_is_a_protocol_violation	ported	tests/unit/cluster_root_order.st	two roots of equal (label, epoch) are a protocol violation
+test_cluster_terms.py::test_ballots_are_proposer_qualified_so_two_proposers_never_share_a_term	ported	tests/unit/cluster_members.st	two ranks never produce the same ballot
+test_cluster_terms.py::test_a_request_for_another_proposers_ballot_is_refused	ported	tests/unit/cluster_lease_values.st	term_taken after the expiry, and bad_ballot
+test_cluster_terms.py::test_a_wiped_granter_never_lets_two_roots_share_a_label	ported	tests/unit/sim_rejoin.st	two wiped acknowledgers of five, then a wiped proposer: no commit lost, no term owned twice
+test_cluster_terms.py::test_a_wiped_proposer_never_wins_its_own_ballot_twice	ported	tests/unit/sim_rejoin.st	two wiped acknowledgers of five, then a wiped proposer: no commit lost, no term owned twice
+test_cluster_tier_failures.py::test_a_failed_acceptance_write_is_refused_and_fails_the_tier	deferred	20	a failed acceptance write fails the tier through the shell's log writer
+test_cluster_tier_failures.py::test_a_failed_promise_write_withholds_the_grant_and_fails_the_tier	ported	tests/unit/cluster_acceptor_rules.st	a grant whose promise append fails is never replied nor kept
+test_cluster_tier_failures.py::test_a_failed_committed_root_write_fails_the_tier	ported	tests/unit/cluster_acceptor_rules.st	an append failure fails the tier, the first reason kept
+test_cluster_tier_failures.py::test_a1_a_detach_waits_for_an_acceptance_in_flight_on_a_tiered_storage	n/a	tiered	a detach waiting on tiered storage acceptance has no protoBaseST counterpart
+test_cluster_tier_failures.py::test_secure_chain_tells_a_detached_tier_from_a_failed_one	n/a	tiered	secure_chain belongs to the tiered storage detach protocol
+test_cluster_tier_failures.py::test_r2_an_acceptor_reopened_after_a_torn_append_keeps_what_it_acknowledges_and_promises	ported	tests/unit/cluster_framed_log.st	openAppend torn payloads
+test_cluster_transactions.py::test_space_without_coordinator_has_none	deferred	21	a space opened without a coordinator is the space integration of cluster mode
+test_cluster_transactions.py::test_commits_under_a_single_node_cluster	deferred	23	commits under a single node cluster run through the transaction path
+test_cluster_transactions.py::test_records_reach_the_storage_before_the_replication_and_no_root_is_published_under_it	deferred	23	records reaching storage before replication are ordered by the transaction path
+test_cluster_transactions.py::test_an_object_store_needs_the_tiered_storage_in_cluster_mode	n/a	tiered	the object store tiered storage requirement has no protoBaseST counterpart
+test_cluster_transactions.py::test_transactions_read_the_committed_root_not_the_storage	deferred	24	reads of the committed root across real spaces are end-to-end cluster tests
+test_cluster_transactions.py::test_the_commit_point_is_the_majority_acknowledgement	ported	tests/unit/cluster_acceptance_rules.st	decided only after its own acceptance; a majority commits
+test_cluster_transactions.py::test_a_holder_paused_past_its_lease_never_replicates	ported	tests/unit/cluster_acceptance_rules.st	nothing is sent past the permission
+test_cluster_transactions.py::test_a_late_replication_is_refused_by_peers_that_granted_a_newer_term	ported	tests/unit/sim_acceptance.st	the old term''s roots are refused after a promise
+test_cluster_transactions.py::test_storage_root_reads_never_make_reads_go_backwards	deferred	24	storage root reads never going backwards needs real spaces and storage
+test_cluster_transactions.py::test_sync_waits_for_the_persisted_epoch_and_exposes_both_epochs	deferred	25	sync waiting for the persisted epoch is part of persistence
+test_cluster_transactions.py::test_sync_promises_local_persistence_and_a_commit_on_the_reader_sees_every_acknowledged_commit	deferred	24	a sync barrier over a reader node is an end-to-end cluster test
+test_cluster_transactions.py::test_a_space_opened_while_no_majority_has_a_space_gets_no_permission_until_one_does	deferred	24	a space waiting for a majority of spaces needs real nodes opening spaces
+test_cluster_transactions.py::test_a_confirmation_in_progress_succeeds_once_a_majority_opens_its_spaces	deferred	24	a confirmation completing once spaces open needs real nodes
+test_cluster_transactions.py::test_a_setup_new_database_whose_recovery_query_goes_unanswered_conflicts_and_is_retried	deferred	24	setup of a new database retried after a conflict is end-to-end
+test_cluster_transactions.py::test_a_recovery_round_ends_once_a_majority_of_witnesses_answered	ported	tests/unit/cluster_base_rules.st	a recovery ends at a majority of witnesses, this node counted, before its timer
+test_cluster_transport.py::test_in_process_delivers_in_order_without_faults	deferred	19	the in-process transport with faults is the transport task's harness
+test_cluster_transport.py::test_in_process_drop_and_duplicate	deferred	19	the in-process transport with faults is the transport task's harness
+test_cluster_transport.py::test_in_process_delays_reorder_messages	deferred	19	the in-process transport with faults is the transport task's harness
+test_cluster_transport.py::test_in_process_partition_and_heal	deferred	19	the in-process transport with faults is the transport task's harness
+test_cluster_transport.py::test_in_process_crashed_node_neither_sends_nor_receives	deferred	19	the in-process transport with faults is the transport task's harness
+test_cluster_transport.py::test_in_process_messages_go_through_the_wire_encoding	deferred	19	the in-process transport with faults is the transport task's harness
+test_cluster_transport.py::test_tcp_binds_port_zero_and_exchanges_frames	deferred	19	TCP binding of port zero and frame exchange is the transport task
+test_cluster_transport.py::test_tcp_malformed_frame_drops_the_connection_not_the_listener	deferred	19	dropping a connection on a malformed frame is the TCP transport's job
+test_cluster_transport.py::test_tcp_send_to_a_peer_not_yet_listening_is_dropped_then_reconnects	deferred	19	reconnecting to a peer not yet listening is the TCP transport's job
+test_cluster_transport.py::test_tcp_send_after_stop_is_a_silent_drop	deferred	19	a silent drop after stop is the TCP transport's lifecycle
+test_cluster_transport.py::test_tcp_best_effort_warm_frames_never_crowd_out_control_messages	n/a	tiered	warm frames carry tiered storage records the port never sends
+test_cluster_transport.py::test_a_protocol_error_raised_by_a_handler_is_recorded_for_the_test	n/a	Python-only API	the fixture recording handler protocol errors exists only for pytest
+test_cluster_voters.py::test_the_default_voter_set_is_the_first_three_members_in_id_order	ported	tests/unit/cluster_members.st	the default voters of 5 members are the first three
+test_cluster_voters.py::test_the_voter_set_is_configurable_and_validated	ported	tests/unit/cluster_members.st	an explicit voter set of 4 is refused
+test_cluster_voters.py::test_learners_never_grant_and_two_voters_suffice	ported	tests/unit/sim_grants.st	learner never grants
+test_cluster_voters.py::test_learners_are_no_quorum_when_a_majority_of_voters_is_down	ported	tests/unit/cluster_proposer_rules.st	a reply of another incarnation is counted and dropped; a learner''s reply is not a vote
+test_cluster_voters.py::test_a_learner_may_own_a_term	ported	tests/unit/sim_acceptance.st	learners never count
+test_cluster_voters.py::test_a_wiped_learner_needs_no_rejoin_and_a_recovery_counts_only_voters	ported	tests/unit/cluster_acceptor_rules.st	acceptStart marks a lone voter''s or learner''s empty log
+test_cluster_voters.py::test_a_member_with_another_voter_set_is_ignored	ported	tests/unit/sim_acceptance.st	a member of another voter set never helps a quorum
+test_cluster_voters.py::test_a_learners_refusal_never_decides_a_replication	ported	tests/unit/cluster_acceptance_rules.st	a learner''s refusal never decides a replication (D54)

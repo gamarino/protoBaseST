@@ -1,4 +1,4 @@
-"EXPECT: ok 25"
+"EXPECT: ok 26"
 "The acceptance rules (cluster/acceptor.st) and the holder's replication and commit point
  (cluster/holder.st) called directly, one guard per check (proto_db coordinator.py _may_accept,
  _apply_replicate, _refuse_queued, _on_done, _on_release, _observe_accepted, _observe_committed,
@@ -325,6 +325,19 @@ c that: 'a learner''s ack never counts toward the commit point (D54), but a matc
     (core _hintsIn: (core dispatch: (msg value: 'ack' value: 'n4' value: { 'term' -> T. 'rid' -> (rep value: s2) rid. 'inc' -> 5. 'ok' -> true.
       'root' -> (PBClusterMessage rootValue: (rec value: T + 50 value: 40)). 'stored' -> false }) in: s2 now: t0 + 2000) state) hint }
   equals: { #(). #(#committed). T + 50 }.
+
+"Task 18 (proto_db test_a_learners_refusal_never_decides_a_replication): a learner's refusal
+ never counts toward the refusals that end a replication either: with n4's refusal and n1's,
+ only one voter refused, so the replication runs on and commits at n0 and n2."
+c that: 'a learner''s refusal never decides a replication (D54)'
+  is: { [ | st |
+      st := core dispatch: (ackOf value: 'n4' value: false value: T value: 5 value: (rep value: s2) rid) in: s2 now: t0 + 2000.
+      st := core dispatch: (ackOf value: 'n1' value: false value: T value: 5 value: (rep value: s2) rid) in: st state now: t0 + 2100.
+      { settled value: st. (rep value: st state) acks.
+        settled value: (core dispatch: (ackOf value: 'n2' value: true value: T value: 5 value: (rep value: st state) rid)
+          in: (core dispatch: (ackOf value: 'n0' value: true value: T value: 5 value: (rep value: st state) rid) in: st state now: t0 + 2200) state
+          now: t0 + 2300) } ] value }
+  equals: { { #(). #(). #(#committed) } }.
 
 "(22) The dispatcher's half of _learn_label."
 s2 := (nodeOf value: 'n0' value: three) with: { #suspectTerm -> T }.

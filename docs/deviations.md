@@ -467,6 +467,25 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   keeps the CC18 text (`proto_db` raises "lease expired") and, as `proto_db`, is not counted.
   *Cost:* none on the wire; a round under the group bound commits fewer entries per permission
   than its batch.
+- **One text for an unknown replication outcome (message text only).** `proto_db` says why a
+  replication ended unknown: "only 1 of the 2 acknowledgements needed arrived before the lease
+  ended", or that a majority was "counted only after the lease had ended", among others, and two
+  of its tests (`test_cluster_rejoin_records.py`, M2) match those words. protoBaseST raises the
+  same `PBOutcomeUnknownError`, in the same cases (`cluster_acceptance_rules.st`: a majority
+  observed past the permission; more refusals than a majority allows), with one text naming the
+  permission and saying that no majority of the voters acknowledged the root within it
+  (`_replicationFailed:outcome:now:effects:`, `cluster/holder.st`): the replication state does
+  not count the acknowledgements at the end. *Cost:* the error does not say how many
+  acknowledgements arrived.
+- **proto_db's cluster tests, ported or justified (Task 18).** `tests/unit/cluster_checklist.tsv`
+  gives each of the 261 test functions of `proto_db` v2.0.0rc3's `tests/unit/test_cluster_*.py`
+  a row: ported (the protoBaseST file and the family that checks it), deferred to the Phase C
+  task that builds what it needs (the threaded shell, the transport, the file-backed log,
+  transactions, persistence, the end-to-end and soak tests), or not applicable (tiered storage,
+  DEPTH = 1, or a Python-only API such as `FencingToken`, which the port does not have: the
+  fencing token is the term). `tests/unit/cluster_checklist.sh` checks the table against the
+  tag. Until those tasks land, a deferred row is a `proto_db` test without a protoBaseST
+  counterpart. *Cost:* none in the code; the deferred rows are open work.
 
 ## Errors and messages
 

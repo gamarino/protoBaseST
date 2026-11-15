@@ -264,6 +264,41 @@ RejoinFamilies class >> lateStart: aRules seed: n
   out at: 3 put: (#('n1' 'n2') collect: [:id | sim countOf: 'rejoin_ballots' at: id]).
   ^ out.
 
+"{ violation. outcomes of a, b, c. ballots of n1 and n2. n1's term for c above its term for b.
+ the ranks of the terms of b's and c's permissions }: proto_db test_cluster_root_certainty.py (two wiped
+ acknowledgers of five; a wiped acknowledger requesting the lease builds on the committed root)
+ and test_cluster_terms.py (a wiped granter never lets two roots share a label; a wiped proposer
+ never wins its own ballot twice). Five voters hold r1. n0 commits a; n1 and n2, two of its
+ acknowledgers, lose their disks and rejoin (one ballot each); once n0's ownership ended idle,
+ n1 acquires a term and commits b, so its base must be a (S4 at every step). n1 loses its disk again and rejoins; it commits c under a term
+ above the one it owned for b (S1 at every step: no term is owned twice)."
+RejoinFamilies class >> wiped: aRules seed: n
+  | sim out terms |
+  sim := self lagged: (BaseFamilies sim: aRules seed: n ids: BaseFamilies five knowing: BaseFamilies five options: BaseFamilies fiveVoters).
+  out := Array new: 5.
+  terms := OrderedCollection new.
+  out at: 1 put: (BaseFamilies violationOf: [
+    out at: 2 put: (OrderedCollection with: (BaseFamilies commit: 'a' at: 'n0' in: sim)).
+    #('n1' 'n2') do: [:id | sim crash: id keepDisk: false].
+    #('n1' 'n2') do: [:id | sim restart: id].
+    sim runUntil: [#('n1' 'n2') allSatisfy: [:id | self isRejoined: id in: sim]] steps: 2000000.
+    out at: 3 put: (#('n1' 'n2') collect: [:id | sim countOf: 'rejoin_ballots' at: id]).
+    "n0's ownership ends idle: n1 asks for the lease itself."
+    BaseFamilies run: sim until: sim now + (3 * (sim nodeAt: 'n0') config leaseDuration).
+    sim on: 'permit' at: 'n1' do: [:permission | terms add: permission term].
+    (out at: 2) add: (BaseFamilies commit: 'b' at: 'n1' in: sim).
+    sim crash: 'n1' keepDisk: false.
+    sim restart: 'n1'.
+    sim runUntil: [self isRejoined: 'n1' in: sim] steps: 2000000.
+    BaseFamilies run: sim until: sim now + (3 * (sim nodeAt: 'n0') config leaseDuration).
+    sim on: 'permit' at: 'n1' do: [:permission | terms add: permission term].
+    (out at: 2) add: (BaseFamilies commit: 'c' at: 'n1' in: sim).
+    sim converge: 2000000]).
+  out at: 2 put: (out at: 2) asArray.
+  out at: 4 put: (terms size = 2 and: [terms last > terms first]).
+  out at: 5 put: (terms collect: [:term | term \\ PBMembership maxMembers]) asArray.
+  ^ out.
+
 "--- 3. a rejoined node never replicates below its ballot (L14) ---"
 
 "{ violation. outcome of x. replicates n2 sent under a term below its rejoin ballot. n2's rejoin
