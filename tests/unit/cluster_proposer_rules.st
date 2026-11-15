@@ -1,4 +1,4 @@
-"EXPECT: ok 26"
+"EXPECT: ok 31"
 "The proposer's rules (cluster/proposer.st) called directly, one rule per check (proto_db
  coordinator.py permit, _become_owner, _open_attempt, _on_reply, _close_attempt, _back_off,
  release, _own_loop_body, _renew, the fairness hints).
@@ -30,7 +30,15 @@
  validUntil dropped) fails checks 16 and 17. (19) A waiter that arrives while the lease has
  lapsed during a renewal joins the queue of the renewed lease and is issued its permission
  (proto_db permit loops back to the owner). The seams that end the demand clear the queue and the
- pipeline of issued permissions (owner.st)."
+ pipeline of issued permissions (owner.st). (25-26) The acceptor's decision of this node's own
+ request signalling a PBDBError (PBOwnStepFailed) rejects only the oldest waiter, proto_db's
+ permit() caller driving the acquisition; the attempt is lost and the others back off; a failure
+ of that attempt's cancel rejects nobody; a late request failure changes nothing. (27-28) A
+ failure of the own cancel of the last lost attempt rejects the oldest waiter once (proto_db
+ _close_attempt raises it to the driving caller); a held release, a cancel of another term and
+ a repeat change nothing; a lone waiter's rejection ends the acquisition. (29) A failure of the
+ own renew of the current renewal ends the ownership without a release, abandoned and fenced
+ (proto_db _own_loop); a late one changes nothing."
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -42,7 +50,8 @@ PlantLateWin >> _inTime: anAttempt in: s now: t
   ^ true.
 
 | c core peers config three four vs marker logged view stateIn ready step eff sends msg granted reject
-  request s own att t0 pair sim owned renewing late lateRenewal plant stats lapsed rel want hintsAfter grantAfter |
+  request s own att t0 pair sim owned renewing late lateRenewal plant stats lapsed rel want hintsAfter grantAfter
+  renewMsg failed settled stat phase two req cancel lost lone other held |
 c := Check new.
 core := PBCoordinatorCore new.
 peers := [:someIds | (1 to: someIds size) asArray collect: [:i | PBPeer nodeId: (someIds at: i) host: '127.0.0.1' port: 7000 + i]].
@@ -162,6 +171,7 @@ s := s with: { #ownership -> (s ownership with: { #queue -> #(). #pipeline -> #(
 owned := s.
 pair := step value: (PBTimerFired token: s ownership token event: #owner) value: s value: t0 + 333334.
 renewing := pair state.
+renewMsg := (pair effects at: 1) event message.
 sim := step value: (granted value: 'n0' value: 1 value: pair state ownership renewal rid value: 5) value: pair state value: t0 + 340000.
 sim := step value: (granted value: 'n2' value: 1 value: pair state ownership renewal rid value: 5) value: sim state value: t0 + 341000.
 c that: 'an owner with demand renews at half the belief left; a won renewal extends the lease'
@@ -332,5 +342,59 @@ grantAfter := [:next :more | | v st |
 c that: 'the fairness hints never change a grant'
   is: { grantAfter value: 'n2' value: true. grantAfter value: 'zz' value: false. (grantAfter value: nil value: false) last }
   equals: { grantAfter value: nil value: false. grantAfter value: nil value: false. #('grant') }.
+
+"(25-29) Own step failures (PBOwnStepFailed), at the rules, with no timing."
+"Dispatches the failure of this node's own message m with a planted PBValidationError."
+failed := [:m :aState :t | step value: (PBOwnStepFailed message: m error: (PBValidationError new messageText: 'planted'; yourself))
+  value: aState value: t].
+settled := [:aStep | (aStep effects select: [:e | e isKindOf: PBSettle]) collect: [:e | { e waiter. e outcome messageText }]].
+phase := [:aState | aState proposer isNil ifTrue: [nil] ifFalse: [aState proposer phase]].
+stat := [:aStep | (aStep effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat]].
+"Two waiters of the attempt att opened: #w1 started it, #w2 joined it."
+two := (step value: (PBPermitWanted waiter: #w2) value: att state value: t0 + 1) state.
+req := (att effects at: 2) event message.
+pair := failed value: req value: two value: t0 + 2000.
+c that: 'an own request failure rejects only the oldest waiter; the attempt is lost and the others back off'
+  is: { two waiters. settled value: pair. pair state waiters. (phase value: pair state). stat value: pair.
+    (pair effects select: [:e | e isKindOf: PBSend]) collect: [:e | { e to. e message type. e message at: 'held' }] }
+  equals: { #(#w1 #w2). #(#(#w1 'planted')). #(#w2). #backoff. #('lost_attempts').
+    #(#('n0' 'release' false) #('n2' 'release' false)) }.
+cancel := (pair effects detect: [:e | e isKindOf: PBToAcceptor]) event message.
+other := failed value: (PBClusterMessage type: 'request' from: 'n1' fields: { 'term' -> 1. 'rid' -> 99. 'inc' -> 5. 'vs' -> vs })
+  value: two value: t0 + 2000.
+c that: 'the cancel of that attempt rejects nobody when it fails; a late request failure changes nothing'
+  is: { (failed value: cancel value: pair state value: t0 + 2001) effects. (failed value: cancel value: pair state value: t0 + 2001) state waiters.
+    other effects. other state waiters. (phase value: other state) }
+  equals: { #(). #(#w2). #(). #(#w1 #w2). #attempt }.
+"A lost attempt of the two waiters: rejects from a majority (n0, n2)."
+lost := step value: (reject value: 'n0' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: 0.5) value: two value: t0 + 4000.
+lost := step value: (reject value: 'n2' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: 0.5) value: lost state value: t0 + 4000.
+cancel := (lost effects detect: [:e | e isKindOf: PBToAcceptor]) event message.
+pair := failed value: cancel value: lost state value: t0 + 5000.
+c that: 'an own cancel failure of the last lost attempt rejects the oldest waiter once; the others keep backing off'
+  is: { stat value: lost. (phase value: lost state). { cancel at: 'term'. cancel at: 'held' }.
+    settled value: pair. eff value: pair. pair state waiters. (phase value: pair state). (pair state proposer notNil and: [pair state proposer backoffEnd = lost state proposer backoffEnd]).
+    (failed value: cancel value: pair state value: t0 + 5001) effects }
+  equals: { #('lost_attempts'). #backoff. #(1 false). #(#(#w1 'planted')). #(#PBSettle). #(#w2). #backoff. true. #() }.
+held := PBClusterMessage type: 'release' from: 'n1' fields: { 'term' -> 1. 'inc' -> 5. 'root' -> nil. 'committed' -> nil.
+  'certain' -> true. 'held' -> true. 'next' -> nil. 'more' -> false }.
+other := PBClusterMessage type: 'release' from: 'n1' fields: { 'term' -> 99. 'inc' -> 5. 'root' -> nil. 'committed' -> nil.
+  'certain' -> false. 'held' -> false. 'next' -> nil. 'more' -> true }.
+lone := step value: (reject value: 'n0' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: 0.5) value: att state value: t0 + 4000.
+lone := step value: (reject value: 'n2' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: 0.5) value: lone state value: t0 + 4000.
+lone := failed value: cancel value: lone state value: t0 + 5000.
+c that: 'a held release or a cancel of another term changes nothing; a lone waiter''s rejection ends the acquisition'
+  is: { (failed value: held value: lost state value: t0 + 5000) effects. (failed value: held value: lost state value: t0 + 5000) state waiters.
+    (failed value: other value: lost state value: t0 + 5000) effects. (failed value: other value: lost state value: t0 + 5000) state waiters.
+    settled value: lone. lone state waiters. lone state proposer }
+  equals: { #(). #(#w1 #w2). #(). #(#w1 #w2). #(#(#w1 'planted')). #(). nil }.
+pair := failed value: renewMsg value: renewing value: t0 + 335000.
+other := failed value: (PBClusterMessage type: 'renew' from: 'n1' fields: { 'term' -> 1. 'rid' -> ((renewMsg at: 'rid') + 99). 'inc' -> 5.
+  'vs' -> vs }) value: renewing value: t0 + 335000.
+c that: 'an own renew failure ends the ownership abandoned, with no release, and fences; a late one changes nothing'
+  is: { renewMsg type. renewing ownership renewal notNil. pair state ownership. (eff value: pair) includes: #PBFence. (eff value: pair) last.
+    (stat value: pair) includes: 'terms_abandoned'. (pair effects select: [:e | e isKindOf: PBSend]) collect: [:e | e message type].
+    other effects. other state ownership notNil and: [other state ownership renewal notNil] }
+  equals: { 'renew'. true. nil. true. #PBFence. true. #(). #(). true }.
 
 c report displayNl.
