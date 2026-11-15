@@ -258,12 +258,18 @@ AuditFamilies class >> commit: aToken at: anId time: aTime in: aSim
   (aSim isKindOf: RoundSim) ifFalse: [^ aSim commit: aToken at: anId time: aTime].
   ^ aSim run: aToken at: anId hot: aToken ~= 'z' builds: #(1000) retries: 10 time: aTime.
 
+"Whether anError is the acquire timeout (PBCoordinatorCore _timeOut:because:in:effects: when
+ acquireTimeout passes: a PBTimeoutError, 'could not obtain a write permission within')."
+AuditFamilies class >> isAcquireTimeout: anError
+  ^ (anError isKindOf: PBTimeoutError)
+    and: [(anError messageText ifNil: ['']) includesSubstring: 'could not obtain a write permission within'].
+
 "The probe of aRow, after the workload, before the faults end: a schedule under which the core
  reads the row's timer, and the count that shows it did; nil for a row with none. acquireTimeout:
  the last running member that owns no lease (an owner commits under its lease and never waits
  for a permit), alone in a partition, commits 'probe' and waits up to 6 s (virtual): 1 when the
  commit timed out (#failed: a PBTimeoutError, 3 s at 1/10), else 0 (still waiting at 30 s and
- more). gatherAttempts: the last member loses its disk and restarts while the second member is
+ more); only that timeout counts (isAcquireTimeout:), not any failed outcome. gatherAttempts: the last member loses its disk and restarts while the second member is
  alone in a partition, for 4 s: the largest gather attempt its rejoin reached (the gather asks
  the silent member again up to gatherAttempts attempts). retryHold: the holds of a kept
  permission that ran out (RoundSim holdsExpired). Answers { the count. the steps it ran }."
@@ -271,7 +277,10 @@ AuditFamilies class >> probe: aRow in: aSim
   | ids m k end most r steps |
   ids := aSim ids.
   m := ids last.
-  (aSim nodeAt: m) isUp ifFalse: [aSim restart: m].
+  "Only the rows with a probe restart the last member (if it is the workload's crashed member,
+   still down) before the faults end: the others restart it after the heal, as before."
+  (#('acquireTimeout' 'gatherAttempts') includes: aRow) ifTrue: [
+    (aSim nodeAt: m) isUp ifFalse: [aSim restart: m]].
   aRow = 'acquireTimeout' ifTrue: [
     m := ids reverse detect: [:id | | node |
         node := aSim nodeAt: id.
@@ -281,7 +290,7 @@ AuditFamilies class >> probe: aRow in: aSim
     aSim commit: 'probe' at: m.
     end := aSim now + 6000000.
     steps := self run: aSim until: [(aSim outcomeOf: 'probe') ~= #pending] steps: 30000 end: end.
-    ^ { (aSim outcomeOf: 'probe') = #failed ifTrue: [1] ifFalse: [0]. steps }].
+    ^ { (self isAcquireTimeout: (aSim failureOf: 'probe')) ifTrue: [1] ifFalse: [0]. steps }].
   aRow = 'gatherAttempts' ifTrue: [
     k := ids at: 2.
     aSim crash: m keepDisk: false.
@@ -449,29 +458,73 @@ AuditFamilies class >> notExercised
   ^ #(#('persist' 'Task 20' #('persistInterval' 'persistLag'))).
 
 "The floors of a part of aRow under aMode, per run: { runs that got the strict checks.
- commits acknowledged } (proto_db's min_acked: an empty run proves nothing). Measured on the
- 3240 runs (task-17-report.md, Fix round 1) and set at about three quarters of each row-mode's
- measured rate per part, so a change that stalls progress, or that sends the runs to checkSafe,
- fails the part. nil for a safety-only row-mode."
+ commits acknowledged } (proto_db's min_acked: an empty run proves nothing). nil for a
+ safety-only row-mode; a row-mode without a declared floor fails loudly."
 AuditFamilies class >> floorOf: aRow mode: aMode
   | key |
   key := aRow , ' ' , aMode.
   (self safetyOnly includes: key) ifTrue: [^ nil].
   self floors do: [:e | e first = key ifTrue: [^ e allButFirst]].
-  ^ self defaultFloor.
+  ^ Error signal: 'AuditFamilies: no floor declared for ' , key.
 
-"The floor of every row-mode not in floors: { strict per run. acknowledged per run }."
-AuditFamilies class >> defaultFloor
-  ^ { 3/4. 5 }.
-
-"Row-modes whose measured rates are below the default floor: { key. strict per run. acknowledged
- per run }. Measured (Fix round 1, the lowest part): driftMargin skewed 0.633 strict per run;
- leaseDuration tenfold 0.8 (on 30-run parts; its parts now hold 20, hence 1/2); permissionDeadline
- tenfold 0.833; renewal skewed 0.8; renewal tenfold 0.375 strict and 5.0 acknowledged per run.
- Every other row-mode measured at least 0.933 strict and 6.867 acknowledged per run."
+"{ row-mode. strict runs per run. commits acknowledged per run }, measured (task-17-report.md,
+ Fix rounds 1 and 2; the runs are deterministic per seed): a row-mode whose every measured run
+ got the strict checks requires every run strict (1); any other keeps the lowest part's measured
+ values, written as count/runs of that part (a part of r runs then needs at least
+ (value * r) ceiling, which every measured part meets)."
 AuditFamilies class >> floors
-  ^ { { 'driftMargin skewed'. 1/2. 5 }. { 'leaseDuration tenfold'. 1/2. 5 }.
-    { 'permissionDeadline tenfold'. 3/5. 5 }. { 'renewal skewed'. 3/5. 5 }. { 'renewal tenfold'. 1/4. 7/2 } }.
+  ^ {
+    { 'acquireTimeout skewed'. 1. 517/60 }.
+    { 'acquireTimeout tenfold'. 1. 517/60 }.
+    { 'acquireTimeout tenth'. 1. 450/60 }.
+    { 'backoff skewed'. 1. 459/60 }.
+    { 'backoff tenfold'. 59/60. 457/60 }.
+    { 'backoff tenth'. 28/30. 206/30 }.
+    { 'driftMargin skewed'. 19/30. 206/30 }.
+    { 'driftMargin tenth'. 28/30. 225/30 }.
+    { 'gatherAttempts skewed'. 1. 454/60 }.
+    { 'gatherAttempts tenfold'. 57/60. 451/60 }.
+    { 'gatherAttempts tenth'. 1. 453/60 }.
+    { 'idleEnd skewed'. 1. 456/60 }.
+    { 'idleEnd tenfold'. 1. 454/60 }.
+    { 'idleEnd tenth'. 1. 460/60 }.
+    { 'leaseDuration skewed'. 58/60. 449/60 }.
+    { 'leaseDuration tenfold'. 15/20. 138/20 }.
+    { 'leaseDuration tenth'. 1. 465/60 }.
+    { 'ownerIdleRelease skewed'. 1. 225/30 }.
+    { 'ownerIdleRelease tenfold'. 1. 454/60 }.
+    { 'ownerIdleRelease tenth'. 1. 468/60 }.
+    { 'permissionDeadline skewed'. 1. 454/60 }.
+    { 'permissionDeadline tenfold'. 25/30. 206/30 }.
+    { 'permissionDeadline tenth'. 1. 472/60 }.
+    { 'permitFloor skewed'. 1. 454/60 }.
+    { 'permitFloor tenth'. 1. 454/60 }.
+    { 'persist skewed'. 1. 454/60 }.
+    { 'persist tenfold'. 1. 454/60 }.
+    { 'persist tenth'. 1. 454/60 }.
+    { 'renewal skewed'. 16/20. 134/20 }.
+    { 'renewal tenfold'. 3/8. 40/8 }.
+    { 'renewal tenth'. 1. 459/60 }.
+    { 'requestTimeout skewed'. 1. 457/60 }.
+    { 'requestTimeout tenfold'. 29/30. 230/30 }.
+    { 'requestTimeout tenth'. 1. 467/60 }.
+    { 'retryHold skewed'. 59/60. 464/60 }.
+    { 'retryHold tenfold'. 58/60. 467/60 }.
+    { 'retryHold tenth'. 59/60. 475/60 }.
+    { 'sendReserve skewed'. 1. 462/60 }.
+    { 'sendReserve tenth'. 1. 468/60 }.
+    { 'startupGrace skewed'. 1. 453/60 }.
+    { 'startupGrace tenfold'. 1. 454/60 }.
+    { 'startupGrace tenth'. 1. 451/60 }.
+    { 'straggle skewed'. 59/60. 444/60 }.
+    { 'straggle tenfold'. 1. 456/60 }.
+    { 'straggle tenth'. 1. 460/60 }.
+    { 'turnSilence skewed'. 1. 457/60 }.
+    { 'turnSilence tenfold'. 59/60. 451/60 }.
+    { 'turnSilence tenth'. 1. 453/60 }.
+    { 'wakeSpread skewed'. 1. 450/60 }.
+    { 'wakeSpread tenfold'. 1. 458/60 }.
+    { 'wakeSpread tenth'. 1. 448/60 } }.
 
 "The bounds of the probe's count per run, { min. max } (nil: the row has no probe): the count
  shows the probe made the core read the timer, and that 1/10 and 10 times differ.

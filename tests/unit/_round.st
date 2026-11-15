@@ -8,6 +8,10 @@
                   (the reserve check of R121 dropped from mayReplicate:now:).
   PlantNoKeep     proto_db plant nokeep: a round whose conflicted commits will retry at once
                   ends its permission instead of keeping it for them (D-LIVE-2 lost).
+  PlantConflictedRootSent  a checker plant: an entry's first attempt reported conflicted
+                  while its root was sent (its retry applies it twice).
+  PlantEarlierRootTakesEffect  the same, the retry conflicting too: the commit ends none
+                  with its first attempt's root in the chain (H7).
   RoundSim        a PBSim whose nodes commit through the round state machine
                   (PBCoordinatorCore round:in:now:): one PBRoundState per incarnation, the
                   round's effects performed by this shell (PBAskPermit, PBAskBase, PBBuild,
@@ -48,6 +52,43 @@ RoundRules subclass: #PlantNoKeep.
 
 PlantNoKeep >> _keep: s hold: someMicros now: t effects: fx
   ^ self _endPermission: s now: t effects: fx.
+
+"A checker plant (sim_checker_plants.st, review N1): the first attempt of every entry is
+ reported conflicted although its built root stays the round's root and is sent (a group-commit
+ defect): the root takes effect, the caller retries (applied twice) or, with no retry left, gets
+ the conflict (H7)."
+RoundRules subclass: #PlantConflictedRootSent.
+
+PlantConflictedRootSent >> _entryBuilt: anEvent in: s now: t effects: fx
+  (anEvent root notNil and: [anEvent entry token last = 1]) ifFalse: [
+    ^ super _entryBuilt: anEvent in: s now: t effects: fx].
+  self _expect: #build in: s for: anEvent.
+  self _expectBuilding: anEvent in: s.
+  ^ self _buildNext: (s with: { #building -> nil. #current -> anEvent root.
+      #conflicted -> ((s conflicted) copyWith: { anEvent entry.
+        PBConflictError new messageText: 'the hot key changed after the transaction read it'; yourself }) })
+    now: t effects: fx.
+
+PlantConflictedRootSent >> _afterBuilds: s now: t effects: fx
+  (s built isEmpty and: [s conflicted notEmpty and: [(s current = s base) not]]) ifFalse: [
+    ^ super _afterBuilds: s now: t effects: fx].
+  fx add: (PBReplicate permission: s permission root: s current pred: s base).
+  ^ s with: { #phase -> #replicate }.
+
+"A checker plant (review N1): as PlantConflictedRootSent, and the second attempt conflicts
+ (nothing of it sent): with one retry, the commit ends none while its first attempt's root took
+ effect (H7, which only a writer for every attempt's root shows)."
+PlantConflictedRootSent subclass: #PlantEarlierRootTakesEffect.
+
+PlantEarlierRootTakesEffect >> _entryBuilt: anEvent in: s now: t effects: fx
+  (anEvent root notNil and: [anEvent entry token last = 2]) ifFalse: [
+    ^ super _entryBuilt: anEvent in: s now: t effects: fx].
+  self _expect: #build in: s for: anEvent.
+  self _expectBuilding: anEvent in: s.
+  ^ self _buildNext: (s with: { #building -> nil.
+      #conflicted -> ((s conflicted) copyWith: { anEvent entry.
+        PBConflictError new messageText: 'the hot key changed after the transaction read it'; yourself }) })
+    now: t effects: fx.
 
 "=== RoundSim ================================================================"
 
@@ -334,7 +375,11 @@ RoundSim >> applyBuild: aBuild
       payload: (PBBuildConflict entry: entry error: (PBConflictError new messageText: 'the hot key changed after the transaction read it'; yourself))
       at: (self _after: micros at: current)].
   root := self _stamped: aBuild stamp on: aBuild base at: current hot: (tx at: #hot) == true.
+  "Every built root writes its token (each attempt, as proto_db's every attempt writes it; the
+   re-commit's unchanged root above writes none): a conflicted attempt's root that took effect,
+   or a token applied twice, shows in the derived history (H7, applied more than once)."
   commitRoots at: token put: root.
+  writers at: (self keyText: root) put: token.
   (tx at: #roots) add: root.
   self _trace: current id , ' built ' , (PBCoreValue textOf: root) , ' on ' , (PBCoreValue textOf: aBuild base) , ' for ' , token printString.
   self _schedule: #round node: current payload: (PBBuilt entry: entry root: root micros: micros) at: (self _after: micros at: current).

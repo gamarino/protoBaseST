@@ -1,4 +1,4 @@
-"EXPECT: checker plants ok 15"
+"EXPECT: checker plants ok 17"
 "The checker's self-tests: the outcome rules of the simulator's convergence check (PBSimChecker
  checkHistory:, the rules of proto_db's assert_outcomes_resolved and the counter its tests
  compare; the same method checkConverged runs on the history PBSim derives) detect each
@@ -44,14 +44,22 @@
    stray_published every member publishes a root the simulator never built
                    (applyPublishCommitted:): stray.
    fork_published  b unknown, applied and published, then every head moves to a root on a's:
-                   a commit a member showed is lost (P1, fork)."
+                   a commit a member showed is lost (P1, fork).
+ The commit round's plants (RoundSim, whose every built root writes its token), against one
+ blind transaction p with one retry that the product commits once:
+   round_twice     p's first attempt is reported conflicted while its root is sent
+                   (PlantConflictedRootSent): its retry applies it twice (applied more than
+                   once, proto_db read_blind_tokens).
+   round_earlier   the same, the retry conflicting too (PlantEarlierRootTakesEffect): p ends
+                   none while its first attempt's root took effect (H7)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_sim'.
 Import from: '_plants'.
+Import from: '_round'.
 Import from: '../audit/_audit'.
 
-| sim c tokens base violation history detected plants out control fresh sims recommit text lost stray |
+| sim c tokens base violation history detected plants out control fresh sims recommit text lost stray roundRun |
 sim := PBSim seed: 1 ids: #('n0' 'n1' 'n2') rules: PBCoordinatorCore new options: Dictionary new.
 tokens := (1 to: 20) collect: [:i | 'c-' , i printString].
 
@@ -199,6 +207,27 @@ sim := fresh value.
 sim _end: 'b' as: #unknown.
 CheckerFamilies heads: sim to: (sim declare: (sim rootOf: 'a')).
 sims add: { 'fork_published'. 'fork: the commit ''b'''. CheckerFamilies violationOf: [sim checker checkConverged] }.
+
+"The commit round's plants (review N1, RoundSim: every attempt's built root writes its token).
+ One blind transaction p at n0 with one retry; the product commits it once and passes."
+roundRun := [:rules | | rs |
+  rs := RoundFamilies sim: rules seed: 1 committed: true options: Dictionary new.
+  rs run: 'p' at: 'n0' hot: false builds: #(1000) retries: 1.
+  { rs. CheckerFamilies violationOf: [
+    RoundFamilies resolve: #('p') in: rs.
+    rs converge: 300000.
+    rs checker checkConverged] } ].
+out := roundRun value: RoundRules new.
+c that: 'round control: p acknowledged, one root, the checks pass'
+  is: { (out first outcomeOf: 'p'). (out first rootsOf: 'p') size. out last } equals: #(#acknowledged 1 nil).
+"round_twice: p's first attempt reported conflicted while its root was sent
+ (PlantConflictedRootSent); the retry commits it again: two roots of one chain write p."
+out := roundRun value: PlantConflictedRootSent new.
+sims add: { 'round_twice'. 'applied more than once: the commit ''p'''. out last }.
+"round_earlier: the same, the retry conflicting too (PlantEarlierRootTakesEffect): p ends none
+ while its first attempt's root is in every chain."
+out := roundRun value: PlantEarlierRootTakesEffect new.
+sims add: { 'round_earlier'. 'H7: the commit ''p'' answered none'. out last }.
 
 sims do: [:p | | t |
   t := p at: 3.
