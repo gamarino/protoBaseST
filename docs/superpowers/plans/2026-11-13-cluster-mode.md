@@ -1319,6 +1319,46 @@ record needs it); tests: a new `tests/unit/cluster_renew_backoff_rules.st` porti
   `tests/interop/concurrency.sh` included. Expected: all PASS (bytes unchanged).
 - [ ] **Step 5:** CHANGELOG; commit `Cluster C4: group commit on a standalone storage (D52) with the shared round runner`.
 
+### Task 22a: proto_db rc4 baseline (format 4, protocol 14)
+
+Added 2026-11-15 after proto_db 2.0.0rc4 (8e6127f). The maintainer's ruling: do the minimum now, as
+proto_db does when the registry is unused. Keep writing format 4, refuse format 5 cleanly, and give the
+full registry (D62) its own plan after this branch merges. The authority is
+`docs/superpowers/specs/2026-11-15-rc4-delta.md`, items by id.
+
+**Files:** the Task 5 wire files (`protocol.st` and peers), `framing.st`, `types.st` (registry),
+`transactions.st`, `object.st`, `tests/conformance/*`, `tests/interop/setup_venv.sh`,
+`tests/unit/cluster_checklist.tsv`, `cluster_checklist.sh`, docs.
+
+- [ ] W1, W2, W4: PROTOCOL_VERSION 14, the optional `unknown` reply field on `fetched` and
+  `commit_info` (read and carried; the port never sends a peer fetch, so it never sets it), the
+  five-item root, and log format 3 refused with `PBNotSupportedError`.
+- [ ] F5: type aliases 22 `proto_db.registry.ModuleList` and 23 `proto_db.registry.Catalog`, with
+  no class (`builtinCount` 24).
+- [ ] F6: refuse creating fields named `parents` or `with_parents`; a stored field of either name
+  still loads, reads and carries over (R157).
+- [ ] S1: `removeRootObject:` refuses `__` names.
+- [ ] F7: re-vendor the rc4 vectors. `_vectors.st` learns the `segments` list, and
+  `parents_database`, `registry_database` and `roots_log_v5` become expected
+  `PBNotSupportedError`. The F4 check: a version-5 segment header is refused before any record
+  decode, so a four-key envelope never reaches `framing.st:375`.
+- [ ] T1: re-pin the checklist to rc4 (298 rows, per the delta doc's classification). T3: bump
+  the venv to rc4.
+- [ ] Docs: C5 and C6 (spec normative tag rc4, deviations: format 5 refused, registry not
+  supported).
+- Tests: the conformance and interop files touched, `bytes_pinned`, the checklist both with and
+  without `PROTOBASE_REPO`, and the wire unit tests. Not the whole suite.
+- Commit `rc4 baseline: protocol 14, format 5 refused, aliases 22-23, vectors at rc4`.
+
+### Task 22b: Core follow-up for rc4 C3 (R212, R231, R233)
+
+A base read that fails with exactly `PBUnexpectedError` after the write permission expired, with
+nothing sent and the tier not failed, gives a retryable `PBConflictError`. A failed read of the
+base a round must first re-commit is "nothing sent", so outcome `#none` and not unknown. This changes
+`roundBuildFailed:in:now:` (`holder.st`, Task 15). The six rc4 plants and their sim cases come
+first and fail first. Tests: `sim_round_rules.st` families and the new checks only. The shell half
+(the tier's failed flag into `PBBuildFailed`) and the C1 timeout text land in Task 23.
+
 ### Task 23: Cluster commits
 
 **Files:**
@@ -1521,6 +1561,12 @@ record needs it); tests: a new `tests/unit/cluster_renew_backoff_rules.st` porti
 - [ ] **Step 4:** commit `Cluster C10: real processes, holder killed mid-round, restart and rejoin`.
 
 ### Task 29: Measurements and documentation
+
+> Rescoped 2026-11-15: the tutorial is now chaptered (`docs/tutorial/13-16`, branch
+> docs/cluster-tutorial, merged before Task 30). Task 29 promotes the `examples/cluster/pending/`
+> programs into the runner, updates the chapters with measured numbers, records D62 as known and not
+> adopted, and documents "format 5 refused".
+
 
 **Files:**
 - Create: `bench/run_cluster.sh`, `bench/cluster_workload.st`.
