@@ -69,7 +69,10 @@ Nothing here reads a clock: t is the node's clock (CC3).
     leaves the queue at its deadline and permit raises, the ownership holding _local). A waiter
     of the acquisition (proposer.st) whose deadline passed ends in PBTimeoutError after a lost
     round, a deferral that yields to an owner, or while the acceptor rejoins; the turn's deferral
-    ends at the earliest deadline, and the back-off never lasts past it.
+    ends at the earliest deadline, and the back-off never lasts past it. A waiter behind this
+    node's own ownership that no longer serves (a fenced term, R149) ends in PBTimeoutError at
+    its deadline, which the ownership loop's timer includes (proto_db _become_owner's
+    _local.acquire(timeout)).
 
 Timing differences from proto_db (no safety rule reads them): proto_db's threads ask an owner
 each on their own; here a waiter refused or silent rejoins the node's acquisition, whose next

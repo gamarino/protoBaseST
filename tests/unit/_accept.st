@@ -215,9 +215,16 @@ AcceptFamilies class >> run: aSim until: anEnd
   aSim runUntil: [aSim now >= anEnd] steps: 1000000.
 
 "Runs aSim until no member owns a term (each ownership ends idle) and every outcome is known:
- the crashes of a schedule then fall between terms. (A crash during a term leaves its owner
- renewing against restarted members that reject at once: correct, but a long run in virtual time
- at the simulator's latency.)"
+ the crashes of a schedule then fall between terms. The reason is a liveness property shared
+ with proto_db (rc3 and 88ca21d), not the renewal storm, which R149 removed: committed knowledge
+ is learnt only from a done, a release, a later term's phase 1 or a recovery round a commit or a
+ read asks for, never at quiescence. A holder that crashes after its commit is acknowledged but
+ before its done is sent leaves that commit accepted on a majority and committed nowhere; its
+ owner then abandons the term (no done by the deadline, or the lease ending, fenced or not) and
+ releases it uncertain, which only makes the members suspect it (proto_db _on_release). With no
+ later commit, no term runs again, and the chains at quiescence miss the acknowledged commit
+ (S4 in converge:). powerLoss without this wait fails so on seeds 1-8 (Task 19b fix round 1);
+ crashing inside a term needs a commit after the restarts, which a new term's phase 1 settles."
 AcceptFamilies class >> idle: aSim
   aSim runUntil: [aSim ids allSatisfy: [:id | | node |
     node := aSim nodeAt: id. node isUp not or: [node state ownership isNil]]] steps: 1000000.
@@ -334,16 +341,13 @@ AcceptFamilies class >> pausedHolder: aRulesBlock seeds: someSeeds
       #('n1' 'n2') doWithIndex: [:id :i |
         ((sim syncedAcceptedOf: id) allButFirst: (others at: i)) do: [:k | (k at: 1) = old ifTrue: [bad := bad + 1]]].
       (sim outcomeOf: 'b') = #acknowledged ifTrue: [acked := acked + 1. bad := bad + 1].
-      "A wrong rule is caught here: past it, the resumed owner of the old term renews against
-       members that reject at once, a long run in virtual time."
-      bad = 0 ifTrue: [
-        sim resume: 'n1'.
-        sim runUntil: [(sim outcomeOf: 'c') ~= #pending] steps: 500000.
-        sim converge: 300000.
-        (sim outcomeOf: 'c') = #acknowledged ifFalse: [bad := bad + 1].
-        "n1, resumed, never accepts a root of the old term either (it promised the newer term
-         to itself)."
-        ((sim syncedAcceptedOf: 'n1') allButFirst: (others at: 1)) do: [:k | (k at: 1) = old ifTrue: [bad := bad + 1]]].
+      sim resume: 'n1'.
+      sim runUntil: [(sim outcomeOf: 'c') ~= #pending] steps: 500000.
+      sim converge: 300000.
+      (sim outcomeOf: 'c') = #acknowledged ifFalse: [bad := bad + 1].
+      "n1, resumed, never accepts a root of the old term either (it promised the newer term to
+       itself)."
+      ((sim syncedAcceptedOf: 'n1') allButFirst: (others at: 1)) do: [:k | (k at: 1) = old ifTrue: [bad := bad + 1]].
       bad + sim problems size]) > 0 ifTrue: [1] ifFalse: [0])].
   ^ { failed. acked }.
 

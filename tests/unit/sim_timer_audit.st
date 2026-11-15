@@ -27,7 +27,9 @@
      reader in the cluster's sources but config.st, and their runs equal the run at factor 1:
      once a reader appears, the declaration fails here.
  (8) AuditFamilies floors declares exactly the parts of floorKeys (none missing, extra,
-     misspelt or twice), each with two integer counts.
+     misspelt or twice), each with two integer counts; a count of 0 only on a part that
+     AuditFamilies pendingFloors names with its reason (now the renewBackoff parts, measured in
+     Task 30), each of those declared { 0. 0 }.
  Each part asserts its own coverage (AuditFamilies failuresOf:row:mode:part:): no violation,
  its own measured floors of strict runs and acknowledged commits, and the probe's bounds where
  the row has one."
@@ -35,7 +37,7 @@ Import from: 'protobase'.
 Import from: '_check'.
 Import from: '../audit/_audit'.
 
-| c peers config missing uncovered same changed runs product expected present sources stale equal declared wanted |
+| c peers config missing uncovered same changed runs product expected present sources stale equal declared wanted pending |
 c := Check new.
 missing := OrderedCollection new.
 uncovered := OrderedCollection new.
@@ -114,4 +116,14 @@ c that: '(8) no part has two floors' is: declared size = declared asSet size equ
 c that: '(8) every floor is { key. strict runs. commits acknowledged } of integers'
   is: ((AuditFamilies floors reject: [:e | e size = 3 and: [(e at: 2) isInteger and: [(e at: 3) isInteger]]]) collect: [:e | e first])
   equals: #().
-(c report = 'ok 15') ifTrue: ['timer audit ok'] ifFalse: [c report displayNl. 'timer audit failed'].
+pending := AuditFamilies pendingFloors collect: [:e | e first].
+c that: '(8) a floor of 0 only on a part pendingFloors names (unmeasured floors that can never fail)'
+  is: ((AuditFamilies floors select: [:e | (e at: 2) = 0 or: [(e at: 3) = 0]]) collect: [:e | e first]) asSet
+  equals: pending asSet.
+c that: '(8) every pending part is a declared floor of { 0. 0 }, with a reason, once'
+  is: { (AuditFamilies pendingFloors reject: [:e | e size = 2 and: [(e at: 2) isString and: [(e at: 2) notEmpty
+      and: [(AuditFamilies floors anySatisfy: [:f | f first = e first and: [(f at: 2) = 0 and: [(f at: 3) = 0]]])]]]])
+      collect: [:e | e first].
+    pending size = pending asSet size }
+  equals: { #(). true }.
+(c report = 'ok 17') ifTrue: ['timer audit ok'] ifFalse: [c report displayNl. 'timer audit failed'].

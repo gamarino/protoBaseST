@@ -392,15 +392,21 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   `_closeRenewal:now:effects:`, `cluster/proposer.st`; `receivedPermitReq:in:now:`,
   `cluster/owner.st`; `PBClusterConfig renewBackoffFloor`, the timer row `renewBackoff`). It is
   not a deviation from `proto_db` at `88ca21d`; it is ahead of the Task 18 checklist, which stays
-  pinned to `v2.0.0rc3`. The simulator workarounds the storm needed are gone: the `r78a`
+  pinned to `v2.0.0rc3`. The rejoin families' workarounds for the storm are gone: the `r78a`
   schedule no longer cuts the holder off before its timer resumes, and `lagged:` (1 ms links)
-  is no longer applied (`tests/unit/_rejoin.st`). Representation and timing differences, none
-  read by a safety rule: `proto_db`'s ownership thread is woken by a notify when a fenced term's
-  permission ends; here `_permitOutcome:` re-evaluates the ownership in the same step, and the
-  fenced term's timer is the lease's end. A local commit that asks while its own node's term is
-  fenced waits for that term to end (its permission's done, or the lease's end) and then
-  acquires, as a waiter does for any ownership that no longer serves; `proto_db`'s `permit`
-  thread goes on to `_become_owner` at once. *Cost:* none beyond `proto_db`'s.
+  is no longer applied (`tests/unit/_rejoin.st`); the acceptance families' guard that skipped a
+  wrong rule's continuation is gone too. `AcceptFamilies idle:` (`tests/unit/_accept.st`) is
+  kept, for another reason, a liveness property shared with `proto_db` (rc3 and `88ca21d`):
+  committed knowledge of an acknowledged commit whose holder crashed before its done is learnt
+  only by a later term's phase 1 or a recovery round a commit or a read asks for, never at
+  quiescence, so its crashes fall between terms. A local commit that asks while its own node's
+  term is fenced waits for that term to end, then acquires, and times out at its
+  `acquireTimeout` deadline meanwhile, as `proto_db`'s `_become_owner` blocks on `_local`
+  until `release()` with that timeout (the ownership loop arms the waiter's deadline). One
+  representation difference, read by no safety rule: `proto_db`'s ownership thread is woken by
+  a notify when a fenced term's permission ends; here `_permitOutcome:` re-evaluates the
+  ownership in the same step, and the fenced term's timer is the lease's end (or a waiter's
+  deadline). *Cost:* none beyond `proto_db`'s.
 - **The rejoin-ballot refusal is made twice (L14).** `proto_db`'s `replicate` refuses
   (`ProtoConflictError`) a term below the node's rejoin ballot, read under its lock at the send.
   protoBaseST refuses first in the commit round (`mayReplicate:now:`, `cluster/holder.st`), from

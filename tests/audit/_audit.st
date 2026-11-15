@@ -526,7 +526,7 @@ AuditFamilies class >> floors
     { 'persist skewed 1'. 60. 454 }.
     { 'persist tenfold 1'. 60. 454 }.
     { 'persist tenth 1'. 60. 454 }.
-    "renewBackoff (Task 19b, R149a): not measured yet; its floors are measured in Task 30."
+    "renewBackoff (Task 19b, R149a): not measured yet (pendingFloors)."
     { 'renewBackoff skewed 1'. 0. 0 }.
     { 'renewBackoff tenfold 1'. 0. 0 }.
     { 'renewBackoff tenth 1'. 0. 0 }.
@@ -563,6 +563,14 @@ AuditFamilies class >> floors
     { 'wakeSpread skewed 1'. 60. 450 }.
     { 'wakeSpread tenfold 1'. 60. 458 }.
     { 'wakeSpread tenth 1'. 60. 448 } }.
+
+"The parts whose floors are not measured yet: { 'row mode part'. why }. Each is declared in
+ floors with { 0. 0 }; the index (sim_timer_audit.st check (8)) refuses a floor of 0 on any part
+ not listed here, and every part listed here must be declared with a floor of 0 and a reason.
+ Task 30 Step 1b measures them and empties the list."
+AuditFamilies class >> pendingFloors
+  ^ #(#('renewBackoff skewed 1' 'measured in Task 30') #('renewBackoff tenfold 1' 'measured in Task 30')
+    #('renewBackoff tenth 1' 'measured in Task 30')).
 
 "The bounds of the probe's count per run, { min. max } (nil: the row has no probe): the count
  shows the probe made the core read the timer, and that 1/10 and 10 times differ.

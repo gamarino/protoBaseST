@@ -1,4 +1,4 @@
-"EXPECT: ok 12"
+"EXPECT: ok 14"
 "The renewal back-off and the fenced term (proto_db 88ca21d, post-rc3: rulings R149 and R149a,
  gamarino/ProtoDB#1, the D50 amendment; tests/unit/test_cluster_renew_backoff.py ported to the
  pure core, virtual time only): cluster/lease.st (PBAttempt isTermFenced), cluster/config.st
@@ -23,13 +23,18 @@
  (9) test_a_round_left_pending_after_a_majority_answered_backs_off (R149a): requestTimeout / 4.
  (10) test_a_fenced_term_resends_an_outstanding_permit_to_a_retry, and its done releases.
  (11) test_a_fenced_term_resends_its_permit_only_to_a_true_retry: every other request is
- refused with its reason, and so is the true retry once the lease has expired."
+ refused with its reason, and so is the true retry once the lease has expired.
+ (12) A local commit that asks while its own node's term is fenced waits, and times out at its
+ acquireTimeout deadline, which a timer of the ownership wakes (proto_db: _become_owner's
+ _local.acquire(timeout=deadline - now) raises then; Task 19b fix round 1, m1).
+ (13) A node fenced at node level (proto_db _failure) answers neither a true retry nor a new
+ request: both are refused 'ending' and nothing is sent (fix round 1, m2)."
 Import from: 'protobase'.
 Import from: '_check'.
 
 | c core peers config three marker logged stateIn msg granted reject req sendsOf sends stats counted timers settled run loop
   rejects grants t0 term belief rt owner s p pr pf pc pw pd pl pa pm permission start r tr cases fenced att permitOf first
-  floor renewing tok |
+  floor renewing tok stateWith ownerWith pt |
 c := Check new.
 core := PBCoordinatorCore new.
 peers := [:someIds | (1 to: someIds size) asArray collect: [:i | PBPeer nodeId: (someIds at: i) host: '127.0.0.1' port: 7000 + i]].
@@ -37,9 +42,11 @@ config := [:id :opts | PBClusterConfig nodeId: id peers: (peers value: three) op
 three := #('n0' 'n1' 'n2').
 marker := PBLogAppend kind: #rejoined label: 0 root: nil sync: true.
 logged := [:appends | PBAcceptorLog decode: (appends collect: [:a | a payload]) path: 'test'].
-stateIn := [:id | (PBNodeState config: (config value: id value: Dictionary new) inc: 5) with: {
+"The dispatcher state of anId (inc 5) configured with the options opts, its acceptor reported."
+stateWith := [:id :opts | (PBNodeState config: (config value: id value: opts) inc: 5) with: {
   #acceptorView -> (PBAcceptorState config: (config value: id value: (Dictionary new at: #startupGrace put: 0; yourself))
     logged: (logged value: { marker }) now: 0) }].
+stateIn := [:id | stateWith value: id value: Dictionary new].
 msg := [:type :from :fields | PBReceived message: (PBClusterMessage type: type from: from fields: fields)].
 req := [:from :aTerm :rid :inc | msg value: 'permit_req' value: from value: { 'term' -> aTerm. 'rid' -> rid. 'inc' -> inc }].
 sendsOf := [:aStep :type | ((aStep effects select: [:e | (e isKindOf: PBSend) and: [e message type = type]]) collect: [:e | { e to. e message }]) asArray].
@@ -75,6 +82,9 @@ t0 := 1000000.
 term := 5.
 belief := (config value: 'n1' value: Dictionary new) belief.
 rt := (config value: 'n1' value: Dictionary new) requestTimeout.
+ownerWith := [:opts | (stateWith value: 'n1' value: opts) with: {
+  #ownership -> (PBOwnership lease: (PBLease term: term validUntil: t0 + belief root: nil certain: true) base: nil committed: false now: t0).
+  #hints -> ((PBHints seed: 1) with: { #ownerTerm -> term. #ownerNode -> 'n1' }) }].
 owner := [(stateIn value: 'n1') with: {
   #ownership -> (PBOwnership lease: (PBLease term: term validUntil: t0 + belief root: nil certain: true) base: nil committed: false now: t0).
   #hints -> ((PBHints seed: 1) with: { #ownerTerm -> term. #ownerNode -> 'n1' }) }].
@@ -252,5 +262,29 @@ c that: 'a fenced term resends its permit only to a true retry, and not once the
     { permitOf value: (pa := core dispatch: (req value: 'n2' value: term value: 50010 value: 3) in: pf state now: t0 + belief).
       (sendsOf value: pa value: 'permit_no') collect: [:m | m last at: 'reason']. counted value: pa } }
   equals: { cases collect: [:e | { #(). { { e at: 1. e at: 2. e at: 3. e at: 5 } }. #(). #() }]. { #(). #('ending'). #() } }.
+
+"(12) n1's own permission out, the term fenced, then w3 asks at n1 with acquireTimeout 100 ms."
+p := core dispatch: (PBPermitWanted waiter: #w1) in: (ownerWith value: (Dictionary new at: #acquireTimeout put: 100; yourself)) now: t0 + 1000.
+tr := t0 + belief - (belief // 4) + 1.
+pr := renewing value: p state value: tr.
+pf := run value: pr state value: tr + 1000 value: (rejects value: pr state value: #(#('n0' 'stale_term' 6 0) #('n2' 'stale_term' 6 0))).
+pw := core dispatch: (PBPermitWanted waiter: #w3) in: pf state now: tr + 2000.
+pt := run value: pw state value: tr + 2000 + 100000 value: { PBTimerFired token: pw state ownership token event: #owner }.
+c that: 'a waiter behind its own fenced term times out at its acquireTimeout deadline'
+  is: { pf state ownership isTermFenced. pw state waiters. timers value: pw. settled value: pw.
+    (settled value: pt) collect: [:e | e class name]. pt state waiters. pt state ownership isTermFenced. sends value: pt value: 'renew' }
+  equals: { true. #(#w3). #(100000). #(). #(#PBTimeoutError). #(). true. 0 }.
+
+"(13) The fenced term of (10), its node fenced at node level too."
+s := (core dispatch: (req value: 'n2' value: term value: 50010 value: 3) in: owner value now: t0 + 1000) state.
+tr := t0 + belief - (belief // 4) + 1.
+pr := renewing value: s value: tr.
+s := (run value: pr state value: tr + 1000 value: (rejects value: pr state value: #(#('n0' 'stale_term' 6 0) #('n2' 'stale_term' 6 0)))) state.
+s := s with: { #fenced -> 'a test fence' }.
+c that: 'a node fenced at node level answers neither a true retry nor a new request'
+  is: ({ { 'n2'. 50010. 3 }. { 'n0'. 50020. 4 } } collect: [:e | | step |
+    step := core dispatch: (req value: e first value: term value: (e at: 2) value: e last) in: s now: tr + 2000.
+    { permitOf value: step. (sendsOf value: step value: 'permit_no') collect: [:m | { m first. m last at: 'reason' }]. counted value: step }])
+  equals: { { #(). #(#('n2' 'ending')). #() }. { #(). #(#('n0' 'ending')). #() } }.
 
 c report displayNl.

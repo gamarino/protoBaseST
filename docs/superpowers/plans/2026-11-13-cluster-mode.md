@@ -1515,8 +1515,15 @@ found here is fixed in the owning module, fail-first.
   PROTOBASE_REPO=<a ProtoBase checkout holding v2.0.0rc3> tests/unit/cluster_checklist.sh`.
   Expected: PASS, no `deferred` row left (each is `ported` or re-justified `n/a`).
 - [ ] **Step 1b:** run the timer audit: `tests/run_tests.sh tests/audit`. Expected: all parts
-  PASS at their declared floors. A floor that moved with a deliberate core change is re-measured
-  and the change is named in the commit.
+  PASS at their declared floors. Re-measure every floor (`AuditFamilies floors`), not only the
+  ones that fail: R149/R149a (Task 19b) changed the renewal path of every row, so a floor that
+  rose would otherwise pass silently below its new count. Measure the parts on
+  `AuditFamilies pendingFloors` (now the three `renewBackoff` parts, "measured in Task 30"),
+  declare their floors and empty that list (the index, `tests/unit/sim_timer_audit.st` check
+  (8), refuses a floor of 0 on any part not on it). A part whose floor drops gets a named reason
+  in the commit. Also decide whether `AcceptFamilies powerLoss` should commit once more after its
+  restarts, so that its crashes can fall inside a term (`tests/unit/_accept.st` `idle:`, the
+  shared liveness property recorded there; Task 19b fix round 1).
 - [ ] **Step 2:** soak: `PBST_SIM_SEEDS=5000 RUN_TIMEOUT=7200 tests/run_tests.sh tests/unit/sim_*.st`.
   Expected: PASS; a failure is a seed to reproduce and fix fail-first.
 - [ ] **Step 3:** re-read the planner's calls (CC1-CC25) against what was built; update

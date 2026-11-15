@@ -467,7 +467,12 @@ PBCoordinatorCore >> dispatchPermitWanted: anEvent in: s now: t
       ifFalse: [
         (self _ownerToAsk: state) notNil
           ifTrue: [self _ask: anEvent waiter in: state now: t effects: fx]
-          ifFalse: [self _wantLease: (state with: { #waiters -> (state waiters copyWith: anEvent waiter) }) now: t effects: fx]]].
+          ifFalse: [
+            state := self _wantLease: (state with: { #waiters -> (state waiters copyWith: anEvent waiter) }) now: t effects: fx.
+            "Behind this node's own ownership that no longer serves (fenced, R149): the ownership
+             loop arms the waiter's deadline (proto_db _become_owner's _local.acquire(timeout))."
+            state ownership notNil ifTrue: [state := self _ownLoop: state now: t effects: fx].
+            state]]].
 
 "Starts an acquisition when waiters wait, no term is owned and none runs."
 PBCoordinatorCore >> _wantLease: s now: t effects: fx
@@ -817,6 +822,10 @@ PBCoordinatorCore >> _ownLoop: s now: t effects: fx
   (own isNil or: [own renewal notNil]) ifTrue: [^ s].
   c := s config.
   state := self _expireQueued: s now: t effects: fx.
+  "The waiters behind this ownership (it no longer serves them: fenced, R149) end in
+   PBTimeoutError at their deadline (proto_db _become_owner: _local.acquire(timeout=deadline -
+   now), the ownership holding _local)."
+  state := self _expire: state because: 'this node''s own term did not end in time' now: t effects: fx.
   own := state ownership.
   late := own pipeline detect: [:e | t > e deadline] ifNone: [nil].
   late notNil ifTrue: [
@@ -869,6 +878,8 @@ PBCoordinatorCore >> _ownLoop: s now: t effects: fx
     ifFalse: [own queue isEmpty ifTrue: [waits add: (1000 max: idle - (t - own lastDemand))]].
   (release notNil and: [own pipeline isEmpty]) ifTrue: [waits add: (1000 max: release - (t - own lastLocal))].
   queued := self _queuedDeadlineIn: state.
+  queued notNil ifTrue: [waits add: queued - t].
+  queued := self _deadlineIn: state.
   queued notNil ifTrue: [waits add: queued - t].
   pair := self _token: #owner in: state.
   state := pair first.

@@ -535,7 +535,7 @@ For tests, tools and readers of the format. An application does not need them.
   `receivedRelease:in:now:` and `receivedWant:in:now:` keep the hints;
   `dispatchTimerFired:in:now:` ignores a timer whose token is not the current one. A waiter whose
   deadline passed ends in `PBTimeoutError` after a lost round, a deferral that yields to a known
-  owner, or while the acceptor rejoins; the back-off never lasts past the earliest deadline.
+  owner, while the acceptor rejoins, or at its deadline behind its own node's fenced term; the back-off never lasts past the earliest deadline.
   `PBCoordinatorCore class >> drawRange` is the Park-Miller range of the seeded draws.
 - **Owner rules** (`cluster/owner.st`): rules O1-O8 at DEPTH 0 and abandoned terms (`proto_db`'s
   `_dispatch`, `_on_permit_req`, `_permit_outcome`, `_abandon`, `_refuse_queue`, `_on_done_owner`,
