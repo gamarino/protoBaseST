@@ -432,6 +432,13 @@ PBTransaction >> mutableNames
 
 "=== writes ==================================================================="
 
+"PBValidationError when the root name aName starts with '__': those roots are reserved for
+ the format (the runtime registry's, proto_db _check_not_reserved): an application never
+ writes nor removes one."
+PBTransaction >> _checkNotReserved: aName
+  (aName beginsWith: '__') ifTrue: [
+    ^ PBValidationError signal: 'Root names starting with ''__'' are reserved for the format, not ' , (PBCodec repr: aName)].
+
 "Sets the root aName to aValue at commit (ProtoBase set_root_object): merged
  into the current value when the root was neither read nor replaced and the
  value is a collection with a complete log (design spec 7.3 step 4)."
@@ -446,17 +453,19 @@ PBTransaction >> setRootObject: aName value: aValue
 PBTransaction >> setRootObject: aName value: aValue replace: aBoolean
   | value |
   _PBNameCheck check: aName what: 'root'.
-  (aName beginsWith: '__') ifTrue: [
-    ^ PBValidationError signal: 'Root names starting with ''__'' are reserved for the format, not ' , (PBCodec repr: aName)].
+  self _checkNotReserved: aName.
   (aBoolean == true or: [aBoolean == false]) ifFalse: [
     ^ PBValidationError signal: 'replace must be a Boolean, not ' , aBoolean printString].
   value := PBCodec canonical: aValue for: ['Root ' , (PBCodec repr: aName)].
   bookkeeping swap: [:st | st checkActive withWrite: aName value: value replace: aBoolean].
 
 "Removes the root aName at commit (a no-op if it is absent then); a later set
- of the name in this transaction replaces (ProtoBase remove_root_object)."
+ of the name in this transaction replaces (ProtoBase remove_root_object). As in
+ proto_db 2.0.0rc4, the name is checked, then the '__' prefix the format
+ reserves, then the state."
 PBTransaction >> removeRootObject: aName
   _PBNameCheck check: aName what: 'root'.
+  self _checkNotReserved: aName.
   bookkeeping swap: [:st | st checkActive withWrite: aName value: PBTxState removed replace: true].
 
 "Creates the mutable cell aName holding aValue at commit and answers its

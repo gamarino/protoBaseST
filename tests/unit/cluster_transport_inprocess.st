@@ -174,7 +174,7 @@ a start: 'n0' peers: members key: nil handler: [:m | nil].
 b start: 'n1' peers: members key: nil handler: ib handler.
 c that: 'a message goes through the wire encoding: what is not a PBClusterMessage is refused'
   signals: PBValidationError containing: 'PBClusterMessage'
-  during: [a send: (MessagePackMap withAll: { 'v' -> 13. 'type' -> 'nonsense'. 'from' -> 'n0' }) to: 'n1'].
+  during: [a send: (MessagePackMap withAll: { 'v' -> 14. 'type' -> 'nonsense'. 'from' -> 'n0' }) to: 'n1'].
 
 "(9) A handler's PBDBError is logged and delivery goes on (proto_db _deliver)."
 (b stop) waitWithin: 60000.

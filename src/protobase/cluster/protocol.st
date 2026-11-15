@@ -1,10 +1,14 @@
-"-- cluster/protocol.st: the wire messages of cluster protocol 13 --
+"-- cluster/protocol.st: the wire messages of cluster protocol 14 --
 
-The messages of proto_db cluster/protocol.py at v2.0.0rc3 (MESSAGE_TYPES, _check_field,
-validate_message, encode_root, decode_labeled_root; format spec, 'Cluster wire protocol').
-Every message is a msgpack map: v (the protocol version, 13), type, from (the sender's node
-id, a String), then the fields of its type in the order of the table, which is proto_db's
-MESSAGE_TYPES copied verbatim. PBClusterFrame puts a message in a frame (the 4-byte length) and
+The messages of proto_db cluster/protocol.py at v2.0.0rc4 (MESSAGE_TYPES, OPTIONAL_FIELDS,
+_check_field, validate_message, encode_root, decode_labeled_root; format spec, 'Cluster wire
+protocol'). Every message is a msgpack map: v (the protocol version, 14), type, from (the
+sender's node id, a String), then the fields of its type in the order of the table, which is
+proto_db's MESSAGE_TYPES copied verbatim, then the optional fields it carries (OPTIONAL_FIELDS:
+unknown, a Boolean, on fetched and commit_info, R240L; checked when present, absent reads
+false). Protocol 14 also lets the records a message carries be format 5 and a root carry its
+format version as a fifth item; protoBaseST reads and writes format 4 only, so it never writes
+a 5-item root and refuses every one it receives (docs/deviations.md, 'Reading'). PBClusterFrame puts a message in a frame (the 4-byte length) and
 optionally authenticates it (CC4).
 
   PBClusterMessage  a validated message: type, from, at: aFieldName, encode. Class side:
@@ -17,7 +21,7 @@ optionally authenticates it (CC4).
                     big-endian length, then the body, at most maxFrameBytes (64 MiB). With a key
                     (CC4, design spec 8.4 Q5) the body is the msgpack bytes then a tagSize-byte
                     tag, HMAC-SHA-256(key, UTF-8(receiver id) || 0x00 || msgpack bytes); without
-                    one the frame is protocol 13 byte for byte. Class side only: encode:to:key:,
+                    one the frame is protocol 14 byte for byte. Class side only: encode:to:key:,
                     lengthFrom:, decodeBody:to:key:, decode:to:key:.
 
 Field kinds (format spec, 'Field types'; proto_db _check_field):
@@ -26,7 +30,9 @@ Field kinds (format spec, 'Field types'; proto_db _check_field):
   #str #bool a String; true or false
   #root      nil (unknown), { 0. nil. nil. label } (the empty space, known) or { epoch.
              16 segment bytes. offset. label }; the 3-item form without the label reads with
-             label 0 and is never written (CC17)
+             label 0 and is never written (CC17); a 5-item form (a fifth item, the root's
+             format version above 4) is refused: a fifth item that is not an Integer above 4
+             is malformed, any other names a version this node does not read
   #records   an Array of { 16 segment bytes. offset. framed record bytes or nil }
   #uuid      16 bytes; #optBytes / #optStr: bytes or nil / a String or nil
   #ranges    nil or an Array of { 16 segment bytes. start. end } with 0 <= start <= end
@@ -35,8 +41,8 @@ Field kinds (format spec, 'Field types'; proto_db _check_field):
 
 Received maps are read as proto_db reads them (msgpack-python unpackb, strict_map_key): a map
 key that is not a str or a bin is refused, a repeated key keeps its last value, extra fields
-are ignored and never re-encoded. As Python's 13.0 == 13, a version written as the Float 13.0
-is protocol 13. A timestamp ext (type -1) anywhere in the map, extra fields included, is refused
+are ignored and never re-encoded; an optional field is carried and re-encoded. As Python's
+14.0 == 14, a version written as the Float 14.0 is protocol 14. A timestamp ext (type -1) anywhere in the map, extra fields included, is refused
 where msgpack-python's Timestamp refuses it. A message protoBaseST builds holds no integer
 outside msgpack's range and never the 3-item root form. A message holds its own copies of the field values and at: answers a fresh
 copy: every value here is immutable."
@@ -45,7 +51,7 @@ Import from: 'protobase/errors'.
 Import from: 'protobase/framing'.
 Import from: 'protobase/cluster/rootlog'.
 
-Object subclass: #PBClusterMessage instanceVariableNames: 'type from values' classVariableNames: 'Schema'.
+Object subclass: #PBClusterMessage instanceVariableNames: 'type from values' classVariableNames: 'Schema OptionalSchema'.
 
 "The table, made once when the module loads: type -> an Array of (field name -> kind), in the
  order of proto_db's MESSAGE_TYPES (format spec, 'Message types')."
@@ -91,9 +97,11 @@ PBClusterMessage class >> _initializeSchema
     table at: (rows at: k) put: ((1 to: pairs size // 2) asArray collect: [:i |
       (pairs at: 2 * i - 1) -> (pairs at: 2 * i)])].
   Schema := table.
+  OptionalSchema := Dictionary new.
+  OptionalSchema at: 'fetched' put: { 'unknown' -> #bool }; at: 'commit_info' put: { 'unknown' -> #bool }.
 
 PBClusterMessage class >> protocolVersion
-  ^ 13.
+  ^ 14.
 
 "A fresh Dictionary from each type to an Array of (field name -> kind), in the order of the
  table (format spec, 'Message types')."
@@ -108,17 +116,24 @@ PBClusterMessage class >> schema
 PBClusterMessage class >> _fieldsOf: aString
   ^ aString isString ifTrue: [Schema at: aString ifAbsent: [nil]] ifFalse: [nil].
 
+"The optional (field name -> kind) Array of the type aString (proto_db OPTIONAL_FIELDS): empty
+ for a type with none or an unknown type."
+PBClusterMessage class >> _optionalFieldsOf: aString
+  ^ aString isString ifTrue: [OptionalSchema at: aString ifAbsent: [#()]] ifFalse: [#()].
+
 "A message protoBaseST sends: aString a type, anId the sender's node id, anArrayOfAssociations
- exactly the fields of the type (field name -> wire value), in any order. Anything else is
- PBValidationError: a message built wrong is a bug of the sender, never sent."
+ exactly the fields of the type (field name -> wire value), in any order, plus any of its
+ optional fields. Anything else is PBValidationError: a message built wrong is a bug of the
+ sender, never sent."
 PBClusterMessage class >> type: aString from: anId fields: anArrayOfAssociations
-  | fields names |
+  | fields optional names |
   fields := self _fieldsOf: aString.
   fields isNil ifTrue: [^ PBValidationError signal: 'Unknown message type ' , aString printString].
   anId isString ifFalse: [^ PBValidationError signal: 'A message names its sender with a String, not ' , anId printString].
   (anArrayOfAssociations isArray and: [anArrayOfAssociations allSatisfy: [:each | each isKindOf: Association]]) ifFalse: [
     ^ PBValidationError signal: 'The fields of a message are an Array of Associations, not ' , anArrayOfAssociations printString].
-  names := fields collect: [:each | each key].
+  optional := self _optionalFieldsOf: aString.
+  names := (fields , optional) collect: [:each | each key].
   anArrayOfAssociations do: [:each |
     (names includes: each key) ifFalse: [
       ^ PBValidationError signal: 'A ' , aString printString , ' message has no field ' , each key printString]].
@@ -136,7 +151,16 @@ PBClusterMessage class >> type: aString from: anId fields: anArrayOfAssociations
       (self _isWritable: given value kind: field value) ifFalse: [
         ^ PBValidationError signal: (self _field: field of: aString refusing: given value)
           , ': a message protoBaseST writes holds integers below 2^64 and roots of 4 items (CC17)'].
-      self _copyWire: given value]).
+      self _copyWire: given value])
+      , (optional collect: [:field |
+        | given |
+        given := anArrayOfAssociations detect: [:each | each key = field key] ifNone: [nil].
+        given isNil
+          ifTrue: [nil]
+          ifFalse: [
+            (self _is: given value kind: field value) ifFalse: [
+              ^ PBValidationError signal: (self _field: field of: aString refusing: given value)].
+            given value]]).
 
 "Whether aValue, a wire value of aKind, may be written: every Integer in it below 2^64 (the
  largest msgpack uint is 2^64 - 1), and a root never in the 3-item form (CC17)."
@@ -154,9 +178,9 @@ PBClusterMessage class >> _isWritable: aValue kind: aKind
 "The message of aByteArray, the body of one frame (proto_db decode_message, validate_message).
  PBClusterProtocolError for bytes that are not one msgpack map, a key that is not a str or a
  bin, a missing v, type or from, another version, an unknown type, a missing or ill-typed
- field; extra fields are ignored."
+ field, an ill-typed optional field; extra fields are ignored."
 PBClusterMessage class >> decode: aByteArray
-  | map version kind fields from |
+  | map version kind fields from absent |
   (aByteArray isKindOf: ByteArray) ifFalse: [
     ^ PBValidationError signal: 'PBClusterMessage decode: a ByteArray was expected, not ' , aByteArray class name].
   map := [MessagePack decodeOrdered: aByteArray strictKeys: true]
@@ -185,7 +209,17 @@ PBClusterMessage class >> decode: aByteArray
         ^ PBClusterProtocolError signal: 'A ' , kind printString , ' message lacks the field ' , field key printString].
       (self _is: value kind: field value) ifFalse: [
         ^ PBClusterProtocolError signal: (self _field: field of: kind refusing: value)].
-      value]).
+      value])
+      , ((self _optionalFieldsOf: kind) collect: [:field |
+        | value |
+        absent isNil ifTrue: [absent := Object new].
+        value := map at: field key ifAbsent: [absent].
+        value == absent
+          ifTrue: [nil]
+          ifFalse: [
+            (self _is: value kind: field value) ifFalse: [
+              ^ PBClusterProtocolError signal: (self _field: field of: kind refusing: value)].
+            value]]).
 
 "Refuses (PBClusterProtocolError) a timestamp ext (type -1) anywhere in aTree that
  msgpack-python's unpackb refuses while decoding, before proto_db looks at any field: data of 4
@@ -252,21 +286,35 @@ PBClusterMessage class >> _isCount: aValue
 PBClusterMessage class >> _isSegment: aValue
   ^ (aValue isKindOf: ByteArray) and: [aValue size = 16].
 
-"nil when aValue is a wire root, else what is wrong with it (proto_db decode_labeled_root)."
+"nil when aValue is a wire root, else what is wrong with it (proto_db decode_labeled_root, in
+ its order: the length, the format version of a 5-item root, then the epoch and label). A
+ 5-item root is never one: this node reads formats 2 to 4 (readableRootVersions), and a fifth
+ item of 4 or less, or not an Integer, is malformed."
 PBClusterMessage class >> _rootProblem: aValue
   | epoch segment offset label |
   aValue isNil ifTrue: [^ nil].
-  (aValue isArray and: [aValue size = 3 or: [aValue size = 4]]) ifFalse: [^ 'Malformed root ' , aValue printString].
+  (aValue isArray and: [aValue size between: 3 and: 5]) ifFalse: [^ 'Malformed root ' , aValue printString].
+  aValue size = 5 ifTrue: [
+    | version |
+    version := aValue at: 5.
+    ((_PBFrame isInt: version) and: [version > 4]) ifFalse: [^ 'Malformed root format version ' , aValue printString].
+    (self readableRootVersions includes: version) ifFalse: [
+      ^ 'A root of format version ' , version printString , ', which this version does not read']].
   epoch := aValue at: 1.
   segment := aValue at: 2.
   offset := aValue at: 3.
-  label := aValue size = 4 ifTrue: [aValue at: 4] ifFalse: [0].
+  label := aValue size >= 4 ifTrue: [aValue at: 4] ifFalse: [0].
   ((self _isCount: epoch) and: [self _isCount: label]) ifFalse: [
     ^ 'Malformed root epoch or term ' , aValue printString].
   epoch = 0 ifTrue: [
     ^ (segment isNil and: [offset isNil]) ifTrue: [nil] ifFalse: ['The empty root (epoch 0) has no pointer']].
   ((self _isSegment: segment) and: [self _isCount: offset]) ifFalse: [^ 'Malformed root pointer ' , aValue printString].
   ^ nil.
+
+"The format versions of a root this node reads (proto_db READABLE_FORMAT_VERSIONS): 2 to 4,
+ as PBSegmentHeader and PBRootRecord; format 5 is refused (docs/deviations.md, 'Reading')."
+PBClusterMessage class >> readableRootVersions
+  ^ #(2 3 4).
 
 "The root a wire root names (CC17): nil (unknown) or a PBLabeledRoot, the empty space for
  epoch 0, label 0 for the 3-item form. PBClusterProtocolError for anything else."
@@ -275,7 +323,7 @@ PBClusterMessage class >> rootFrom: aWireValue
   problem := self _rootProblem: aWireValue.
   problem isNil ifFalse: [^ PBClusterProtocolError signal: problem].
   aWireValue isNil ifTrue: [^ nil].
-  label := aWireValue size = 4 ifTrue: [aWireValue at: 4] ifFalse: [0].
+  label := aWireValue size >= 4 ifTrue: [aWireValue at: 4] ifFalse: [0].
   (aWireValue at: 1) = 0 ifTrue: [^ PBLabeledRoot label: label record: nil].
   ^ PBLabeledRoot label: label
     record: (PBRootRecord segment: (aWireValue at: 2) offset: (aWireValue at: 3) epoch: (aWireValue at: 1)).
@@ -333,22 +381,46 @@ PBClusterMessage >> type
 PBClusterMessage >> from
   ^ from.
 
-"A fresh copy of the wire value of the field aFieldName; PBValidationError when the type has no
- such field."
+"A fresh copy of the wire value of the field aFieldName; an optional field the message does not
+ carry reads false (proto_db msg.get('unknown', False); every optional field is a Boolean).
+ PBValidationError when the type has no such field."
 PBClusterMessage >> at: aFieldName
-  | fields |
+  | fields optional |
   fields := self class _fieldsOf: type.
   1 to: fields size do: [:i |
     (fields at: i) key = aFieldName ifTrue: [^ self class _copyWire: (values at: i)]].
+  optional := self class _optionalFieldsOf: type.
+  1 to: optional size do: [:i |
+    (optional at: i) key = aFieldName ifTrue: [
+      | value |
+      value := values at: fields size + i.
+      ^ value isNil ifTrue: [false] ifFalse: [value]]].
   ^ PBValidationError signal: 'A ' , type printString , ' message has no field ' , aFieldName printString.
 
+"Whether the message carries the field aFieldName: every field of its type, and an optional
+ field only when present."
+PBClusterMessage >> includesField: aFieldName
+  | all |
+  all := self _allFields.
+  1 to: all size do: [:i |
+    (all at: i) key = aFieldName ifTrue: [
+      ^ i <= (self class _fieldsOf: type) size or: [(values at: i) notNil]]].
+  ^ false.
+
+"The fields of the type then its optional fields, (name -> kind), in the order of values."
+PBClusterMessage >> _allFields
+  ^ (self class _fieldsOf: type) , (self class _optionalFieldsOf: type).
+
 "The msgpack bytes of the message: a map of v, type, from, then the fields in the order of the
- table (proto_db encode_message of a message make_message built in that order)."
+ table, then the optional fields it carries (proto_db encode_message of a message make_message
+ built in that order)."
 PBClusterMessage >> encode
-  | fields |
-  fields := self class _fieldsOf: type.
+  | all required |
+  all := self _allFields.
+  required := (self class _fieldsOf: type) size.
   ^ MessagePack encode: (MessagePackMap withAll: { 'v' -> self class protocolVersion. 'type' -> type. 'from' -> from }
-    , ((1 to: fields size) asArray collect: [:i | (fields at: i) key -> (values at: i)])).
+    , (((1 to: all size) asArray select: [:i | i <= required or: [(values at: i) notNil]])
+      collect: [:i | (all at: i) key -> (values at: i)])).
 
 PBClusterMessage _initializeSchema.
 

@@ -1,6 +1,8 @@
 # Deviations and refusals
 
-Where protoBaseST differs from `proto_db` at `v2.0.0rc2`, and everything it refuses.
+Where protoBaseST differs from `proto_db` at `v2.0.0rc2`, and everything it refuses. The cluster
+branch follows `proto_db` at `v2.0.0rc4` at format 4 (protocol 14, format 5 refused; see
+[Reading](#reading)).
 The rule behind the whole list is the design spec's: **refuse, never diverge**. A value, type,
 version or operation the prototype cannot handle exactly signals an explicit error naming it. It
 never stores something else in its place, and it never replaces where `proto_db` would merge.
@@ -40,15 +42,16 @@ All are `PBValidationError`, raised by the call that receives the value, naming 
 
 | Value | Why it is refused | What to do |
 |---|---|---|
-| A `Symbol` longer than six bytes (decision 2; format 4 has no symbol kind) | A symbol stored as a string would come back as a string; the value would change kind. | Store a `String`. When `@sym` lands (format 5), protoST gets an explicit wrapper. |
+| A `Symbol` longer than six bytes (decision 2; format 4 has no symbol kind) | A symbol stored as a string would come back as a string; the value would change kind. | Store a `String`. When `@sym` lands (in a later format; `proto_db` deferred symbol references past format 5), protoST gets an explicit wrapper. |
 | A short `Symbol`, such as `#paid` | **Not refused**, because in protoST it *is* the `String` `'paid'` (STATUS D35). It is stored as a string. | Nothing depends on telling them apart. |
 | A protoST `Dictionary` | Its order is unspecified and the order of a map is part of its bytes. | `PBFrozenDict`, or a `PBDictionary`. |
 | `Fraction`, `Character`, `Set`, `Bag`, `Interval`, a block, any other object | They have no kind in the format. Storing them under another kind would be a lie. | Convert explicitly. |
 | A string with a lone surrogate | It has no UTF-8 encoding. | |
 | A list, a map, a NaN as a key or set element | Not orderable (as in Python). | `PBTuple`. |
 | A value nested deeper than 1022 msgpack containers (`PBCodec maxValueDepth`) | The normative limit of `v2.0.0rc2`. Reading deeper data is `PBCorruptionError`. | |
-| A root name starting with `__` | Reserved for the format. | |
+| A root name starting with `__`, written or removed (`removeRootObject:` too, since `proto_db` 2.0.0rc4) | Reserved for the format (the runtime registry's roots). | |
 | An attribute name starting with `_`, or `oid`, `atom_pointer`, `context`, `with_`, `has_defined_attr`, or a name the class reserves | The format's rule for records. | |
+| A change (`withAll:`, `with:value:`) naming `parents` or `with_parents` | Reserved for new fields by `proto_db` 2.0.0rc4 (format spec "Reserved names", R157, R158: DBObject's parents API). A stored field of either name, written before, still loads, reads and is carried unchanged by a new version. | Another name. |
 | A `PBSet` element nested past 1020, a `PBHashDictionary` key or value past 1018 | The bucket tuple around it adds containers; refused when the mutator is called. | |
 | A slice bound that is not an Integer or `nil` (including `true`) | Python's `slice.indices` takes `True` as 1; in Smalltalk a Boolean is not a number, and `proto_db`'s own positions refuse `bool`. `tests/unit/list_positions.st` records `proto_db`'s answers next to this one's. | |
 | `PBList extend:` of a `String` | Python's `extend("abc")` appends three one-character strings; in Smalltalk a String's elements are Characters, which no format stores. | `appendLast:` for one string value. |
@@ -214,26 +217,40 @@ collections with writes, and `PBCountedSet` since Task 22.
 - **Format-3 collections** are read; their indexes are not rebuilt, and `validate()` and
   `rebuilt()` of misfiled format-3 collections are not provided.
 - **`snapshot_ref` byte references, pagers and residency** are not provided.
-- **Symbols and the per-database class registry** (`__currentModules`, `@sym`) are format-5
-  features and are outside this prototype. The registry of record classes is process-wide, as
-  `proto_db`'s.
+- **Format 5 is refused** (`proto_db` 2.0.0rc4, the runtime registry D62: the features `parents`,
+  envelope key `p`, and `registry`, the types `ModuleList` and `Catalog`, aliases 22 and 23).
+  protoBaseST reads formats 2 to 4 and writes 4, as `proto_db` writes for data without a
+  feature. A segment header or root record of version 5 (or above) is `PBNotSupportedError`
+  (format spec "Format stability": a reader that predates a version refuses it and never
+  misreads it), so any space an rc4 writer opened with a feature is refused at open. The header
+  is checked before any record of the segment is decoded, so a four-key envelope is never
+  reported as corruption (`tests/conformance/format5_refused.st`). An acceptor log of log format
+  3 is refused at its header; protoBaseST writes log format 2 and never a kind-7 entry. The
+  aliases 22 and 23 are in the built-in table with no class: a record of either is
+  `PBNotSupportedError`, and none is ever written. The runtime registry (modules, catalog, C3
+  resolution, `__currentModules`, `__catalog`) is not supported; it gets its own plan after the
+  cluster branch. The registry of record classes is process-wide, as `proto_db`'s.
 - **The root record refusal** is `proto_db`'s `decode_root` sentence ("Undecodable root record"),
   without protoST's MessagePack detail. `proto_db` keeps that detail only as `__cause__`, and
   protoST has no exception chaining. *Cost:* a corrupt root is harder to diagnose.
 
 ## Conformance vectors
 
-The vectors are those of `proto_db` at `v2.0.0rc2` (digest recorded in
-`tests/conformance/vectors.sha256`). Where protoBaseST differs from the manifest on purpose, the
-difference is a tracked table (`tests/conformance/_expected_differences.st`) and the runner fails
-if a listed difference goes away or an unlisted one appears. Three remain, all `permanent,
-design 4.3` (no time-zone database):
+The vectors are those of `proto_db` at `v2.0.0rc4` (digest `37b286fd…`, recorded in
+`tests/conformance/vectors.sha256`; `v2.0.0rc2` before cluster Task 22a). Where protoBaseST differs
+from the manifest on purpose, the difference is a tracked table
+(`tests/conformance/_expected_differences.st`) and the runner fails if a listed difference goes
+away or an unlisted one appears. Six remain: three `permanent, design 4.3` (no time-zone
+database) and three format-5 vectors refused until the runtime-registry plan (D62):
 
 | Section | Id | Difference |
 |---|---|---|
 | `values_decode_only` | `datetime-zone-format3` | Decodes to a `PBLegacyZoneDateTime` (the wall clock), not the instant; re-encoding it is `PBValidationError`. |
 | `values_read_not_rewritten` | `map-zone-key-format3` | Re-encoding is refused, as listed; the decoded keys are format-3 wall clocks, not instants. |
 | `invalid` | `value-instant-wall-out-of-range` | **Accepted** and presented in UTC. The wall-clock range needs the zone's rules; the format spec ("Known gaps") lets a reader without a database present the instant in UTC. Refusing would call valid data corrupt. |
+| `format5` | `parents_database` | A format-5 space (feature `parents`): its version-5 root is `PBNotSupportedError` at open. |
+| `format5` | `registry_database` | A format-5 space (feature `registry`): the same refusal. |
+| `format5` | `roots_log_v5` (`cluster/roots-v5.log`) | An acceptor log of log format 3: `PBNotSupportedError` at its header. |
 
 The invalid `message-oversized` vector (a frame length, the frame layer's refusal) is verified by
 `tests/conformance/cluster.st` with `PBClusterFrame lengthFrom:`; no vector is skipped.
@@ -241,7 +258,8 @@ The invalid `message-oversized` vector (a frame length, the frame layer's refusa
 ## Cluster wire messages
 
 `PBClusterMessage` (`cluster/protocol.st`) decodes what `proto_db`'s `protocol.py` at
-`v2.0.0rc3` decodes and refuses what it refuses. Where `proto_db`'s format spec (and so the
+`v2.0.0rc4` (protocol 14) decodes and refuses what it refuses. Protocol 13 and 14 nodes never
+exchange messages: every message carries `v`, and another version drops the connection. Where `proto_db`'s format spec (and so the
 cluster plan's brief and design spec 1.11, which quote it) words a rule differently from its
 code, the code is followed (controller ruling, cluster Task 5 review), because a peer is judged
 by the bytes `proto_db` accepts. Pinned by `tests/unit/cluster_messages.st`:
@@ -253,8 +271,17 @@ by the bytes `proto_db` accepts. Pinned by `tests/unit/cluster_messages.st`:
   is ignored. No honest peer writes bin keys (`packb(use_bin_type=True)`); the two readings
   differ only on garbage. The disagreement between `format-spec.rst` and `protocol.py` is a note
   for `proto_db` upstream.
-- **Version.** `proto_db` refuses `msg.get('v') != 13`, and Python's `13.0 == 13`: a `v` written
-  as the Float 13.0 (float64 or float32) is version 13. `true` is not (Python's `True == 1`).
+- **Version.** `proto_db` refuses `msg.get('v') != 14`, and Python's `14.0 == 14`: a `v` written
+  as the Float 14.0 (float64 or float32) is version 14. `true` is not (Python's `True == 1`).
+- **Optional `unknown` (R240L).** `fetched` and `commit_info` may carry `unknown`, a Boolean:
+  absent reads `false`, present and not a Boolean is refused, present is carried and re-encoded
+  (`at:`, `includesField:`). On any other type it is an extra field, ignored. At DEPTH = 0 the
+  port never sends `fetch` or `commit_query` and ignores the replies; answering `unknown` and the
+  read capping of the fetch service (R212) are Phase D.
+- **Five-item roots.** A protocol-14 root may carry its format version as a fifth item (above 4).
+  protoBaseST never writes one, and refuses every one it receives with `proto_db`'s two reasons:
+  a fifth item that is not an Integer above 4 is malformed; any other is a format version this
+  node does not read (2 to 4).
 - **Value lists.** The format spec lists the values of `done.outcome` (`committed`, `none`,
   `unknown`) and `answer.state` (`ok`, `empty`, `unknown`); `proto_db`'s `_check_field` checks
   only that they are strings, and so does protoBaseST. A message using another value is a
@@ -274,10 +301,10 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
 - **Frame authentication (divergence, design spec 8.4 Q5, CC4).** `proto_db`'s cluster has no
   authentication: a frame is a 4-byte length and a msgpack map. protoBaseST offers optional HMAC
   frame authentication with a shared key (`PBClusterFrame`, a `ByteArray` of at least 32
-  bytes). **Disabled** (no key), the frames are protocol 13 byte for byte and the message
+  bytes). **Disabled** (no key), the frames are protocol 14 byte for byte and the message
   vectors are the test. **Enabled**, every frame body is the msgpack bytes followed by a 32-byte
   tag, HMAC-SHA-256(key, UTF-8(receiver id) ‖ 0x00 ‖ msgpack bytes), and the 4-byte length
-  covers both: such frames are not protocol 13, and a `proto_db` node (or a protoBaseST node
+  covers both: such frames are not protocol 14, and a `proto_db` node (or a protoBaseST node
   without the key) refuses them as undecodable, as protoBaseST with a key refuses an unkeyed
   frame. A missing or wrong tag drops the connection like an invalid message. The receiver id in
   the tag stops a frame from being delivered to another member; there is no replay counter,

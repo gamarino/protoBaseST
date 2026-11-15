@@ -25,7 +25,7 @@ PBDBError subclass: #PBCorruptionError.
 PBCorruptionError comment: 'Stored data failed an integrity check. Counterpart of ProtoBase ProtoCorruptionError.'.
 
 PBCorruptionError subclass: #PBClusterProtocolError.
-PBClusterProtocolError comment: 'Bytes received on a cluster connection that are not a valid message of protocol 13: not one msgpack map, a key that is not a string, a missing v, type or from, another version, an unknown type, a missing or ill-typed field. The receiver drops the connection. Counterpart of ProtoBase ClusterProtocolError (proto_db/cluster/protocol.py).'.
+PBClusterProtocolError comment: 'Bytes received on a cluster connection that are not a valid message of protocol 14: not one msgpack map, a key that is not a string, a missing v, type or from, another version, an unknown type, a missing or ill-typed field, an ill-typed optional field, a root of a format version this node does not read (5 or above). The receiver drops the connection. Counterpart of ProtoBase ClusterProtocolError (proto_db/cluster/protocol.py).'.
 
 PBDBError subclass: #PBNotSupportedError.
 PBNotSupportedError comment: 'The requested value, type, version or operation is not supported. protoBaseST refuses explicitly instead of diverging from ProtoBase. Counterpart of ProtoBase ProtoNotSupportedError.'.

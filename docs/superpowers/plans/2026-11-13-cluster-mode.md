@@ -21,17 +21,21 @@ core runs in a seeded, single-threaded, virtual-time simulator that carries ever
 - CPython ≥ 3.11 with `proto_db` from the existing interop venv, for Task 26 only.
 
 **Spec:** `docs/superpowers/specs/2026-11-13-cluster-design.md` (read all of it, including §8.4,
-the maintainer's answers Q1–Q8). The normative protocol and format are `proto_db` at `v2.0.0rc3`
-(`7786974`; its cluster paths and vectors equal `v2.0.0rc2`, spec header):
+the maintainer's answers Q1–Q8). The normative protocol and format are `proto_db` at `v2.0.0rc4`
+(`8e6127f`, since Task 22a; before it `v2.0.0rc3`, `7786974`). What changed from rc3 is listed, item by
+item, in `docs/superpowers/specs/2026-11-15-rc4-delta.md`; protoBaseST follows rc4 at format 4
+(protocol 14, format 5 refused):
 - `docs/source/coordinator-protocol.rst` ("CP" below; written for an implementer of protoBaseST);
 - `docs/source/format-spec.rst` lines 1434-1662 ("FS-log", "FS-wire");
 - `docs/decisions.md` D44-D55 and the rulings they cite;
 - `proto_db/cluster/*.py`, `proto_db/storage/logfile.py`, `proto_db/transactions.py`
   (`_run_round`, `_permit_round`, `_lease_base`, `_phase_1_floor`, `_commit_base`,
   `Database.run`);
-- `tests/unit/test_cluster_*.py` (27 files, 261 functions), `tests/support/plant_defects.py`.
+- `tests/unit/test_cluster_*.py` (29 files, 298 functions at rc4; 27 and 261 at rc3),
+  `tests/support/plant_defects.py`.
 
-Read every `proto_db` file with `git -C "$PROTOBASE_REPO" show v2.0.0rc3:<path>`; never modify
+Read every `proto_db` file with `git -C "$PROTOBASE_REPO" show v2.0.0rc4:<path>` (rc3 for the tasks done
+before Task 22a); never modify
 that repository. **When a rule is unclear, `proto_db`'s code at the tag is the reference**; read it
 before guessing. Every rule in the core carries a comment citing its source (D/R number, CP
 section, or `proto_db` function), as the spec's first risk asks.
@@ -1330,21 +1334,21 @@ full registry (D62) its own plan after this branch merges. The authority is
 `transactions.st`, `object.st`, `tests/conformance/*`, `tests/interop/setup_venv.sh`,
 `tests/unit/cluster_checklist.tsv`, `cluster_checklist.sh`, docs.
 
-- [ ] W1, W2, W4: PROTOCOL_VERSION 14, the optional `unknown` reply field on `fetched` and
+- [x] W1, W2, W4: PROTOCOL_VERSION 14, the optional `unknown` reply field on `fetched` and
   `commit_info` (read and carried; the port never sends a peer fetch, so it never sets it), the
   five-item root, and log format 3 refused with `PBNotSupportedError`.
-- [ ] F5: type aliases 22 `proto_db.registry.ModuleList` and 23 `proto_db.registry.Catalog`, with
+- [x] F5: type aliases 22 `proto_db.registry.ModuleList` and 23 `proto_db.registry.Catalog`, with
   no class (`builtinCount` 24).
-- [ ] F6: refuse creating fields named `parents` or `with_parents`; a stored field of either name
+- [x] F6: refuse creating fields named `parents` or `with_parents`; a stored field of either name
   still loads, reads and carries over (R157).
-- [ ] S1: `removeRootObject:` refuses `__` names.
-- [ ] F7: re-vendor the rc4 vectors. `_vectors.st` learns the `segments` list, and
+- [x] S1: `removeRootObject:` refuses `__` names.
+- [x] F7: re-vendor the rc4 vectors. `_vectors.st` learns the `segments` list, and
   `parents_database`, `registry_database` and `roots_log_v5` become expected
   `PBNotSupportedError`. The F4 check: a version-5 segment header is refused before any record
   decode, so a four-key envelope never reaches `framing.st:375`.
-- [ ] T1: re-pin the checklist to rc4 (298 rows, per the delta doc's classification). T3: bump
+- [x] T1: re-pin the checklist to rc4 (298 rows, per the delta doc's classification). T3: bump
   the venv to rc4.
-- [ ] Docs: C5 and C6 (spec normative tag rc4, deviations: format 5 refused, registry not
+- [x] Docs: C5 and C6 (spec normative tag rc4, deviations: format 5 refused, registry not
   supported).
 - Tests: the conformance and interop files touched, `bytes_pinned`, the checklist both with and
   without `PROTOBASE_REPO`, and the wire unit tests. Not the whole suite.
@@ -1601,9 +1605,11 @@ the timer audit (`tests/audit`) and the hunt for integration problems run once, 
 found here is fixed in the owning module, fail-first.
 
 - [ ] **Step 1:** run the whole suite with the venv present. Expected: all PASS, no `SKIP` under
-  `tests/conformance/cluster.st`, `cluster_checklist.sh` passing with 261 rows. Then run the
+  `tests/conformance/cluster.st`, `cluster_checklist.sh` passing with 298 rows (rc4, since Task 22a). Then run the
   checklist in final mode with the checkout named: `CHECKLIST_FINAL=1
-  PROTOBASE_REPO=<a ProtoBase checkout holding v2.0.0rc3> tests/unit/cluster_checklist.sh`.
+  PROTOBASE_REPO=<a ProtoBase checkout holding v2.0.0rc4> tests/unit/cluster_checklist.sh`.
+  Also the F4 audit (rc4 delta, risk 4): no path decodes a record without its segment header
+  checked (opaque atoms, the atom cache, records carried in messages).
   Expected: PASS, no `deferred` row left (each is `ported` or re-justified `n/a`).
 - [ ] **Step 1b:** run the timer audit: `tests/run_tests.sh tests/audit`. Expected: all parts
   PASS at their declared floors. Re-measure every floor (`AuditFamilies floors`), not only the

@@ -4,6 +4,7 @@
  connection). The framed log files (roots-torn.log, ranges.log, segments.log and the
  invalid vectors of layer log) are verified by framing_logs.st (PBFramedLog), the acceptor
  log roots.log and the invalid vectors of layer roots_log by rootlog.st (PBAcceptorLog), the
+ acceptor log of format 3 roots-v5.log (refused, PBNotSupportedError) by format5_refused.st, the
  cluster segment by cluster_segment.st (PBSpaceRoot databases:term:epoch:previous:), the
  message frames and the invalid vectors of layer message by messages.st (PBClusterMessage),
  except message-oversized, verified here: a frame length over 64 MiB is refused by the frame
@@ -25,7 +26,7 @@ oversized do: [:e |
     on: PBDBError do: [:x | (x isKindOf: PBClusterProtocolError) ifTrue: [nil] ifFalse: [x class name , ': ' , x messageText]].
   outcome isNil ifFalse: [('FAIL message-oversized: ' , outcome) displayNl. Smalltalk exit: 1]].
 "The section must hold exactly the items verified elsewhere (the files listed above)."
-(cluster keys asSortedCollection asArray = #('messages' 'ranges_log' 'roots_log' 'roots_log_torn' 'segment' 'segments_log'))
+(cluster keys asSortedCollection asArray = #('messages' 'ranges_log' 'roots_log' 'roots_log_torn' 'roots_log_v5' 'segment' 'segments_log'))
   ifFalse: [('FAIL the cluster section holds ' , cluster keys asSortedCollection asArray printString) displayNl. Smalltalk exit: 1].
 base := FileSystem temp / ('pbst-cluster-' , Smalltalk pid printString).
 base deleteAll.

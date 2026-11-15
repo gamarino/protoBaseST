@@ -1,8 +1,8 @@
 "EXPECT: ok 17"
-"PBClusterFrame (cluster/protocol.st): the frames of cluster protocol 13, a 4-byte big-endian
+"PBClusterFrame (cluster/protocol.st): the frames of cluster protocol 14, a 4-byte big-endian
  length then the body, at most 64 MiB (proto_db cluster/protocol.py encode_frame,
  FrameDecoder), and the optional HMAC frame authentication of CC4 (design spec 8.4, Q5).
- Without a key the frame is protocol 13 byte for byte (the vector request.frame). With a key
+ Without a key the frame is protocol 14 byte for byte (the vector request.frame). With a key
  the body is the msgpack bytes followed by a 32-byte tag, HMAC-SHA-256(key, UTF-8(receiver id)
  || 0x00 || msgpack bytes), and the length covers both: a frame bound to another receiver, a
  flipped tag byte, a keyed frame read without the key and an unkeyed frame read with one are
@@ -23,7 +23,7 @@ frame := (vectors / 'cluster' / 'messages' / 'request.frame') binaryContents.
 message := PBClusterMessage decode: (frame copyFrom: 5 to: frame size).
 key := ByteArray withAll: ((1 to: 32) asArray collect: [:i | i * 7 \\ 256]).
 
-c that: 'without a key, the frame is the protocol-13 vector byte for byte'
+c that: 'without a key, the frame is the protocol-14 vector byte for byte'
   is: (PBClusterFrame encode: message to: 'n1' key: nil) equals: frame.
 c that: 'a length over 64 MiB is refused from the length bytes' signals: PBClusterProtocolError containing: 'exceeds'
   during: [PBClusterFrame lengthFrom: (vectors / 'invalid' / 'message-oversized.bin') binaryContents].
@@ -50,16 +50,17 @@ c that: 'a key of 31 bytes is refused' signals: PBValidationError containing: '3
 c that: 'a frame whose length is not the size of its body is refused' signals: PBClusterProtocolError containing: 'length'
   during: [PBClusterFrame decode: (frame copyFrom: 1 to: frame size - 1) to: 'n1' key: nil].
 
-"Python: hmac.new(key, 'nödo'.encode() + b'\0' + body, sha256), and the same for a 100-byte key."
+"Python: hmac.new(key, 'nödo'.encode() + b'\0' + body, sha256), and the same for a 100-byte key,
+ over the body of the rc4 vector request.frame (v 14)."
 keyed := PBClusterFrame encode: message to: 'nödo' key: key.
 c that: 'the tag of a non-ASCII receiver is the UTF-8 one Python computes'
   is: (keyed copyFrom: keyed size - 31 to: keyed size)
-  equals: (Check bytes: 'd4e4126e199f45ee7a259deeb97a99bc5cb6806b52783f130e9ad8cf2270c1fe').
+  equals: (Check bytes: 'bd401b37956e60f5fd4d6cc09ea56f7b36385d554ea7ed3572e09744d835751a').
 c that: 'a non-ASCII receiver round-trips' is: (PBClusterFrame decode: keyed to: 'nödo' key: key) encode equals: message encode.
 keyed := PBClusterFrame encode: message to: 'n1' key: (ByteArray withAll: ((1 to: 100) asArray collect: [:i | i * 3 \\ 256])).
 c that: 'the tag of a 100-byte key is the one Python computes'
   is: (keyed copyFrom: keyed size - 31 to: keyed size)
-  equals: (Check bytes: '70cbf4f0b4af6a6f72a6ae5bdfc206569e2dbed9675983eeb0f373abdf918923').
+  equals: (Check bytes: '3d5fb243ec45be170a473680045416a221903996ec30246407bcbf84b01a7e21').
 c that: 'an empty key is refused' signals: PBValidationError containing: '32'
   during: [PBClusterFrame encode: message to: 'n1' key: #[]].
 c that: 'an empty receiver id is refused' signals: PBValidationError containing: 'receiver'

@@ -2,6 +2,23 @@
 
 ## 0.2.0 (unreleased)
 
+- Follows `proto_db` 2.0.0rc4 at format 4 (cluster Task 22a; the delta is
+  `docs/superpowers/specs/2026-11-15-rc4-delta.md`). Cluster protocol 14
+  (`PBClusterMessage protocolVersion`): the optional `unknown` of `fetched` and `commit_info`
+  (checked when present, carried and re-encoded; `at:` reads `false` when absent,
+  `includesField:`), and the five-item root refused with `proto_db`'s two reasons
+  (`readableRootVersions` 2 to 4). Format 5 is refused with `PBNotSupportedError` (segments,
+  roots and log format 3, as before), and protoBaseST keeps writing format 4 and log format 2.
+  The built-in aliases 22 `proto_db.registry.ModuleList` and 23 `proto_db.registry.Catalog` are in
+  the table with no class (`builtinCount` 24); a record of either is never written
+  (`PBAtomEnvelope encode`, `PBTypeRegistry registryAliases`). A change naming `parents` or
+  `with_parents` is `PBValidationError` (R157), while a stored field of either name still loads
+  and is carried. `removeRootObject:` refuses `__` names, as `setRootObject:` does. The
+  conformance vectors are re-vendored at rc4 (digest `37b286fd…`); `_vectors.st` reads the
+  `segments` list, and the new runner `tests/conformance/format5_refused.st` pins the format-5
+  vectors as expected `PBNotSupportedError` refusals and checks that a version-5 segment is
+  refused before any record is decoded. The checklist is pinned to rc4 (298 rows; a deferral may
+  name a lettered task such as `22b`), and the interop venv to rc4 (Python 3.12 or newer).
 - Group commit on a standalone storage (Task 22, `proto_db` D52 and `_standalone_round`), with
   the shared round runner (`round.st`). Every commit and every new database is a
   `PBCommitEntry` (`transaction:willRetry:deadline:`, `createDatabase:deadline:`, `future`)

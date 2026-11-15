@@ -42,7 +42,9 @@ Attribute names are checked as the format spec's 'Atom records' requires, with
 PBValidationError: a non-empty String that does not start with _, is not oid,
 atom_pointer or context, nor a behaviour name of DBObject (with_,
 has_defined_attr) or of the class (reservedAttributeNames); a name given twice
-in one call is refused too. A class need not be registered to build records;
+in one call is refused too, and so is a change naming parents or with_parents
+(parentsApiNames: reserved for new fields from proto_db 2.0.0rc4, R157; a stored
+field of either name still loads and is carried unchanged). A class need not be registered to build records;
 its records are refused when saved until it is (PBObjectSpace
 registerAtomClass:), as ProtoBase refuses a class with no declared type name.
 
@@ -72,6 +74,13 @@ PBObject class >> persistedFields
  any subclass: the check reads them from PBObject, so no override drops them."
 PBObject class >> dbObjectBehaviourNames
   ^ #('with_' 'has_defined_attr').
+
+"The names of DBObject's parents API (proto_db 2.0.0rc4, format spec 'Reserved names', R157,
+ R158): no change may create or set a field of either name. The reservation is write-only: a
+ stored field of either name (written before format 5) still loads, reads and is carried
+ unchanged by a new version, so the read path (_checkPersistedNames:at:) never checks them."
+PBObject class >> parentsApiNames
+  ^ #('parents' 'with_parents').
 
 "The names an application class reserves besides DBObject's: none by default."
 PBObject class >> reservedAttributeNames
@@ -121,6 +130,9 @@ PBObject class >> _state: anArrayOfAssociations with: aChanges
       ^ PBValidationError signal: self name , ': an attribute is an Association (name -> value), not '
         , (PBKeys _preview: each)].
     name := self _checkAttributeName: each key.
+    (PBObject parentsApiNames includes: name) ifTrue: [
+      ^ PBValidationError signal: self name , ': the attribute name ' , name printString
+        , ' is reserved for the parents API of DBObject (format spec, Reserved names): a change never writes it'].
     (given includes: name) ifTrue: [
       ^ PBValidationError signal: self name , ': the attribute ' , name printString , ' is given twice'].
     given add: name.

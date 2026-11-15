@@ -139,7 +139,7 @@ States: active, committing, committed, aborted. After `commit` or `abort`, every
 | `database`, `isActive` | |
 | `getRootObject: aName` | The root, `nil` when absent. The transaction's own write comes first. The first read of a name is recorded (absence too). |
 | `rootNames` | Sorted names as this transaction sees them. Records nothing. |
-| `setRootObject: aName value: v` | Writes the root. `v` passes `PBCodec canonical:for:` at once. A name starting with `__` is `PBValidationError`. |
+| `setRootObject: aName value: v` | Writes the root. `v` passes `PBCodec canonical:for:` at once. A name starting with `__` is `PBValidationError` (and so it is for `removeRootObject:`). |
 | `setRootObject: aName value: v replace: aBoolean` | With `true`, the root is replaced, not merged, at commit (last writer wins). |
 | `removeRootObject: aName` | Removes the root (counts as a replace). |
 | `getMutable: aName`, `mutableNames` | Reads a cell and its names. |
@@ -218,7 +218,7 @@ Applications meet them through `registerAtomClass:` and through a record read fr
 | `PBAtom >> oid`, `tag`, `pointer`, `isSaved`, `isLoaded`, `knownOid`, `state`, `stateAt:` | Identity and the stored fields. An atom's oid is its record's; an atom not stored draws a version-4 UUID in memory on first need (`proto_db` D21). Atoms are `=` when one object or sharing an oid. |
 | `PBAtom class >> typeName`, `typeAliases`, `requiredFields`, `persistedFields`, `integerFields`, `slotFields`, `unloadedAt:storage:` | The class-side declaration. |
 | `PBTypeRegistry class >> register:` | As `registerAtomClass:`. |
-| `classForTag:`, `tagFor:`, `isRegistered:`, `nameOfTag:`, `canonicalTag:`, `writerTag:`, `isTag:sameTypeAs:`, `recordShapeForTag:`, `unloadedAtomFor:at:storage:`, `checkOpaqueName:`, `aliasOf:`, `isValidName:`, `builtinNames`, `builtinCount` | Lookup. An unregistered application name gives `PBOpaqueAtom`; an unknown `proto_db.` name is `PBCorruptionError`. |
+| `classForTag:`, `tagFor:`, `isRegistered:`, `nameOfTag:`, `canonicalTag:`, `writerTag:`, `isTag:sameTypeAs:`, `recordShapeForTag:`, `unloadedAtomFor:at:storage:`, `checkOpaqueName:`, `aliasOf:`, `isValidName:`, `builtinNames`, `builtinCount` (24), `registryAliases` | Lookup. An unregistered application name gives `PBOpaqueAtom`; an unknown `proto_db.` name is `PBCorruptionError`. The format-5 aliases 22 and 23 (`proto_db.registry.ModuleList`, `Catalog`) have no class: `PBNotSupportedError`. |
 
 A `PBOpaqueAtom` is a record of a type with no class here (decision D59). It answers `typeName`,
 `tag`, `at:` and `attributeNames`; every other message, and its use where a built-in type is
@@ -329,7 +329,7 @@ means the same in both languages. `PBTimeoutError` is not protoST's `TimeoutErro
 | `PBClosedError` (under `PBValidationError`) | The space or storage is closed |
 | `PBUserError` | Misuse: a transaction used after its end, a lock not held |
 | `PBCorruptionError` | Stored data is damaged or malformed |
-| `PBClusterProtocolError` (under `PBCorruptionError`) | Bytes received on a cluster connection are not a valid protocol-13 frame or message, or fail frame authentication |
+| `PBClusterProtocolError` (under `PBCorruptionError`) | Bytes received on a cluster connection are not a valid protocol-14 frame or message, or fail frame authentication |
 | `PBNotSupportedError` | Valid, but outside what the prototype handles |
 | `PBUnexpectedError` | The file system failed |
 | `PBOutcomeUnknownError` (under `PBUnexpectedError`) | The commit may or may not have been applied; never retried |
@@ -755,19 +755,22 @@ For tests, tools and readers of the format. An application does not need them.
   Malformed entries and two different roots of one kind with equal label and epoch are
   `PBCorruptionError`.
 - **Wire messages** (`cluster/protocol.st`): `PBClusterMessage`, the 22 message types of
-  `proto_db`'s cluster protocol 13 (`protocol.py`). Class side: `protocolVersion` (13), `schema`
+  `proto_db`'s cluster protocol 14 (`protocol.py` at `v2.0.0rc4`). Class side: `protocolVersion` (14), `schema`
   (a fresh `Dictionary` from each type to its `name -> kind` Associations in the order of the
   format spec's table; kinds `#int #number #str #bool #root #records #uuid #optBytes #optStr
   #ranges #strs #after`), `type:from:fields:` (a message to send: exactly the fields of the type,
   as `name -> wire value`; anything else is `PBValidationError`), `decode:` (the body of one
   frame), `rootFrom:` / `rootValue:` (a wire root and a `PBLabeledRoot` or `nil`: `[0, nil, nil,
-  label]` is the empty space, the 3-item form reads with label 0 and is never written),
+  label]` is the empty space, the 3-item form reads with label 0 and is never written, a 5-item
+  root of a format version is refused: `readableRootVersions` is `#(2 3 4)`),
   `rangesFrom:` / `rangesValue:` (`nil` or `{ segment bytes. start. end }` triples, start <=
   end) and `afterFrom:` (`nil` or `{ seq. holder }`). A message answers `type`, `from`, `at:`
-  (a fresh copy of a field's wire value) and `encode` (the msgpack map `v type from` then the
-  fields in table order). `decode:` signals `PBClusterProtocolError` (a `PBCorruptionError`) for
+  (a fresh copy of a field's wire value; the optional `unknown` of `fetched` and `commit_info`
+  reads `false` when absent), `includesField:` (whether an optional field is carried) and
+  `encode` (the msgpack map `v type from`, the fields in table order, then the optional fields
+  carried). `type:from:fields:` takes the optional fields too. `decode:` signals `PBClusterProtocolError` (a `PBCorruptionError`) for
   bytes that are not one msgpack map, a map key that is not a str or bin, a missing `v`, `type`
-  or `from`, another version, an unknown type, a missing or ill-typed field, or a timestamp ext
+  or `from`, another version, an unknown type, a missing or ill-typed field, an ill-typed optional field, or a timestamp ext
   msgpack-python would refuse (extra fields included); extra fields are ignored and never
   re-encoded. `type:from:fields:` also refuses integers of 2^64 or more and the 3-item root
   form. The rules where `proto_db`'s code and format spec differ are in
@@ -777,7 +780,7 @@ For tests, tools and readers of the format. An application does not need them.
   key: aKeyOrNil` answers the 4-byte big-endian length then the body; `lengthFrom:` reads the
   length from the first 4 bytes alone and refuses one above `maxFrameBytes`;
   `decodeBody:to:key:` answers the message of a body; `decode:to:key:` that of a whole frame
-  (its length must be the size of its body). Without a key (`nil`) the frame is protocol 13 byte
+  (its length must be the size of its body). Without a key (`nil`) the frame is protocol 14 byte
   for byte. The receiver is a non-empty String without NUL, else `PBValidationError`. With a key
   (a `ByteArray` of at least 32 bytes, else `PBValidationError`) the body
   is the msgpack bytes followed by the tag HMAC-SHA-256(key, UTF-8(receiver id) ‖ 0x00 ‖
@@ -785,7 +788,7 @@ For tests, tools and readers of the format. An application does not need them.
   not match (another key, another receiver, a changed byte, an unkeyed frame) is
   `PBClusterProtocolError` whose text names authentication; the tags are compared over all 32 bytes.
   Every refusal of received bytes is `PBClusterProtocolError`, and so is encoding a body over
-  the limit, as in `proto_db`'s protocol.py. The divergence from protocol 13 and the
+  the limit, as in `proto_db`'s protocol.py. The divergence from protocol 14 and the
   trusted-network assumption are in [deviations.md](deviations.md#cluster-mode).
 - **Transports** (`cluster/transport.st`): `PBInProcessTransport` and `PBTcpTransport`, the two
   implementations of `PBClusterTransport`'s protocol (`proto_db`'s `transport.py`). `start: aNodeId

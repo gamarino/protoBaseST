@@ -49,7 +49,14 @@ Not tested, or not proven:
 
 - **Anything outside those scenarios.** No fuzzing of the codec against `proto_db` beyond the
   vectors, the seeded sequences and a few dozen hand-picked edge values.
-- **Other `proto_db` releases.** The reference is `v2.0.0rc2`. A newer release may differ.
+- **Other `proto_db` releases.** The reference is `v2.0.0rc2` (the cluster branch: `v2.0.0rc4` at
+  format 4, protocol 14). A newer release may differ.
+- **Format 5 and the runtime registry** (`proto_db` 2.0.0rc4, D62): refused with
+  `PBNotSupportedError`, not read or written. Its own plan follows the cluster branch
+  (`docs/superpowers/specs/2026-11-15-rc4-delta.md`, section 3b).
+- **Phase D of the cluster (peer fetch):** the fetch service, `commit_query`, their read capping
+  after a lease expires (R212) and the `unknown` answers of a member that cannot tell (R240L,
+  R234L-R245L) are not ported; the port ignores `fetched` and `commit_info` at DEPTH = 0.
 - **Speed.** The AVL workload is many times slower than `proto_db`'s. The dated figures, and how
   they were measured, are in [deviations.md](deviations.md#performance); they are indicative only.
 - **Memory and long runs.** A segment rolls over at 256 MiB as `proto_db`'s does; nothing was run

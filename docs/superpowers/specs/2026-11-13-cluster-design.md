@@ -17,6 +17,11 @@
   `proto_db/storage/tiered.py` and `tests/conformance/vectors/` are unchanged
   (`git diff --stat v2.0.0rc2 HEAD` over those paths is empty), and `PROTOCOL_VERSION` is 13 in
   both. Everything below holds for both tags.
+- **Normative tag since 2026-11-15:** `v2.0.0rc4` (`8e6127f`). Its delta from rc3 is
+  `docs/superpowers/specs/2026-11-15-rc4-delta.md`: protocol 14 (`unknown` on `fetched` and
+  `commit_info`, the five-item root), format 5 (the runtime registry, D62), which protoBaseST
+  refuses with `PBNotSupportedError` while it keeps writing format 4 and log format 2, and the C3
+  rule (R212, R231, R233). Where this spec names rc3, rc4 holds unless the delta says otherwise.
 - **protoBaseST** at `7ef11d7` (branch `feat/prototype`). **protoST** at `bc0ce63` (branch
   `feat/protobase-support`). **protoIO** at `fe9130b` (0.5.0).
 

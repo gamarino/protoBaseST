@@ -1,10 +1,12 @@
-"EXPECT: messages ok 23"
+"EXPECT: messages ok 24"
 "The message frames of the cluster section (README, 'Using the vectors', 8) and the invalid
  vectors of layer 'message', read with PBClusterMessage:
-   messages/*.frame  one frame of each of the 22 types and unknown-root (a commit_query whose
-                     root is nil): the 4-byte big-endian length equals the body's size; the body
-                     decodes (decode:) to the listed type and sender, and each field of the type
-                     describes (PBNotation describeRaw:) as the manifest's typed value; a root,
+   messages/*.frame  one frame of each of the 22 types, unknown-root (a commit_query whose
+                     root is nil) and fetched-unknown (a fetched carrying the optional unknown,
+                     protocol 14): all at v 14; the 4-byte big-endian length equals the body's
+                     size; the body decodes (decode:) to the listed type and sender, and each
+                     field of the type, and each optional field the manifest lists, describes
+                     (PBNotation describeRaw:) as the manifest's typed value; a root,
                      ranges or after field read into its value (rootFrom:, rangesFrom:,
                      afterFrom:) and written back (rootValue:, rangesValue:) describes the same;
                      encode gives the body byte for byte
@@ -13,11 +15,14 @@
                      the frame layer's refusal (PBClusterFrame), verified by cluster.st"
 Import from: 'protobase'.
 Import from: '_vectors'.
-| manifest cluster failures passed body schema typed invalid |
+| manifest cluster failures passed body schema typed invalid optional |
 manifest := Vectors manifest.
 cluster := manifest at: 'cluster'.
 failures := OrderedCollection new.
 schema := PBClusterMessage schema.
+"proto_db OPTIONAL_FIELDS at v2.0.0rc4."
+optional := Dictionary new.
+optional at: 'fetched' put: #('unknown'); at: 'commit_info' put: #('unknown').
 passed := 0.
 
 "The body of a frame: the bytes after its 4-byte big-endian length, which must be their size."
@@ -32,7 +37,7 @@ typed at: #root put: [:v | PBClusterMessage rootValue: (PBClusterMessage rootFro
   at: #ranges put: [:v | PBClusterMessage rangesValue: (PBClusterMessage rangesFrom: v)];
   at: #after put: [:v | PBClusterMessage afterFrom: v].
 
-(cluster at: 'messages') size = 23 ifFalse: [failures add: 'the manifest lists ' , (cluster at: 'messages') size printString , ' frames, not 23'].
+(cluster at: 'messages') size = 24 ifFalse: [failures add: 'the manifest lists ' , (cluster at: 'messages') size printString , ' frames, not 24'].
 (cluster at: 'messages') do: [:entry |
   | id frame message listed problems |
   id := entry at: 'id'.
@@ -43,7 +48,7 @@ typed at: #root put: [:v | PBClusterMessage rootValue: (PBClusterMessage rootFro
   message := [PBClusterMessage decode: frame] on: PBDBError do: [:e | failures add: id , ': ' , e class name , ' ' , e messageText. nil].
   message isNil ifFalse: [
     (message type = (entry at: 'type') and: [message type = ((listed at: 'type') at: 'str')
-        and: [message from = ((listed at: 'from') at: 'str') and: [((listed at: 'v') at: 'int') = '13']]])
+        and: [message from = ((listed at: 'from') at: 'str') and: [((listed at: 'v') at: 'int') = PBClusterMessage protocolVersion printString]]])
       ifFalse: [failures add: id , ': type ' , message type printString , ' from ' , message from printString].
     (schema at: message type) do: [:field |
       | value expected |
@@ -56,7 +61,13 @@ typed at: #root put: [:v | PBClusterMessage rootValue: (PBClusterMessage rootFro
         back := (typed at: field value) value: value.
         (PBNotation describeRaw: back) = expected ifFalse: [
           failures add: id , ': field ' , field key , ' read and written back is ' , (PBNotation describeRaw: back) printString]]].
-    listed keys size = ((schema at: message type) size + 3) ifFalse: [
+    (optional at: message type ifAbsent: [#()]) do: [:name |
+      (listed includesKey: name) = (message includesField: name) ifFalse: [
+        failures add: id , ': the optional field ' , name , ' is carried: ' , (message includesField: name) printString].
+      ((listed includesKey: name) and: [(PBNotation describeRaw: (message at: name)) ~= (listed at: name)]) ifTrue: [
+        failures add: id , ': the optional field ' , name , ' is ' , (PBNotation describeRaw: (message at: name)) printString]].
+    listed keys size = ((schema at: message type) size + 3
+        + ((optional at: message type ifAbsent: [#()]) count: [:name | listed includesKey: name])) ifFalse: [
       failures add: id , ': the manifest lists other fields than the table'].
     message encode = frame ifFalse: [failures add: id , ': encode differs from the frame body']].
   failures size = problems ifTrue: [passed := passed + 1]].

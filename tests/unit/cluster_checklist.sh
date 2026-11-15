@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The checklist of proto_db's cluster tests (spec 6.2): every test function of the
-# tests/unit/test_cluster_*.py files of proto_db v2.0.0rc3 has one row in cluster_checklist.tsv,
+# tests/unit/test_cluster_*.py files of proto_db v2.0.0rc4 has one row in cluster_checklist.tsv,
 # and every row is one of:
 #   ported    <protoBaseST .st test file, repo-relative>  <family> the file exists and the family
 #                                                                   is one of its check labels, whole:
@@ -8,7 +8,7 @@
 #                                                                   `check value: '...'` (outside the
 #                                                                   comments, '' read as '); never a
 #                                                                   prefix, never comment text
-#   deferred  <task number, 19..28>                   <reason>     Phase C ports it (the shell,
+#   deferred  <task number, 19..28, or a sub-task of one: 22b>  <reason>  Phase C ports it (the shell,
 #                                                                   transport, storage, processes)
 #   n/a       <tiered | DEPTH = 1 | Python-only API>  <reason>     it does not apply to the port
 # Columns are tab-separated: proto_db file::function, status, then the two fields above. Blank
@@ -26,7 +26,7 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 PB="${PROTOBASE_REPO:-$REPO/../ProtoBase}"
-TAG=v2.0.0rc3
+TAG=v2.0.0rc4
 explicit="${PROTOBASE_REPO_EXPLICIT-${PROTOBASE_REPO:+1}}"
 if [[ -z "$explicit" && ! -e "$PB" ]]; then
     echo "SKIP: no ProtoBase checkout"
@@ -46,7 +46,7 @@ list="$(for f in $files; do
 done)"
 
 python3 -I - "$REPO" "$HERE/cluster_checklist.tsv" "$list" "$(printf '%s\n' $files | wc -l)" "${CHECKLIST_FINAL:-0}" <<'PY'
-import os, sys
+import os, re, sys
 repo, table, listing, nfiles = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 final = sys.argv[5] == "1"
 
@@ -123,13 +123,14 @@ else:
                 errors.append("%s: %s: %r is not a check label of %s" % (where, key, b, a))
                 continue
         elif status == "deferred":
-            if not a.isdigit() or not 19 <= int(a) <= 28:
-                errors.append("%s: %s: deferred to %r, not a Phase C task (19..28)" % (where, key, a))
+            task = re.fullmatch(r"([0-9]+)([a-z]?)", a)
+            if not task or not 19 <= int(task.group(1)) <= 28:
+                errors.append("%s: %s: deferred to %r, not a Phase C task (19..28, or one with a letter: 22b)" % (where, key, a))
                 continue
             if len(b.split()) < 6:
                 errors.append("%s: %s: the deferral needs a specific reason" % (where, key))
                 continue
-            deferred.setdefault(int(a), []).append(key)
+            deferred.setdefault((int(task.group(1)), task.group(2)), []).append(key)
             if final:
                 errors.append("%s: %s is still deferred to Task %s (CHECKLIST_FINAL=1)" % (where, key, a))
         elif status == "n/a":
@@ -151,7 +152,7 @@ for e in errors:
 print("%d files, %d test functions, %d rows" % (nfiles, len(functions), len(rows)))
 print("ported %d, deferred %d, n/a %d" % (counts["ported"], counts["deferred"], counts["n/a"]))
 for task in sorted(deferred):
-    print("deferred to Task %d (%d):" % (task, len(deferred[task])))
+    print("deferred to Task %d%s (%d):" % (task[0], task[1], len(deferred[task])))
     for key in deferred[task]:
         print("  " + key)
 if errors:

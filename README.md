@@ -226,5 +226,5 @@ the README and the tutorial against the code.
 MIT. Copyright (c) 2026 Gustavo Marino.
 
 Third-party material: `tests/conformance/` (the vectors, `manifest.json`, `vectors.sha256`) is
-vendored from `proto_db` at `v2.0.0rc2`, MIT, Copyright (c) 2023 ProtoBase Team. Its notice is in
+vendored from `proto_db` at `v2.0.0rc4` (`v2.0.0rc2` before the cluster branch), MIT, Copyright (c) 2023 ProtoBase Team. Its notice is in
 [tests/conformance/LICENSE](tests/conformance/LICENSE).

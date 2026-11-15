@@ -13,7 +13,7 @@ types (D59)' and 'Built-in type aliases', with ProtoBase's proto_db/core/atom.py
   PBTypeRegistry canonicalTag: aTag   the tag a writer puts for the type aTag names
   PBTypeRegistry writerTag: aTag      the same, refusing (PBValidationError) a
                                       name every reader must refuse
-  PBTypeRegistry builtinNames         the normative table of the 22 built-in aliases
+  PBTypeRegistry builtinNames         the normative table of the 24 built-in aliases
 
   PBAtom          the abstract base of every persistent object: oid, pointer,
                   storage and the lazy-load memo
@@ -70,10 +70,19 @@ PBTypeRegistry class >> _builtinTable
       'proto_db.indexing.RangeIndex' 'proto_db.indexing.VectorIndex'
       'proto_db.transactions.SpaceRoot' 'proto_db.transactions.DatabaseRoot'
       'proto_db.core.dbobject.DBObject' 'proto_db.avl._Node'
-      'proto_db.avl.CountedKeyNode').
+      'proto_db.avl.CountedKeyNode'
+      'proto_db.registry.ModuleList' 'proto_db.registry.Catalog').
 
+"22 and 23 are the runtime registry's types (format 5, feature registry, proto_db 2.0.0rc4):
+ named here, as the table is append-only, with no class, so a record of either is
+ PBNotSupportedError (docs/deviations.md, 'Reading')."
 PBTypeRegistry class >> builtinCount
-  ^ 22.
+  ^ 24.
+
+"The aliases of the runtime registry's types (proto_db REGISTRY_TYPES): a record of either is
+ format 5, never written here."
+PBTypeRegistry class >> registryAliases
+  ^ #(22 23).
 
 "The alias Integer of a built-in type name, or nil (constant time)."
 PBTypeRegistry class >> aliasOf: aName

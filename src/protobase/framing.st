@@ -478,7 +478,7 @@ PBAtomEnvelope >> slots
  wireOf:atomRef:for:): a name or a value that cannot be written is refused
  here, before anything is written, with the text of tag:oid:state:."
 PBAtomEnvelope >> encode
-  | wireState ref ks |
+  | wireState ref ks writtenTag |
   ref := PBCodec pointerRef.
   ks := state keys.
   "The names first, as tag:oid:state: checks them before the values."
@@ -490,5 +490,11 @@ PBAtomEnvelope >> encode
     | key |
     key := ks at: i.
     key -> (PBCodec wireOf: (state _valueAt: i) atomRef: ref for: ['Attribute ' , (PBCodec repr: key)])]).
+  writtenTag := PBTypeRegistry writerTag: tag.
+  "A record of the runtime registry's types (aliases 22 and 23, feature registry) is format 5:
+   this writer writes format 4 only (docs/deviations.md, 'Reading')."
+  (PBTypeRegistry registryAliases includes: writtenTag) ifTrue: [
+    ^ PBNotSupportedError signal: 'PBAtomEnvelope: a record of the type ' , (PBTypeRegistry nameOfTag: writtenTag)
+      , ' is format 5 (feature registry); protoBaseST writes format 4'].
   ^ MessagePack encode: (MessagePackMap withAll: {
-    't' -> (PBTypeRegistry writerTag: tag). 'oid' -> oid. 's' -> wireState }).
+    't' -> writtenTag. 'oid' -> oid. 's' -> wireState }).
