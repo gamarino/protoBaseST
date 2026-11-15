@@ -1045,6 +1045,7 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     failure drops the message and reconnects after a jittered back-off; control lane only.
     The sender's queue is bounded in bytes (`MAX_FRAME_BYTES`); overflow drops the oldest and
     counts it.
+- **Checklist (Task 18):** turn the 12 `deferred 19` rows of `tests/unit/cluster_checklist.tsv` (`awk -F'\t' '$2=="deferred" && $3==19' tests/unit/cluster_checklist.tsv`) into `ported` rows, each naming the whole check label of a test this task adds; a row this task cannot port is re-justified as `n/a` in its review, never left deferred.
 - [ ] **Step 1: write the failing tests.**
   - `cluster_transport_inprocess.st` (`"EXPECT: ok 4"`): a message from `n0` to `n1` arrives
     decoded; replies travel on the replier's own link; a keyed endpoint and an unkeyed one drop
@@ -1157,6 +1158,7 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     bits (the `#seed` option seeds a `Random` instead, for tests). `_attach:` refuses a
     `#startupGrace` shorter than the default when the loaded log is not empty (L17,
     `PBValidationError`).
+- **Checklist (Task 18):** turn the 22 `deferred 20` rows of `tests/unit/cluster_checklist.tsv` (`awk -F'\t' '$2=="deferred" && $3==20' tests/unit/cluster_checklist.tsv`) into `ported` rows, each naming the whole check label of a test this task adds; a row this task cannot port is re-justified as `n/a` in its review, never left deferred.
 - [ ] **Step 1: write the failing test** `cluster_coordinator_shell.st` (`"EXPECT: ok 10"`): three
   coordinators over `PBInProcessNetwork` and a memory tier test double (test file only) elect an
   owner and issue a permit (outcomes only); `committedRoot` follows a `done`; a test subclass of
@@ -1200,6 +1202,7 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   - `PBObjectSpace class >> storage: aClusterStorage coordinator: aCoordinator`: refuses a
     storage not in cluster mode and the reverse (`PBObjectSpace storage:` of a cluster-mode
     storage); attaches `PBSharedTier storage:nodeId:` to the coordinator; `coordinator`.
+- **Checklist (Task 18):** turn the 2 `deferred 21` rows of `tests/unit/cluster_checklist.tsv` (`awk -F'\t' '$2=="deferred" && $3==21' tests/unit/cluster_checklist.tsv`) into `ported` rows, each naming the whole check label of a test this task adds; a row this task cannot port is re-justified as `n/a` in its review, never left deferred.
 - [ ] **Step 1: write the failing test** `cluster_tier.st` (`"EXPECT: ok 13"`): log names
   `'n0'` → `n0.roots`, `'nœud'` → hex of its UTF-8, `'a/b'` → hex, `'..'` → `...roots`
   inside `cluster/`, 65 characters → hex (Review Focus 5); a second
@@ -1240,6 +1243,7 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     `replaceRoot:` with epoch + 1, step 8 outcome rule applied to the round; a failure of the
     flush, the publish or the lock reaches every built entry; a lone entry runs exactly the
     single-commit protocol (D52).
+- **Checklist (Task 18):** no row of `tests/unit/cluster_checklist.tsv` is deferred to this task (0 rows); a row this task ports is turned into `ported`, and none is deferred to it.
 - [ ] **Step 1: write the failing tests.** `round_group_commit.st` (`"EXPECT: ok 5"`): 20
   transactions committed from 20 actors all succeed, the history holds 20 versions, the storage
   epoch advanced by fewer than 20 (counted through a seam subclass counting `replaceRoot:`
@@ -1276,6 +1280,7 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   group bound and `stats` (`critical_commits`, build µs, replication µs). Each
   `PBCommitEntry` enters the core as a `PBRoundEntry` whose `token` is the entry itself;
   `PBSettle` effects settle the entry's Future.
+- **Checklist (Task 18):** turn the 9 `deferred 23` rows of `tests/unit/cluster_checklist.tsv` (`awk -F'\t' '$2=="deferred" && $3==23' tests/unit/cluster_checklist.tsv`) into `ported` rows, each naming the whole check label of a test this task adds; a row this task cannot port is re-justified as `n/a` in its review, never left deferred.
 - [ ] **Step 1: write the failing tests.**
   - `cluster_commit_path.st` (`"EXPECT: ok 5"`): three in-process nodes over one directory;
     100 `run:` increments from all nodes give 100; commits from every node appear in every
@@ -1315,6 +1320,7 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
 - Produces: `PBObjectSpace >> committedEpoch`; the confirmation commit (a permission round with
   no entry, through `PBRoundRunner`); a failure of it is logged and reads start from the logged
   committed root (as `_read_storage_root`).
+- **Checklist (Task 18):** turn the 5 `deferred 24` rows of `tests/unit/cluster_checklist.tsv` (`awk -F'\t' '$2=="deferred" && $3==24' tests/unit/cluster_checklist.tsv`) into `ported` rows, each naming the whole check label of a test this task adds; a row this task cannot port is re-justified as `n/a` in its review, never left deferred.
 - [ ] **Step 1: write the failing test** `cluster_reads.st` (`"EXPECT: ok 4"`): a node that
   restarts reads at or above its last committed root before any commit of its own (L18); a
   snapshot never goes backwards across ten restarts; `newDatabase:` on one node is visible on
@@ -1341,6 +1347,7 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   `PBObjectSpace >> sync: milliseconds` → nil once the persisted epoch reaches the committed
   epoch, `PBTimeoutError` after `milliseconds` (a durability barrier, not a visibility
   barrier). Never on the commit path.
+- **Checklist (Task 18):** turn the 8 `deferred 25` rows of `tests/unit/cluster_checklist.tsv` (`awk -F'\t' '$2=="deferred" && $3==25' tests/unit/cluster_checklist.tsv`) into `ported` rows, each naming the whole check label of a test this task adds; a row this task cannot port is re-justified as `n/a` in its review, never left deferred.
 - [ ] **Step 1: write the failing test** `cluster_persister.st` (`"EXPECT: ok 4"`): after commits
   and `sync: 10000`, `space.root` holds a cluster root whose epoch equals `committedEpoch`;
   a test that persists a higher root first sees the persister refuse to go back; `sync:` with
@@ -1357,6 +1364,7 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
 - Create: `tests/interop/cluster_space_to_py.sh`, `tests/interop/_st_cluster_space.st`,
   `tests/interop/py_rootlog.py`, `tests/interop/rootlog_both_ways.sh`.
 
+- **Checklist (Task 18):** no row of `tests/unit/cluster_checklist.tsv` is deferred to this task (0 rows); a row this task ports is turned into `ported`, and none is deferred to it.
 - [ ] **Step 1: write the tests.**
   - `cluster_space_to_py.sh`: `_st_cluster_space.st` runs three in-process nodes on one
     directory, commits the ERP-shaped workload of `_st_write_space.st`, `sync:`s and stops;
@@ -1382,6 +1390,7 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   `out/<id>.unknown` with `append:` + `sync`), `tests/cluster/_cluster.sh` (start, kill, wait
   for a marker file, verify), `tests/cluster/real_commits.sh`, `tests/cluster/real_kill_owner.sh`.
 
+- **Checklist (Task 18):** no row of `tests/unit/cluster_checklist.tsv` is deferred to this task (0 rows); a row this task ports is turned into `ported`, and none is deferred to it.
 - [ ] **Step 1: write the tests.** `real_commits.sh`: three processes, 30 commits each, then a
   verifier process reads the space through a fresh node: the counter equals the number of
   acknowledged tokens plus the unknown tokens present, every acknowledged token is present.
@@ -1401,6 +1410,7 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
   marker file at "built", "replicate sent", "done sent", then continuing),
   `tests/cluster/real_kill_holder.sh`, `tests/cluster/real_restart_rejoin.sh`.
 
+- **Checklist (Task 18):** turn the 4 `deferred 28` rows of `tests/unit/cluster_checklist.tsv` (`awk -F'\t' '$2=="deferred" && $3==28' tests/unit/cluster_checklist.tsv`) into `ported` rows, each naming the whole check label of a test this task adds; a row this task cannot port is re-justified as `n/a` in its review, never left deferred.
 - [ ] **Step 1: write the tests.** `real_kill_holder.sh`: for each of the three markers, `kill
   -9` the holder when its marker appears; restart it with the disk kept; at the end every
   acknowledged token is present and every unknown token is present on all nodes or on none.
@@ -1446,7 +1456,10 @@ the timer audit (`tests/audit`) and the hunt for integration problems run once, 
 found here is fixed in the owning module, fail-first.
 
 - [ ] **Step 1:** run the whole suite with the venv present. Expected: all PASS, no `SKIP` under
-  `tests/conformance/cluster.st`, `cluster_checklist.sh` passing with 261 rows.
+  `tests/conformance/cluster.st`, `cluster_checklist.sh` passing with 261 rows. Then run the
+  checklist in final mode with the checkout named: `CHECKLIST_FINAL=1
+  PROTOBASE_REPO=/home/gamarino/Documentos/proyectos/ProtoBase tests/unit/cluster_checklist.sh`.
+  Expected: PASS, no `deferred` row left (each is `ported` or re-justified `n/a`).
 - [ ] **Step 1b:** run the timer audit: `tests/run_tests.sh tests/audit`. Expected: all parts
   PASS at their declared floors. A floor that moved with a deliberate core change is re-measured
   and the change is named in the commit.

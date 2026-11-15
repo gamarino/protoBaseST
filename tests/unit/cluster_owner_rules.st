@@ -207,11 +207,11 @@ s := core dispatch: (req value: 'n0' value: 1 value: 9 value: 4) in: fx state no
 r2 := core dispatch: (msg value: 'done' value: 'n2' value: { 'term' -> 1. 'seq' -> 1. 'inc' -> 4. 'outcome' -> 'committed'.
   'root' -> (PBClusterMessage rootValue: r). 'copies' -> #(). 'ranges' -> nil }) in: pair state now: t0 + 2000.
 c that: 'a lone none restores the committed base; a done of another incarnation abandons'
-  is: { fx state ownership pipeline size. (stats value: fx) includes: 'terms_abandoned'.
+  is: { fx state ownership pipeline size. (stats value: fx) includes: 'terms_abandoned'. sends value: fx.
     (permitOf value: s) at: 'seq'. (permitOf value: s) at: 'certain'.
     (PBClusterMessage rootFrom: ((permitOf value: s) at: 'root')) key = r key.
     (stats value: r2) includes: 'terms_abandoned'. r2 state suspectTerm }
-  equals: { 0. false. 2. true. true. true. 1 }.
+  equals: { 0. false. #(). 2. true. true. true. 1 }.
 r2 := PBLabeledRoot label: 1 record: (PBRootRecord segment: (ByteArray new: 16) offset: 8 epoch: 2).
 
 "(18) proto_db test_a_permit_arriving_after_its_request_gave_up_is_handed_back_at_once: a permit

@@ -1310,7 +1310,10 @@ PBSim >> _build: aToken on: aBase permission: aPermission step: aStep at: aNode
   ^ self _schedule: #dispatch node: aNode
     payload: (PBReplicateWanted permission: aPermission root: root pred: aBase waiter: { 'replicate'. aToken. aPermission }) at: now.
 
-PBSim >> _replicated: aToken outcome: anOutcome permission: aPermission at: aNode
+PBSim >> _replicated: aToken outcome: aSettled permission: aPermission at: aNode
+  | anOutcome |
+  "An unknown replication is settled with its PBOutcomeUnknownError (holder.st)."
+  anOutcome := (aSettled isKindOf: PBOutcomeUnknownError) ifTrue: [#unknown] ifFalse: [aSettled].
   self _end: aToken as: ((PBDoneReport outcomes includes: anOutcome)
     ifTrue: [anOutcome = #committed ifTrue: [#acknowledged] ifFalse: [anOutcome]]
     ifFalse: [#failed]).

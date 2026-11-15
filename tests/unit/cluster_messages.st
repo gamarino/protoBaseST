@@ -1,4 +1,4 @@
-"EXPECT: ok 28"
+"EXPECT: ok 30"
 "PBClusterMessage (cluster/protocol.st): the protocol-13 messages of proto_db
  cluster/protocol.py (validate_message, _check_field, decode_labeled_root). A received map
  is validated against the field table of its type: extra fields are ignored and never
@@ -17,7 +17,7 @@
  3-item root form (never written, CC17) is PBValidationError."
 Import from: 'protobase'.
 Import from: '_check'.
-| c raw head seg request fields root rejectFields refuses done permit release |
+| c raw head seg request fields root rejectFields refuses done permit release sample |
 c := Check new.
 raw := [:assocs | MessagePack encode: (MessagePackMap withAll: assocs)].
 head := [:type | { 'v' -> 13. 'type' -> type. 'from' -> 'n1' }].
@@ -125,4 +125,35 @@ c that: 'records and segments are validated; replicate has no pred_committed' is
     ((PBClusterMessage schema at: 'replicate') anySatisfy: [:f | f key = 'pred_committed']).
     PBClusterMessage protocolVersion }
   equals: { 'refused'. 'decoded'. 'refused'. false. 13 }.
+"proto_db test_every_message_carries_the_protocol_version_and_sender and
+ test_message_roundtrip_through_a_frame: the map of a built message holds v 13, its type and
+ its sender; one message of every type of the table, with every optional field set and with
+ every one of them nil, comes back from a frame equal, byte for byte."
+c that: 'every message carries the protocol version, its type and its sender'
+  is: [ | map | map := MessagePack decode: request encode.
+    { (map associations detect: [:a | a key = 'v']) value. (map associations detect: [:a | a key = 'type']) value.
+      (map associations detect: [:a | a key = 'from']) value. request type. request from } ] value
+  equals: #(13 'request' 'n1' 'request' 'n1').
+sample := [:kind :full | kind = #int ifTrue: [3] ifFalse: [
+  kind = #number ifTrue: [0.25] ifFalse: [
+  kind = #str ifTrue: ['busy'] ifFalse: [
+  kind = #bool ifTrue: [full] ifFalse: [
+  kind = #root ifTrue: [full ifTrue: [{ 5. seg. 80. 3 }] ifFalse: [nil]] ifFalse: [
+  kind = #records ifTrue: [full ifTrue: [{ { seg. 80. #[1 2 3] }. { seg. 26. nil } }] ifFalse: [#()]] ifFalse: [
+  kind = #uuid ifTrue: [seg] ifFalse: [
+  kind = #optBytes ifTrue: [full ifTrue: [#[1 2 3]] ifFalse: [nil]] ifFalse: [
+  kind = #optStr ifTrue: [full ifTrue: ['n2'] ifFalse: [nil]] ifFalse: [
+  kind = #ranges ifTrue: [full ifTrue: [{ { seg. 26. 90 } }] ifFalse: [nil]] ifFalse: [
+  kind = #strs ifTrue: [full ifTrue: [#('n1' 'n4')] ifFalse: [#()]] ifFalse: [
+  kind = #after ifTrue: [full ifTrue: [#(4 'n2')] ifFalse: [nil]] ifFalse: [
+  Error signal: 'no sample for ' , kind printString]]]]]]]]]]]]].
+c that: 'one message of every type round-trips through a frame'
+  is: ((PBClusterMessage schema keys asSortedCollection asArray) reject: [:type |
+    #(true false) allSatisfy: [:full | | m back |
+      m := PBClusterMessage type: type from: 'peer-a' fields: ((PBClusterMessage schema at: type) collect: [:f |
+        f key -> (sample value: f value value: full)]).
+      back := PBClusterFrame decode: (PBClusterFrame encode: m to: 'n2' key: nil) to: 'n2' key: nil.
+      back type = type and: [back from = 'peer-a' and: [back encode = m encode]]]])
+  equals: #().
+
 c report displayNl.

@@ -1,4 +1,4 @@
-"EXPECT: ok 26"
+"EXPECT: ok 28"
 "The acceptance rules (cluster/acceptor.st) and the holder's replication and commit point
  (cluster/holder.st) called directly, one guard per check (proto_db coordinator.py _may_accept,
  _apply_replicate, _refuse_queued, _on_done, _on_release, _observe_accepted, _observe_committed,
@@ -43,7 +43,7 @@ Import from: '_check'.
 
 | c core peers config three five marker logged acceptorOf T OLD rec accept node r1 r2 r3 base sibling k k1 old newer
   vs msg repl step ackOf counts s granted nodeOf perm view eff toAcc settled t0 rep holderOf learn s2 v own stats
-  timers hintAck done |
+  timers hintAck done unknown late few refused ownFailed |
 c := Check new.
 core := PBCoordinatorCore new.
 peers := [:someIds | (1 to: someIds size) asArray collect: [:i | PBPeer nodeId: (someIds at: i) host: '127.0.0.1' port: 7000 + i]].
@@ -234,6 +234,18 @@ perm := [:valid | PBPermission term: T seq: 3 rid: 9 owner: 'n0' root: base cert
 eff := [:aStep | aStep effects collect: [:e | e class name]].
 toAcc := [:aStep | (aStep effects select: [:e | e isKindOf: PBToAcceptor]) collect: [:e | e event]].
 settled := [:aStep | (aStep effects select: [:e | e isKindOf: PBSettle]) collect: [:e | e outcome]].
+"From here an unknown replication's settle is shown as its PBOutcomeUnknownError's exact text."
+settled := [:aStep | (aStep effects select: [:e | e isKindOf: PBSettle]) collect: [:e |
+  (e outcome isKindOf: PBOutcomeUnknownError) ifTrue: [e outcome messageText] ifFalse: [e outcome]]].
+"proto_db's text of an unknown outcome at n0 for r1 (epoch 10), coordinator.py replicate."
+unknown := [:why | 'Node n0: ' , why , '; the root (epoch 10) may or may not take effect'].
+late := [:n | unknown value: 'the lease ended before this node observed the outcome (' , n printString
+  , ' acknowledgements, 2 needed, were counted only after the lease had ended)'].
+few := [:n | unknown value: 'only ' , n printString , ' of the 2 acknowledgements needed arrived before the lease ended'].
+refused := [:n :m | unknown value: n printString , ' members refused the root, and only ' , m printString
+  , ' of the 2 acknowledgements needed arrived'].
+ownFailed := 'Node n0: the commit of root epoch 10 failed after the root was sent (its own acceptance could not be made '
+  , 'durable); peers may have acknowledged it, so it may or may not take effect'.
 step := [:p :id :someIds :t | core dispatch: (PBReplicateWanted permission: p root: r1 pred: base waiter: #w) in: (nodeOf value: id value: someIds) now: t].
 c that: 'nothing is sent past the permission (a reserve of 0 too) or under the reserve; else the replicate, the own acceptance and a timer; a root of another term is refused'
   is: { settled value: (step value: (perm value: 500000) value: 'n0' value: three value: t0 + 500000).
@@ -284,7 +296,8 @@ c that: 'a majority observed past the permission, its timer (once the own accept
     settled value: (core dispatch: (PBAcceptorDiscarded step: (PBAcceptorStep state: view appends: #() reply: #()
       vote: (PBClusterMessage type: 'ack' from: 'n0' fields: { 'term' -> T. 'rid' -> (rep value: s) rid. 'inc' -> 5. 'ok' -> true.
         'root' -> nil. 'stored' -> false }))) in: (v value: (v value: s value: 'n1' value: true value: t0 + 2000) state value: 'n2' value: true value: t0 + 3000) state now: t0 + 4000) }
-  equals: { #(#unknown). #('replication_failures'). T. #(#PBSuspect). #(#unknown). { #(). #(100000) }. { #(). #(100000) }. #(). #(#unknown) }.
+  equals: { { late value: 3 }. #('replication_failures'). T. #(#PBSuspect). { few value: 1 }. { #(). #(100000) }. { #(). #(100000) }. #().
+    { ownFailed } }.
 
 "(20) Refusals."
 c that: 'more refusals than a majority allows end it unknown at once; an own refusal is neither (proto_db), peers alone can commit'
@@ -296,7 +309,22 @@ c that: 'more refusals than a majority allows end it unknown at once; an own ref
       value: 'n2' value: false value: t0 + 4000).
     settled value: (v value: (v value: (own value: s value: false value: t0 + 2000) state value: 'n1' value: true value: t0 + 3000) state
       value: 'n2' value: true value: t0 + 4000) }
-  equals: #(#() #(#unknown) #() #(#unknown) #(#committed)).
+  equals: { #(). { refused value: 2 value: 1 }. #(). { refused value: 2 value: 0 }. #(#committed) }.
+
+"(20b, 20c) proto_db test_cluster_rejoin_records.py M2 (re-review 4): a majority counted only
+ after the permission ended is reported as such, never as too few acknowledgements; too few
+ acknowledgements are still reported as too few. The round's error is the replication's."
+c that: 'a majority counted after the lease ended is reported as such'
+  is: [ | st text | st := v value: (own value: s value: true value: t0 + 2000) state value: 'n1' value: true value: t0 + 600000.
+    text := (settled value: st) first.
+    { text. (text includesSubstring: 'lease ended before') and: [text includesSubstring: 'observed'].
+      text includesSubstring: 'acknowledgements needed arrived'. st state holder replications size } ] value
+  equals: { late value: 2. true. false. 0 }.
+c that: 'too few acknowledgements are still reported as too few'
+  is: [ | text | text := (settled value: (core dispatch: (PBTimerFired token: (rep value: s) token event: #replicate)
+      in: (own value: s value: true value: t0 + 2000) state now: t0 + 500000)) first.
+    { text. text includesSubstring: 'only 1 of the 2 acknowledgements needed' } ] value
+  equals: { few value: 1. true }.
 
 "(21) Ack filters."
 s2 := (own value: s value: true value: t0 + 2000) state.

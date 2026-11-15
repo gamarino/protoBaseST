@@ -25,7 +25,8 @@
  ends #unknown; after a committed round, #committed. (19) #unreachable: a retryable conflict,
  #unknown. (20) needsCommit: the base is re-committed first (its replicate's pred the base),
  then the entries build on the re-commit. (21) A failed re-commit: #none for a conflict,
- #unknown for any other error. (22) #unknown: PBOutcomeUnknownError for every built entry, a
+ #unknown for any other error. (22) #unknown: the replication's PBOutcomeUnknownError (its text
+ proto_db's, an unknown outcome without it refused) for every built entry, a
  conflicted one its own conflict. (23) A permit error settles the batch. (24) PBReportDone
  carries a root exactly with #committed. (26) termRetries stale permissions in a row fail the
  queued commits with a conflict (proto_db _TERM_RETRIES); a fresh permission, or a permit
@@ -258,10 +259,16 @@ c that: 'a failed re-commit: #none for a conflict, #unknown otherwise'
 "(22)"
 st := go value: core value: fresh value: { permitted. { PBRoundEnqueued entry: (e value: 'h' value: true). 0 }. { PBPermitted permission: perm. 0 }. { ok. 1000 }.
   { PBBuilt entry: (e value: 'a' value: false) root: (rec value: T value: 2) micros: 1000. 2000 }. { conflict value: 'h' value: true. 3000 }.
-  { PBReplicated outcome: #unknown. 4000 } }.
+  { PBReplicated outcome: (PBOutcomeUnknownError new messageText: 'Node n0: only 1 of the 2 acknowledgements needed arrived '
+    , 'before the lease ended; the root (epoch 2) may or may not take effect'; yourself). 4000 } }.
 c that: '#unknown: PBOutcomeUnknownError for the built, the conflicted its own conflict, not held'
-  is: { (settles value: st last) collect: [:p | { p first. p last class. (p last isKindOf: PBConflictError) and: [p last permitHeld] }]. reportOf value: st last }
-  equals: { { { 'h'. PBConflictError. false }. { 'a'. PBOutcomeUnknownError. false } }. #(#unknown) }.
+  is: { (settles value: st last) collect: [:p | { p first. p last class. (p last isKindOf: PBConflictError) and: [p last permitHeld] }].
+    reportOf value: st last.
+    ((settles value: st last) detect: [:p | p first = 'a']) last messageText.
+    [PBReplicated outcome: #unknown. #accepted] on: PBValidationError do: [:ex | #refused] }
+  equals: { { { 'h'. PBConflictError. false }. { 'a'. PBOutcomeUnknownError. false } }. #(#unknown).
+    'Node n0: only 1 of the 2 acknowledgements needed arrived before the lease ended; the root (epoch 2) may or may not take effect'.
+    #refused }.
 
 "(23)"
 st := go value: core value: fresh value: { permitted. { PBPermitted permission: (PBTimeoutError new messageText: 't'; yourself). 0 } }.

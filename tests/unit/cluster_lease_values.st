@@ -164,9 +164,14 @@ c that: 'a release of another holder, term or incarnation frees nothing' is:
   equals: ((1 to: 3) collect: [:i | { 'n1'. 7. 4097. grace + 2000000 }]) asArray.
 g := (busy newState release: 'n1' inc: 7 term: 4097 now: grace + 600000) first
   decideRequest: 'n2' inc: 9 term: 4098 now: grace + 700000 config: cfg.
+"proto_db grants the seen term to another requester; here a term is its proposer's ballot (rank in
+ the low 12 bits), so only n2 may ask 4098: the second requester is n2's next incarnation, refused
+ term_taken (one holder per term), the grant of its old incarnation ended."
 c that: 'a term seen in a busy refusal is granted to it once the grant ends' is:
-  { g verdict. g promiseToLog. grantOf value: g newState }
-  equals: { #grant. 4098. { 'n2'. 9. 4098. grace + 2700000 } }.
+  { g verdict. g promiseToLog. grantOf value: g newState.
+    (g newState decideRequest: 'n2' inc: 10 term: 4098 now: grace + 800000 config: cfg) reason.
+    (g newState decideRequest: 'n2' inc: 10 term: 4098 now: grace + 800000 config: cfg) endedTerm }
+  equals: { #grant. 4098. { 'n2'. 9. 4098. grace + 2700000 }. 'term_taken'. 4098 }.
 rel := s0 release: 'n1' inc: 7 term: 4097 now: grace.
 g := rel first decideRequest: 'n1' inc: 7 term: 4097 now: grace + 10 config: cfg.
 c that: 'a release overtaking its request closes the term' is:
@@ -181,8 +186,11 @@ a := (a withGrant: 'n0' root: nil committed: nil certain: true) withGrant: 'n0' 
 won := a withReject: 'n0' reason: 'busy' highest: 8193 remaining: 5.
 c that: 'an attempt counts a peer once, by its first reply' is:
   { a state. a replies. won replies. won highestSeen. won busyRemaining.
-    (won withGrant: 'n1' root: nil committed: nil certain: true) state }
-  equals: { #pending. 1. 1. 8193. 0. #won }.
+    (won withGrant: 'n1' root: nil committed: nil certain: true) state.
+    [ | r | r := ((PBAttempt term: 4096 rid: 1 sentAt: 0 voters: 3) withReject: 'n1' reason: 'busy' highest: 4096 remaining: 5)
+        withGrant: 'n1' root: nil committed: nil certain: true.
+      { r state. r replies. r committedRoots size. r busyRemaining } ] value }
+  equals: { #pending. 1. 1. 8193. 0. #won. { #pending. 1. 0. 5 } }.
 g := s1 decideRequest: 'n1' inc: 8 term: 8193 now: grace + 100 config: cfg.
 ended := s1 decideRequest: 'n1' inc: 8 term: 4097 now: grace + 100 config: cfg.
 c that: 'a request of a new incarnation ends the grant of the old one' is:

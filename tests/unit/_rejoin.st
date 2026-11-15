@@ -13,7 +13,9 @@
                              restartGrace (leaseDuration + driftMargin) on its own clock, then
                              completes on the answers of a plain round, without a ballot.
   PlantReplicateBelowBallot  a holder replicates under a term below its rejoin ballot (L14's
-                             refusal at the send dropped)."
+                             refusal at the send dropped).
+  PlantRejoinLearnsNothing   a rejoin adopts no root from its witnesses' answers.
+  PlantReleaseForgets        a release carries no committed root."
 
 Import from: 'protobase'.
 Import from: '_sim'.
@@ -37,6 +39,27 @@ RejoinRules subclass: #PlantReplicateBelowBallot.
 
 PlantReplicateBelowBallot >> _belowRejoinBallot: aPermission in: s
   ^ false.
+
+RejoinRules subclass: #PlantRejoinLearnsNothing.
+
+"The rejoin adopts the ballot and the promises it learnt, but no root: what the witnesses
+ accepted and know committed is dropped (the R49 learning removed)."
+PlantRejoinLearnsNothing >> _completeRejoin: aDecision answers: someAnswers ballot: aBallot in: s now: t effects: fx
+  | counted |
+  counted := someAnswers select: [:a | aDecision first includes: a from].
+  ^ self _adopt: (PBRejoinLearnt learnt: (counted inject: aBallot into: [:m :a | m max: a highestLabel])
+      seen: (counted inject: 0 into: [:m :a | m max: a promised]) accepted: nil committed: nil ballot: aBallot
+      log: (self _rejoinIn: s) log)
+    in: s effects: fx.
+
+RejoinRules subclass: #PlantReleaseForgets.
+
+"A release that carries no committed root (the release's knowledge removed)."
+PlantReleaseForgets >> _release: aTerm in: s held: isHeld certain: isCertain next: aNext more: isMore
+  | m |
+  m := super _release: aTerm in: s held: isHeld certain: isCertain next: aNext more: isMore.
+  ^ PBClusterMessage type: 'release' from: m from fields: ((PBClusterMessage schema at: 'release') collect: [:f |
+    f key -> (f key = 'committed' ifTrue: [nil] ifFalse: [m at: f key])]).
 
 "=== RejoinSim ================================================================"
 
@@ -264,39 +287,99 @@ RejoinFamilies class >> lateStart: aRules seed: n
   out at: 3 put: (#('n1' 'n2') collect: [:id | sim countOf: 'rejoin_ballots' at: id]).
   ^ out.
 
-"{ violation. outcomes of a, b, c. ballots of n1 and n2. n1's term for c above its term for b.
- the ranks of the terms of b's and c's permissions }: proto_db test_cluster_root_certainty.py (two wiped
- acknowledgers of five; a wiped acknowledger requesting the lease builds on the committed root)
- and test_cluster_terms.py (a wiped granter never lets two roots share a label; a wiped proposer
- never wins its own ballot twice). Five voters hold r1. n0 commits a; n1 and n2, two of its
- acknowledgers, lose their disks and rejoin (one ballot each); once n0's ownership ended idle,
- n1 acquires a term and commits b, so its base must be a (S4 at every step). n1 loses its disk again and rejoins; it commits c under a term
- above the one it owned for b (S1 at every step: no term is owned twice)."
+"{ violation. outcomes of a and b. rejoin ballots of n1 and n2. the base of b is a. what n3 and
+ n4 accepted is not a }: proto_db test_cluster_root_certainty.py (two wiped acknowledgers of
+ five report the committed root; a wiped acknowledger's rejoin), test_cluster_rejoin.py x1 (a
+ rejoined acknowledger reports the committed root it lost) and test_cluster_terms.py (a wiped
+ granter never lets two roots share a label). Five voters hold r1. n0 commits a, acknowledged
+ by exactly a majority: its replicates to n3 and n4 are lost, so are its done and its release.
+ n1 and n2, two of a's three acknowledgers, lose their disks and rejoin: their witnesses
+ (N - majority + 1 = 3, the wiped excluded) must include n0, the only other node that holds a.
+ Then n0 is cut off and n3 commits b: its phase 1 reaches at most n1, n2, n3 and n4, so it
+ builds on a only through what n1 and n2 learnt in their rejoin (S4 at every step, and every
+ root's (label, epoch) unique). PlantRejoinLearnsNothing (the rejoin adopts no root) loses a."
 RejoinFamilies class >> wiped: aRules seed: n
-  | sim out terms |
-  sim := self lagged: (BaseFamilies sim: aRules seed: n ids: BaseFamilies five knowing: BaseFamilies five options: BaseFamilies fiveVoters).
+  | logs r1 sim out base |
+  r1 := BaseFamilies r1.
+  logs := Dictionary new.
+  BaseFamilies five do: [:id |
+    logs at: id put: { PBLogAppend kind: #accepted label: r1 label root: r1 record sync: true.
+      PBLogAppend kind: #committed label: r1 label root: r1 record sync: true.
+      PBLogAppend kind: #rejoined label: 0 root: nil sync: true }].
+  sim := self lagged: (RejoinSim seed: n ids: BaseFamilies five rules: aRules
+    options: (BaseFamilies fiveVoters at: #startupGrace put: 0; yourself) logs: logs).
   out := Array new: 5.
-  terms := OrderedCollection new.
   out at: 1 put: (BaseFamilies violationOf: [
+    #('replicate' 'done' 'release') do: [:type | #('n3' 'n4') do: [:id | sim drop: type from: 'n0' to: id]].
+    #('done' 'release') do: [:type | #('n1' 'n2') do: [:id | sim drop: type from: 'n0' to: id]].
     out at: 2 put: (OrderedCollection with: (BaseFamilies commit: 'a' at: 'n0' in: sim)).
     #('n1' 'n2') do: [:id | sim crash: id keepDisk: false].
     #('n1' 'n2') do: [:id | sim restart: id].
     sim runUntil: [#('n1' 'n2') allSatisfy: [:id | self isRejoined: id in: sim]] steps: 2000000.
     out at: 3 put: (#('n1' 'n2') collect: [:id | sim countOf: 'rejoin_ballots' at: id]).
-    "n0's ownership ends idle: n1 asks for the lease itself."
-    BaseFamilies run: sim until: sim now + (3 * (sim nodeAt: 'n0') config leaseDuration).
-    sim on: 'permit' at: 'n1' do: [:permission | terms add: permission term].
-    (out at: 2) add: (BaseFamilies commit: 'b' at: 'n1' in: sim).
-    sim crash: 'n1' keepDisk: false.
-    sim restart: 'n1'.
-    sim runUntil: [self isRejoined: 'n1' in: sim] steps: 2000000.
-    BaseFamilies run: sim until: sim now + (3 * (sim nodeAt: 'n0') config leaseDuration).
-    sim on: 'permit' at: 'n1' do: [:permission | terms add: permission term].
-    (out at: 2) add: (BaseFamilies commit: 'c' at: 'n1' in: sim).
+    sim undrop.
+    sim partition: #(#('n0') #('n1' 'n2' 'n3' 'n4')).
+    sim on: 'base' at: 'n3' do: [:decision | base := decision].
+    (out at: 2) add: (BaseFamilies commit: 'b' at: 'n3' in: sim).
+    out at: 5 put: (#('n3' 'n4') collect: [:id | | acc |
+      acc := (sim nodeAt: id) acceptor accepted.
+      acc notNil and: [acc key = (sim rootOf: 'a') key]]).
+    sim heal.
     sim converge: 2000000]).
   out at: 2 put: (out at: 2) asArray.
-  out at: 4 put: (terms size = 2 and: [terms last > terms first]).
-  out at: 5 put: (terms collect: [:term | term \\ PBMembership maxMembers]) asArray.
+  out at: 4 put: ((base isKindOf: PBBaseDecision) and: [base base notNil and: [base base key = (sim rootOf: 'a') key]]).
+  ^ out.
+
+"{ violation. outcome of x }: proto_db test_cluster_coordinator.py
+ test_a_restarted_peer_honours_promises_through_its_startup_grace. Three voters hold r1; with n2
+ cut off, n0 commits a and owns a term granted by n0 and n1 only. Then n0 is cut off from n1
+ and n2, and n1 restarts (its log kept: the grant it forgets, the promise it keeps) configured
+ with aGrace (nil: the default, leaseDuration + driftMargin). n2, which never heard of n0's
+ term, commits x: it needs n1's grant, refused during the grace, so it owns a term only once
+ n0's lease ended (L5, the checker's watchLeases, at every step). With aGrace 0, n1 grants at
+ once and two leases are valid at the same time (the checker's L5 text)."
+RejoinFamilies class >> restartGrace: aRules seed: n grace: aGrace
+  | sim out |
+  sim := self lagged: (self formed: aRules seed: n).
+  sim checker watchLeases.
+  out := Array new: 2.
+  out at: 1 put: (BaseFamilies violationOf: [
+    sim partition: #(#('n0' 'n1') #('n2')).
+    BaseFamilies commit: 'a' at: 'n0' in: sim.
+    sim partition: #(#('n0') #('n1' 'n2')).
+    sim crash: 'n1' keepDisk: true.
+    sim reconfigure: 'n1' options: (aGrace isNil
+      ifTrue: [Dictionary new]
+      ifFalse: [Dictionary new at: #startupGrace put: aGrace; yourself]).
+    sim restart: 'n1'.
+    out at: 2 put: (BaseFamilies commit: 'x' at: 'n2' in: sim).
+    sim heal.
+    sim converge: 2000000]).
+  ^ out.
+
+"{ violation. n1 and n2 know a committed. n2's permission certain. on a. outcome of b }: proto_db
+ test_cluster_coordinator.py test_release_propagates_the_replicated_root_to_every_peer. Three
+ voters hold r1. n0 commits a and its done is lost, so only its release (once its ownership
+ ends idle) can teach n1 and n2 that a is committed. n2 then commits b: its lease's root is a,
+ certain. PlantReleaseForgets (a release without its committed root) teaches nothing."
+RejoinFamilies class >> releaseTeaches: aRules seed: n
+  | sim out a permission |
+  sim := self lagged: (self formed: aRules seed: n).
+  out := Array new: 5.
+  out at: 1 put: (BaseFamilies violationOf: [
+    #('n1' 'n2') do: [:id | sim drop: 'done' from: 'n0' to: id].
+    BaseFamilies commit: 'a' at: 'n0' in: sim.
+    a := (sim rootOf: 'a') key.
+    sim runUntil: [(sim nodeAt: 'n0') state ownership isNil] steps: 2000000.
+    BaseFamilies run: sim until: sim now + 10000.
+    out at: 2 put: (#('n1' 'n2') collect: [:id | | k |
+      k := (sim nodeAt: id) acceptor committed.
+      k notNil and: [k key = a]]).
+    sim on: 'permit' at: 'n2' do: [:p | permission := p].
+    out at: 5 put: (BaseFamilies commit: 'b' at: 'n2' in: sim).
+    sim converge: 2000000]).
+  out at: 3 put: (permission notNil and: [permission isCertain]).
+  out at: 4 put: (permission notNil and: [permission root notNil and: [permission root key = a]]).
   ^ out.
 
 "--- 3. a rejoined node never replicates below its ballot (L14) ---"

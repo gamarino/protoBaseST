@@ -105,7 +105,11 @@ check value: 'first open unaffected' value: log load accepted label = 8.
 tests add: 5.
 "5. after close the log opens again; a closed log refuses writes"
 log close.
-check value: 'closed log refuses' value: (refusal value: [log promise: 20] value: PBClosedError) notNil.
+check value: 'closed log refuses' value: ((Array
+  with: (refusal value: [log promise: 20] value: PBClosedError)
+  with: (refusal value: [log append: #accepted label: 9 root: rec2] value: PBClosedError)
+  with: (refusal value: [log append: #committed label: 9 root: rec2] value: PBClosedError)
+  with: (refusal value: [log markRejoined] value: PBClosedError)) allSatisfy: [:x | x notNil]).
 "proto_db order: promise and markRejoined check the handle first (a closed log given a bad term
  is closed); append checks its kind and encodes the entry before it looks at the handle."
 check value: 'closed before a bad term' value: (refusal value: [log promise: -1] value: PBClosedError) notNil.

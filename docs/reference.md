@@ -573,8 +573,16 @@ For tests, tools and readers of the format. An application does not need them.
   voters acked while the permission is valid (the commit point, CP 1.7 step 9), teaching the own
   acceptor the root (logged) and clearing a suspicion it answers; more refusals than a majority
   allows, the permission's end (a timer that comes earlier is set again for the time left) or a
-  failed own append end it `#unknown`
-  (`'replication_failures'`, the node and its acceptor suspect for the term).
+  failed own append end it unknown
+  (`'replication_failures'`, the node and its acceptor suspect for the term): its waiter is
+  settled with a `PBOutcomeUnknownError` whose text is `proto_db`'s for the case, `Node <id>:
+  <why>; the root (epoch <e>) may or may not take effect`, where why is `the lease ended before
+  this node observed the outcome (<n> acknowledgements, <m> needed, were counted only after the
+  lease had ended)`, `<k> members refused the root, and only <n> of the <m> acknowledgements
+  needed arrived` or `only <n> of the <m> acknowledgements needed arrived before the lease ended`;
+  a failed own append is `Node <id>: the commit of root epoch <e> failed after the root was sent
+  (its own acceptance could not be made durable); peers may have acknowledged it, so it may or
+  may not take effect`.
 - **Base choice** (`cluster/holder.st`, CP 1.6): `proto_db`'s `_lease_base`, `recover_root`,
   `_phase_1_floor`, `_base_needs_commit` and the refound and hard guard, as rules over the values
   `PBBaseDecision base:needsCommit:outcome:` (`base`, `needsCommit`, `outcome`: `#ok`, `#stale` or
@@ -622,7 +630,9 @@ For tests, tools and readers of the format. An application does not need them.
   `PBRoundEnqueued entry:`, `PBPermitted permission:` (a `PBPermission` or an error value),
   `PBBaseDecided decision:` (a `PBBaseDecision` or an error value), `PBBuilt entry:root:micros:`
   (entry `nil` for the re-commit of a base that needs one; root `nil` for nothing to publish),
-  `PBBuildConflict entry:error:`, `PBBuildFailed entry:error:`, `PBReplicated outcome:`,
+  `PBBuildConflict entry:error:`, `PBBuildFailed entry:error:`, `PBReplicated outcome:`
+  (`#committed`, `#none`, or the replication's `PBOutcomeUnknownError`; a bare `#unknown` is
+  refused; `outcome`, `error`),
   `PBHoldExpired token:`, `PBDropKept caller:`. Effects: `PBAskPermit`, `PBAskBase permission:`,
   `PBBuild entry:base:stamp:` (stamp `{ term. base epoch + 1 }`), `PBReplicate
   permission:root:pred:`, `PBSettle` of an entry's token (`true`, `false`, or an error value),
@@ -638,8 +648,9 @@ For tests, tools and readers of the format. An application does not need them.
   `dispatchReplicateWanted:` checks it again at the send against the acceptor's ballot and then
   sends nothing, `#none`). A build error that is a `PBDBError` fails its commit alone; any other
   ends the round, nothing sent.
-  `#committed` settles the built entries `true`; `#none` is a retryable conflict; `#unknown` is a
-  `PBOutcomeUnknownError` for every built entry, never retried. A `#stale` base requeues the
+  `#committed` settles the built entries `true`; `#none` is a retryable conflict; an unknown
+  outcome settles every built entry with the replication's `PBOutcomeUnknownError` (its text
+  says why), never retried. A `#stale` base requeues the
   round at the head of the queue and ends the permission `#unknown` (unless a round under it
   committed); after `termRetries` (5) stale permissions in a row the queued commits fail with a
   `PBConflictError`; `#unreachable`

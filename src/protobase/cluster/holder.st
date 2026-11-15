@@ -26,10 +26,13 @@ no proposal). Nothing here reads a clock: t is the node's clock (CC3).
     acceptance answered (proto_db decides it after the own append) and either a majority of
     the voters acked (the holder included), or more voters refused than a majority allows, or
     the permission's validity ended (its timer). It is #committed exactly when a majority acked
-    and the permission is still valid when that is observed; anything else is #unknown, since
+    and the permission is still valid when that is observed; anything else is unknown, since
     the root left the node: counted replication_failures, the node suspect for the term (its
-    acceptor too, PBSuspect). An own acceptance whose append failed ends it #unknown at once
-    (proto_db: the own log write raises after the sends). A commit teaches the node's own
+    acceptor too, PBSuspect), its waiter settled with a PBOutcomeUnknownError whose text is
+    proto_db's for the case (coordinator.py replicate at DEPTH 0): a majority counted only
+    after the permission ended; more refusals than a majority allows; too few acknowledgements
+    before it ended. An own acceptance whose append failed ends it unknown at once (proto_db:
+    the own log write raises after the sends). A commit teaches the node's own
     acceptor the root as committed (PBLearnCommitted, accepted knowledge, appended #committed
     without a sync) and clears a suspicion the root's label answers.
   The done that follows (owner.st dispatchDoneReport:) is broadcast; every member's acceptor
@@ -235,7 +238,27 @@ PBCoordinatorCore >> _decideReplication: aReplication in: s now: t effects: fx
   majority := s config membership majority.
   valid := aReplication permission isValidAt: t.
   ((aReplication acks size >= majority) or: [(aReplication nacks size > (voters - majority)) or: [valid not]]) ifFalse: [^ s].
-  ^ self _endReplication: aReplication committed: (self _commitPoint: aReplication majority: majority valid: valid) in: s effects: fx.
+  (self _commitPoint: aReplication majority: majority valid: valid) ifTrue: [
+    ^ self _endReplication: aReplication committed: true in: s effects: fx].
+  ^ self _endReplication: aReplication unknown: 'Node ' , s config nodeId , ': '
+    , (self _unknownWhy: aReplication voters: voters majority: majority) , '; the root (epoch '
+    , (self _epochOf: aReplication root) printString , ') may or may not take effect' in: s effects: fx.
+
+"Why aReplication, decided and not committed, ended unknown: proto_db's texts at DEPTH 0, in its
+ order (coordinator.py replicate; its texts for a stopped coordinator are the shell's, and that
+ for records not stored is tiered). A majority acked, so it was observed only after the
+ permission ended; more voters refused than a majority allows; or too few acked before the end."
+PBCoordinatorCore >> _unknownWhy: aReplication voters: aVoters majority: aMajority
+  | acks nacks |
+  acks := aReplication acks size printString.
+  nacks := aReplication nacks size.
+  aReplication acks size >= aMajority ifTrue: [
+    ^ 'the lease ended before this node observed the outcome (' , acks , ' acknowledgements, ' , aMajority printString
+      , ' needed, were counted only after the lease had ended)'].
+  nacks > (aVoters - aMajority) ifTrue: [
+    ^ nacks printString , ' members refused the root, and only ' , acks , ' of the ' , aMajority printString
+      , ' acknowledgements needed arrived'].
+  ^ 'only ' , acks , ' of the ' , aMajority printString , ' acknowledgements needed arrived before the lease ended'.
 
 "The commit point (CP 1.7 step 9): a majority of the voters acknowledged, observed while the
  permission is valid."
@@ -249,16 +272,28 @@ PBCoordinatorCore >> _commitPoint: aReplication majority: aMajority valid: isVal
  its term, its acceptor too)."
 PBCoordinatorCore >> _endReplication: aReplication committed: isCommitted in: s effects: fx
   | state label |
+  isCommitted ifFalse: [^ PBValidationError signal: 'PBCoordinatorCore: an unknown replication ends with its reason'].
   state := self _replaceReplication: aReplication with: nil in: s.
   label := aReplication root label.
-  isCommitted ifTrue: [
-    fx add: (PBToAcceptor event: (PBLearnCommitted root: aReplication root accept: true logged: true)).
-    state := state with: { #suspectTerm -> (self _learnLabel: label clears: state suspectTerm) }.
-    state := self _bindCommitted: aReplication permission root: aReplication root in: state.
-    ^ self _settle: aReplication waiter with: #committed in: state effects: fx].
+  fx add: (PBToAcceptor event: (PBLearnCommitted root: aReplication root accept: true logged: true)).
+  state := state with: { #suspectTerm -> (self _learnLabel: label clears: state suspectTerm) }.
+  state := self _bindCommitted: aReplication permission root: aReplication root in: state.
+  ^ self _settle: aReplication waiter with: #committed in: state effects: fx.
+
+"aReplication ends unknown: counted, the node suspect for its term (its acceptor too); its
+ waiter is settled with a PBOutcomeUnknownError of aText (proto_db's text for the case)."
+PBCoordinatorCore >> _endReplication: aReplication unknown: aText in: s effects: fx
+  | state label error |
+  state := self _replaceReplication: aReplication with: nil in: s.
+  label := aReplication root label.
   fx add: (PBCount stat: 'replication_failures'); add: (PBToAcceptor event: (PBSuspect term: label)).
   state := state with: { #suspectTerm -> (state suspectTerm max: label) }.
-  ^ self _settle: aReplication waiter with: #unknown in: state effects: fx.
+  error := PBOutcomeUnknownError new messageText: aText; yourself.
+  ^ self _settle: aReplication waiter with: error in: state effects: fx.
+
+"The epoch of aLabeledRoot's record, 0 for the empty space."
+PBCoordinatorCore >> _epochOf: aLabeledRoot
+  ^ aLabeledRoot record isNil ifTrue: [0] ifFalse: [aLabeledRoot record epoch].
 
 "The replication whose request id is aRid, nil when none (decided, or never sent)."
 PBCoordinatorCore >> _replication: aRid in: s
@@ -313,7 +348,10 @@ PBCoordinatorCore >> _ownAckFailed: anAck in: s now: t effects: fx
   | rep |
   rep := self _replication: (anAck at: 'rid') in: s.
   rep isNil ifTrue: [^ s].
-  ^ self _endReplication: rep committed: false in: s effects: fx.
+  "proto_db's text for a failure after the root was sent; the failure is the own log write."
+  ^ self _endReplication: rep unknown: 'Node ' , s config nodeId , ': the commit of root epoch '
+    , (self _epochOf: rep root) printString , ' failed after the root was sent (its own acceptance could not be made '
+    , 'durable); peers may have acknowledged it, so it may or may not take effect' in: s effects: fx.
 
 "The timer of a replication: its permission ended (re-armed when it came early)."
 PBCoordinatorCore >> _replicationTimer: anEvent in: s now: t effects: fx
@@ -1418,23 +1456,32 @@ PBBuildFailed >> printOn: aStream
 
 "--- PBReplicated ---"
 
-PBRoundEvent subclass: #PBReplicated instanceVariableNames: 'outcome'.
+PBRoundEvent subclass: #PBReplicated instanceVariableNames: 'outcome error'.
 
-"The answer to PBReplicate: anOutcome, #committed, #unknown or #none (H7, the settle of
- dispatchReplicateWanted:in:now:)."
+"The answer to PBReplicate, the settle of dispatchReplicateWanted:in:now: (H7): #committed,
+ #none, or the PBOutcomeUnknownError of an unknown outcome (its text says why). An unknown
+ outcome without its error is refused: the round reports proto_db's reason."
 PBReplicated class >> outcome: anOutcome
-  (#(#committed #unknown #none) includes: anOutcome) ifFalse: [
-    ^ PBValidationError signal: 'PBReplicated: an outcome is #committed, #unknown or #none, not ' , anOutcome printString].
-  ^ self basicNew _setOutcome: anOutcome asSymbol.
+  (anOutcome isKindOf: PBOutcomeUnknownError) ifTrue: [^ self basicNew _setOutcome: #unknown error: anOutcome].
+  (#(#committed #none) includes: anOutcome) ifFalse: [
+    ^ PBValidationError signal: 'PBReplicated: an outcome is #committed, #none or a PBOutcomeUnknownError, not '
+      , anOutcome printString].
+  ^ self basicNew _setOutcome: anOutcome asSymbol error: nil.
 
-PBReplicated >> _setOutcome: anOutcome
+PBReplicated >> _setOutcome: anOutcome error: anError
   "Runs once, on a fresh instance."
   outcome isNil ifFalse: [^ PBUserError signal: 'PBReplicated is immutable'].
   outcome := anOutcome.
+  error := anError.
   ^ self.
 
+"#committed, #unknown or #none."
 PBReplicated >> outcome
   ^ outcome.
+
+"The PBOutcomeUnknownError of an unknown outcome, else nil."
+PBReplicated >> error
+  ^ error.
 
 PBReplicated >> roundWith: aCore in: aRoundState now: t
   ^ aCore roundReplicated: self in: aRoundState now: t.
@@ -1947,7 +1994,7 @@ PBCoordinatorCore >> roundReplicated: anEvent in: s now: t
       ifTrue: [
         o = #committed
           ifTrue: [self _buildNext: (s with: { #outcome -> #committed. #committed -> s current. #base -> s current }) now: t effects: fx]
-          ifFalse: [self _replicationFailed: s outcome: o now: t effects: fx]]
+          ifFalse: [self _replicationFailed: s with: anEvent now: t effects: fx]]
       ifFalse: [
         self _expect: #replicate in: s for: anEvent.
         o = #committed
@@ -1955,16 +2002,13 @@ PBCoordinatorCore >> roundReplicated: anEvent in: s now: t
             self _finish: (s built collect: [:b | b first]) with: true effects: fx.
             self _roundDone: (s with: { #outcome -> #committed. #committed -> s current. #base -> s current. #built -> #() })
               now: t effects: fx]
-          ifFalse: [self _replicationFailed: s outcome: o now: t effects: fx]]].
+          ifFalse: [self _replicationFailed: s with: anEvent now: t effects: fx]]].
 
-"A replication that did not commit: #unknown (the root left this node) or #none (nothing a voter
- may accept left it)."
-PBCoordinatorCore >> _replicationFailed: s outcome: anOutcome now: t effects: fx
-  anOutcome = #unknown ifTrue: [
-    ^ self _failRound: s with: (PBOutcomeUnknownError new messageText: 'Node ' , s config nodeId , ': the root of this commit '
-      , 'was sent under ' , (PBCoreValue textOf: s permission) , ' and no majority of the voters acknowledged it within the '
-      , 'permission: it may or may not be committed (the next phase 1 decides)'; yourself)
-      sent: true now: t effects: fx].
+"A replication that did not commit (the PBReplicated aReplicated): unknown (the root left this
+ node; the round ends with the replication's PBOutcomeUnknownError, proto_db's text) or #none
+ (nothing a voter may accept left it)."
+PBCoordinatorCore >> _replicationFailed: s with: aReplicated now: t effects: fx
+  aReplicated outcome = #unknown ifTrue: [^ self _failRound: s with: aReplicated error sent: true now: t effects: fx].
   ^ self _failRound: s with: (PBConflictError new messageText: 'Node ' , s config nodeId , ': nothing a voter may accept left '
     , 'this node under ' , (PBCoreValue textOf: s permission) , ' (it ended, or had too little time left, before the root '
     , 'was sent); nothing was replicated'; yourself)

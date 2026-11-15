@@ -2,6 +2,15 @@
 
 ## 0.2.0 (unreleased)
 
+- The checklist of `proto_db`'s cluster tests (Task 18): `tests/unit/cluster_checklist.tsv`
+  gives each of the 261 test functions of `tests/unit/test_cluster_*.py` at v2.0.0rc3 a row,
+  ported (a whole check label of a protoBaseST test), deferred to a Phase C task or n/a;
+  `tests/unit/cluster_checklist.sh` checks it against the tag and, with `CHECKLIST_FINAL=1`,
+  fails on any deferred row. An unknown replication outcome now carries `proto_db`'s text for
+  its case (a majority counted only after the permission ended; refusals; too few
+  acknowledgements; a failed own append): its waiter is settled with that
+  `PBOutcomeUnknownError`, and `PBReplicated outcome:` takes it (a bare `#unknown` is refused).
+
 - The cluster's safety sweep (Task 17): the timer audit, `tests/audit/` (every row of
   `PBClusterConfig timerTable` at 1/10, 10 times and skewed per member, 3 and 5 members, seeds
   1-30: 3240 simulator runs with drops and a crash; helper `tests/audit/_audit.st`), a run of its

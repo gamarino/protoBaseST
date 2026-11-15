@@ -1,4 +1,4 @@
-"EXPECT: ok 9"
+"EXPECT: ok 14"
 "The rejoin of an empty acceptor log (cluster/rejoin.st, CP 'A node that lost its disk', R51,
  R78a, L13, L14) in the simulator (_sim.st), proto_db test_cluster_rejoin, _rejoin_fresh and
  _rejoin_records. The families, the hooked simulator and the planted wrong rules are in
@@ -15,10 +15,14 @@
  PBCorruptionError naming forceRejoin, and forceRejoin on it forgets the lost commit. (7) The
  R78b boundary (5x, (D + m)/(D - m) with m = 2/3 D) with the holder's timer running: the
  waiting plant is safe at 5 and loses a at 6; the product is safe at 8. (8) proto_db's literal
- check: with every clock stopped the ballot rejoin completes, the waiting one never does. (9)
- Two wiped acknowledgers of five rejoin, then one acquires and commits (its base is the commit
- they lost), loses its disk again and commits under a higher term of its rank: no acknowledged
- commit lost (S4), no term owned twice (S1)."
+ check: with every clock stopped the ballot rejoin completes, the waiting one never does.
+ (9-10) Two wiped acknowledgers of five (a reached exactly a majority; its done and release
+ lost) learn a from their rejoin witnesses, so the next holder, n0 cut off, builds on it;
+ PlantRejoinLearnsNothing loses a (S4). (11-12) A peer restarted mid-lease refuses grants
+ through its startup grace, so a lease is granted only after the old one ended (L5 checked at
+ every step); with a grace of 0 two leases are valid at once. (13-14) A release teaches its
+ committed root to every peer (the done lost) and the next holder's lease is certain on it;
+ PlantReleaseForgets teaches nothing."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_rejoin'.
@@ -75,9 +79,29 @@ c that: 'every clock stopped: the ballot rejoin completes, a waiting one never d
   is: { RejoinFamilies frozen: RejoinRules new seed: 1. RejoinFamilies frozen: PlantRejoinByWaiting new seed: 1 }
   equals: #(#(true 1) #(false 0)).
 
-"(9)"
-c that: 'two wiped acknowledgers of five, then a wiped proposer: no commit lost, no term owned twice'
+"(9-10)"
+c that: 'two wiped acknowledgers of five learn the committed root by their rejoin ({ violation. a, b. ballots. b on a. a never reached n3, n4 })'
   is: (#(1 2) collect: [:seed | (RejoinFamilies wiped: RejoinRules new seed: seed) asArray])
-  equals: ((1 to: 2) collect: [:i | { nil. #(#acknowledged #acknowledged #acknowledged). #(1 1). true. #(1 1) }]).
+  equals: ((1 to: 2) collect: [:i | { nil. #(#acknowledged #acknowledged). #(1 1). true. #(false false) }]).
+out := RejoinFamilies wiped: PlantRejoinLearnsNothing new seed: 1.
+c that: 'PlantRejoinLearnsNothing is caught (S4: a acknowledged, then lost)'
+  is: { (out first ifNil: ['']) includesSubstring: 'S4: the acknowledged commit ''a'''. out at: 2. out at: 4 }
+  equals: { true. #(#acknowledged #acknowledged). false }.
+
+"(11-12)"
+c that: 'a restarted peer refuses every grant through its startup grace: never two valid leases ({ violation. x })'
+  is: (#(1 2) collect: [:seed | (RejoinFamilies restartGrace: RejoinRules new seed: seed grace: nil) asArray])
+  equals: #(#(nil #acknowledged) #(nil #acknowledged)).
+out := RejoinFamilies restartGrace: RejoinRules new seed: 1 grace: 0.
+c that: 'a restart with a startup grace of 0 is caught (L5: two valid leases at once)'
+  is: ((out first ifNil: ['']) includesSubstring: 'L5: valid leases at once') equals: true.
+
+"(13-14)"
+c that: 'a release teaches its committed root to every peer; the next holder is certain on it ({ violation. learnt. certain. on a. b })'
+  is: (#(1 2) collect: [:seed | (RejoinFamilies releaseTeaches: RejoinRules new seed: seed) asArray])
+  equals: #(#(nil #(true true) true true #acknowledged) #(nil #(true true) true true #acknowledged)).
+c that: 'PlantReleaseForgets is caught (no peer learns a committed; the next lease is uncertain)'
+  is: ((RejoinFamilies releaseTeaches: PlantReleaseForgets new seed: 1) asArray copyFrom: 2 to: 3)
+  equals: #(#(false false) false).
 
 c report displayNl.
