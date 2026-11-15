@@ -8,7 +8,8 @@
 #                                                                   `check value: '...'` (outside the
 #                                                                   comments, '' read as '); never a
 #                                                                   prefix, never comment text
-#   deferred  <task number, 19..28, or a sub-task of one: 22b>  <reason>  Phase C ports it (the shell,
+#   deferred  <task number, 19..28, or a lettered task of that range, such as 22b, that the cluster
+#              plan has as a '### Task <id>:' heading>  <reason>  Phase C ports it (the shell,
 #                                                                   transport, storage, processes)
 #   n/a       <tiered | DEPTH = 1 | Python-only API>  <reason>     it does not apply to the port
 # Columns are tab-separated: proto_db file::function, status, then the two fields above. Blank
@@ -45,10 +46,14 @@ list="$(for f in $files; do
         | sed -E 's/^ *def (test_[A-Za-z0-9_]*).*/\1/' | sed "s|^|$(basename "$f")::|"
 done)"
 
-python3 -I - "$REPO" "$HERE/cluster_checklist.tsv" "$list" "$(printf '%s\n' $files | wc -l)" "${CHECKLIST_FINAL:-0}" <<'PY'
+plan="$REPO/docs/superpowers/plans/2026-11-13-cluster-mode.md"
+lettered="$(sed -n -E 's/^### Task ([0-9]+[a-z]):.*/\1/p' "$plan" 2>/dev/null | tr '\n' ' ')"
+
+python3 -I - "$REPO" "$HERE/cluster_checklist.tsv" "$list" "$(printf '%s\n' $files | wc -l)" "${CHECKLIST_FINAL:-0}" "$lettered" <<'PY'
 import os, re, sys
 repo, table, listing, nfiles = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 final = sys.argv[5] == "1"
+planned = set(sys.argv[6].split())       # the lettered tasks of the plan ('### Task 22b:')
 
 
 def labels_of(text):
@@ -126,6 +131,9 @@ else:
             task = re.fullmatch(r"([0-9]+)([a-z]?)", a)
             if not task or not 19 <= int(task.group(1)) <= 28:
                 errors.append("%s: %s: deferred to %r, not a Phase C task (19..28, or one with a letter: 22b)" % (where, key, a))
+                continue
+            if task.group(2) and a not in planned:
+                errors.append("%s: %s: deferred to Task %s, which the cluster plan has no heading for" % (where, key, a))
                 continue
             if len(b.split()) < 6:
                 errors.append("%s: %s: the deferral needs a specific reason" % (where, key))

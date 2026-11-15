@@ -81,8 +81,8 @@ Build protoST 0.12.0 against protoCore 3.6.0 and protoIO 0.7.0 (see its own READ
 `lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S40 and
 `BinaryFile >> linkCount` and `FileReference >> realPath` (the hard-link refusal and the lock
 naming of the cluster logs), which this code relies on. The Python interop tests and the ERP demo also need a checkout of the
-[protoBase repository](https://github.com/gamarino/ProtoDB), at the tag `v2.0.0rc2`, and Python
-3.11 or newer (tested with 3.14):
+[protoBase repository](https://github.com/gamarino/ProtoDB), at the tag `v2.0.0rc4` (`v2.0.0rc2`
+before the cluster branch), and Python 3.12 or newer (3.11 before it; tested with 3.14):
 
 ```sh
 git clone https://github.com/gamarino/ProtoDB ../ProtoBase    # default location; or set PROTOBASE_REPO

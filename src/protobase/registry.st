@@ -133,7 +133,8 @@ PBTypeRegistry class >> _entryFor: aName
 
 "Registers aClass under aClass typeName and each of aClass typeAliases. The
  name must follow the grammar, and a name of the reserved proto_db. namespace
- must be in the built-in table; an alias is any non-empty String that is not a
+ must be in the built-in table and not one of the runtime registry's types (22, 23:
+ format 5, which protoBaseST does not write); an alias is any non-empty String that is not a
  built-in name (see the module comment). A name or an
  alias already registered by another class is PBValidationError. Registering
  the same class again is a no-op. The class's record shape is built here: a
@@ -188,6 +189,8 @@ PBTypeRegistry class >> _checkDeclaredName: aName of: aClass
       , aName printString].
   ((aName beginsWith: 'proto_db.') and: [(self aliasOf: aName) isNil]) ifTrue: [
     ^ PBValidationError signal: 'PBTypeRegistry: ' , aName , ' is in the reserved proto_db. namespace but is not a built-in type'].
+  (self registryAliases includes: (self aliasOf: aName)) ifTrue: [
+    ^ PBValidationError signal: 'PBTypeRegistry: ' , aName , ' is a format-5 type of the runtime registry; protoBaseST writes format 4'].
 
 "Whether a class is registered under aName (a declared name or an alias)."
 PBTypeRegistry class >> isRegistered: aName

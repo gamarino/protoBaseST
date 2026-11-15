@@ -1,4 +1,4 @@
-"EXPECT: ok 53"
+"EXPECT: ok 54"
 "PBTypeRegistry (format spec, 'Type names (D57)', 'Atoms of unknown types (D59)',
  'Built-in type aliases'): aliases and names map to registered classes, an
  unknown proto_db. name is corruption, any other unknown valid name is an
@@ -45,6 +45,14 @@ BadName class >> typeName
 PBAtom subclass: #ReservedName.
 ReservedName class >> typeName
   ^ 'proto_db.custom.Thing'.
+
+PBAtom subclass: #FakeModuleList.
+FakeModuleList class >> typeName
+  ^ 'proto_db.registry.ModuleList'.
+
+PBAtom subclass: #FakeCatalog.
+FakeCatalog class >> typeName
+  ^ 'proto_db.registry.Catalog'.
 
 PBAtom subclass: #BuiltinAlias.
 BuiltinAlias class >> typeName
@@ -98,6 +106,12 @@ c that: 'a Boolean tag' signals: PBCorruptionError during: [PBTypeRegistry class
 "Registration refusals."
 c that: 'bad, when registered' signals: PBValidationError during: [PBTypeRegistry register: BadName].
 c that: 'a proto_db. name outside the table' signals: PBValidationError during: [PBTypeRegistry register: ReservedName].
+c that: 'a class declaring a registry type name (22, 23) is refused and the alias keeps no class'
+  is: ({ FakeModuleList. FakeCatalog } collect: [:cls |
+      [PBTypeRegistry register: cls. 'registered'] on: PBValidationError do: [:e |
+        (e messageText includesSubstring: 'format-5 type of the runtime registry') ifTrue: ['refused'] ifFalse: [e messageText]]])
+    , ({ 22. 23 } collect: [:tag | [PBTypeRegistry classForTag: tag. 'a class'] on: PBNotSupportedError do: [:e | 'no class']])
+  equals: #('refused' 'refused' 'no class' 'no class').
 c that: 'a built-in name as an alias' signals: PBValidationError during: [PBTypeRegistry register: BuiltinAlias].
 c that: 'the abstract base (no typeName)' signals: PBValidationError during: [PBTypeRegistry register: PBAtom].
 c that: 'not a class' signals: PBValidationError during: [PBTypeRegistry register: 42].

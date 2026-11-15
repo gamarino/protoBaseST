@@ -226,8 +226,10 @@ collections with writes, and `PBCountedSet` since Task 22.
   is checked before any record of the segment is decoded, so a four-key envelope is never
   reported as corruption (`tests/conformance/format5_refused.st`). An acceptor log of log format
   3 is refused at its header; protoBaseST writes log format 2 and never a kind-7 entry. The
-  aliases 22 and 23 are in the built-in table with no class: a record of either is
-  `PBNotSupportedError`, and none is ever written. The runtime registry (modules, catalog, C3
+  aliases 22 and 23 are in the built-in table with no class, and an application class
+  declaring either name is refused when registered (`PBValidationError`). So a record of
+  either is `PBNotSupportedError` when read, and `PBAtomEnvelope encode` refuses one as a
+  backstop, so none is ever written. The runtime registry (modules, catalog, C3
   resolution, `__currentModules`, `__catalog`) is not supported; it gets its own plan after the
   cluster branch. The registry of record classes is process-wide, as `proto_db`'s.
 - **The root record refusal** is `proto_db`'s `decode_root` sentence ("Undecodable root record"),

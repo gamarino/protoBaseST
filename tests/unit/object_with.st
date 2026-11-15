@@ -1,4 +1,4 @@
-"EXPECT: ok 34"
+"EXPECT: ok 36"
 "New records (plan Task 15; ProtoBase DBObject(**attrs) and with_): PBObject withAll:,
  Invoice withAll: for an application class, with:value: and withAll: on a record. Each
  answers a new record, a new atom whose oid differs from the old one's; the old record is
@@ -11,7 +11,12 @@
  versions too; an opaque atom refuses with:value: naming its type.
  parents and with_parents are reserved for new fields (proto_db 2.0.0rc4, format spec 'Reserved
  names', R157): a change naming either is PBValidationError, while a stored field of either
- name still loads, reads, and is carried unchanged by a new version."
+ name still loads, reads, and is carried unchanged by a new version, placed as proto_db
+ 2.0.0rc4's with_ places it (_take_legacy, then _carry): after the other attributes, parents
+ then with_parents. The bytes of such a new version are those the rc4 venv writes (fixture
+ below: proto_db v2.0.0rc4 MemoryStorage, DirectContext load of the record { parents 'p'.
+ with_parents 3. n 1 }, with_(n=2), saved; its payload re-packed with the oid 00 01 .. 0f;
+ tests/interop/py_legacy_with_bytes.py prints it)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_spaces'.
@@ -24,7 +29,7 @@ Invoice class >> reservedAttributeNames
 Invoice >> number
   ^ self at: 'number'.
 
-| c a b oldOid inv inv2 base sb ref st stub newer opaque legacyRef legacy carried |
+| c a b oldOid inv inv2 base sb ref st stub newer opaque legacyRef legacy carried legacyRef2 |
 c := Check new.
 a := PBObject withAll: { 'name' -> 'Ada'. 'born' -> 1815 }.
 c that: 'withAll: holds the attributes' is: (a at: 'name') equals: 'Ada'.
@@ -73,6 +78,7 @@ sb := SpaceBuilder segment: (ByteArray fromHex: '0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0
 ref := sb add: 19 oid: 7 state: { 'name' -> 'Grace'. 'born' -> 1906 }.
 opaque := sb add: 'tests.with.Unknown' oid: 8 state: { 'x' -> 1 }.
 legacyRef := sb add: 19 oid: 9 state: { 'parents' -> 'p'. 'with_parents' -> 3. 'n' -> 1 }.
+legacyRef2 := sb add: 19 oid: 10 state: { 'with_parents' -> 3. 'n' -> 1. 'parents' -> 'p' }.
 sb writeTo: base root: ref.
 st := PBFileStorage path: base.
 stub := PBTypeRegistry unloadedAtomFor: 19 at: ref pointer storage: st.
@@ -85,9 +91,15 @@ legacy := PBTypeRegistry unloadedAtomFor: 19 at: legacyRef pointer storage: st.
 c that: 'a stored field parents or with_parents loads and reads'
   is: { legacy at: 'parents'. legacy at: 'with_parents'. legacy hasDefinedAttr: 'parents' } equals: #('p' 3 true).
 carried := legacy with: 'n' value: 2.
-c that: 'a new version carries a stored parents and with_parents unchanged'
+c that: 'a new version carries a stored parents and with_parents unchanged, after the other attributes'
   is: { carried state keys. carried at: 'parents'. carried at: 'with_parents'. carried at: 'n' }
-  equals: { #('parents' 'with_parents' 'n'). 'p'. 3. 2 }.
+  equals: { #('n' 'parents' 'with_parents'). 'p'. 3. 2 }.
+c that: 'the new version''s record is the bytes proto_db rc4 writes'
+  is: (PBAtomEnvelope tag: 19 oid: (ByteArray withAll: (0 to: 15)) state: carried state) encode
+  equals: (Check bytes: '83a17413a36f6964c410000102030405060708090a0b0c0d0e0fa17383a16e02a7706172656e7473a170ac776974685f706172656e747303').
+c that: 'carried fields go last, parents then with_parents, whatever their stored order'
+  is: ((PBTypeRegistry unloadedAtomFor: 19 at: legacyRef2 pointer storage: st) with: 'x' value: 2) state keys
+  equals: #('n' 'x' 'parents' 'with_parents').
 c that: 'a stored parents field cannot be changed' signals: PBValidationError containing: 'parents'
   during: [legacy with: 'parents' value: 'q'].
 st close.

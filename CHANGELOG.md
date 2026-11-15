@@ -10,15 +10,20 @@
   (`readableRootVersions` 2 to 4). Format 5 is refused with `PBNotSupportedError` (segments,
   roots and log format 3, as before), and protoBaseST keeps writing format 4 and log format 2.
   The built-in aliases 22 `proto_db.registry.ModuleList` and 23 `proto_db.registry.Catalog` are in
-  the table with no class (`builtinCount` 24); a record of either is never written
-  (`PBAtomEnvelope encode`, `PBTypeRegistry registryAliases`). A change naming `parents` or
-  `with_parents` is `PBValidationError` (R157), while a stored field of either name still loads
-  and is carried. `removeRootObject:` refuses `__` names, as `setRootObject:` does. The
+  the table with no class (`builtinCount` 24); an application class declaring either name is
+  refused by `register:`, and a record of either is never written (`PBAtomEnvelope encode`,
+  `PBTypeRegistry registryAliases`). A change naming `parents` or `with_parents` is
+  `PBValidationError` (R157), while a stored field of either name still loads and is carried,
+  placed last as rc4's `with_` places it (pinned against rc4's bytes,
+  `tests/interop/py_legacy_with_bytes.py`). `removeRootObject:` refuses `__` names, as `setRootObject:` does. The
   conformance vectors are re-vendored at rc4 (digest `37b286fd…`); `_vectors.st` reads the
   `segments` list, and the new runner `tests/conformance/format5_refused.st` pins the format-5
   vectors as expected `PBNotSupportedError` refusals and checks that a version-5 segment is
   refused before any record is decoded. The checklist is pinned to rc4 (298 rows; a deferral may
-  name a lettered task such as `22b`), and the interop venv to rc4 (Python 3.12 or newer).
+  name a lettered task such as `22b` when the cluster plan has its heading), and the interop venv
+  to rc4 (Python 3.12 or newer). **After merging, run `tests/interop/setup_venv.sh` in every
+  checkout:** a venv still holding rc2 (and every worktree linked to it) fails
+  `tests/interop/env.sh` (exit 1, FAIL, not SKIP) until it is rebuilt at rc4.
 - Group commit on a standalone storage (Task 22, `proto_db` D52 and `_standalone_round`), with
   the shared round runner (`round.st`). Every commit and every new database is a
   `PBCommitEntry` (`transaction:willRetry:deadline:`, `createDatabase:deadline:`, `future`)

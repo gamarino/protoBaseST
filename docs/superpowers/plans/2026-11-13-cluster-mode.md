@@ -18,7 +18,7 @@ core runs in a seeded, single-threaded, virtual-time simulator that carries ever
   `MessagePack`/`MessagePackMap`, `crc32`, `HMAC sha256Key:message:`, `ByteArray randomBytes:`,
   `Random seed:`, `Time microsecondClockValue`, `OSProcess spawn:arguments:`/`kill:signal:`);
 - protoBaseST at `c0915cf` (branch `feat/cluster`, off `feat/prototype`);
-- CPython ≥ 3.11 with `proto_db` from the existing interop venv, for Task 26 only.
+- CPython ≥ 3.12 with `proto_db` from the interop venv (at `v2.0.0rc4` since Task 22a), for Task 26 only.
 
 **Spec:** `docs/superpowers/specs/2026-11-13-cluster-design.md` (read all of it, including §8.4,
 the maintainer's answers Q1–Q8). The normative protocol and format are `proto_db` at `v2.0.0rc4`
@@ -107,7 +107,7 @@ spec states or need an owner's answer; Task 29 copies the whole table into `docs
 | CC1 | The node's own vote and own acceptance are local events to its own acceptor (`PBToAcceptor`), decided by the same rule methods as a peer's request, never through the transport | One decision path; spec 5.4 leaves the dispatcher/acceptor mapping as a Phase B review point |
 | CC2 | `PBGrantState` lives inside `PBAcceptorState`: promises are durable acceptor state. The dispatcher reads the acceptor's published snapshot (an `Atom`) for hints only and never decides a grant or an acceptance from it | Atomic acceptor steps (R55, R81, R81b) |
 | CC3 | The core counts integer microseconds; options are milliseconds. Defaults: `driftMargin` = ⌈2D/3⌉, belief = D − margin, `sendReserve` = min(`requestTimeout`, belief // 4), `startupGrace` = D + margin, idle end D // 4 | No rounding of `proto_db`'s float seconds can make the margin fall below 2/3 D (R78b) |
-| CC4 | **(maintainer)** HMAC frame authentication layout: the frame body is the msgpack map followed by a 32-byte tag, HMAC-SHA-256(key, UTF-8(receiver id) ‖ 0x00 ‖ msgpack bytes); the 4-byte length covers both; `MAX_FRAME_BYTES` unchanged; a key is a `ByteArray` of at least 32 bytes; a missing or wrong tag drops the connection like an invalid message; the tag is compared over all 32 bytes without an early exit. Replay needs no counter: duplication and reordering are inside the failure model (P5), and the receiver id in the tag stops delivery to another member. Disabled, the bytes are protocol 13 | Q5 asks for optional HMAC "from the start" but fixes no layout |
+| CC4 | **(maintainer)** HMAC frame authentication layout: the frame body is the msgpack map followed by a 32-byte tag, HMAC-SHA-256(key, UTF-8(receiver id) ‖ 0x00 ‖ msgpack bytes); the 4-byte length covers both; `MAX_FRAME_BYTES` unchanged; a key is a `ByteArray` of at least 32 bytes; a missing or wrong tag drops the connection like an invalid message; the tag is compared over all 32 bytes without an early exit. Replay needs no counter: duplication and reordering are inside the failure model (P5), and the receiver id in the tag stops delivery to another member. Disabled, the bytes are protocol 14 (13 before Task 22a) | Q5 asks for optional HMAC "from the start" but fixes no layout |
 | CC5 | The reader delivers each valid frame as it is read. `proto_db`'s "messages decoded from the same 64 KiB read as a bad frame are lost with it" is a property of its reads, not reproduced | Delivery and loss are both inside the failure model; the connection is still dropped at the first invalid frame |
 | CC6 | **(maintainer)** The node-id binding of the acceptor log proposed in lesson L27 is **not** added in Phases A-C: it needs a new entry kind, which would change the shared format. In shared storage the file name `cluster/<name>.roots` binds the id. Kept as a proposal to `proto_db` for Phase D | "Same bytes" outranks a cheap addition |
 | CC7 | Message types never sent at `DEPTH = 0` over shared storage (`records warm store propose fetch fetched commit_query commit_info`) are decoded and validated (an invalid one drops the connection), then ignored and counted in `stats` (`ignored_messages`) | All 22 types must be validated (spec 3.3 item 4); answering them would be code for Phase D |
@@ -1604,6 +1604,9 @@ tests it adds or changes and those that exercise the code it touches. The whole 
 the timer audit (`tests/audit`) and the hunt for integration problems run once, here. A failure
 found here is fixed in the owning module, fail-first.
 
+- [ ] **Step 0 (since Task 22a):** the interop venv is pinned to `v2.0.0rc4`. Run
+  `tests/interop/setup_venv.sh` in this checkout, and after the merge in `main` and every
+  worktree linked to its venv: a venv still at rc2 fails `tests/interop/env.sh` (exit 1).
 - [ ] **Step 1:** run the whole suite with the venv present. Expected: all PASS, no `SKIP` under
   `tests/conformance/cluster.st`, `cluster_checklist.sh` passing with 298 rows (rc4, since Task 22a). Then run the
   checklist in final mode with the checkout named: `CHECKLIST_FINAL=1

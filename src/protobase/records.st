@@ -112,17 +112,25 @@ PBObject class >> new
 
 "The PBFrozenDict of the attributes anArrayOfAssociations (a record's state, in
  order) updated by the changes aChanges: an existing name keeps its place, a
- new one is appended, each value canonical, each name checked."
+ new one is appended, each value canonical, each name checked. A stored field
+ named parents or with_parents (R157) is carried unchanged and placed last, in
+ the order of parentsApiNames, as proto_db 2.0.0rc4's with_ does (_take_legacy
+ takes them out, _carry puts them back after the other attributes), so the new
+ version's bytes are rc4's."
 PBObject class >> _state: anArrayOfAssociations with: aChanges
-  | names values given |
+  | names values given legacy |
   ((aChanges isKindOf: Array) or: [aChanges isKindOf: OrderedCollection]) ifFalse: [
     ^ PBValidationError signal: self name , ': the attributes are an Array of Associations (name -> value), not '
       , (PBKeys _preview: aChanges)].
   names := OrderedCollection new.
   values := OrderedCollection new.
+  legacy := Dictionary new.
   anArrayOfAssociations do: [:each |
-    names addLast: (self _checkAttributeName: each key).
-    values addLast: each value].
+    | name |
+    name := self _checkAttributeName: each key.
+    (PBObject parentsApiNames includes: name)
+      ifTrue: [legacy at: name put: each value]
+      ifFalse: [names addLast: name. values addLast: each value]].
   given := Set new.
   aChanges do: [:each |
     | name i |
@@ -140,6 +148,8 @@ PBObject class >> _state: anArrayOfAssociations with: aChanges
     i = 0
       ifTrue: [names addLast: name. values addLast: (self _canonical: each value field: name)]
       ifFalse: [values at: i put: (self _canonical: each value field: name)]].
+  PBObject parentsApiNames do: [:name |
+    (legacy includesKey: name) ifTrue: [names addLast: name. values addLast: (legacy at: name)]].
   ^ PBFrozenDict withAssociations: ((1 to: names size) asArray collect: [:i | (names at: i) -> (values at: i)]).
 
 "aValue canonical, a PBValidationError of the codec naming the field aName
