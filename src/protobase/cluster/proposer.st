@@ -791,23 +791,65 @@ PBCoordinatorCore >> dispatchAcceptorDecided: anEvent in: s now: t
         ifFalse: [self _onReply: vote in: state now: t effects: fx]].
     self _poke: state now: t effects: fx].
 
-"The acceptor's decision of this node's own message signalled a PBDBError (proto_db raises it in
- the caller's thread). A replicate: its replication ends unknown, or in the protocol violation
- (_ownAcceptanceFailed:error:in:effects:). A request: every waiter of the acquisition is settled
- with the error (proto_db _acquire raises it out of permit()); the attempt, missing the own
- vote, ends by its timer. Any other message has no waiter: unchanged."
+"The acceptor's decision of this node's own message signalled a PBDBError (proto_db decides the
+ own vote in the thread that sent it and raises there). Each case is matched to what is current
+ now, so a late failure (its round already closed by its timer) changes nothing.
+ A replicate: its replication ends unknown, or in the protocol violation
+   (_ownAcceptanceFailed:error:in:effects:).
+ A request of the current attempt (term, rid): proto_db _open_attempt raises out of _acquire into
+   the permit() caller driving it. The core does not know which waiter that is, so every waiter
+   of the acquisition is rejected with the error (conservative: proto_db's other callers would
+   retry), and the attempt is closed at once as lost (_lose:: its cancel, then no waiter is left,
+   so the acquisition ends), where proto_db sent nothing.
+ A renew of the current renewal (term, rid): proto_db _renew runs on the ownership thread, whose
+   failure handler (_own_loop) abandons the ownership, refuses its queue 'ending' and fences the
+   node: the same here, the ownership ended without a release (_ownershipFailed:).
+ A release (held, or the cancel of a lost attempt): proto_db logs a failed release of the
+   ownership loop (coordinator.py 3545); the shell has logged it. A cancel fails in proto_db's
+   _close_attempt and raises to the driving caller; here the attempt is closed already and its
+   waiters back off, so it is only logged (docs/deviations.md)."
 PBCoordinatorCore >> dispatchOwnStepFailed: anEvent in: s now: t
-  ^ self _step: [:fx | | m state |
+  ^ self _step: [:fx | | m e |
     m := anEvent message.
+    e := anEvent error.
     m type = 'replicate'
-      ifTrue: [self _ownAcceptanceFailed: m error: anEvent error in: s effects: fx]
-      ifFalse: [
-        m type = 'request'
-          ifTrue: [
-            state := s.
-            s waiters do: [:w | state := self _settle: w with: anEvent error in: state effects: fx].
-            state with: { #waiters -> #() }]
-          ifFalse: [s]]].
+      ifTrue: [self _ownAcceptanceFailed: m error: e in: s effects: fx]
+      ifFalse: [m type = 'request'
+        ifTrue: [self _ownRequestFailed: m error: e in: s now: t effects: fx]
+        ifFalse: [m type = 'renew'
+          ifTrue: [self _ownRenewFailed: m error: e in: s now: t effects: fx]
+          ifFalse: [s]]]].
+
+"The own request m of the current attempt failed with anError (dispatchOwnStepFailed:in:now:)."
+PBCoordinatorCore >> _ownRequestFailed: m error: anError in: s now: t effects: fx
+  | p a state |
+  p := s proposer.
+  a := p isNil ifTrue: [nil] ifFalse: [p attempt].
+  (a notNil and: [a term = (m at: 'term') and: [a rid = (m at: 'rid')]]) ifFalse: [^ s].
+  state := s.
+  s waiters do: [:w | state := self _settle: w with: anError in: state effects: fx].
+  ^ self _lose: (state with: { #waiters -> #() }) now: t effects: fx.
+
+"The own renew m of the current renewal failed with anError: proto_db _own_loop's failure
+ handler (dispatchOwnStepFailed:in:now:)."
+PBCoordinatorCore >> _ownRenewFailed: m error: anError in: s now: t effects: fx
+  | own r state |
+  own := s ownership.
+  r := own isNil ifTrue: [nil] ifFalse: [own renewal].
+  (r notNil and: [own term = (m at: 'term') and: [r rid = (m at: 'rid')]]) ifFalse: [^ s].
+  ^ self _ownershipFailed: s why: 'its ownership thread failed: ' , anError class name , ': ' , anError messageText now: t effects: fx.
+
+"The ownership's failure (proto_db _own_loop's except): abandoned (the queue refused, the node
+ suspect for its term), the queue refused 'ending', the ownership gone without a release, then
+ the node fenced for aText."
+PBCoordinatorCore >> _ownershipFailed: s why: aText now: t effects: fx
+  | state own locals |
+  state := self _abandon: s why: aText now: t effects: fx.
+  own := state ownership.
+  locals := self _refuse: own queue reason: 'ending' term: own term in: state effects: fx.
+  state := state with: { #ownership -> nil. #waiters -> (locals , state waiters) }.
+  fx add: (PBFence reason: 'Node ' , s config nodeId , ': ' , aText).
+  ^ state.
 
 "The acceptor could not make the promise of this node's own grant durable (proto_db _promise
  failing): the own vote is the refusal 'promise_failed' (highest the term, remaining 0). An own

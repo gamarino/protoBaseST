@@ -15,7 +15,8 @@
   the tier attached already is a no-op, another refused `PBValidationError`) and `_detach`. A
   failed tier write fails the tier (R57); a `PBDBError` a rule's decision signals drops that message (and
   rejects a local request with it, also an own request or replicate the acceptor decides,
-  `PBOwnStepFailed`) without fencing, as `proto_db`'s lanes; an error while a decided step's
+  `PBOwnStepFailed`, which closes the attempt; an own renewal's failure ends the ownership and
+  fences, as `proto_db`'s ownership thread) without fencing, as `proto_db`'s lanes; an error while a decided step's
   effects are performed fences; any other error
   escaping an actor fences the node, and the acceptor reads the fence before each step, so a
   request queued before a dispatcher fence is never granted (review I1). A replication that

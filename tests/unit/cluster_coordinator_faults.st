@@ -1,4 +1,4 @@
-"EXPECT: ok 9"
+"EXPECT: ok 13"
 "The coordinator shell's faults (cluster/coordinator.st, Task 20 fix round 1), over
  PBInProcessNetwork and MemoryTier (_cluster_shell.st). The order of the events is controlled by
  test doubles, never by timing: every wait is a condition with a deadline of 60 s.
@@ -22,8 +22,14 @@
  node, and a replication whose voters were sent the root settles #unknown; on the acceptor, an
  error in the reply of a step it decided fences too (review N1). (7) A
  PBDBError in the acceptor's decision of this node's own request or replicate is handed to the
- dispatcher (PBOwnStepFailed): the permit waiter is rejected with it, the replication with the
- protocol violation, at once (review N2; proto_db raises it to the caller)."
+ dispatcher (PBOwnStepFailed): the permit waiter is rejected with it and the attempt closed at
+ once (no acquisition left), the replication with the
+ protocol violation, at once (review N2; proto_db raises it to the caller); one that is not a
+ violation ends the replication #unknown (the root was sent: proto_db replicate's second
+ handler, review Q3); a held release whose decision fails is only logged (proto_db 3545).
+ (8) A late own request failure, for a rid that is not the current attempt's, is ignored
+ (review Q2). (9) An own renewal whose decision fails ends the ownership (abandoned, the queue
+ refused 'ending', no release) and fences the node, as proto_db _own_loop does (review Q1)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_cluster_shell'.
@@ -61,6 +67,10 @@ ArmedRules >> plant
 ArmedRules >> fire: aSymbol
   ^ armed value: nil ifCurrent: aSymbol.
 
+"Whether the armed fault has fired (or none is armed)."
+ArmedRules >> isSpent
+  ^ armed value isNil.
+
 "A peer's request: handed to the acceptor, then a fault on the dispatcher."
 ArmedRules >> dispatchReceived: anEvent in: s now: t
   | step m |
@@ -76,14 +86,21 @@ ArmedRules >> dispatchReplicateWanted: anEvent in: s now: t
   (self fire: #effects) ifFalse: [^ step].
   ^ PBStep state: step state effects: step effects , { PlantedDBFault new }.
 
-"The acceptor's decision of this node's own request (armed #ownRequest: PBValidationError) or
- own replicate (armed #ownReplicate: PBCorruptionError) signals."
+"The acceptor's decision of this node's own message signals: a request (armed #ownRequest:
+ PBValidationError), a replicate (#ownReplicate: PBCorruptionError; #ownReplicateDB:
+ PBValidationError), a renew (#ownRenew) or a held release (#ownRelease)."
 ArmedRules >> accept: anEvent in: s now: t
   ((anEvent isKindOf: PBReceived) and: [anEvent message from = s config nodeId]) ifTrue: [
     (anEvent message type = 'request' and: [self fire: #ownRequest]) ifTrue: [
       ^ PBValidationError signal: 'planted own request failure'].
     (anEvent message type = 'replicate' and: [self fire: #ownReplicate]) ifTrue: [
-      ^ PBCorruptionError signal: 'Protocol violation: planted own acceptance failure']].
+      ^ PBCorruptionError signal: 'Protocol violation: planted own acceptance failure'].
+    (anEvent message type = 'replicate' and: [self fire: #ownReplicateDB]) ifTrue: [
+      ^ PBValidationError signal: 'planted own acceptance failure'].
+    (anEvent message type = 'renew' and: [self fire: #ownRenew]) ifTrue: [
+      ^ PBValidationError signal: 'planted own renew failure'].
+    (anEvent message type = 'release' and: [(anEvent message at: 'held') = true and: [self fire: #ownRelease]]) ifTrue: [
+      ^ PBValidationError signal: 'planted own release failure']].
   ((anEvent isKindOf: PBReceived) and: [anEvent message type = 'request' and: [self fire: #acceptEffects]]) ifTrue: [
     | step |
     step := super accept: anEvent in: s now: t.
@@ -117,7 +134,7 @@ PlantingAcceptor >> handle: anEvent
         cells acceptorState swap: [:s | s with: { clash first -> clash last }]]].
   ^ super handle: anEvent.
 
-| x4 n c kit three nodes rules out a b f r p base root clash n0end vs barrier |
+| q x4 n c kit three nodes rules out a b f r p base root clash n0end vs barrier |
 c := Check new.
 three := #('n0' 'n1' 'n2').
 
@@ -251,15 +268,71 @@ nodes := three collect: [:id | id = 'n0'
 nodes do: [:x | x start].
 (1 to: 3) do: [:i | ((nodes at: i) _attach: (MemoryTier served: (three at: i) trace: kit trace)) waitWithin: 60000].
 a := kit settle: nodes first _permit.
+q := nodes first nodeState proposer.
 p := (kit settle: nodes first _permit) at: 2.
 base := (kit settle: (nodes first _baseFor: p)) at: 2.
 rules arm: #ownReplicate.
 r := kit settle: (nodes first _replicate: (kit rootUnder: p on: base base offset: 1) under: p).
 c that: 'a PBDBError in the acceptor''s decision of an own request or replicate settles its waiter with it; the node is not fenced'
   is: { a first. (a at: 2) class name. ((a at: 2) isKindOf: Exception) ifTrue: [(a at: 2) messageText] ifFalse: [nil].
-    r first. (r at: 2) class name. ((r at: 2) isKindOf: Exception) ifTrue: [(r at: 2) messageText] ifFalse: [nil]. nodes first isFenced }
+    r first. (r at: 2) class name. ((r at: 2) isKindOf: Exception) ifTrue: [(r at: 2) messageText] ifFalse: [nil]. nodes first isFenced.
+    q isNil }
   equals: { #error. #PBValidationError. 'planted own request failure'. #error. #PBCorruptionError.
-    'Protocol violation: planted own acceptance failure'. false }.
+    'Protocol violation: planted own acceptance failure'. false. true }.
+p := (kit settle: nodes first _permit) at: 2.
+base := (kit settle: (nodes first _baseFor: p)) at: 2.
+rules arm: #ownReplicateDB.
+r := kit settle: (nodes first _replicate: (kit rootUnder: p on: base base offset: 2) under: p).
+(nodes first _done: p outcome: #unknown) waitWithin: 60000.
+c that: 'an own acceptance whose decision signals a PBDBError that is not a violation ends #unknown (the root was sent)'
+  is: { r. nodes first isFenced }
+  equals: { #(#ok #unknown). false }.
+"A held release whose decision fails is logged (proto_db 3545): the node stays healthy and commits."
+rules arm: #ownRelease.
+out := kit commitOn: nodes first offset: 3.
+f := kit waitUntil: [rules isSpent].
+c that: 'an own held release whose decision signals a PBDBError is logged; the node stays healthy and commits'
+  is: { out first. f. nodes first isFenced. (kit commitOn: nodes first offset: 4) first }
+  equals: { #committed. true. false. #committed }.
+kit stopAll: nodes.
+
+"--- (8) a late own request failure (not the current attempt) is ignored ---"
+kit := ShellKit ids: three.
+nodes := three collect: [:id | kit node: id].
+nodes first start.
+(nodes first _attach: (MemoryTier served: 'n0' trace: kit trace)) waitWithin: 60000.
+vs := nodes first config membership fingerprint.
+a := nodes first _permit.
+f := kit waitUntil: [nodes first nodeState proposer notNil and: [nodes first nodeState proposer attempt notNil]].
+b := nodes first nodeState proposer attempt.
+r := kit settle: (nodes first _post: [PBOwnStepFailed
+  message: (PBClusterMessage type: 'request' from: 'n0' fields: { 'term' -> b term. 'rid' -> (b rid + 1000). 'inc' -> 1. 'vs' -> vs })
+  error: (PBValidationError new messageText: 'a late failure'; yourself)]).
+(2 to: 3) do: [:i | (nodes at: i) start. ((nodes at: i) _attach: (MemoryTier served: (three at: i) trace: kit trace)) waitWithin: 60000].
+a := kit settle: a.
+c that: 'a late own request failure that is not the current attempt''s is ignored: the permit is granted'
+  is: { f. r. a first. (a at: 2) class name }
+  equals: { true. #(#ok true). #ok. #PBPermission }.
+kit stopAll: nodes.
+
+"--- (9) an own renewal whose decision fails ends the ownership and fences (proto_db _own_loop) ---"
+kit := ShellKit ids: three.
+rules := ArmedRules armed: nil.
+nodes := three collect: [:id | id = 'n0'
+  ifTrue: [kit node: id options: Dictionary new rules: rules acceptorClass: _PBAcceptor]
+  ifFalse: [kit node: id]].
+nodes do: [:x | x start].
+(1 to: 3) do: [:i | ((nodes at: i) _attach: (MemoryTier served: (three at: i) trace: kit trace)) waitWithin: 60000].
+out := kit commitOn: nodes first offset: 1.
+rules arm: #ownRenew.
+n := 1.
+f := kit waitUntil: [rules isSpent or: [
+  [(kit commitOn: nodes first offset: (n := n + 1)) first ~= #committed] on: Error do: [:e | e return: true]]].
+b := kit waitUntil: [nodes first isFenced].
+c that: 'an own renewal whose decision signals a PBDBError ends the ownership and fences the node'
+  is: { out first. f. rules isSpent. b. nodes first nodeState ownership. (nodes first stats at: 'terms_abandoned') >= 1.
+    (nodes first stats at: 'failure') notNil and: [(nodes first stats at: 'failure') includesSubstring: 'planted own renew failure'] }
+  equals: { #committed. true. true. true. nil. true. true }.
 kit stopAll: nodes.
 
 c report displayNl.

@@ -424,7 +424,7 @@ For tests, tools and readers of the format. An application does not need them.
   `PBStartNode`, `PBStopNode`, `PBPermitWanted waiter:`, `PBBaseWanted permission:waiter:`,
   `PBReplicateWanted permission:root:pred:waiter:` (the root built and the root it was built on), `PBDoneReport permission:outcome:` (`#committed`,
   `#unknown` or `#none`), `PBRejoinWanted`, `PBAcceptorDecided step:`, `PBAcceptorDiscarded
-  step:reason:` (the step the shell discarded because its append failed, and the failure's text; `dispatchAcceptorDiscarded:in:now:`), `PBOwnStepFailed message:error:` (this node's own request or replicate whose acceptor decision signalled a `PBDBError`; `dispatchOwnStepFailed:in:now:` settles the waiter behind it). Effects, each answering
+  step:reason:` (the step the shell discarded because its append failed, and the failure's text; `dispatchAcceptorDiscarded:in:now:`), `PBOwnStepFailed message:error:` (this node's own request or replicate whose acceptor decision signalled a `PBDBError`; `dispatchOwnStepFailed:in:now:`, matched to the current attempt, renewal or replication: a request's waiters are rejected and its attempt lost, a replicate ends unknown or in the violation, a renew ends the ownership and fences). Effects, each answering
   `applyTo:` with one message the shell implements (applySend:, applyToAcceptor:, applyTimer:,
   applySettle:, applyPublishCommitted:, applyPublishAcceptor:, applyFence:, and for the base
   choice applyReadPersisted: and applyProbeRoot:): `PBSend

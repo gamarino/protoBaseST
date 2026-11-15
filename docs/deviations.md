@@ -549,8 +549,18 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     and `_route` do; a local request it interrupts (`_replicate:under:` of a root not labelled
     with its term, for one) is rejected with it, as `proto_db` raises it to its caller, and the
     acceptor hands the dispatcher the error of its decision on this node's own request or
-    replicate (`PBOwnStepFailed`), so the permit waiters are rejected with it and the replication
-    ends unknown, or in the violation, at once rather than at a timer. An error while the effects
+    replicate (`PBOwnStepFailed`), matched to the current attempt, renewal or replication (a
+    late one is ignored). For a request, `proto_db` raises from `_open_attempt` into the one
+    `permit()` caller driving the acquisition and sends nothing; the core cannot tell which
+    waiter that is, so every waiter of the acquisition is rejected with the error (conservative:
+    `proto_db`'s other callers would retry) and the attempt, whose request is already out (CC1),
+    is closed at once as lost (its cancel broadcast). A replication ends unknown, or in the
+    violation. A renewal fails as `proto_db`'s ownership thread does (`_own_loop`): the
+    ownership abandoned, its queue refused `'ending'`, no release, the node fenced. A failed
+    held release is logged, as `proto_db` (3545); a failed cancel of a lost attempt is only
+    logged too, where `proto_db` raises it from `_close_attempt` to the driving caller before
+    broadcasting the cancel: here the attempt is closed and its cancel sent already, and its
+    waiters back off and retry. An error while the effects
     of a decided step are performed (its state already published) fences the node whatever its
     class, where `proto_db` would leave the step half done: here a lost timer would strand a
     waiter; a replication whose root was sent then settles `#unknown`. Any other error fences the node, as
