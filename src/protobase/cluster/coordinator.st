@@ -712,9 +712,11 @@ PBClusterCoordinator >> _detach
  detached, nil when aTier (or a tier over its storage) was not the one attached. On a node that
  is stopping, the Future resolves with nil once the stop has settled, so the acceptor step in
  progress has finished before the caller closes the tier's log (proto_db detach takes _log_lock);
- it is chained on stop's Future, never waited. Before start, nil at once."
+ it is chained on stop's Future, never waited. Before start, nil at once. A nil tier is
+ PBValidationError, before anything is sent (in the acceptor it would fence the node)."
 PBClusterCoordinator >> _detach: aTier
   | f current |
+  aTier isNil ifTrue: [^ PBValidationError signal: 'Node ' , config nodeId , ': _detach: takes the tier to detach, not nil'].
   self isRunning ifTrue: [^ cells acceptor value detach: aTier].
   f := Future new.
   current := run value.

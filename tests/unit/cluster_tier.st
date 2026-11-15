@@ -1,4 +1,4 @@
-"EXPECT: ok 38"
+"EXPECT: ok 39"
 "The shared tier and the cluster storage mode (cluster/tier.st, store.st clusterPath:, space.st
  storage:coordinator:; proto_db cluster/persister.py PlainTier and _node_log, transactions.py
  ObjectSpace(coordinator=)).
@@ -48,7 +48,7 @@ GatedAcceptor _setGate: Future new trace: (Atom on: #()).
 SeamTier class >> logClass
   ^ SeamLog.
 
-| c base dir st tier other rec p1 p2 p3 r1 r2 r3 lockFile held plain kit node space s2 w t2 t3 st3 framed d closing p4 kit2 node2 space2 detached trace |
+| c base dir st tier other rec p1 p2 p3 r1 r2 r3 lockFile held plain kit node space s2 w t2 t3 st3 framed d closing p4 kit2 node2 space2 detached trace t4 |
 c := Check new.
 base := FileSystem temp / ('pbst-cluster-tier-' , Smalltalk pid printString).
 base deleteAll.
@@ -238,15 +238,19 @@ node2 := kit2 node: 'n0' options: Dictionary new rules: PBCoordinatorCore new ac
 node2 start.
 dir := base / 'stopping'.
 space2 := PBObjectSpace storage: (PBFileStorage clusterPath: dir pathString) coordinator: node2.
+c that: '_detach: refuses nil' signals: PBValidationError containing: 'not nil' during: [node2 _detach: nil].
+"A tier over the space's storage: the one the identity rule of _detach: matches."
+t4 := PBSharedTier storage: space2 storage nodeId: 'y'.
 trace := GatedAcceptor trace.
 w := node2 stop.
-detached := node2 _detach: nil.
+detached := node2 _detach: t4.
 detached thenDo: [:x | trace swap: [:old | old , #('detached')]].
 trace swap: [:old | old , #('released')].
 GatedAcceptor gate resolve: true.
 w waitWithin: 60000.
 detached waitWithin: 60000.
 c that: 'a detach during a stop settles after the acceptor step in progress' is: trace value equals: #('released' 'finish' 'detached').
+t4 close.
 space2 close.
 s2 := PBFileStorage clusterPath: dir pathString.
 c that: 'a space closed after its node stopped releases its log' is: ((PBSharedTier storage: s2 nodeId: 'n0') close; yourself) class equals: PBSharedTier.
