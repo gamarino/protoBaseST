@@ -2,6 +2,21 @@
 
 ## 0.2.0 (unreleased)
 
+- The cluster's transports (Task 19, `cluster/transport.st`, `proto_db`'s `transport.py`):
+  `PBInProcessNetwork` / `PBInProcessTransport` (every message framed and decoded with each
+  endpoint's key; drop and duplicate faults from a seeded generator, partitions, crashes) and
+  `PBTcpTransport` (`listenOn:host:`, `withListener:`, each with `requestTimeout:`): one listener
+  actor, one reader actor per accepted connection (the length checked before the body is read;
+  any `PBClusterProtocolError` closes the connection), one sender actor per peer with a queue
+  bounded at `maxFrameBytes` bytes (the oldest frames dropped first) and a jittered reconnection
+  back-off, so a black-holed peer delays nobody else (L7). One protocol: `start:peers:key:handler:`,
+  `send:to:` (never blocks), `stop` (a `Future` that settles once nothing more is delivered) and
+  `stats` (`frames_sent`, `frames_dropped`, `frames_rejected`, `connections_dropped`). Tests:
+  `tests/unit/cluster_transport_inprocess.st`, `tests/unit/cluster_transport_tcp.st`; the 12
+  checklist rows deferred to Task 19 are ported (11) or n/a (the in-process delays: the
+  simulator's). `tests/unit/sim_harness.st`'s no-clock check now covers the core files, not the
+  transport shell. Deviations: [deviations.md](docs/deviations.md#cluster-mode).
+
 - The checklist of `proto_db`'s cluster tests (Task 18): `tests/unit/cluster_checklist.tsv`
   gives each of the 261 test functions of `tests/unit/test_cluster_*.py` at v2.0.0rc3 a row,
   ported (a whole check label of a protoBaseST test), deferred to a Phase C task or n/a;

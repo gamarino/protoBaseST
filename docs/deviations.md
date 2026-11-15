@@ -478,6 +478,41 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   counterpart: each of Tasks 19-28 turns its rows into ported ones (or re-justifies one as n/a
   in its review), and the final gate runs the checker with `CHECKLIST_FINAL=1`, which fails on
   any deferred row. *Cost:* none in the code; the deferred rows are open work, tracked.
+- **The transports are actors (representation and timing, `cluster/transport.st`, Task 19).**
+  `proto_db`'s `TcpTransport` has one listener thread multiplexing every accepted connection with
+  a selector and one sender thread per peer; protoST has no `select`, so `PBTcpTransport` has
+  one listener actor, one reader actor per accepted connection and one sender actor per peer,
+  all in the high band. Consequences: (1) the handler is called on the reader of each
+  connection, so concurrently when several peers send, where `proto_db` calls it on its one
+  listener thread; it must be safe to call from several threads (the coordinator forwards each
+  message to its dispatcher actor). (2) Each valid frame is delivered as it is read (CC5);
+  `proto_db` loses, with a bad frame, the other messages decoded from the same 64 KiB read.
+  (3) `stop` answers a `Future` that settles once nothing more is delivered and every actor has
+  finished, where `proto_db`'s `stop` joins its threads: an actor must not wait (R19), so the
+  caller chooses whether to wait. *Cost:* none known; delivery and loss are both inside the
+  failure model.
+- **The sender's queue and back-off (`cluster/transport.st`).** `proto_db` bounds a peer's control
+  lane at 10 000 frames (`max_queue`, a send beyond it is dropped) and has a second, best-effort
+  lane for `warm` frames bounded by bytes. protoBaseST has the control lane only (`warm` is
+  tiered-only, never sent at depth 0 over shared storage) and bounds it by bytes, at
+  `PBClusterFrame maxFrameBytes`: a frame that does not fit makes room by dropping the oldest
+  queued frames, counted in `frames_dropped`, and is always queued itself. A failed connect or
+  write drops the frame and starts a back-off during which the frames to that peer are dropped,
+  drawn from 100 to 200 ms (`proto_db`: a fixed 0.1 s after a failed connect, and one retry of the
+  frame on a fresh connection after a failed write, which protoBaseST does not make). The
+  connect and write timeouts are one value, `requestTimeout` (250 ms by default; `proto_db`:
+  `connect_timeout` and `send_timeout`, 1 s each). The sender reads the monotonic clock for the
+  back-off: `transport.st` is a shell, outside the no-clock check of the core
+  (`tests/unit/sim_harness.st`, check 12). *Cost:* an old frame may be lost to a burst where
+  `proto_db` would drop the new one; both are losses the protocol tolerates.
+- **The in-process network's faults (`cluster/transport.st`).** `PBInProcessNetwork` drops and
+  duplicates frames with probabilities drawn from a seeded generator, partitions the members into
+  groups and treats a stopped endpoint as a crashed node, as `proto_db`'s `InProcessNetwork`;
+  it has no delays (`set_faults(delay=...)`, `set_link_delay`): delays and reordering are the
+  simulator's (`PBSimFaults delay:reorder:`, in virtual time), so no test depends on wall-clock
+  timing. The checklist row `test_in_process_delays_reorder_messages` is n/a for that reason.
+  The network has no `stats` of its own and no `close` (nothing is in flight outside the
+  endpoints); the endpoints count their frames (`stats`).
 
 ## Errors and messages
 

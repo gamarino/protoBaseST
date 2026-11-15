@@ -758,6 +758,40 @@ For tests, tools and readers of the format. An application does not need them.
   Every refusal of received bytes is `PBClusterProtocolError`, and so is encoding a body over
   the limit, as in `proto_db`'s protocol.py. The divergence from protocol 13 and the
   trusted-network assumption are in [deviations.md](deviations.md#cluster-mode).
+- **Transports** (`cluster/transport.st`): `PBInProcessTransport` and `PBTcpTransport`, the two
+  implementations of `PBClusterTransport`'s protocol (`proto_db`'s `transport.py`). `start: aNodeId
+  peers: aMembership key: aKeyOrNil handler: aBlock` begins receiving: the node id must be a
+  member of the `PBMembership`, the key is `nil` or a `ByteArray` of at least 32 bytes, and
+  the one-argument block gets each valid, decoded `PBClusterMessage`; a second `start` (or one after `stop`) is
+  `PBValidationError`. `send: aMessage to: aNodeId` frames the message for that node
+  (`PBClusterFrame`, with the key) and never blocks: a frame over the limit is
+  `PBClusterProtocolError` and anything but a `PBClusterMessage` `PBValidationError`; before
+  `start` and after `stop` it is a silent no-op; a lost frame is counted, never signalled.
+  `stop` answers a `Future` that settles (with `true`) once nothing more is delivered and the
+  transport's actors have finished; it is idempotent. `stats` answers a `Dictionary` of
+  `'frames_sent'`, `'frames_dropped'`, `'frames_rejected'` and `'connections_dropped'`
+  (`PBClusterTransport statNames`). A `PBDBError` signalled by the handler is written to stderr
+  and delivery goes on. `isRunning` answers whether the transport is started and not stopped.
+  - `PBInProcessNetwork new` (or `seed: anInteger`) is a network of endpoints inside one
+    process; `endpoint` answers a new `PBInProcessTransport`. Every message is framed by its
+    sender and decoded by its receiver, each with its own key, so a keyed endpoint and an
+    unkeyed one refuse each other's frames (`'frames_rejected'`). Faults: `drop: p duplicate: q`
+    (probabilities from 0 to 1, drawn from the seeded generator), `partition: anArrayOfGroups`
+    (frames flow only inside a group) and `heal`; a stopped endpoint is a crashed node, its node
+    id free for a new endpoint. Each endpoint delivers on an actor of its own, in arrival order.
+  - `PBTcpTransport listenOn: aPort host: aHost` (port 0 picks a free port; an address that
+    cannot be listened on is `PBValidationError`) and `withListener: aServerSocket` (for tests
+    that publish ports first), each also with `requestTimeout:` (a positive Integer of
+    milliseconds, default `defaultRequestTimeout`, 250, the timeout of every connect and write).
+    `port` answers the port listened on. Frames are length-prefixed over TCP; connections are
+    one-way (a node writes only on its own outbound connections). One listener actor accepts;
+    one reader actor per connection reads each frame, checking the length before it reads the
+    body, and closes the connection at the first refused frame; one sender actor per peer
+    drains that peer's queue (bounded at `maxFrameBytes` bytes, the oldest frames dropped first),
+    connecting on demand; a failed connect or write drops the frame and starts a back-off of 100
+    to 200 ms (`backoffBase` microseconds to twice it). The handler is called on the readers,
+    concurrently with several peers. The differences from `proto_db` are in
+    [deviations.md](deviations.md#cluster-mode).
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.
@@ -777,6 +811,6 @@ For tests, tools and readers of the format. An application does not need them.
 ## The module and its files
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
-`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
+`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
 `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
-`zonekeys`. The protoST libraries it uses are `decimal`, `calendar` and `uuid`.
+`zonekeys`. The protoST libraries it uses are `decimal`, `calendar`, `uuid` and `net`.

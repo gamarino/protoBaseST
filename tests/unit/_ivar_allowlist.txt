@@ -112,3 +112,13 @@ PBReplicate>>_setPermission:root:pred:
 PBReportDone>>_setPermission:outcome:root:
 PBDropKept>>_setCaller:
 PBRejoinLearnt>>_setLearnt:seen:accepted:committed:ballot:log:
+PBInProcessNetwork>>_setEndpoints:groups:faults:random:
+PBInProcessTransport>>_setNetwork:run:counters:
+_PBTransportRun>>_setNodeId:key:handler:inbox:senders:listener:
+_PBInProcessInbox>>_setTransport:nodeId:key:handler:
+PBTcpTransport>>_setListener:port:requestTimeout:run:inbound:counters:
+_PBInbound>>_setClosed:entries:
+_PBTcpListener>>_setTransport:server:
+_PBTcpReader>>_setTransport:socket:nodeId:key:handler:
+_PBTcpSender>>_setTransport:peer:queue:link:proxy:
+_PBSendQueue>>_setFrames:bytes:draining:closed:

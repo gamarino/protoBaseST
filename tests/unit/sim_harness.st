@@ -18,8 +18,9 @@
  reply before its sync, an acknowledged commit missing from a member's chain (S4), an unknown
  commit on one member only, a commit answered none that a member holds (H7), and two committed
  chains that diverge (a fork); a commit every member learns converges. (11) converge: answers
- whether the queue emptied. (12) No file of the simulator or of src/protobase/cluster reads a
- clock of protoST's (Time, Date, DateTime, the clock primitives, Future after:, Delay)."
+ whether the queue emptied. (12) No file of the simulator or of the core in src/protobase/cluster
+ (every file there but the shells: transport.st, whose sender times its reconnection back-off)
+ reads a clock of protoST's (Time, Date, DateTime, the clock primitives, Future after:, Delay)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_sim'.
@@ -387,9 +388,11 @@ planted := sim value: 11 value: TickRules new.
 a := a , { planted converge: 100. (lines value: planted value: 'converge: still busy after 100 steps') size }.
 c that: 'converge: answers whether the queue emptied' is: a equals: #(true false 1).
 
-"(12) No file of the simulator or of src/protobase/cluster reads a clock (STPATH names <repo>/src)."
-failure := OSProcess shell: 'src="${STPATH%%:*}"; grep -l -E ''millisecondClockValue|microsecondClockValue|utcMicroseconds|nowUTC|__clock|Time now|Date today|DateTime now|millisecondsToRun|timeToRun|Future after|Delay'' "$src/../tests/unit/_sim.st" "$src"/protobase/cluster/*.st'.
-c that: 'no file of the simulator or of src/protobase/cluster reads a clock'
+"(12) No file of the simulator or of the core in src/protobase/cluster reads a clock (STPATH names
+ <repo>/src). The shells (transport.st) are the files that may; the list of core files is every
+ file of the directory less them, so a new core file is checked without being named here."
+failure := OSProcess shell: 'src="${STPATH%%:*}"; core=$(ls "$src"/protobase/cluster/*.st | grep -v -E ''/(transport)\.st$''); grep -l -E ''millisecondClockValue|microsecondClockValue|utcMicroseconds|nowUTC|__clock|Time now|Date today|DateTime now|millisecondsToRun|timeToRun|Future after|Delay'' "$src/../tests/unit/_sim.st" $core'.
+c that: 'no file of the simulator or of the core in src/protobase/cluster reads a clock'
   is: { failure exitCode. failure output } equals: { 1. '' }.
 
 c report displayNl.

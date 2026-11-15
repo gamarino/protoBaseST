@@ -18,6 +18,7 @@ Import from: 'protobase/cluster/members'.
 Import from: 'protobase/cluster/rootlog'.
 Import from: 'protobase/cluster/protocol'.
 Import from: 'protobase/cluster/config'.
+Import from: 'protobase/cluster/transport'.
 Import from: 'protobase/cluster/lease'.
 Import from: 'protobase/cluster/core'.
 Import from: 'protobase/cluster/acceptor'.

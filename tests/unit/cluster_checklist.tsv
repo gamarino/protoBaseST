@@ -152,7 +152,7 @@ test_cluster_protocol.py::test_release_fairness_hints_are_typed	ported	tests/uni
 test_cluster_protocol.py::test_make_message_rejects_unknown_types_and_missing_fields	ported	tests/unit/cluster_messages.st	building a message without one of its fields is refused
 test_cluster_protocol.py::test_decode_rejects_another_protocol_version	ported	tests/unit/cluster_messages.st	another protocol version is refused
 test_cluster_protocol.py::test_decode_rejects_garbage_and_non_maps	ported	tests/unit/cluster_messages.st	garbage bytes and a map that is not one are refused
-test_cluster_protocol.py::test_frames_split_across_chunks_and_coalesced_in_one_chunk	deferred	19	reassembly of split and coalesced frames is the TCP transport's read loop
+test_cluster_protocol.py::test_frames_split_across_chunks_and_coalesced_in_one_chunk	ported	tests/unit/cluster_transport_tcp.st	frames split across 3-byte writes and coalesced in one write are delivered in order
 test_cluster_protocol.py::test_an_oversized_frame_is_rejected_before_it_is_buffered	ported	tests/unit/cluster_frames.st	a length over 64 MiB is refused from the length bytes
 test_cluster_protocol.py::test_root_encoding_distinguishes_unknown_empty_and_a_record	ported	tests/unit/cluster_messages.st	[0, nil, nil, 9] is the empty space of label 9
 test_cluster_protocol.py::test_roots_carry_their_label_term	ported	tests/unit/cluster_messages.st	the 3-item root reads with label 0
@@ -241,18 +241,18 @@ test_cluster_transactions.py::test_a_space_opened_while_no_majority_has_a_space_
 test_cluster_transactions.py::test_a_confirmation_in_progress_succeeds_once_a_majority_opens_its_spaces	deferred	24	a confirmation completing once spaces open needs real nodes
 test_cluster_transactions.py::test_a_setup_new_database_whose_recovery_query_goes_unanswered_conflicts_and_is_retried	deferred	24	setup of a new database retried after a conflict is end-to-end
 test_cluster_transactions.py::test_a_recovery_round_ends_once_a_majority_of_witnesses_answered	ported	tests/unit/cluster_base_rules.st	a recovery ends at a majority of witnesses, this node counted, before its timer
-test_cluster_transport.py::test_in_process_delivers_in_order_without_faults	deferred	19	the in-process transport with faults is the transport task's harness
-test_cluster_transport.py::test_in_process_drop_and_duplicate	deferred	19	the in-process transport with faults is the transport task's harness
-test_cluster_transport.py::test_in_process_delays_reorder_messages	deferred	19	the in-process transport with faults is the transport task's harness
-test_cluster_transport.py::test_in_process_partition_and_heal	deferred	19	the in-process transport with faults is the transport task's harness
-test_cluster_transport.py::test_in_process_crashed_node_neither_sends_nor_receives	deferred	19	the in-process transport with faults is the transport task's harness
-test_cluster_transport.py::test_in_process_messages_go_through_the_wire_encoding	deferred	19	the in-process transport with faults is the transport task's harness
-test_cluster_transport.py::test_tcp_binds_port_zero_and_exchanges_frames	deferred	19	TCP binding of port zero and frame exchange is the transport task
-test_cluster_transport.py::test_tcp_malformed_frame_drops_the_connection_not_the_listener	deferred	19	dropping a connection on a malformed frame is the TCP transport's job
-test_cluster_transport.py::test_tcp_send_to_a_peer_not_yet_listening_is_dropped_then_reconnects	deferred	19	reconnecting to a peer not yet listening is the TCP transport's job
-test_cluster_transport.py::test_tcp_send_after_stop_is_a_silent_drop	deferred	19	a silent drop after stop is the TCP transport's lifecycle
+test_cluster_transport.py::test_in_process_delivers_in_order_without_faults	ported	tests/unit/cluster_transport_inprocess.st	without faults, 20 messages from n0 arrive at n1 decoded and in order
+test_cluster_transport.py::test_in_process_drop_and_duplicate	ported	tests/unit/cluster_transport_inprocess.st	the drop fault loses a message and the duplicate fault delivers one twice
+test_cluster_transport.py::test_in_process_delays_reorder_messages	n/a	Python-only API	InProcessNetwork wall-clock delays are not ported: delay and reorder are PBSimFaults delay:reorder: in virtual time, so no test depends on timing
+test_cluster_transport.py::test_in_process_partition_and_heal	ported	tests/unit/cluster_transport_inprocess.st	a partition drops what crosses it and heal ends it
+test_cluster_transport.py::test_in_process_crashed_node_neither_sends_nor_receives	ported	tests/unit/cluster_transport_inprocess.st	a crashed node neither sends nor receives
+test_cluster_transport.py::test_in_process_messages_go_through_the_wire_encoding	ported	tests/unit/cluster_transport_inprocess.st	a message goes through the wire encoding: what is not a PBClusterMessage is refused
+test_cluster_transport.py::test_tcp_binds_port_zero_and_exchanges_frames	ported	tests/unit/cluster_transport_tcp.st	three transports on port 0 exchange 100 messages with each peer, all delivered in order
+test_cluster_transport.py::test_tcp_malformed_frame_drops_the_connection_not_the_listener	ported	tests/unit/cluster_transport_tcp.st	a connection sending message-not-a-map.bin is closed and the next valid frame on a new connection arrives
+test_cluster_transport.py::test_tcp_send_to_a_peer_not_yet_listening_is_dropped_then_reconnects	ported	tests/unit/cluster_transport_tcp.st	a message to a peer not yet listening is dropped, and a later one arrives once it listens
+test_cluster_transport.py::test_tcp_send_after_stop_is_a_silent_drop	ported	tests/unit/cluster_transport_tcp.st	a send after stop is a silent drop
 test_cluster_transport.py::test_tcp_best_effort_warm_frames_never_crowd_out_control_messages	n/a	tiered	warm frames carry tiered storage records the port never sends
-test_cluster_transport.py::test_a_protocol_error_raised_by_a_handler_is_recorded_for_the_test	deferred	19	a handler's protocol error is logged by the transport's delivery, which goes on; the pytest fixture half is Python-only
+test_cluster_transport.py::test_a_protocol_error_raised_by_a_handler_is_recorded_for_the_test	ported	tests/unit/cluster_transport_inprocess.st	a PBDBError signalled by the handler is logged and the next message is delivered
 test_cluster_voters.py::test_the_default_voter_set_is_the_first_three_members_in_id_order	ported	tests/unit/cluster_members.st	the default voters of 5 members are the first three
 test_cluster_voters.py::test_the_voter_set_is_configurable_and_validated	ported	tests/unit/cluster_members.st	an explicit voter set of 4 is refused
 test_cluster_voters.py::test_learners_never_grant_and_two_voters_suffice	ported	tests/unit/sim_grants.st	learner never grants

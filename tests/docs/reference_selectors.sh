@@ -42,7 +42,7 @@ extend slice head tail has union intersection difference count_of index_names ge
 register_atom_class is_active committed_at lock_timeout retries backoff keys values
 asFrozenDict asOf: tr:
 flock fsync nil true false proto_db remove aName atom_pointer context cluster_term current pair n i v repr
-avl calendar codec collections decimal errors framing notation publisher registry roots store transactions uuid zonekeys
+avl calendar codec collections decimal errors framing net notation publisher registry roots store transactions uuid zonekeys
 """.split())
 parts = {p for d in defined for p in re.findall(r"[A-Za-z_]\w*:", d)}
 bad = []
