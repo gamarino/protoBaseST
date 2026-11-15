@@ -552,14 +552,24 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     (`PBOwnStepFailed`), matched to the current attempt, renewal, replication or last lost
     attempt (a late one is ignored). For a request, `proto_db` raises from `_open_attempt` into the one
     `permit()` caller driving the acquisition and sends nothing; as there, one waiter, the
-    oldest, is rejected with the error and the others retry, but the attempt, whose request is
-    already out (CC1), is closed at once as lost (its cancel broadcast, a failure of that cancel
-    ignored). A replication ends unknown, or in the violation. A renewal fails as `proto_db`'s
-    ownership thread does (`_own_loop`): the ownership abandoned, its queue refused `'ending'`,
-    no release, the node fenced. A failed held release is logged, as `proto_db` (3545). A failed
-    cancel of the last lost attempt rejects the oldest waiter, as `proto_db`'s `_close_attempt`
-    raises it to the driving caller; the cancel is broadcast already here, where `proto_db`
-    raises before broadcasting it. An error while the effects
+    oldest, is rejected with the error, nothing is counted lost and the next waiter asks at once
+    (no back-off), but the attempt's request is already out (CC1), so its cancel is broadcast (a
+    failure of that cancel rejects nobody). A replication ends unknown, or in the violation. A
+    renewal fails as `proto_db`'s ownership thread does (`_own_loop`): the ownership abandoned,
+    its queue refused `'ending'`, no release, the node fenced. A failed held release is logged,
+    as `proto_db` (3545). A failed cancel of the last lost attempt rejects the oldest waiter, as
+    `proto_db`'s `_close_attempt` raises it to the driving caller; the cancel is broadcast
+    already here, where `proto_db` raises before broadcasting it, and when it rejects the last
+    waiter while the next attempt is open, that attempt is cancelled too (no requested term is
+    left without its cancel). **A cancel failure that arrives after the acquisition ended is
+    only logged.** In `proto_db` the driving caller raises inside `_close_attempt`, before it
+    could open another attempt, so it never receives a permit for that acquisition. Here the
+    own acceptor decides the cancel after it was sent, and the failure can come back after the
+    next attempt has already won (or after every waiter left): the acquisition it belongs to
+    is gone, and the waiter it would have been reported to now holds a permit of a valid term,
+    so there is no caller left to raise it to. Cost: that waiter commits where `proto_db`'s
+    caller would have seen the error; the error is still written to stderr, and nothing is
+    unsafe (the cancel was broadcast, the won term is a regular one). An error while the effects
     of a decided step are performed (its state already published) fences the node whatever its
     class, where `proto_db` would leave the step half done: here a lost timer would strand a
     waiter; a replication whose root was sent then settles `#unknown`. Any other error fences the node, as

@@ -626,15 +626,23 @@ PBCoordinatorCore >> _own: anAttempt root: aRoot certain: isCertain in: s now: t
 
 "A lost round: the cancel of its term, then the back-off (proto_db _close_attempt, _back_off)."
 PBCoordinatorCore >> _lose: s now: t effects: fx
-  | a cancel |
+  | a |
   a := s proposer attempt.
   fx add: (PBCount stat: 'lost_attempts').
-  cancel := self _release: a term in: s held: false certain: false next: nil more: true.
-  "Its own grant of the term ends (proto_db PeerGrants.on_release of its own vote)."
-  fx add: (PBToAcceptor event: (PBReceived message: cancel)).
-  self _broadcast: cancel in: s effects: fx.
+  self _cancelAttempt: s effects: fx.
   ^ self _retry: (s with: { #proposer -> (s proposer with: { #lostTerm -> a term }) })
     busy: (a busyRemaining min: s config leaseDuration) now: t effects: fx.
+
+"The cancel of the open attempt's term, whose request has left (proto_db _close_attempt builds
+ it, _become_owner broadcasts it): to this node's own acceptor, whose own grant of the term ends
+ (proto_db PeerGrants.on_release of its own vote), and to every other member. Every path that
+ closes an attempt without owning its term sends it, so no requested term is left without its
+ cancel."
+PBCoordinatorCore >> _cancelAttempt: s effects: fx
+  | cancel |
+  cancel := self _release: s proposer attempt term in: s held: false certain: false next: nil more: true.
+  fx add: (PBToAcceptor event: (PBReceived message: cancel)).
+  self _broadcast: cancel in: s effects: fx.
 
 "After a lost round, or a deferral that yielded to a known owner (proto_db permit): every waiter
  whose deadline passed ends in PBTimeoutError; the rest back off, or the acquisition ends when
@@ -806,16 +814,19 @@ PBCoordinatorCore >> dispatchAcceptorDecided: anEvent in: s now: t
    the one permit() caller driving the acquisition, which holds _local; every other caller then
    takes _local and opens its own attempt. Which caller drives is arbitrary in proto_db, so the
    oldest waiter, the one that started the acquisition, is rejected with the error
-   (_failDriver:with:effects:) and the attempt is closed at once as lost (_lose:: its cancel,
-   where proto_db sent nothing since no request had left); the other waiters back off and retry.
-   That cancel is a port artifact, so a failure of it rejects nobody (lostTerm cleared).
+   (_failDriver:with:effects:). The attempt is closed with its cancel (_cancelAttempt:effects:),
+   since its request has left, where proto_db sent nothing; that cancel is a port artifact, so a
+   failure of it rejects nobody. As in proto_db (the exception leaves _become_owner before
+   _close_attempt), it is not a lost round: nothing is counted and nobody backs off; the next
+   waiter opens a new acquisition at once (failures 0), its ballot above the failed term.
  A renew of the current renewal (term, rid): proto_db _renew runs on the ownership thread, whose
    failure handler (_own_loop) abandons the ownership, refuses its queue 'ending' and fences the
    node: the same here, the ownership ended without a release (_ownershipFailed:).
  The cancel of the last lost attempt (held false, its term the proposer's lostTerm): proto_db
    _close_attempt decides the own cancel (PeerGrants.on_release) on the driving caller's thread
    and raises the error into that one permit() caller; the oldest waiter is rejected with it
-   (_ownCancelFailed:), the others keep backing off. Any other release (a held one, a cancel of
+   (_ownCancelFailed:), the others keep backing off. A failure that comes after the acquisition
+   ended is ignored (docs/deviations.md). Any other release (a held one, a cancel of
    another term) is only logged by the shell, as proto_db logs a failed release of the ownership
    loop (coordinator.py 3545)."
 PBCoordinatorCore >> dispatchOwnStepFailed: anEvent in: s now: t
@@ -838,20 +849,26 @@ PBCoordinatorCore >> _ownRequestFailed: m error: anError in: s now: t effects: f
   p := s proposer.
   a := p isNil ifTrue: [nil] ifFalse: [p attempt].
   (a notNil and: [a term = (m at: 'term') and: [a rid = (m at: 'rid')]]) ifFalse: [^ s].
-  state := self _lose: (self _failDriver: s with: anError effects: fx) now: t effects: fx.
-  state proposer isNil ifTrue: [^ state].
-  ^ state with: { #proposer -> (state proposer with: { #lostTerm -> nil }) }.
+  self _cancelAttempt: s effects: fx.
+  state := self _failDriver: s with: anError effects: fx.
+  "The next ballot orders above the term the peers saw requested."
+  state := state with: { #proposer -> nil.
+    #hints -> ((self _hintsIn: state) with: { #hint -> ((self _hintsIn: state) hint max: a term) }) }.
+  ^ self _wantLease: state now: t effects: fx.
 
 "The own cancel m of the last lost attempt failed with anError (dispatchOwnStepFailed:in:now:):
- the oldest waiter is rejected with it, once; the acquisition ends when no waiter is left, else
- it keeps backing off."
+ the oldest waiter is rejected with it, once. The acquisition goes on while waiters are left;
+ else it ends, the next attempt, when one is already open (its request out), closed first with
+ its cancel (_cancelAttempt:effects:, not a lost round: proto_db's driver raised before opening
+ it)."
 PBCoordinatorCore >> _ownCancelFailed: m error: anError in: s effects: fx
   | p state |
   p := s proposer.
   (p notNil and: [(m at: 'held') = false and: [p lostTerm = (m at: 'term')]]) ifFalse: [^ s].
   state := self _failDriver: (s with: { #proposer -> (p with: { #lostTerm -> nil }) }) with: anError effects: fx.
-  state waiters isEmpty ifTrue: [^ state with: { #proposer -> nil }].
-  ^ state.
+  state waiters isEmpty ifFalse: [^ state].
+  p attempt notNil ifTrue: [self _cancelAttempt: state effects: fx].
+  ^ state with: { #proposer -> nil }.
 
 "s with its oldest waiter, proto_db's permit() caller driving the acquisition, settled with
  anError and gone from the waiters."

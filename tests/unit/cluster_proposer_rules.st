@@ -1,4 +1,4 @@
-"EXPECT: ok 31"
+"EXPECT: ok 33"
 "The proposer's rules (cluster/proposer.st) called directly, one rule per check (proto_db
  coordinator.py permit, _become_owner, _open_attempt, _on_reply, _close_attempt, _back_off,
  release, _own_loop_body, _renew, the fairness hints).
@@ -32,11 +32,15 @@
  (proto_db permit loops back to the owner). The seams that end the demand clear the queue and the
  pipeline of issued permissions (owner.st). (25-26) The acceptor's decision of this node's own
  request signalling a PBDBError (PBOwnStepFailed) rejects only the oldest waiter, proto_db's
- permit() caller driving the acquisition; the attempt is lost and the others back off; a failure
+ permit() caller driving the acquisition; the attempt is closed with its cancel but is no lost
+ round: nothing counted, no back-off, the next waiter opens a new acquisition at once (failures 0)
+ above the failed term; a lone waiter's rejection ends the acquisition, the cancel sent; a failure
  of that attempt's cancel rejects nobody; a late request failure changes nothing. (27-28) A
  failure of the own cancel of the last lost attempt rejects the oldest waiter once (proto_db
  _close_attempt raises it to the driving caller); a held release, a cancel of another term and
- a repeat change nothing; a lone waiter's rejection ends the acquisition. (29) A failure of the
+ a repeat change nothing; a lone waiter's rejection ends the acquisition; a failure arriving while
+ the next attempt is open keeps that attempt for the other waiters, and when it rejects the last
+ waiter it closes that attempt with its cancel (no lost round) before the acquisition ends. (29) A failure of the
  own renew of the current renewal ends the ownership without a release, abandoned and fenced
  (proto_db _own_loop); a late one changes nothing."
 Import from: 'protobase'.
@@ -51,7 +55,7 @@ PlantLateWin >> _inTime: anAttempt in: s now: t
 
 | c core peers config three four vs marker logged view stateIn ready step eff sends msg granted reject
   request s own att t0 pair sim owned renewing late lateRenewal plant stats lapsed rel want hintsAfter grantAfter
-  renewMsg failed settled stat phase two req cancel lost lone other held |
+  renewMsg toAcceptor failed settled stat phase two req cancel lost lone other held opened releases |
 c := Check new.
 core := PBCoordinatorCore new.
 peers := [:someIds | (1 to: someIds size) asArray collect: [:i | PBPeer nodeId: (someIds at: i) host: '127.0.0.1' port: 7000 + i]].
@@ -69,6 +73,9 @@ stateIn := [:id :someIds :appends :opts | (PBNodeState config: (config value: id
   with: { #acceptorView -> (view value: id value: someIds value: appends) }].
 ready := [:id | stateIn value: id value: three value: { marker } value: Dictionary new].
 eff := [:aStep | aStep effects collect: [:e | e class name]].
+"The message of aStep's first PBToAcceptor effect, nil when there is none."
+toAcceptor := [:aStep | | e | e := aStep effects detect: [:x | x isKindOf: PBToAcceptor] ifNone: [nil].
+  e isNil ifTrue: [nil] ifFalse: [e event message]].
 sends := [:aStep | (aStep effects select: [:e | e isKindOf: PBSend]) collect: [:e | { e to. e message type }]].
 msg := [:type :from :fields | PBReceived message: (PBClusterMessage type: type from: from fields: fields)].
 granted := [:from :term :rid :inc | msg value: 'grant' value: from value: { 'term' -> term. 'rid' -> rid. 'inc' -> inc.
@@ -150,7 +157,7 @@ s := (step value: (PBTimerFired token: pair state proposer token event: #propose
 pair := step value: (PBTimerFired token: pair state proposer token event: #proposer) value: pair state value: t0 + 10000.
 c that: 'a lost attempt cancels to every member and its own acceptor, then backs off to the busy remaining'
   is: { (pair effects select: [:e | e isKindOf: PBSend]) collect: [:e | { e to. e message at: 'held'. e message at: 'certain'. e message at: 'more' }].
-    ((pair effects detect: [:e | e isKindOf: PBToAcceptor]) event message) type. s proposer phase.
+    ([:m | m isNil ifTrue: [nil] ifFalse: [m type]] value: (toAcceptor value: pair)). s proposer phase.
     s proposer backoffEnd - (t0 + 10000) between: 500 and: 999. s proposer busyEnd - (t0 + 10000) }
   equals: { #(#('n0' false false true) #('n2' false false true)). 'release'. #backoff. true. 500000 }.
 pair := step value: (PBTimerFired token: s proposer token event: #proposer) value: s value: s proposer backoffEnd.
@@ -182,7 +189,7 @@ pair := step value: (PBTimerFired token: sim state ownership token event: #owner
 c that: 'without demand for idleEnd the owner releases'
   is: { pair state ownership. (pair effects select: [:e | e isKindOf: PBSend]) collect: [:e | | m | m := e message.
       { e to. m at: 'term'. m at: 'held'. m at: 'certain'. m at: 'next'. m at: 'more' }].
-    ((pair effects detect: [:e | e isKindOf: PBToAcceptor]) event message) at: 'held' }
+    ([:m | m isNil ifTrue: [nil] ifFalse: [m at: 'held']] value: (toAcceptor value: pair)) }
   equals: { nil. #(#('n0' 1 true true nil false) #('n2' 1 true true nil false)). true }.
 
 "(11) The turn named, the deferral, want."
@@ -345,21 +352,31 @@ c that: 'the fairness hints never change a grant'
 
 "(25-29) Own step failures (PBOwnStepFailed), at the rules, with no timing."
 "Dispatches the failure of this node's own message m with a planted PBValidationError."
-failed := [:m :aState :t | step value: (PBOwnStepFailed message: m error: (PBValidationError new messageText: 'planted'; yourself))
-  value: aState value: t].
+failed := [:m :aState :t | m isNil
+  ifTrue: [PBStep state: aState effects: #()]
+  ifFalse: [step value: (PBOwnStepFailed message: m error: (PBValidationError new messageText: 'planted'; yourself))
+    value: aState value: t]].
 settled := [:aStep | (aStep effects select: [:e | e isKindOf: PBSettle]) collect: [:e | { e waiter. e outcome messageText }]].
 phase := [:aState | aState proposer isNil ifTrue: [nil] ifFalse: [aState proposer phase]].
 stat := [:aStep | (aStep effects select: [:e | e isKindOf: PBCount]) collect: [:e | e stat]].
 "Two waiters of the attempt att opened: #w1 started it, #w2 joined it."
 two := (step value: (PBPermitWanted waiter: #w2) value: att state value: t0 + 1) state.
 req := (att effects at: 2) event message.
+releases := [:aStep | (aStep effects select: [:e | (e isKindOf: PBSend) and: [e message type = 'release']]) collect: [:e |
+  { e to. e message at: 'term'. e message at: 'held' }]].
 pair := failed value: req value: two value: t0 + 2000.
-c that: 'an own request failure rejects only the oldest waiter; the attempt is lost and the others back off'
-  is: { two waiters. settled value: pair. pair state waiters. (phase value: pair state). stat value: pair.
-    (pair effects select: [:e | e isKindOf: PBSend]) collect: [:e | { e to. e message type. e message at: 'held' }] }
-  equals: { #(#w1 #w2). #(#(#w1 'planted')). #(#w2). #backoff. #('lost_attempts').
-    #(#('n0' 'release' false) #('n2' 'release' false)) }.
-cancel := (pair effects detect: [:e | e isKindOf: PBToAcceptor]) event message.
+lone := failed value: req value: att state value: t0 + 2000.
+c that: 'an own request failure rejects only the oldest waiter; its cancel is sent, no lost round, the next waiter asks at once'
+  is: { two waiters. settled value: pair. pair state waiters. releases value: pair.
+    ([:m | m isNil ifTrue: [nil] ifFalse: [m type]] value: (toAcceptor value: pair)). stat value: pair. (phase value: pair state).
+    pair state proposer notNil and: [pair state proposer failures = 0 and: [pair state proposer attempt notNil and: [pair state proposer attempt term > 1]]].
+    (pair effects select: [:e | e isKindOf: PBSend]) collect: [:e | e message type] }
+  equals: { #(#w1 #w2). #(#(#w1 'planted')). #(#w2). #(#('n0' 1 false) #('n2' 1 false)). 'release'. #('attempts'). #attempt. true.
+    #('release' 'release' 'request' 'request') }.
+c that: 'an own request failure of a lone waiter ends the acquisition with the attempt''s cancel, no lost round'
+  is: { settled value: lone. lone state waiters. lone state proposer. releases value: lone. stat value: lone }
+  equals: { #(#(#w1 'planted')). #(). nil. #(#('n0' 1 false) #('n2' 1 false)). #() }.
+cancel := toAcceptor value: pair.
 other := failed value: (PBClusterMessage type: 'request' from: 'n1' fields: { 'term' -> 1. 'rid' -> 99. 'inc' -> 5. 'vs' -> vs })
   value: two value: t0 + 2000.
 c that: 'the cancel of that attempt rejects nobody when it fails; a late request failure changes nothing'
@@ -369,10 +386,10 @@ c that: 'the cancel of that attempt rejects nobody when it fails; a late request
 "A lost attempt of the two waiters: rejects from a majority (n0, n2)."
 lost := step value: (reject value: 'n0' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: 0.5) value: two value: t0 + 4000.
 lost := step value: (reject value: 'n2' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: 0.5) value: lost state value: t0 + 4000.
-cancel := (lost effects detect: [:e | e isKindOf: PBToAcceptor]) event message.
+cancel := toAcceptor value: lost.
 pair := failed value: cancel value: lost state value: t0 + 5000.
 c that: 'an own cancel failure of the last lost attempt rejects the oldest waiter once; the others keep backing off'
-  is: { stat value: lost. (phase value: lost state). { cancel at: 'term'. cancel at: 'held' }.
+  is: { stat value: lost. (phase value: lost state). (cancel isNil ifTrue: [nil] ifFalse: [{ cancel at: 'term'. cancel at: 'held' }]).
     settled value: pair. eff value: pair. pair state waiters. (phase value: pair state). (pair state proposer notNil and: [pair state proposer backoffEnd = lost state proposer backoffEnd]).
     (failed value: cancel value: pair state value: t0 + 5001) effects }
   equals: { #('lost_attempts'). #backoff. #(1 false). #(#(#w1 'planted')). #(#PBSettle). #(#w2). #backoff. true. #() }.
@@ -388,6 +405,24 @@ c that: 'a held release or a cancel of another term changes nothing; a lone wait
     (failed value: other value: lost state value: t0 + 5000) effects. (failed value: other value: lost state value: t0 + 5000) state waiters.
     settled value: lone. lone state waiters. lone state proposer }
   equals: { #(). #(#w1 #w2). #(). #(#w1 #w2). #(#(#w1 'planted')). #(). nil }.
+"The cancel's failure arrives once the next attempt is open (its request out): the proposer's
+ timers fired until the phase is #attempt."
+opened := [:aStep | | st |
+  st := aStep state.
+  1 to: 6 do: [:i | (st proposer notNil and: [st proposer phase ~= #attempt]) ifTrue: [
+    st := (step value: (PBTimerFired token: st proposer token event: #proposer) value: st value: st proposer wakeAt last) state]].
+  st].
+lone := step value: (reject value: 'n0' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: 0.5) value: att state value: t0 + 4000.
+lone := opened value: (step value: (reject value: 'n2' value: 1 value: 1 value: 5 value: 'busy' value: 1 value: 0.5) value: lone state value: t0 + 4000).
+pair := failed value: cancel value: lone value: lone proposer startedAt + 1.
+other := failed value: cancel value: (opened value: lost) value: (opened value: lost) proposer startedAt + 1.
+c that: 'a cancel failure during the next attempt: kept for the other waiters; rejecting the last one, that attempt is cancelled first'
+  is: { (phase value: lone). lone proposer attempt term > 1. lone proposer lostTerm.
+    settled value: pair. pair state proposer. pair state waiters. eff value: pair. releases value: pair. stat value: pair.
+    settled value: other. other state waiters. (phase value: other state). other effects size }
+  equals: { #attempt. true. 1.
+    #(#(#w1 'planted')). nil. #(). #(#PBSettle #PBToAcceptor #PBSend #PBSend). { { 'n0'. lone proposer attempt term. false }. { 'n2'. lone proposer attempt term. false } }. #().
+    #(#(#w1 'planted')). #(#w2). #attempt. 1 }.
 pair := failed value: renewMsg value: renewing value: t0 + 335000.
 other := failed value: (PBClusterMessage type: 'renew' from: 'n1' fields: { 'term' -> 1. 'rid' -> ((renewMsg at: 'rid') + 99). 'inc' -> 5.
   'vs' -> vs }) value: renewing value: t0 + 335000.
