@@ -1,4 +1,4 @@
-"EXPECT: 15 majority loss ok (6 checks)"
+"EXPECT: 15 majority loss ok (7 checks)"
 "PENDING: runs once Tasks 23 (cluster commits) and 24 (reads in cluster mode) of
  docs/superpowers/plans/2026-11-13-cluster-mode.md land. Written against the API that plan
  specifies; the test runner does not run it (the .st.pending extension). When both tasks are
@@ -15,24 +15,33 @@
  - the majority side goes on committing meanwhile, and the minority learns its commits after
    the partition heals;
  - when the acceptor logs of a majority of voters are lost, the wiped members cannot rejoin by
-   themselves: too few witnesses can confirm the ballot, and stats reports why
-   (rejoin_blocked). Losing a majority of logs is outside the failure model;
+   themselves: each plain round finds one witness (the survivor) where two are needed, so no
+   ballot round starts, and each asks again. They stay rejoining; rejoin_blocked stays nil,
+   because it names why a rejoin that has its answers cannot complete, and these never have
+   them. Losing a majority of logs is outside the failure model;
  - forceRejoin is the operator's decision: the wiped members complete their rejoin with the
    answers of the members that are left, and the cluster serves again. A commit acknowledged
    only by the lost logs may be gone: that is the price, and why it is a decision.
 
- Every wait is a condition with a deadline of 60 s; no duration is asserted.
+ Every wait is a condition with a deadline of 60 s; no duration is asserted. One watch looks,
+ for 2 s (20 request timeouts), for a rejoin that must not happen: a correct implementation passes
+ it whatever the timing, and the window only bounds how long the program looks.
 
  Run it: STPATH=<repository>/src protost 15_majority_loss.st"
 Import from: 'protobase'.
 Import from: '../tutorial/_lesson'.
 
-| lesson dir ids peers network make nodes spaces until dbs outcome tr fresh |
+| lesson dir ids peers network make nodes spaces until watch dbs outcome tr fresh |
 lesson := Lesson named: '15 majority loss'.
 dir := FileSystem temp / ('pbst-cluster-15m-' , Smalltalk pid printString).
 dir deleteAll.
 until := [:aBlock | | deadline |
   deadline := Time millisecondClockValue + 60000.
+  [aBlock value or: [Time millisecondClockValue > deadline]] whileFalse: [(Future after: 10) wait].
+  aBlock value].
+"The same poll for ms milliseconds: whether aBlock became true within the window."
+watch := [:ms :aBlock | | deadline |
+  deadline := Time millisecondClockValue + ms.
   [aBlock value or: [Time millisecondClockValue > deadline]] whileFalse: [(Future after: 10) wait].
   aBlock value].
 ids := #('n0' 'n1' 'n2').
@@ -74,9 +83,11 @@ fresh := #('n1' 'n2') collect: [:id | make value: id].
 fresh do: [:node | node start].
 #(2 3) with: fresh do: [:k :node |
   spaces at: k put: (PBObjectSpace storage: (PBFileStorage clusterPath: dir pathString) coordinator: node)].
-lesson check: 'the wiped members report why they cannot rejoin'
-  isTrue: (until value: [fresh allSatisfy: [:node | (node stats at: 'rejoin_blocked') notNil]]).
-lesson say: 'rejoin_blocked: ' , ((fresh at: 1) stats at: 'rejoin_blocked') printString.
+lesson check: 'the wiped members do not rejoin by themselves'
+  isTrue: (watch value: 2000 value: [fresh anySatisfy: [:node | (node stats at: 'rejoins') > 0]]) not.
+lesson check: 'they are still gathering: rejoining, nothing blocked, no ballot rejoin'
+  isTrue: (fresh allSatisfy: [:node |
+    (node stats at: 'rejoining') and: [(node stats at: 'rejoin_blocked') isNil and: [(node stats at: 'rejoin_ballots') = 0]]]).
 
 "The operator decides."
 fresh do: [:node | node forceRejoin].

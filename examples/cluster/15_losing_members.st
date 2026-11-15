@@ -8,7 +8,8 @@
  - with two of three down nothing is issued: the survivor's request ends in PBTimeoutError at
    its acquireTimeout. A minority never writes;
  - a member restarted on its intact disk (a new incarnation, its acceptor log restored) is a
-   voter again once its startup grace has passed, and the cluster issues permissions again,
+   voter again at once, grants again once its startup grace has passed, and the cluster issues
+   permissions again,
    under a higher term: a term is never reused.
 
  Stopping a coordinator is a crash for this lesson: its endpoint stops, so it neither sends nor

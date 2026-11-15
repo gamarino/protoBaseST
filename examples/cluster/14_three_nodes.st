@@ -26,12 +26,6 @@ lesson := Lesson named: '14 three nodes'.
 dir := FileSystem temp / ('pbst-cluster-14-' , Smalltalk pid printString).
 dir deleteAll.
 
-"A condition polled every 10 ms, for at most 60 s."
-until := [:aBlock | | deadline |
-  deadline := Time millisecondClockValue + 60000.
-  [aBlock value or: [Time millisecondClockValue > deadline]] whileFalse: [(Future after: 10) wait].
-  aBlock value].
-
 "Three members. In one process the host and port are not used, but every member is named."
 ids := #('n0' 'n1' 'n2').
 peers := ids collect: [:id | PBPeer nodeId: id host: '127.0.0.1' port: 7400].
@@ -56,6 +50,11 @@ lesson check: 'each node has its acceptor log in cluster/'
 lesson check: 'the space is empty' is: spaces first listDatabases equals: #().
 
 "A new cluster forms by itself: each empty log is completed as a first start."
+"Waiting is a condition polled every 10 ms, for at most 60 s; never a fixed sleep."
+until := [:aBlock | | deadline |
+  deadline := Time millisecondClockValue + 60000.
+  [aBlock value or: [Time millisecondClockValue > deadline]] whileFalse: [(Future after: 10) wait].
+  aBlock value].
 lesson check: 'every node finishes joining'
   isTrue: (until value: [nodes allSatisfy: [:node | (node stats at: 'rejoining') not]]).
 stats := nodes collect: [:node | node stats].

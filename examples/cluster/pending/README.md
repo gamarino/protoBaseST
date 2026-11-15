@@ -7,8 +7,12 @@ specifies for tasks that have not landed yet. They have never run. Their extensi
 
 | Program | Chapter | Runs once |
 |---|---|---|
-| `14_cluster_commits.st.pending` | [14](../../../docs/tutorial/14-a-three-node-cluster.md) | Task 23 (cluster commits), Task 24 (reads, `committedEpoch`), Task 25 (the persister, `sync:`) |
-| `15_majority_loss.st.pending` | [15](../../../docs/tutorial/15-failures-and-recovery.md) | Task 23 (cluster commits), Task 24 (reads after a rejoin) |
+| `14_cluster_commits.st.pending` | [14](../../../docs/tutorial/14-a-three-node-cluster.md) | Task 23 (cluster commits), Task 24 (`newDatabase:` and reads in cluster mode, `committedEpoch`), Task 25 (the persister, `sync:`, `persistedEpoch`) |
+| `15_majority_loss.st.pending` | [15](../../../docs/tutorial/15-failures-and-recovery.md) | Task 23 (cluster commits), Task 24 (`newDatabase:`, reads after a rejoin, `committedEpoch`) |
+
+The chapter sections that quote them carry the same markers: in chapter 14, *Committing* and
+*Reading* run once Tasks 23 and 24 land, *Durability* once Tasks 23 to 25 land; in chapter 15, the
+majority-loss section once Tasks 23 and 24 land.
 
 When the tasks a program needs are merged: move it to `examples/cluster/` without the `.pending`
 suffix, update the `<!-- example: -->` line of its chapter, run it with

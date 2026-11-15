@@ -6,7 +6,8 @@
  - the defaults derived from leaseDuration: driftMargin, sendReserve, startupGrace;
  - the rules that refuse a configuration at construction (sendReserve, authKey, unknown names);
  - PBClusterConfig timerTable, one row per timer;
- - stats: the health keys and the counters, with proto_db's names;
+ - stats: the health keys and the counters, with proto_db's names (a permission asked by hand
+   makes the counters move);
  - a member restarted over a log that served before needs its full startup grace: a shorter one
    is refused when the space attaches (L17).
 
@@ -16,7 +17,7 @@
 Import from: 'protobase'.
 Import from: '../tutorial/_lesson'.
 
-| lesson peers config refuse dir network make nodes spaces until stats restarted |
+| lesson peers config refuse dir network make nodes spaces until stats restarted permit later |
 lesson := Lesson named: '16 configuration'.
 peers := #('n0' 'n1' 'n2') collect: [:id | PBPeer nodeId: id host: '127.0.0.1' port: 7400].
 refuse := [:options | PBClusterConfig nodeId: 'n0' peers: peers options: options].
@@ -65,12 +66,15 @@ nodes do: [:node | node start].
 spaces := nodes collect: [:node |
   PBObjectSpace storage: (PBFileStorage clusterPath: dir pathString) coordinator: node].
 until value: [nodes allSatisfy: [:node | (node stats at: 'rejoining') not]].
+permit := nodes first _permit waitWithin: 60000.
+(nodes first _done: permit outcome: #none) waitWithin: 60000.
 stats := nodes first stats.
 lesson check: 'the health keys'
   is: (#('healthy' 'fenced' 'tier_failed' 'rejoining' 'rejoin_blocked' 'failure') collect: [:k | stats at: k])
   equals: { true. false. false. false. nil. nil }.
-lesson check: 'the counters start at zero or count what happened'
-  isTrue: (#('grants_given' 'permits_issued' 'rejoins' 'terms_abandoned') allSatisfy: [:k | (stats at: k) >= 0]).
+lesson check: 'the counters count what happened: grants given, a permission issued'
+  isTrue: ((nodes inject: 0 into: [:sum :node | sum + (node stats at: 'grants_given')]) > 0
+    and: [(nodes inject: 0 into: [:sum :node | sum + (node stats at: 'permits_issued')]) > 0]).
 
 "n2 restarts with a startup grace of 0 over its log, which served before: refused (L17)."
 (nodes at: 3) stop waitWithin: 60000.
@@ -84,7 +88,9 @@ restarted := make value: 'n2' value: Dictionary new.
 restarted start.
 spaces at: 3 put: (PBObjectSpace storage: (PBFileStorage clusterPath: dir pathString) coordinator: restarted).
 lesson check: 'with the default grace it attaches' isTrue: (spaces at: 3) coordinator == restarted.
-lesson check: 'and serves' isTrue: (until value: [(restarted stats at: 'rejoining') not]).
+later := restarted _permit waitWithin: 60000.
+(restarted _done: later outcome: #none) waitWithin: 60000.
+lesson check: 'and serves: the restarted member gets a write permission' isTrue: later term >= permit term.
 
 spaces do: [:space | space close].
 { nodes at: 1. nodes at: 2. restarted } do: [:node | node stop waitWithin: 60000].

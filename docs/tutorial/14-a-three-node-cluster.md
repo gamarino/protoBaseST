@@ -10,7 +10,7 @@ pending, [pending/14_cluster_commits.st.pending](../../examples/cluster/pending/
 Previous: [13. The ideas behind cluster mode](13-cluster-concepts.md). Next: [15. Failures and recovery](15-failures-and-recovery.md).
 
 > **What runs today.** Starting members, the transports, attaching the shared directory, the
-> cluster forming, permissions and `stats` run, and the first two programs prove it. Committing
+> cluster forming, permissions and `stats` run, and the first two programs show it. Committing
 > and reading through the coordinator do not exist yet: the blocks of those sections are marked
 > **Runs once Task N lands** and come from the pending program, which is written against the API of
 > the [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md) and has never run.
@@ -27,7 +27,9 @@ network := PBInProcessNetwork new.
 ```
 
 Every member is configured with **the same** peer list: ranks, voters and the voter fingerprint are
-computed from it (chapter 13), and a member with another list is ignored by the others. A `PBPeer`
+computed from it (chapter 13). A member configured with another voter set is ignored by the
+others; other differences (a learner, a host, a port) are not detected, so keep the list identical
+everywhere. A `PBPeer`
 names the host and port its member listens on. The three members of this first program live in one
 process, so the address is not used: their messages travel over a `PBInProcessNetwork`, which the
 simulator's tests use too, and which can drop, duplicate and partition (chapter 15).
@@ -71,7 +73,7 @@ lesson check: 'the space is empty' is: spaces first listDatabases equals: #().
 
 `PBFileStorage clusterPath:` opens a storage that may hold a cluster's files; `PBFileStorage
 path:` keeps refusing such a directory, and `PBObjectSpace storage:` refuses a cluster-mode storage:
-the mode is chosen when the storage is opened, never guessed (CC20). `storage:coordinator:` opens
+the mode is chosen when the storage is opened, never guessed. `storage:coordinator:` opens
 the member's **shared tier**, whose acceptor log is `cluster/<id>.roots`, and attaches it to the
 coordinator before it answers the space. The log takes an `flock` of its own,
 `cluster/<id>.roots.lock`, so a second process started with the same id is refused at once
@@ -89,14 +91,28 @@ space/
     n2.roots  n2.roots.lock
 ```
 
-The owner of the space is the caller: `close` detaches the tier and closes the log, and the
-coordinator keeps running. Close the spaces before you stop the coordinators.
+The caller owns the space: `close` detaches the tier and closes the log, and the coordinator
+keeps running. Close the spaces before you stop the coordinators.
 
 ## A new cluster forms by itself
 
 Three empty logs: each member starts *rejoining* (chapter 13). Each asks the others, finds that
 every other voter answered, none holds a root and none has promised a term, and completes as a
 cluster's first start, without a ballot.
+
+That takes a moment, and the program must wait for it. It never sleeps for a fixed time; it polls
+a condition:
+
+```smalltalk
+until := [:aBlock | | deadline |
+  deadline := Time millisecondClockValue + 60000.
+  [aBlock value or: [Time millisecondClockValue > deadline]] whileFalse: [(Future after: 10) wait].
+  aBlock value].
+```
+
+`until value: aBlock` evaluates the block every 10 ms until it answers true, for at most 60 s, and
+answers its last value. That is the only way any program of these chapters waits: the deadline
+turns a hang into a failure, and no check reads a duration.
 
 ```smalltalk
 lesson check: 'every node finishes joining'
@@ -106,10 +122,9 @@ lesson check: 'every node is healthy' isTrue: (stats allSatisfy: [:s | (s at: 'h
 lesson check: 'no rejoin needed a ballot' isTrue: (stats allSatisfy: [:s | (s at: 'rejoin_ballots') = 0]).
 ```
 
-until polls a condition every 10 ms for at most 60 s. That is the only way any program of these
-chapters waits: the deadline turns a hang into a failure, and no check reads a duration. A member's
-`stats` is a `Dictionary` with `proto_db`'s names: the health keys (`'healthy'`, `fenced`,
-`'tier_failed'`, `'rejoining'`, `rejoin_blocked`, `failure`) and the counters (chapter 16).
+A member's `stats` is a `Dictionary` with `proto_db`'s names: the health keys (`'healthy'`,
+`'fenced'`, `'tier_failed'`, `'rejoining'`, `'rejoin_blocked'`, `'failure'`) and the counters
+(chapter 16).
 
 ## A write permission, by hand
 
@@ -126,9 +141,12 @@ lesson check: 'the low 12 bits of the term are the owner''s rank'
 
 `_permit` answers a `Future`. Nobody owned a term, so n0 tried to own one: it asked the voters
 for a ballot of rank 0, won two promises of three, and issued itself the permission. A run printed
-`term 12288, owner n0`: 12288 is 3 × 4096 + 0, the third ballot of rank 0 (earlier attempts did not
-win: a member still forming refuses as `'rejoining'`). The number varies from run to run; the rank in
-its low bits does not.
+`term 12288, owner n0`: 12288 is 3 × 4096 + 0, the third ballot of rank 0. The earlier attempts
+did not win because of the startup grace: for its `startupGrace` after `start` (1 s with this
+lesson's 600 ms lease) every member, including one at a cluster's first start, refuses grants as
+`'starting'`. `proto_db` does the same; its own tutorial starts its first cluster with a grace of
+0, which fresh logs allow. The lessons keep the default, so that what you see here is what a
+restarted member does. The number varies from run to run; the rank in its low bits does not.
 
 ```smalltalk
 done := (nodes first _done: permit outcome: #none) waitWithin: 60000.
@@ -137,8 +155,8 @@ lesson check: 'the permission is ended' is: done equals: true.
 
 Every permission ends with a report to the owner: `#committed`, `#unknown`, or `#none` (nothing
 acceptable was sent). Until it ends the owner issues no other permission (DEPTH 0), and a holder
-that never reports is timed out at `valid + requestTimeout`, when the owner abandons the term
-(rule O6, lesson L29).
+that never reports is timed out at `valid + requestTimeout`, when the owner abandons the term:
+an owner never waits for ever on a dead holder.
 
 ## The same cluster over TCP
 
@@ -163,7 +181,7 @@ nodes := (1 to: 3) collect: [:i |
 Everything else is the first program. Frames are a 4-byte length and a msgpack map, protocol 13
 of `proto_db`, byte for byte. Connections are one-way: a member writes only on the connections it
 opened and reads only from those it accepted, with one sender actor per peer, so a dead peer
-delays nobody else (lesson L7). The transport counts its frames:
+delays nobody else. The transport counts its frames:
 
 ```smalltalk
 sent := transports inject: 0 into: [:sum :t | sum + (t stats at: 'frames_sent')].
@@ -178,8 +196,9 @@ authenticates, it does not encrypt.
 
 ## Committing
 
-> **Runs once Task 23 lands.** The blocks of this section come from
-> `examples/cluster/pending/14_cluster_commits.st.pending`.
+> **Runs once Tasks 23 and 24 land.** Task 23 is the commit path, Task 24 brings `newDatabase:`
+> and `committedEpoch` to a cluster-mode space. The blocks of this section come from
+> `examples/cluster/pending/14_cluster_commits.st.pending`, which has never run.
 
 In cluster mode a commit looks exactly like a standalone one. `newDatabase:` is a commit too:
 
@@ -190,10 +209,18 @@ shop run: [:t |
   t setRootObject: 'tokens' value: t newDictionary].
 ```
 
-Behind it, the commit is queued on the space's round runner; its new records are saved and synced
-first; then the runner asks for a permission, builds every queued commit of the node on the
-permission's base, syncs, replicates to the voters and waits for a majority (chapter 13). Your
-code waits only on the commit itself.
+Behind it, the commit is queued on the space's round runner, which follows the diagram of
+chapter 13:
+
+1. the transaction's new records are written to the shared segment;
+2. the runner asks the owner for a write permission;
+3. it builds every commit queued on the node on the permission's base, one after the other;
+4. it makes every record durable, with one sync of the shared segment;
+5. it sends the new root to the voters (`'replicate'`);
+6. it waits for a majority of acknowledgements, within the permission;
+7. it reports the `'done'` to every member, and answers the waiting commits.
+
+Your code waits only on the commit itself.
 
 A commit now has **three** outcomes, so a careful workload writes a value unique to each commit,
 a token, and keeps the unknown ones apart:
@@ -213,24 +240,27 @@ a token, and keeps the unknown ones apart:
 
 `run:` retries a `PBConflictError` (nothing left the node, so a retry cannot apply the work twice)
 and never retries a `PBOutcomeUnknownError`. Chapter 15 shows how the tokens settle the unknown
-ones. The tokens go in one dictionary, written blindly (chapter 6), while the counter is read and
-written, so concurrent increments conflict and retry, exactly as in chapter 5. Under a hot key a
+ones. Both roots are read and written, so concurrent commits conflict and `run:` retries them,
+exactly as in chapter 5. Under a hot key a
 round keeps its permission for a conflicting transaction that `run:` is about to retry, so the
-retry builds on the root just committed instead of losing the next turn (held retries, D-LIVE-2).
+retry builds on the root just committed instead of losing the next turn (held retries).
 
 ## Reading
 
-> **Runs once Task 24 lands.**
+> **Runs once Tasks 23 and 24 land.** The barriers below are commits (Task 23); the reads through
+> the coordinator are Task 24.
 
-A read in cluster mode takes the newest root **its node knows committed**. It sends nothing and
-never waits. The price: it may miss a commit another node acknowledged a moment ago, because the
+A read in cluster mode takes the newest root **its node knows committed**. Apart from the
+confirmation after an attach (below), it sends nothing and never waits. The price: it may miss a commit another node acknowledged a moment ago, because the
 node learns that commit from a `'done'` message, asynchronously, and no bound on that delay is
 promised. The snapshot is always a state that was committed, never a mixture.
 
-When a read must see every commit acknowledged before it started, make a commit first: any commit
-is a **barrier**, because its permission round makes the node learn the newest root before it
-builds (a base below an acknowledged commit would lose it, which the protocol forbids).
-`newDatabase:` is a commit, so n1 creating a database of its own sees the one n0 created:
+When a read must see every commit acknowledged before it started, make a commit first: any
+commit that writes something and returns normally is a **barrier**, because its permission round
+makes the node learn the newest root before it builds (a base below an acknowledged commit would
+lose it, which the protocol forbids). `newDatabase:` is expected to be one too: in `proto_db` it is
+a commit under a permission, so n1 creating a database of its own sees the one n0 created. The
+plan does not state it for the port; this check confirms it once Task 24 lands:
 
 ```smalltalk
 (spaces at: 2) newDatabase: 'n1-scratch'.
@@ -260,15 +290,17 @@ every barrier is a version in `history`. Use it where the guarantee is worth a c
 local reads elsewhere. (There is no read-only barrier; `proto_db` does not have one either.)
 
 A node that attaches its log knows only what the log recorded; its own last "committed" entry is
-not synced on its own and may have been lost in a power loss (R67). So the space's first snapshot
+not synced on its own and may have been lost in a power loss (chapter 13). So the space's first snapshot
 after every attach runs a **confirmation commit**, an empty round under a permission, before it
-reads. Reads never go backwards across a restart (lesson L18). On a coordinator,
-`committedEpoch` is the epoch of the newest root it knows committed; the space answers the same
-once Task 24 lands, and it never goes down.
+reads. Reads never go backwards across a restart. On a coordinator, `committedEpoch` is the
+epoch of the newest root it knows committed; the space answers the same once Task 24 lands. It
+never goes down, except after `forceRejoin` on a survivor, which is outside the failure model
+(chapter 15).
 
 ## Durability: the persister
 
-> **Runs once Task 25 lands.**
+> **Runs once Tasks 23 to 25 land.** It needs commits (Task 23), `committedEpoch` on the space
+> (Task 24), and the persister with `sync:` and the persisted epoch (Task 25).
 
 `space.root` is written by each node's persister, after the commit, by compare-and-swap, never
 backwards. The commit point does not need it: acknowledged commits are durable in the voters'
@@ -281,8 +313,9 @@ lesson check: 'after sync: the persisted epoch reached the committed one'
 ```
 
 `sync:` is a **durability** barrier, not a visibility barrier: it says nothing about commits this
-node has not learnt. Use it before telling a user "saved" to a reader of `space.root` (a plain
-`proto_db` reader, a backup), not to mean "I now see everything".
+node has not learnt. Use it when a reader of `space.root` alone (a plain `proto_db` reader, a
+backup) must see the commit, for example before reporting "saved" to such a reader; it does not
+mean "I now see everything".
 
 ## Closing
 
@@ -302,5 +335,5 @@ stopped.
 - Each member opens the same directory with `clusterPath:` and attaches it with
   `storage:coordinator:`; its log is `cluster/<id>.roots`, locked against a double start.
 - A fresh cluster forms by itself; `stats` tells you when it is healthy.
-- Commits look like standalone ones but have a third outcome; local reads may lag, a commit is the
-  barrier, and `space.root` is written later, by the persister.
+- Commits look like standalone ones but have a third outcome; local reads may lag, a commit that
+  writes something is the barrier, and `space.root` is written later, by the persister.

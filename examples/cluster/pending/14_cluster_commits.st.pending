@@ -13,12 +13,13 @@
    from the owner, the build, a majority of synced acceptances (the commit point), then done;
  - a local read takes the newest root its node knows committed: it never waits, and it may miss
    a commit another node acknowledged a moment ago;
- - any commit is a barrier: once it returns, its node has seen every commit acknowledged before
-   it started (newDatabase: is one; so is a run: that writes '_read_barrier');
+ - a commit that writes something and returns normally is a barrier: once it returns, its node
+   has seen every commit acknowledged before it started (a run: that writes '_read_barrier';
+   newDatabase: is expected to be one, as in proto_db, and the check below confirms it);
  - a commit has three outcomes: committed, PBConflictError (nothing left the node: run: retries
    it) and PBOutcomeUnknownError (run: never retries it); a unique token per commit settles an
    unknown one later;
- - committedEpoch never goes backwards; sync: waits until the persister has written space.root
+ - committedEpoch never goes backwards (forceRejoin on a survivor aside); sync: waits until the persister has written space.root
    up to it, a durability barrier, not a visibility barrier.
 
  Every wait is a condition with a deadline of 60 s; no duration is asserted.
@@ -55,7 +56,8 @@ shop run: [:t |
   t setRootObject: 'tokens' value: t newDictionary].
 lesson check: 'n0 committed under a permission' isTrue: ((nodes at: 1) stats at: 'permits_issued') + ((nodes at: 2) stats at: 'permits_issued') + ((nodes at: 3) stats at: 'permits_issued') >= 2.
 
-"A commit on n1 is a barrier: afterwards n1 knows every commit acknowledged before it."
+"newDatabase: on n1 is expected to be a barrier (a commit under a permission, as in proto_db):
+ afterwards n1 knows every commit acknowledged before it. To be confirmed when Task 24 lands."
 (spaces at: 2) newDatabase: 'n1-scratch'.
 lesson check: 'after its own commit n1 sees the database n0 made'
   isTrue: ((spaces at: 2) listDatabases includes: 'shop').
