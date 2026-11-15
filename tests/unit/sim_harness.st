@@ -1,4 +1,4 @@
-"EXPECT: ok 12"
+"EXPECT: ok 13"
 "The deterministic simulator (_sim.st) over the core vocabulary (cluster/core.st), with test
  rules: EchoRules sends a want to every other member, sets one timer (1000 us) and hands its
  PBStartNode to its acceptor, which logs a synced promise and an unsynced committed entry.
@@ -20,7 +20,10 @@
  chains that diverge (a fork); a commit every member learns converges. (11) converge: answers
  whether the queue emptied. (12) No file of the simulator or of the core in src/protobase/cluster
  (every file there but the shells: transport.st, whose sender times its reconnection back-off)
- reads a clock of protoST's (Time, Date, DateTime, the clock primitives, Future after:, Delay)."
+ reads a clock of protoST's (Time, Date, DateTime, the clock primitives, Future after:, Delay);
+ each name the exemption lists must be a file that exists. (13) Delays with reorder: true
+ deliver every one of 50 messages from n0 to n1, out of send order for seed 11; with reorder:
+ false the same seed keeps the send order (proto_db test_in_process_delays_reorder_messages)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_sim'.
@@ -210,6 +213,29 @@ ReplyRules >> acceptStart: anEvent in: s now: t
     appends: { PBLogAppend kind: #promise label: 4096 + s config rank root: nil sync: true }
     reply: { PBPublishAcceptor state: s }.
 
+"n0 sends 50 requests to n1 at start (terms 1-50); every node notes the terms it receives, in
+ arrival order. The simulator runs in one thread, so a plain collection is safe here."
+EchoRules subclass: #OrderRules instanceVariableNames: 'seen'.
+
+OrderRules class >> new
+  ^ self basicNew setSeen.
+
+OrderRules >> setSeen
+  seen := OrderedCollection new.
+
+OrderRules >> seen
+  ^ seen asArray.
+
+OrderRules >> dispatchStartNode: anEvent in: s now: t
+  s config nodeId = 'n0' ifFalse: [^ PBStep state: s effects: #()].
+  ^ PBStep state: s effects: ((1 to: 50) asArray collect: [:k |
+      PBSend to: 'n1' message: (PBClusterMessage type: 'request' from: 'n0'
+        fields: { 'term' -> k. 'rid' -> k. 'inc' -> 0. 'vs' -> 0 })]).
+
+OrderRules >> dispatchReceived: anEvent in: s now: t
+  seen add: (anEvent message at: 'term').
+  ^ PBStep state: s effects: #().
+
 "--- the checks ---"
 
 | c ids sim run lines times clocks index count failure a b planted errorOf modes |
@@ -391,8 +417,23 @@ c that: 'converge: answers whether the queue emptied' is: a equals: #(true false
 "(12) No file of the simulator or of the core in src/protobase/cluster reads a clock (STPATH names
  <repo>/src). The shells (transport.st) are the files that may; the list of core files is every
  file of the directory less them, so a new core file is checked without being named here."
-failure := OSProcess shell: 'src="${STPATH%%:*}"; core=$(ls "$src"/protobase/cluster/*.st | grep -v -E ''/(transport)\.st$''); grep -l -E ''millisecondClockValue|microsecondClockValue|utcMicroseconds|nowUTC|__clock|Time now|Date today|DateTime now|millisecondsToRun|timeToRun|Future after|Delay'' "$src/../tests/unit/_sim.st" $core'.
+failure := OSProcess shell: 'src="${STPATH%%:*}"; test -f "$src/protobase/cluster/transport.st" || { echo "an exempt shell is missing: transport.st"; exit 2; }; core=$(ls "$src"/protobase/cluster/*.st | grep -v -E ''/(transport)\.st$''); grep -l -E ''millisecondClockValue|microsecondClockValue|utcMicroseconds|nowUTC|__clock|Time now|Date today|DateTime now|millisecondsToRun|timeToRun|Future after|Delay'' "$src/../tests/unit/_sim.st" $core'.
 c that: 'no file of the simulator or of the core in src/protobase/cluster reads a clock'
   is: { failure exitCode. failure output } equals: { 1. '' }.
+
+"(13) Delays and reordering deliver every message, in another order (seed 11); without reorder the
+ order is kept."
+a := { true. false } collect: [:reorder |
+  | rules s |
+  rules := OrderRules new.
+  s := PBSim seed: 11 ids: ids rules: rules options: Dictionary new.
+  s faults: (PBSimFaults drop: 0 duplicate: 0 delay: 20000 reorder: reorder).
+  "Not converge:, which ends the faults first."
+  s runUntil: [rules seen size >= 50] steps: 100000.
+  rules seen].
+c that: 'delay:reorder: delivers every message out of send order; reorder: false keeps it'
+  is: { (a first asSortedCollection: [:x :y | x <= y]) asArray = (1 to: 50) asArray. a first ~= (1 to: 50) asArray.
+    a last }
+  equals: { true. true. (1 to: 50) asArray }.
 
 c report displayNl.

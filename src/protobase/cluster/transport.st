@@ -358,14 +358,13 @@ _PBInProcessInbox >> finish
 
 PBClusterTransport subclass: #PBTcpTransport instanceVariableNames: 'listener port requestTimeout run inbound'.
 
-"The default timeout, in milliseconds, of a connect or a write: proto_db's requestTimeout
- default (PBClusterConfig), 250 ms."
+"The default timeout, in milliseconds, of a connect or a write: 1000, proto_db's connect_timeout
+ and send_timeout, with which its coordinator builds its TcpTransport."
 PBTcpTransport class >> defaultRequestTimeout
-  ^ 250.
+  ^ 1000.
 
 "The base of the reconnection back-off, in microseconds (proto_db reconnect_backoff, 0.1 s): after
- a failed connect or write, frames to that peer are dropped for a time drawn from this base to
- twice it."
+ a failed connect, frames to that peer are dropped for a time drawn from this base to twice it."
 PBTcpTransport class >> backoffBase
   ^ 100000.
 
@@ -563,7 +562,9 @@ _PBTcpListener >> run
     transport isRunning ifFalse: [
       "An accept that stop's close woke answers a Socket without a descriptor (protoST 0.12.0),
        whose close signals: it holds nothing to release."
-      socket isNil ifFalse: [[socket close] on: Error do: [:e | nil]].
+      socket isNil ifFalse: [[socket close] on: Error do: [:e |
+        (e isKindOf: MessageNotUnderstood) ifTrue: [e pass].
+        nil]].
       ^ true].
     socket isNil
       ifTrue: [transport class _warn: 'accepting a connection failed: ' , failure printString]
@@ -676,7 +677,14 @@ _PBTcpSender >> offer: aFrame
 "Writes the queued frames, oldest first, until the queue is empty or closed (an actor method)."
 _PBTcpSender >> drain
   | frame |
-  [(frame := self _take) notNil] whileTrue: [self _write: frame].
+  [[(frame := self _take) notNil] whileTrue: [self _write: frame]] on: Error do: [:e |
+    "A stray error must not leave the queue draining with no drain running: offer: would never
+     start one again and the peer would be cut off. It is reported, the connection is dropped,
+     and the next offer: starts a new drain."
+    transport class _warn: 'the sender to ' , peer nodeId printString , ' failed: ' , e messageText.
+    self _discard: link value first.
+    queue swap: [:old | old idle].
+    ^ false].
   queue value isClosed ifTrue: [self _closeLink].
   ^ true.
 
@@ -689,21 +697,32 @@ _PBTcpSender >> _take
    queue value: old withoutFirst ifCurrent: old] whileFalse.
   ^ old size = 0 ifTrue: [nil] ifFalse: [old first].
 
-"Writes aFrame on the connection, connecting first when there is none (with requestTimeout). A
- frame during the back-off, or one whose connect or write fails, is dropped and counted; a
- failure closes the connection and starts a back-off (proto_db _send_loop)."
+"Writes aFrame on the connection, connecting first when there is none (with requestTimeout), as
+ proto_db's _send_loop: a failed write closes the connection and the frame is written once more
+ on a fresh one, at once; a frame is dropped and counted when there is no connection (a failed
+ connect, or its back-off) or when the retry fails too. Only a failed connect starts a back-off."
 _PBTcpSender >> _write: aFrame
-  | socket failed |
-  socket := self _connection.
-  socket isNil ifTrue: [^ transport _count: 'frames_dropped'].
-  failed := false.
-  [socket nextPutBytes: aFrame] on: Error do: [:e |
+  | socket |
+  2 timesRepeat: [
+    socket := self _connection.
+    socket isNil ifTrue: [^ transport _count: 'frames_dropped'].
+    (self _put: aFrame on: socket) ifTrue: [^ transport _count: 'frames_sent'].
+    self _discard: socket].
+  transport _count: 'frames_dropped'.
+
+"Whether aFrame was written on aSocket (false when the write signals: a reset, a closed peer, a
+ timeout, or stop closing the socket)."
+_PBTcpSender >> _put: aFrame on: aSocket
+  [aSocket nextPutBytes: aFrame] on: Error do: [:e |
     (e isKindOf: MessageNotUnderstood) ifTrue: [e pass].
-    failed := true].
-  failed ifTrue: [
-    self _fail: socket.
-    ^ transport _count: 'frames_dropped'].
-  transport _count: 'frames_sent'.
+    ^ false].
+  ^ true.
+
+"Closes aSocketOrNil after a failed write and forgets the connection, keeping the back-off of an
+ earlier failed connect (proto_db keeps failed_at)."
+_PBTcpSender >> _discard: aSocketOrNil
+  aSocketOrNil isNil ifFalse: [aSocketOrNil close].
+  link swap: [:old | { nil. old last }].
 
 "The open connection to the peer, connecting when there is none and the back-off is over; nil
  when there is no connection to write on."
@@ -711,11 +730,12 @@ _PBTcpSender >> _connection
   | current socket |
   current := link value.
   current first isNil ifFalse: [^ current first].
+  queue value isClosed ifTrue: [^ nil].
   (current last notNil and: [Time microsecondClockValue < current last]) ifTrue: [^ nil].
   socket := [Socket connectTo: peer host port: peer port timeout: transport requestTimeout] on: Error do: [:e |
     (e isKindOf: MessageNotUnderstood) ifTrue: [e pass].
     nil].
-  socket isNil ifTrue: [self _fail: nil. ^ nil].
+  socket isNil ifTrue: [self _failConnect. ^ nil].
   socket timeout: transport requestTimeout.
   link value: { socket. nil } ifCurrent: current.
   "stop closes the queue, then the socket in link: either it saw this socket, or this sees the
@@ -723,10 +743,10 @@ _PBTcpSender >> _connection
   queue value isClosed ifTrue: [self _closeLink. ^ nil].
   ^ socket.
 
-"Closes aSocketOrNil and starts the back-off: a time from backoffBase to twice it."
-_PBTcpSender >> _fail: aSocketOrNil
+"Starts the back-off after a failed connect: a time from backoffBase to twice it (proto_db: a
+ fixed reconnect_backoff; the jitter is protoBaseST's)."
+_PBTcpSender >> _failConnect
   | random jitter |
-  aSocketOrNil isNil ifFalse: [aSocketOrNil close].
   random := ByteArray randomBytes: 2.
   jitter := (random at: 1) * 256 + (random at: 2).
   link swap: [:old | { nil. Time microsecondClockValue + PBTcpTransport backoffBase
@@ -794,6 +814,10 @@ _PBSendQueue >> withoutFirst
   frames isEmpty ifTrue: [^ self class basicNew _setFrames: #() bytes: 0 draining: false closed: closed].
   ^ self class basicNew _setFrames: (frames copyFrom: 2 to: frames size) bytes: bytes - frames first size
     draining: true closed: closed.
+
+"This queue, not draining (its frames kept)."
+_PBSendQueue >> idle
+  ^ self class basicNew _setFrames: frames bytes: bytes draining: false closed: closed.
 
 "Closed, its frames discarded."
 _PBSendQueue >> closed

@@ -1,4 +1,4 @@
-"EXPECT: ok 10"
+"EXPECT: ok 11"
 "PBTcpTransport (cluster/transport.st): length-prefixed frames over TCP (proto_db
  cluster/transport.py TcpTransport), one listener actor, one reader actor per accepted
  connection, one sender actor per peer. Every transport listens on 127.0.0.1, port 0, through
@@ -14,7 +14,11 @@
  refusals (Review Focus 4). (7) A message to a peer not yet listening is dropped, and once the
  peer listens a later one arrives. (8) A send after stop is a silent drop. (9) A transport starts
  once; a message to an unknown peer or to the node itself is dropped and counted. (10) listenOn:
- host: binds a free port for port 0 and refuses a port in use. Every wait is for a
+ host: binds a free port for port 0 and refuses a port in use. (11) A peer restarts on its port:
+ the frames written into the old, dead connection are lost (as in proto_db), the write that
+ fails is retried at once on a new connection, and nothing is dropped. Every transport but
+ those of check (10) has a 60 s connect and write timeout (requestTimeout:), so no outcome
+ depends on how fast a loaded machine connects or writes. Every wait is for a
  condition with a generous deadline (60 s at least) that turns a hang into a failure; nothing
  asserts a duration. A raw socket's read has a 60 s timeout, so a connection the receiver
  failed to close fails the check instead of hanging."
@@ -60,7 +64,7 @@ Hole >> acceptOn: aServer
   key2 reserved port server delivered before frames t0 |
 c := Check new.
 request := [:from :t | PBClusterMessage type: 'request' from: from fields: { 'term' -> t. 'rid' -> t. 'inc' -> 0. 'vs' -> 0 }].
-listen := [PBTcpTransport withListener: (ServerSocket listenOn: 0 host: '127.0.0.1')].
+listen := [PBTcpTransport withListener: (ServerSocket listenOn: 0 host: '127.0.0.1') requestTimeout: 60000].
 "The membership of anArray of { id. port }."
 membership := [:pairs | PBMembership peers: (pairs collect: [:p | PBPeer nodeId: p first host: '127.0.0.1' port: p last]) voters: nil].
 "Whether aBlock became true within the deadline (60 s at least), checked every 10 ms."
@@ -143,9 +147,10 @@ big := PBClusterMessage type: 'records' from: 'a' fields: { 'term' -> 1. 'rid' -
 40 timesRepeat: [a send: big to: 'hole'].
 1 to: 100 do: [:t | a send: (request value: 'a' value: t) to: 'b'].
 await value: [(inboxes at: 2) size >= 100].
+"The hole's sender is blocked: fewer than its 40 frames are written once b has all 100."
 c that: 'a black-holed peer does not stop 100 messages to the live peer'
-  is: { (inboxes at: 2) terms. ((a stop) waitWithin: 60000). ((b stop) waitWithin: 60000) }
-  equals: { (1 to: 100) asArray. true. true }.
+  is: { (inboxes at: 2) terms. (stats value: a value: 'frames_sent') < 140. ((a stop) waitWithin: 60000). ((b stop) waitWithin: 60000) }
+  equals: { (1 to: 100) asArray. true. true. true }.
 (hole waitWithin: 60000) close.
 holeServer close.
 
@@ -157,6 +162,8 @@ a start: 'a' peers: (membership value: { { 'a'. a port }. { 'b'. b port } }) key
 b start: 'b' peers: (membership value: { { 'a'. a port }. { 'b'. b port } }) key: key2 last handler: (inboxes at: 2) handler.
 1 to: 5 do: [:t | a send: (request value: 'a' value: t) to: 'b'. b send: (request value: 'b' value: t) to: 'a'].
 await value: [(stats value: a value: 'frames_rejected') > 0 and: [(stats value: b value: 'frames_rejected') > 0]].
+"Every frame each side sent is accounted for (written or dropped) before nothing delivered is asserted."
+await value: [{ a. b } allSatisfy: [:t | (stats value: t value: 'frames_sent') + (stats value: t value: 'frames_dropped') >= 5]].
 c that: 'two different keys: nothing is delivered and frames_rejected counts the refusals'
   is: { (inboxes at: 1) size. (inboxes at: 2) size. (stats value: a value: 'frames_rejected') > 0. (stats value: b value: 'frames_rejected') > 0.
     (stats value: b value: 'connections_dropped') > 0 }
@@ -174,7 +181,7 @@ a send: (request value: 'a' value: 1) to: 'b'.
 await value: [(stats value: a value: 'frames_dropped') >= 1].
 before := stats value: a value: 'frames_dropped'.
 server := ServerSocket listenOn: port host: '127.0.0.1'.
-b := PBTcpTransport withListener: server.
+b := PBTcpTransport withListener: server requestTimeout: 60000.
 b start: 'b' peers: (membership value: { { 'a'. a port }. { 'b'. port } }) key: nil handler: (inboxes at: 2) handler.
 await value: [(inboxes at: 2) size > 0 or: [a send: (request value: 'a' value: 2) to: 'b'. false]].
 c that: 'a message to a peer not yet listening is dropped, and a later one arrives once it listens'
@@ -207,6 +214,29 @@ c that: 'listenOn:host: binds a free port for port 0 and refuses a port in use'
   is: { a port > 0. a requestTimeout. [PBTcpTransport listenOn: a port host: '127.0.0.1'. 'bound'] on: PBValidationError do: [:e | 'refused'].
     [PBTcpTransport listenOn: 0 host: '127.0.0.1' requestTimeout: 0. 'built'] on: PBValidationError do: [:e | 'refused'].
     ((a stop) waitWithin: 60000) }
-  equals: #(true 250 'refused' 'refused' true).
+  equals: #(true 1000 'refused' 'refused' true).
+
+"(11) A restarted peer: only the frames written into the dead connection are lost."
+a := listen value. b := listen value.
+port := b port.
+inboxes := { Inbox new. Inbox new }.
+a start: 'a' peers: (membership value: { { 'a'. a port }. { 'b'. port } }) key: nil handler: (inboxes at: 1) handler.
+b start: 'b' peers: (membership value: { { 'a'. a port }. { 'b'. port } }) key: nil handler: (inboxes at: 2) handler.
+a send: (request value: 'a' value: 1) to: 'b'.
+await value: [(inboxes at: 2) size >= 1].
+(b stop) waitWithin: 60000.
+b := PBTcpTransport withListener: (ServerSocket listenOn: port host: '127.0.0.1') requestTimeout: 60000.
+inboxes := { inboxes first. Inbox new }.
+b start: 'b' peers: (membership value: { { 'a'. a port }. { 'b'. port } }) key: nil handler: (inboxes at: 2) handler.
+"One frame at a time: each is written (or dropped) before the next is sent."
+2 to: 30 do: [:t |
+  a send: (request value: 'a' value: t) to: 'b'.
+  await value: [(stats value: a value: 'frames_sent') + (stats value: a value: 'frames_dropped') >= t]].
+await value: [(inboxes at: 2) terms includes: 30].
+t0 := (inboxes at: 2) terms.
+c that: 'after a peer restarts, only frames written into the dead connection are lost: the failed write is retried on a new one'
+  is: { stats value: a value: 'frames_dropped'. stats value: a value: 'frames_sent'. t0 notEmpty and: [t0 = (t0 first to: 30) asArray] }
+  equals: { 0. 30. true }.
+(a stop) waitWithin: 60000. (b stop) waitWithin: 60000.
 
 c report displayNl.

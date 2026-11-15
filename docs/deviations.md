@@ -496,22 +496,35 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   lane for `warm` frames bounded by bytes. protoBaseST has the control lane only (`warm` is
   tiered-only, never sent at depth 0 over shared storage) and bounds it by bytes, at
   `PBClusterFrame maxFrameBytes`: a frame that does not fit makes room by dropping the oldest
-  queued frames, counted in `frames_dropped`, and is always queued itself. A failed connect or
-  write drops the frame and starts a back-off during which the frames to that peer are dropped,
-  drawn from 100 to 200 ms (`proto_db`: a fixed 0.1 s after a failed connect, and one retry of the
-  frame on a fresh connection after a failed write, which protoBaseST does not make). The
-  connect and write timeouts are one value, `requestTimeout` (250 ms by default; `proto_db`:
-  `connect_timeout` and `send_timeout`, 1 s each). The sender reads the monotonic clock for the
-  back-off: `transport.st` is a shell, outside the no-clock check of the core
-  (`tests/unit/sim_harness.st`, check 12). *Cost:* an old frame may be lost to a burst where
-  `proto_db` would drop the new one; both are losses the protocol tolerates.
+  queued frames, counted in `frames_dropped`, and is always queued itself. Failures follow
+  `proto_db`'s `_send_loop`: a failed write closes the connection and the same frame is written
+  once more on a fresh one, at once (`tests/unit/cluster_transport_tcp.st` check 11: a peer
+  restart loses only the frames written into the dead connection); only a failed connect starts
+  a back-off, during which the frames to that peer are dropped. The back-off is drawn from 100
+  to 200 ms where `proto_db`'s is a fixed 0.1 s (the jitter is protoBaseST's). The connect and
+  write timeouts are one value, `requestTimeout` (default 1000 ms, `proto_db`'s
+  `connect_timeout` and `send_timeout` with which its coordinator builds the transport; a
+  coordinator may pass another). The sender reads the monotonic clock for the back-off:
+  `transport.st` is a shell, outside the no-clock check of the core (`tests/unit/sim_harness.st`,
+  check 12). *Cost:* an old frame may be lost to a burst where `proto_db` would drop the new
+  one; both are losses the protocol tolerates.
+- **The transport's stats (`cluster/transport.st`).** `frames_dropped` is `proto_db`'s
+  `TcpTransport.dropped`; `frames_sent`, `frames_rejected` and `connections_dropped` are
+  protoBaseST's own (the plan's names), as `proto_db`'s TCP transport counts nothing else. The
+  in-process network's own `stats` (`sent`, `dropped`, `duplicated`, `delivered`) are not
+  ported: each endpoint counts its frames.
+- **Accept errors (`proto_db` behaviour, kept).** An `accept` that fails while the transport runs
+  is written to stderr and the listener tries again at once, as `proto_db`'s selector loop does:
+  a persistent error (no file descriptor left) keeps the high-band listener busy and stderr
+  full until it clears. An actor cannot wait to back off (R19).
 - **The in-process network's faults (`cluster/transport.st`).** `PBInProcessNetwork` drops and
   duplicates frames with probabilities drawn from a seeded generator, partitions the members into
   groups and treats a stopped endpoint as a crashed node, as `proto_db`'s `InProcessNetwork`;
   it has no delays (`set_faults(delay=...)`, `set_link_delay`): delays and reordering are the
   simulator's (`PBSimFaults delay:reorder:`, in virtual time), so no test depends on wall-clock
-  timing. The checklist row `test_in_process_delays_reorder_messages` is n/a for that reason.
-  The network has no `stats` of its own and no `close` (nothing is in flight outside the
+  timing. The checklist row `test_in_process_delays_reorder_messages` is ported there
+  (`tests/unit/sim_harness.st` check 13: with seed 11 all 50 messages arrive, out of send
+  order, and with `reorder: false` in order). The network has no `stats` of its own and no `close` (nothing is in flight outside the
   endpoints); the endpoints count their frames (`stats`).
 
 ## Errors and messages

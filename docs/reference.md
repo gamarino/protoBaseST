@@ -782,14 +782,15 @@ For tests, tools and readers of the format. An application does not need them.
   - `PBTcpTransport listenOn: aPort host: aHost` (port 0 picks a free port; an address that
     cannot be listened on is `PBValidationError`) and `withListener: aServerSocket` (for tests
     that publish ports first), each also with `requestTimeout:` (a positive Integer of
-    milliseconds, default `defaultRequestTimeout`, 250, the timeout of every connect and write).
+    milliseconds, default `defaultRequestTimeout`, 1000, the timeout of every connect and write).
     `port` answers the port listened on. Frames are length-prefixed over TCP; connections are
     one-way (a node writes only on its own outbound connections). One listener actor accepts;
     one reader actor per connection reads each frame, checking the length before it reads the
     body, and closes the connection at the first refused frame; one sender actor per peer
     drains that peer's queue (bounded at `maxFrameBytes` bytes, the oldest frames dropped first),
-    connecting on demand; a failed connect or write drops the frame and starts a back-off of 100
-    to 200 ms (`backoffBase` microseconds to twice it). The handler is called on the readers,
+    connecting on demand; a failed write is retried once at once on a fresh connection, and a
+    failed connect drops the frame and starts a back-off of 100 to 200 ms (`backoffBase`
+    microseconds to twice it) during which the frames to that peer are dropped. The handler is called on the readers,
     concurrently with several peers. The differences from `proto_db` are in
     [deviations.md](deviations.md#cluster-mode).
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and

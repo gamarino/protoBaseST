@@ -243,7 +243,7 @@ test_cluster_transactions.py::test_a_setup_new_database_whose_recovery_query_goe
 test_cluster_transactions.py::test_a_recovery_round_ends_once_a_majority_of_witnesses_answered	ported	tests/unit/cluster_base_rules.st	a recovery ends at a majority of witnesses, this node counted, before its timer
 test_cluster_transport.py::test_in_process_delivers_in_order_without_faults	ported	tests/unit/cluster_transport_inprocess.st	without faults, 20 messages from n0 arrive at n1 decoded and in order
 test_cluster_transport.py::test_in_process_drop_and_duplicate	ported	tests/unit/cluster_transport_inprocess.st	the drop fault loses a message and the duplicate fault delivers one twice
-test_cluster_transport.py::test_in_process_delays_reorder_messages	n/a	Python-only API	InProcessNetwork wall-clock delays are not ported: delay and reorder are PBSimFaults delay:reorder: in virtual time, so no test depends on timing
+test_cluster_transport.py::test_in_process_delays_reorder_messages	ported	tests/unit/sim_harness.st	delay:reorder: delivers every message out of send order; reorder: false keeps it
 test_cluster_transport.py::test_in_process_partition_and_heal	ported	tests/unit/cluster_transport_inprocess.st	a partition drops what crosses it and heal ends it
 test_cluster_transport.py::test_in_process_crashed_node_neither_sends_nor_receives	ported	tests/unit/cluster_transport_inprocess.st	a crashed node neither sends nor receives
 test_cluster_transport.py::test_in_process_messages_go_through_the_wire_encoding	ported	tests/unit/cluster_transport_inprocess.st	a message goes through the wire encoding: what is not a PBClusterMessage is refused

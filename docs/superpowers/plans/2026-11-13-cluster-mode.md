@@ -1158,6 +1158,22 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     bits (the `#seed` option seeds a `Random` instead, for tests). `_attach:` refuses a
     `#startupGrace` shorter than the default when the loaded log is not empty (L17,
     `PBValidationError`).
+- Carried from Task 19 (review m7, report concerns):
+  - (a) `PBTcpTransport` calls the handler on the reader actor of each inbound connection, so on
+    several threads at once: the handler only forwards each message to the dispatcher actor
+    (spec 5.4), which keeps the order per connection.
+  - (b) Drop and count a message whose `from` is not a peer, or is the node itself
+    (`coordinator.py` 1771, `_on_message`): the transport cannot check the sender (connections
+    are one-way and the HMAC binds the receiver, CC4).
+  - (c) `tests/unit/sim_harness.st` check 12 bans clock reads in `src/protobase/cluster/*.st`
+    except the shells it exempts by name (now `transport.st`, each checked to exist): add
+    `coordinator.st`, and later `round.st`, the persister and the tier if they read a clock or
+    use `Future after:`.
+  - (d) `stop` of a transport answers a `Future`; the coordinator's stop chains on it and never
+    waits inside an actor. Pass `requestTimeout` (milliseconds) to `PBTcpTransport ...
+    requestTimeout:`, or keep its default of 1000 ms, `proto_db`'s.
+  - (e) A sender blocked in a connect is not woken by `stop`: stop settles at most
+    `requestTimeout` later.
 - **Checklist (Task 18):** turn the 22 `deferred 20` rows of `tests/unit/cluster_checklist.tsv` (`awk -F'\t' '$2=="deferred" && $3==20' tests/unit/cluster_checklist.tsv`) into `ported` rows, each naming the whole check label of a test this task adds; a row this task cannot port is re-justified as `n/a` in its review, never left deferred.
 - [ ] **Step 1: write the failing test** `cluster_coordinator_shell.st` (`"EXPECT: ok 10"`): three
   coordinators over `PBInProcessNetwork` and a memory tier test double (test file only) elect an
