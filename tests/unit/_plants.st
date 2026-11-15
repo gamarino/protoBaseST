@@ -19,7 +19,13 @@
   PlantCancelWakes      any release ends the back-off, a lost attempt's cancel included
                         (proto_db's cancel_wakes).
   PlantAnyIncarnation   a reply of another incarnation is taken (replies of another incarnation
-                        are dropped, L12)."
+                        are dropped, L12).
+  PlantLateDoneAsNone   a permission without a done by its deadline is retired as 'none' (O5:
+                        the next permission reuses its base) instead of abandoning the term (O6,
+                        L29: a dying holder's replication may still be accepted).
+
+ The lessons' schedules that have no family of their own are here too (LessonFamilies, for
+ sim_lessons.st): L29's dying holder."
 
 Import from: 'protobase'.
 
@@ -285,3 +291,58 @@ LeaseFamilies class >> incarnations: aRulesClass seeds: someSeeds
     (run owns: 'n0') ifTrue: [owned := owned + 1].
     (sim countOf: 'stale_replies' at: 'n0') < 2 ifTrue: [uncounted := uncounted + 1]].
   ^ { owned. uncounted }.
+
+"=== L29: a dying holder vs done =============================================="
+
+PBCoordinatorCore subclass: #PlantLateDoneAsNone.
+
+PlantLateDoneAsNone >> _permissionLate: anIssued in: s now: t effects: fx
+  | own |
+  own := s ownership.
+  ^ self _issue: (s with: { #ownership -> (own with: { #pipeline -> (own pipeline reject: [:e | e == anIssued]) }) })
+    now: t effects: fx.
+
+Object subclass: #LessonFamilies.
+
+"{ violation text or nil. terms n0 abandoned. outcome of c. outcome of b }: L29, O6. Three members
+ formed before (startup grace 0), no faults, the rules aRules. n0 owns (its commit a); n1 asks
+ it for a permission (commit b), builds its root and replicates it, and dies right after the
+ send (paused: its acceptor, its done and its replies wait); n2 asks n0 (commit c) 50 ms before
+ n1's deadline and waits behind n1's permission. With no done by valid + requestTimeout, n0
+ abandons the term, so c commits in a later term; retiring n1's permission as 'none' instead (O5)
+ issues its base again to n2, whose root carries the label and epoch of n1's, which n1 sent and
+ n0 and n2 accepted: two roots of one label and epoch (the checker's sibling rule). n1 resumes
+ once c is resolved (or at 4 s) and the run converges."
+LessonFamilies class >> lateDone: aRules seed: n
+  | ids logs opts sim violation seen sent |
+  ids := #('n0' 'n1' 'n2').
+  logs := Dictionary new.
+  ids do: [:id | logs at: id put: { PBLogAppend kind: #rejoined label: 0 root: nil sync: true }].
+  opts := Dictionary new.
+  opts at: #startupGrace put: 0.
+  sim := PBSim seed: n ids: ids rules: aRules options: opts logs: logs.
+  violation := [:aBlock | [aBlock value. nil] on: Error do: [:e |
+    ((e messageText ifNil: ['']) beginsWith: 'PBSim seed') ifFalse: [e signal].
+    e messageText]].
+  ^ { violation value: [
+      sim commit: 'a' at: 'n0'.
+      sim runUntil: [(sim outcomeOf: 'a') ~= #pending] steps: 100000.
+      sim commit: 'b' at: 'n1'.
+      seen := 0.
+      sent := false.
+      [sent or: [sim step not]] whileFalse: [ | lines |
+        lines := sim trace.
+        seen + 1 to: lines size do: [:i | ((lines at: i) includesSubstring: 'replicate from n1') ifTrue: [sent := true]].
+        seen := lines size].
+      sent ifFalse: [sim fail: 'n1 never replicated b'].
+      sim pause: 'n1'.
+      "n2 asks 50 ms before n1's deadline: a fresh request, so a permission issued at the
+       deadline is valid on arrival (one asked long before would be expired by then, L5)."
+      sim commit: 'c' at: 'n2' time: (sim nodeAt: 'n0') state ownership pipeline first deadline - 50000.
+      sim runUntil: [(sim outcomeOf: 'c') ~= #pending or: [sim now > 4000000]] steps: 200000.
+      sim resume: 'n1'.
+      sim runUntil: [(sim outcomeOf: 'c') ~= #pending] steps: 200000.
+      sim converge: 200000].
+    sim countOf: 'terms_abandoned' at: 'n0'.
+    sim outcomeOf: 'c'.
+    sim outcomeOf: 'b' }.

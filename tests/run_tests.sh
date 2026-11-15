@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # protoBaseST test runner.
 #
-# Usage: tests/run_tests.sh [path...]     (default: tests/ and examples/)
+# Usage: tests/run_tests.sh [--audit] [path...]     (default: tests/ and examples/, less tests/audit)
+#
+# tests/audit holds the cluster's timer audit (every timer row at 1/10, 10x and skewed, 3240
+# simulator runs, some three hours serially): a run of its own. It runs only when a path names it
+# or a file in it (tests/run_tests.sh tests/audit), or with --audit, which adds tests/audit to the
+# paths run (the default set when no path is given). Every other run skips it; its index,
+# tests/unit/sim_timer_audit.st, stays in the default run and fails when an audit file is missing.
 #
 # Environment:
 #   PROTOST         the protost binary (default: protost)
@@ -44,10 +50,16 @@ export PROTOBASE_REPO="${PROTOBASE_REPO:-$REPO/../ProtoBase}"
 export STPATH="$REPO/src${STPATH:+:$STPATH}"
 TIMEOUT="${RUN_TIMEOUT:-600}"
 
+AUDIT="$REPO/tests/audit"
+with_audit=0
+if [[ "${1:-}" == --audit ]]; then
+    with_audit=1; shift
+fi
 if [[ $# -eq 0 ]]; then
     set -- "$REPO/tests"
     [[ -d "$REPO/examples" ]] && set -- "$@" "$REPO/examples"
 fi
+[[ $with_audit -eq 1 ]] && set -- "$@" "$AUDIT"
 
 files=()
 missing=0
@@ -56,9 +68,13 @@ for p in "$@"; do
         echo "FAIL: no such path: $p"; missing=$((missing + 1)); continue
     fi
     p="$(cd "$(dirname "$p")" && pwd)/$(basename "$p")"
+    p="${p%/.}"
     if [[ -d "$p" ]]; then
+        # tests/audit only when this path is tests/audit or inside it (--audit adds it as a path).
+        skip_audit="$AUDIT"
+        [[ "$p" == "$AUDIT" || "$p" == "$AUDIT"/* ]] && skip_audit=""
         while IFS= read -r f; do files+=("$f"); done < <(
-            find "$p" \( -name .venv -o -name out -o -name fixtures \) -prune -o -type f \
+            find "$p" \( -name .venv -o -name out -o -name fixtures -o -path "${skip_audit:-/nonexistent}" \) -prune -o -type f \
                 \( -name '*.st' -o -name '*.sh' \) ! -name '_*' \
                 -print | sort)
     else
@@ -70,7 +86,11 @@ kept=()
 for f in "${files[@]}"; do
     [[ "$TOOLING" == *" ${f#"$REPO"/} "* ]] || kept+=("$f")
 done
-files=("${kept[@]}")
+files=()
+for f in "${kept[@]}"; do
+    # Each test once, in order, when paths overlap (--audit tests/audit).
+    [[ " ${files[*]} " == *" $f "* ]] || files+=("$f")
+done
 
 passed=0; failed=0; skipped=0
 rel() { printf '%s' "${1#"$REPO"/}"; }

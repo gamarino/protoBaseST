@@ -794,7 +794,7 @@ PBCoordinatorCore >> _ownLoop: s now: t effects: fx
   own := state ownership.
   late := own pipeline detect: [:e | t > e deadline] ifNone: [nil].
   late notNil ifTrue: [
-    state := self _abandon: state why: 'permission ' , late seq printString , ' of ' , late node , ' timed out' now: t effects: fx.
+    state := self _permissionLate: late in: state now: t effects: fx.
     own := state ownership].
   own isAbandoned ifTrue: [^ self _endOwnership: state now: t effects: fx].
   lease := own lease.
@@ -816,10 +816,10 @@ PBCoordinatorCore >> _ownLoop: s now: t effects: fx
     ^ self _endOwnership: state now: t effects: fx].
   remaining := lease remainingAt: t.
   demand := own pipeline notEmpty or: [own queue notEmpty or: [2 * (t - own lastDemand) <= c leaseDuration]].
-  "Renewed when half of the belief is left (R78b)."
-  (demand and: [2 * remaining < c belief]) ifTrue: [^ self _renew: state now: t effects: fx].
+  "Renewed when half of the belief is left (R78b, renewalLeft)."
+  (demand and: [remaining < c renewalLeft]) ifTrue: [^ self _renew: state now: t effects: fx].
   waits := OrderedCollection new.
-  waits add: (demand ifTrue: [1000 max: (2 * remaining - c belief + 1) // 2] ifFalse: [idle]).
+  waits add: (demand ifTrue: [1000 max: (remaining - c renewalLeft) ceiling] ifFalse: [idle]).
   own pipeline notEmpty
     ifTrue: [waits add: (1000 max: (own pipeline inject: own pipeline first deadline into: [:m :e | m min: e deadline]) - t)]
     ifFalse: [own queue isEmpty ifTrue: [waits add: (1000 max: idle - (t - own lastDemand))]].
@@ -830,6 +830,12 @@ PBCoordinatorCore >> _ownLoop: s now: t effects: fx
   state := pair first.
   fx add: (PBTimer after: (waits inject: waits first into: [:m :w | m min: w]) token: pair last event: #owner).
   ^ state with: { #ownership -> (state ownership with: { #token -> pair last }) }.
+
+"O6 (L29): the permission anIssued has no done by its deadline: its holder may be dying, and a
+ replication it sent may still be accepted, so the owner cannot know what the term holds; it
+ abandons the term (never retiring the permission as 'none', which would issue its base again)."
+PBCoordinatorCore >> _permissionLate: anIssued in: s now: t effects: fx
+  ^ self _abandon: s why: 'permission ' , anIssued seq printString , ' of ' , anIssued node , ' timed out' now: t effects: fx.
 
 "proto_db _renew: the same term asked again of every voter, its own vote included."
 PBCoordinatorCore >> _renew: s now: t effects: fx

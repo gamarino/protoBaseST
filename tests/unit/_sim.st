@@ -102,10 +102,22 @@ or a startup grace of 0 after a restart lets a lease outlive its grants by desig
 the term), at most one node holds an ownership whose lease is valid on its own clock (L5: the
 belief never outlives the granters' promise). checkConverged (converge:): the committed
 chains of the live nodes (from each one's published committed root through the pred links of
-the roots the simulator built) do not fork (of two heads, one is in the other's chain); every
-acknowledged commit is in every live node's chain (S4); every unknown commit in every live
-node's chain or in none; a commit answered #none in no chain (H7). A violation is an Error
-whose text holds the seed and the last 200 trace lines."
+the roots the simulator built) do not fork (of two heads, one is in the other's chain), then
+checkHistory: over the history the simulator derives (history, a PBSimHistory: the tokens of
+the commits each live node's chain holds), the rules of proto_db's assert_outcomes_resolved:
+every acknowledged commit is in every live node's chain (S4); every unknown commit (#unknown,
+or #pending: nobody answered it) in every live node's chain or in none; a commit answered #none
+or with an error in no chain (H7); no chain holds a root the simulator did not build, no log
+held and no script persisted (a stray write); every commit in the chain of a root any node
+published as committed is still in every chain (a fork of history); and, for a history that
+carries counters, each member's counter equals its tokens. checkSafe is the form that does not
+need the nodes to have caught up (the timer audit, when the last commit was not acknowledged):
+no fork of heads; an acknowledged root, or a published one, is in every live chain whose head
+does not precede it; H7; no stray write. A violation is an Error whose text holds the seed and
+the last 200 trace lines.
+
+Configurations. seed:ids:rules:configs:logs: builds each node's configuration with a block of
+its id and the peers (the timer audit gives each member its own timer values, tests/audit/_audit.st)."
 
 Import from: 'protobase'.
 
@@ -350,6 +362,86 @@ PBSimNode >> crash
 PBSimNode >> segment
   ^ ByteArray withAll: ((1 to: 16) asArray collect: [:i | i = 16 ifTrue: [config rank + 1] ifFalse: [0]]).
 
+"=== PBSimHistory ============================================================"
+
+"What a test's readers saw of its commits (proto_db tests/support/outcomes.py, CommitTokens and
+ assert_outcomes_resolved): the members read; the tokens of the commits each one's committed
+ state holds (present: id -> Set); the counter each one read in the same snapshot (values: id ->
+ Integer, absent when the workload counts nothing: the simulator's commits have no effect apart
+ from their root, so a derived history has none); the tokens acknowledged, unknown (the caller
+ got no answer either way) and answered none or with an error (nothing applied); every token a
+ member was seen to show during the run (observed); and a text naming a token's root (keys, for
+ the messages). PBSim history derives one at convergence; sim_checker_plants.st feeds synthetic
+ ones (proto_db's workload plants) to the same checks. A builder of test support: the setters
+ answer the receiver."
+Object subclass: #PBSimHistory instanceVariableNames: 'members present values acked unknown none observed keys'.
+
+PBSimHistory class >> members: someIds present: aDictionary
+  ^ self basicNew setMembers: someIds present: aDictionary.
+
+PBSimHistory >> setMembers: someIds present: aDictionary
+  members := someIds asArray.
+  present := Dictionary new.
+  members do: [:m | present at: m put: (aDictionary at: m ifAbsent: [#()]) asSet].
+  values := Dictionary new.
+  acked := Set new.
+  unknown := Set new.
+  none := Set new.
+  observed := Set new.
+  keys := Dictionary new.
+
+PBSimHistory >> acked: someTokens
+  acked addAll: someTokens.
+
+PBSimHistory >> unknown: someTokens
+  unknown addAll: someTokens.
+
+PBSimHistory >> none: someTokens
+  none addAll: someTokens.
+
+PBSimHistory >> observed: someTokens
+  observed addAll: someTokens.
+
+PBSimHistory >> value: anInteger at: anId
+  values at: anId put: anInteger.
+
+PBSimHistory >> key: aText of: aToken
+  keys at: aToken put: aText.
+
+PBSimHistory >> members
+  ^ members.
+
+PBSimHistory >> presentAt: anId
+  ^ present at: anId.
+
+PBSimHistory >> valueAt: anId
+  ^ values at: anId ifAbsent: [nil].
+
+"Tokens in a fixed order (the messages name the first violation the same way on every run)."
+PBSimHistory >> sorted: aSet
+  ^ aSet asArray sorted: [:a :b | a <= b].
+
+PBSimHistory >> acked
+  ^ self sorted: acked.
+
+PBSimHistory >> unknown
+  ^ self sorted: unknown.
+
+PBSimHistory >> none
+  ^ self sorted: none.
+
+PBSimHistory >> observed
+  ^ self sorted: observed.
+
+PBSimHistory >> isWritten: aToken
+  ^ (acked includes: aToken) or: [(unknown includes: aToken) or: [none includes: aToken]].
+
+"aToken printString, with the text of its root when known."
+PBSimHistory >> name: aToken
+  | k |
+  k := keys at: aToken ifAbsent: [nil].
+  ^ k isNil ifTrue: [aToken printString] ifFalse: [aToken printString , ' (' , k , ')'].
+
 "=== PBSimChecker ============================================================"
 
 Object subclass: #PBSimChecker instanceVariableNames: 'sim owners roots rootFields leases'.
@@ -428,8 +520,14 @@ PBSimChecker >> replyAt: aNode
     self fail: aNode id , ' performed an acceptor reply before its append is synced (entry ' , aNode owed printString
       , ', synced through ' , aNode disk syncedSize printString , ')'].
 
-"At convergence: no fork, S4, the unknown commits and H7."
+"At convergence: the committed heads of the live nodes do not fork, then the outcome rules over
+ the history the simulator derives (checkHistory:)."
 PBSimChecker >> checkConverged
+  self checkHeads.
+  self checkHistory: sim history.
+
+"The committed chains of the live nodes do not fork: of two heads, one is in the other's chain."
+PBSimChecker >> checkHeads
   | live chains |
   live := sim ids select: [:id | (sim nodeAt: id) isUp].
   chains := live collect: [:id | sim committedChainOf: id].
@@ -442,26 +540,84 @@ PBSimChecker >> checkConverged
           and: [((chains at: i) includes: (sim keyText: hj)) not]]]) ifTrue: [
         self fail: 'fork: the committed chains of ' , (live at: i) , ' (' , (sim keyText: hi) , ') and '
           , (live at: j) , ' (' , (sim keyText: hj) , ') diverge']]].
-  sim commitOrder do: [:token |
-    | status root key holders |
-    status := sim outcomeOf: token.
-    root := sim rootOf: token.
-    key := root isNil ifTrue: [nil] ifFalse: [sim keyText: root].
-    holders := (1 to: live size) asArray select: [:i | key notNil and: [(chains at: i) includes: key]].
-    status = #acknowledged ifTrue: [
-      (1 to: live size) do: [:i | (holders includes: i) ifFalse: [
-        self fail: 'S4: the acknowledged commit ' , token printString , ' (' , key , ') is not in the committed chain of '
-          , (live at: i)]]].
-    (status = #unknown and: [holders notEmpty and: [holders size < live size]]) ifTrue: [
-      self fail: 'the unknown commit ' , token printString , ' is in the committed chain of '
-        , (holders collect: [:i | live at: i]) printString , ' only'].
-    (status = #none and: [holders notEmpty]) ifTrue: [
-      self fail: 'H7: the commit ' , token printString , ' answered none is in the committed chain of '
-        , (holders collect: [:i | live at: i]) printString]].
+
+"The rules of proto_db's assert_outcomes_resolved, and the counter its tests compare, over
+ aHistory (a PBSimHistory), in this order: every acknowledged token present on every member
+ (S4); every unknown token present on every member or on none; no token answered none (or with
+ an error) present anywhere (H7); no token present that no commit wrote (a stray write); every
+ token a member was seen to show still present on every member (history never loses what a member
+ showed, proto_db P1: a fork); a member's counter equal to the tokens it holds."
+PBSimChecker >> checkHistory: aHistory
+  | members holdersOf |
+  members := aHistory members.
+  holdersOf := [:token | (members select: [:m | (aHistory presentAt: m) includes: token]) asArray].
+  aHistory acked do: [:token |
+    members do: [:m | ((aHistory presentAt: m) includes: token) ifFalse: [
+      self fail: 'S4: the acknowledged commit ' , (aHistory name: token) , ' is not in the committed chain of ' , m]]].
+  aHistory unknown do: [:token | | holders |
+    holders := holdersOf value: token.
+    (holders notEmpty and: [holders size < members size]) ifTrue: [
+      self fail: 'the unknown commit ' , token printString , ' is in the committed chain of ' , holders printString , ' only']].
+  aHistory none do: [:token | | holders |
+    holders := holdersOf value: token.
+    holders notEmpty ifTrue: [
+      self fail: 'H7: the commit ' , token printString , ' answered none (or an error) is in the committed chain of '
+        , holders printString]].
+  members do: [:m |
+    (aHistory sorted: (aHistory presentAt: m)) do: [:token |
+      (aHistory isWritten: token) ifFalse: [
+        self fail: 'stray: the committed chain of ' , m , ' holds ' , token printString
+          , ', which no acknowledged or unknown commit wrote']]].
+  aHistory observed do: [:token |
+    members do: [:m | ((aHistory presentAt: m) includes: token) ifFalse: [
+      self fail: 'fork: the commit ' , (aHistory name: token) , ' that a member showed is not in the committed chain of ' , m
+        , ': history lost it']]].
+  members do: [:m | | v |
+    v := aHistory valueAt: m.
+    (v notNil and: [v ~= (aHistory presentAt: m) size]) ifTrue: [
+      self fail: 'counter: ' , m , ' counts ' , v printString , ' commits, its committed chain holds '
+        , (aHistory presentAt: m) size printString]].
+
+"The safety rules that hold whether or not the nodes caught up (the timer audit: liveness may
+ suffer, safety may not): the heads do not fork (checkHeads); for every live node, the root of
+ an acknowledged commit, and every root a node published as committed, is in its chain unless
+ its head is still before that root (it has not learnt it yet: counted, not a violation); a
+ commit answered none (or with an error) is in no chain (H7); no chain holds a root no commit
+ wrote. Answers how many (root, node) pairs were not learnt yet."
+PBSimChecker >> checkSafe
+  | live history behind targets chains |
+  self checkHeads.
+  live := sim ids select: [:id | (sim nodeAt: id) isUp].
+  history := sim history.
+  behind := 0.
+  targets := Dictionary new.
+  sim publishedKeys do: [:k | targets at: k put: 'committed root ' , k , ' a node published'].
+  history acked do: [:token | targets at: (sim keyText: (sim rootOf: token)) put: 'acknowledged commit ' , (history name: token)].
+  chains := Dictionary new.
+  live do: [:m | chains at: m put: (sim committedChainOf: m)].
+  (targets keys asArray sorted: [:a :b | a <= b]) do: [:key | | chain |
+    chain := sim chainFrom: key.
+    live do: [:m | | head |
+      head := (sim nodeAt: m) committed.
+      ((chains at: m) includes: key) ifFalse: [
+        (head isNil or: [chain includes: (sim keyText: head)])
+          ifTrue: [behind := behind + 1]
+          ifFalse: [
+            self fail: 'S4: the ' , (targets at: key) , ' is not in the committed chain of ' , m , ', whose head '
+              , (sim keyText: head) , ' does not precede it']]]].
+  history none do: [:token |
+    live do: [:m | ((history presentAt: m) includes: token) ifTrue: [
+      self fail: 'H7: the commit ' , token printString , ' answered none (or an error) is in the committed chain of ' , m]]].
+  live do: [:m |
+    (history sorted: (history presentAt: m)) do: [:token |
+      (history isWritten: token) ifFalse: [
+        self fail: 'stray: the committed chain of ' , m , ' holds ' , token printString
+          , ', which no acknowledged or unknown commit wrote']]].
+  ^ behind.
 
 "=== PBSim ==================================================================="
 
-Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current counts failing syncCost fixedLags peers persisted epochSteps'.
+Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current counts failing syncCost fixedLags peers persisted epochSteps writers published initialKeys'.
 
 "N nodes (anArray of ids) running aRules, each configured with aDictionary (PBClusterConfig
  options), all started at virtual time 0, every choice drawn from Random seed: n."
@@ -471,9 +627,16 @@ PBSim class >> seed: n ids: anArray rules: aRules options: aDictionary
 "As seed:ids:rules:options:, each node id of aLogs starting over a synced log holding its
  Array of PBLogAppend."
 PBSim class >> seed: n ids: anArray rules: aRules options: aDictionary logs: aLogs
-  ^ self basicNew setSeed: n ids: anArray rules: aRules options: aDictionary logs: aLogs.
+  ^ self seed: n ids: anArray rules: aRules
+    configs: [:id :somePeers | PBClusterConfig nodeId: id peers: somePeers options: aDictionary] logs: aLogs.
 
-PBSim >> setSeed: n ids: anArray rules: aRules options: aDictionary logs: aLogs
+"As seed:ids:rules:options:logs:, each node configured with what aBlock answers for its id and
+ the peers (Array of PBPeer) of the cluster: a PBClusterConfig, or a test subclass of it (the
+ timer audit gives each node its own timer values)."
+PBSim class >> seed: n ids: anArray rules: aRules configs: aBlock logs: aLogs
+  ^ self basicNew setSeed: n ids: anArray rules: aRules configs: aBlock logs: aLogs.
+
+PBSim >> setSeed: n ids: anArray rules: aRules configs: aBlock logs: aLogs
   seed := n.
   "Park-Miller's first draws of nearby small seeds are small and alike: the seed is spread
    over the generator's range and the first draws are discarded."
@@ -483,7 +646,7 @@ PBSim >> setSeed: n ids: anArray rules: aRules options: aDictionary logs: aLogs
   ids := anArray asArray.
   peers := (1 to: ids size) asArray collect: [:i | PBPeer nodeId: (ids at: i) host: '127.0.0.1' port: 7000 + i].
   nodes := Dictionary new.
-  ids do: [:id | nodes at: id put: (PBSimNode config: (PBClusterConfig nodeId: id peers: peers options: aDictionary))].
+  ids do: [:id | nodes at: id put: (PBSimNode config: (aBlock value: id value: peers))].
   queue := OrderedCollection new.
   now := 0.
   faults := PBSimFaults none.
@@ -501,10 +664,15 @@ PBSim >> setSeed: n ids: anArray rules: aRules options: aDictionary logs: aLogs
   fixedLags := Dictionary new.
   persisted := nil.
   epochSteps := Dictionary new.
+  writers := Dictionary new.
+  published := Set new.
+  initialKeys := Set new.
   aLogs keysAndValuesDo: [:id :appends |
     | disk |
     disk := (self nodeAt: id) disk.
-    appends do: [:a | disk append: a payload].
+    appends do: [:a |
+      a root notNil ifTrue: [initialKeys add: (self keyText: (PBLabeledRoot label: a label record: a root))].
+      disk append: a payload].
     disk syncThrough: disk size].
   ids do: [:id | self _start: (nodes at: id)].
 
@@ -558,14 +726,66 @@ PBSim >> keyText: aRoot
 "The keys of the roots of anId's committed chain: its published committed root and every root
  before it through the pred links of the roots the simulator built."
 PBSim >> committedChainOf: anId
+  (self nodeAt: anId) committed isNil ifTrue: [^ Set new].
+  ^ self chainFrom: (self keyText: (self nodeAt: anId) committed).
+
+"The keys of the chain ending at the root of key aKeyText: it and every root before it through
+ the pred links of the roots the simulator built."
+PBSim >> chainFrom: aKeyText
   | chain key |
   chain := Set new.
-  (self nodeAt: anId) committed isNil ifTrue: [^ chain].
-  key := self keyText: (self nodeAt: anId) committed.
+  key := aKeyText.
   [key notNil and: [(chain includes: key) not]] whileTrue: [
     chain add: key.
     key := preds at: key ifAbsent: [nil]].
   ^ chain.
+
+"The token of the commit whose attempt built the root of key aKeyText (its root, or the unchanged
+ root its re-commit replicated), nil for a root the simulator did not build."
+PBSim >> writerOf: aKeyText
+  ^ writers at: aKeyText ifAbsent: [nil].
+
+"Whether the root of key aKeyText was built by the simulator (every root it builds records its
+ pred link) or needs no builder: the empty space (epoch 0, of any label), a root of the logs
+ the nodes started over, or a root the script persisted (persist:)."
+PBSim >> isKnownRoot: aKeyText
+  ^ (preds includesKey: aKeyText) or: [(initialKeys includes: aKeyText) or: [((aKeyText subStrings: '/') at: 2) = '0']].
+
+"The keys of every root any node published as committed, in no order (a fresh Set)."
+PBSim >> publishedKeys
+  ^ published copy.
+
+"The history of the commits as the live nodes' committed chains show it (a PBSimHistory): a
+ node's tokens are those whose commit wrote a root of its chain (its root, or the unchanged root
+ of its re-commit), and a root of its chain that the simulator did not build, no log held and
+ no script persisted (isKnownRoot:) is the stray token 'root <key>'; acknowledged as the simulator
+ recorded; unknown: #unknown, and #pending (a commit no one answered: its node's incarnation
+ is gone, or it is still running); none: #none and #failed (an error other than an unknown
+ outcome: nothing applied, H7); observed: the writers of every root in the chain of a root any
+ node published as committed during the run."
+PBSim >> history
+  | live present history seen tokensOf |
+  live := ids select: [:id | (self nodeAt: id) isUp].
+  "The tokens whose commit wrote each root: its root, or its re-commit's (writerOf:)."
+  tokensOf := Dictionary new.
+  writers keysAndValuesDo: [:k :token | (tokensOf at: k ifAbsentPut: [Set new]) add: token].
+  commitRoots keysAndValuesDo: [:token :root | (tokensOf at: (self keyText: root) ifAbsentPut: [Set new]) add: token].
+  present := Dictionary new.
+  live do: [:id | | tokens |
+    tokens := Set new.
+    (self committedChainOf: id) do: [:k |
+      tokens addAll: (tokensOf at: k ifAbsent: [#()]).
+      (self isKnownRoot: k) ifFalse: [tokens add: 'root ' , k]].
+    present at: id put: tokens].
+  history := PBSimHistory members: live present: present.
+  history acked: (commitOrder select: [:k | (commits at: k) = #acknowledged]).
+  history unknown: (commitOrder select: [:k | #(#unknown #pending) includes: (commits at: k)]).
+  history none: (commitOrder select: [:k | #(#none #failed) includes: (commits at: k)]).
+  commitOrder do: [:k | (commitRoots includesKey: k) ifTrue: [history key: (self keyText: (commitRoots at: k)) of: k]].
+  seen := Set new.
+  published do: [:k | (seen includes: k) ifFalse: [seen addAll: (self chainFrom: k)]].
+  seen do: [:k | history observed: (tokensOf at: k ifAbsent: [#()])].
+  ^ history.
 
 PBSim >> fail: aText
   | text |
@@ -689,6 +909,7 @@ PBSim >> delay: fromId to: toId by: someMicros
  a later task writes it; a script sets it here)."
 PBSim >> persist: aRoot
   persisted := aRoot.
+  aRoot notNil ifTrue: [initialKeys add: (self keyText: aRoot)].
   self _trace: 'persisted ' , (PBCoreValue textOf: aRoot).
 
 PBSim >> persisted
@@ -917,6 +1138,7 @@ PBSim >> applySettle: aSettle
 
 PBSim >> applyPublishCommitted: aPublish
   checker noteRoot: aPublish root.
+  aPublish root notNil ifTrue: [published add: (self keyText: aPublish root)].
   current committed: aPublish root.
 
 "The acceptor snapshot and the fence are what a shell publishes for readers and refuses
@@ -978,6 +1200,7 @@ PBSim >> _based: aToken decision: anOutcome permission: aPermission at: aNode
   "proto_db _commit_base: an unchanged root on the base, labelled with the term, epoch + 1."
   root := self _newRoot: aPermission on: base step: 1 at: aNode.
   commitRoots at: aToken put: root.
+  writers at: (self keyText: root) put: aToken.
   self _trace: aNode id , ' re-commits ' , (PBCoreValue textOf: base) , ' as ' , (PBCoreValue textOf: root)
     , ' for ' , aToken printString.
   ^ self _schedule: #dispatch node: aNode
@@ -996,6 +1219,7 @@ PBSim >> _build: aToken on: aBase permission: aPermission step: aStep at: aNode
   | root |
   root := self _newRoot: aPermission on: aBase step: (epochSteps at: aNode id ifAbsent: [1]) at: aNode.
   commitRoots at: aToken put: root.
+  writers at: (self keyText: root) put: aToken.
   self _trace: aNode id , ' built ' , (PBCoreValue textOf: root) , ' on ' , (PBCoreValue textOf: aBase)
     , ' for ' , aToken printString.
   ^ self _schedule: #dispatch node: aNode

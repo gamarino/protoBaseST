@@ -2,6 +2,20 @@
 
 ## 0.2.0 (unreleased)
 
+- The cluster's safety sweep (Task 17): the timer audit, `tests/audit/` (every row of
+  `PBClusterConfig timerTable` at 1/10, 10 times and skewed per member, 3 and 5 members, seeds
+  1-30: 3240 simulator runs with drops and a crash; helper `tests/audit/_audit.st`), a run of its
+  own: `tests/run_tests.sh tests/audit`, or `--audit` with the default set, which skips it; its
+  index `tests/unit/sim_timer_audit.st` stays in the default run. The checker's self-tests
+  (`tests/unit/sim_checker_plants.st`, eight planted histories) and one planted defect per
+  applicable lesson (`tests/unit/sim_lessons.st`, twelve; L29's plant `PlantLateDoneAsNone` in
+  `tests/unit/_plants.st`). The simulator checks every converged run against the history rules
+  of `proto_db`'s `assert_outcomes_resolved` (`PBSimHistory`, `PBSimChecker >> checkHistory:`:
+  S4, unknown alike, H7, no stray write, nothing shown lost, the counter) and, when the members
+  have not caught up, `checkSafe`; each node's configuration can be its own
+  (`PBSim seed:ids:rules:configs:logs:`). `PBClusterConfig` reads its derived timers through
+  `renewalLeft`, `permitFloor` and `permissionDeadline:` (same values), and the owner's late
+  permission (O6) is the rule method `PBCoordinatorCore >> _permissionLate:in:now:effects:`.
 - The rejoin of an empty acceptor log (`src/protobase/cluster/rejoin.st`, CP 'A node that lost
   its disk', R51, R78a, L13, L14, L18): `proto_db`'s `_rejoin`, `_rejoin_round`, `_gather`,
   `_rejoin_decision`, `_complete_rejoin`, `_on_ballot_query` and `force_rejoin` as rule methods

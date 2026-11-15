@@ -18,6 +18,10 @@ sendReserve is at most belief // 4 (default min(requestTimeout, belief // 4)); s
 defaults to D + margin; idleEnd is D // 4. Options that name tiered storage (CC8) are
 PBNotSupportedError; any other unknown option is PBValidationError.
 
+Every row of timerTable is read by the rules through an accessor here, never computed inline
+(renewalLeft, permitFloor and permissionDeadline: included), so a test configuration can scale
+any one timer (tests/unit/_audit.st, the timer audit).
+
 Every value here is immutable: built once by its class-side constructor."
 
 Import from: 'protobase/errors'.
@@ -188,6 +192,21 @@ PBClusterConfig >> startupGrace
 "How long an owner is without demand before it releases its term: D / 4."
 PBClusterConfig >> idleEnd
   ^ self leaseDuration // 4.
+
+"The lease left below which an owner with demand renews: half the belief (R78b; a Fraction when
+ the belief is odd, compared exactly)."
+PBClusterConfig >> renewalLeft
+  ^ self belief / 2.
+
+"The lease left below which an owner issues no permission and renews first: a quarter of the
+ belief (a Fraction when the belief is not a multiple of 4, compared exactly)."
+PBClusterConfig >> permitFloor
+  ^ self belief / 4.
+
+"How long after its issue an owner waits for the done of a permission valid for aValid
+ microseconds before it abandons the term (O6, L29): aValid + requestTimeout."
+PBClusterConfig >> permissionDeadline: aValid
+  ^ aValid + self requestTimeout.
 
 PBClusterConfig >> persistInterval
   ^ durations at: #persistInterval.

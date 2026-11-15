@@ -200,9 +200,16 @@ The tests need protoST 0.12.0 or newer (see Requirements). Point `PROTOST` at th
 export PROTOST=../protoST/build_release/protost      # default: protost from PATH
 tests/conformance/fetch_vectors.sh                    # only to re-vendor the format-4 vectors (they are already in the repository)
 PYTHON=python3.14 tests/interop/setup_venv.sh         # Python side of the interop tests (needs the checkout above)
-tests/run_tests.sh                                    # everything under tests/ and examples/
+tests/run_tests.sh                                    # everything under tests/ and examples/, less tests/audit
 tests/run_tests.sh tests/unit tests/docs              # or chosen paths
+tests/run_tests.sh tests/audit                        # the cluster's timer audit alone (some three hours)
+tests/run_tests.sh --audit                            # the default set and the timer audit
 ```
+
+`tests/audit/` holds the cluster's timer audit: every timer of the coordination at 1/10, 10 times
+and skewed per member, 3240 simulator runs, a run of its own. Only a path that names it, or
+`--audit`, runs it; its index `tests/unit/sim_timer_audit.st` stays in the default run (the audit's
+configuration and one run per mode) and fails when an audit file is missing.
 
 The runner prints `PASS`, `FAIL` or `SKIP` per test and ends with `passed N, failed N, skipped N`.
 A `.st` test starts with an `"EXPECT: <last line>"` or `"EXPECT-ERROR: <text>"` directive; a

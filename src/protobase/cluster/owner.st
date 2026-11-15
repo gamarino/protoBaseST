@@ -498,7 +498,7 @@ PBCoordinatorCore >> _issue: aState now: t effects: fx
   "Draining (R80): nothing new; the ownership loop ends the term once the pipeline is empty."
   (c ownerIdleRelease notNil and: [t - own lastLocal > c ownerIdleRelease]) ifTrue: [^ s].
   "Too little lease left for a replication to finish under it: the ownership renews first."
-  4 * (own lease remainingAt: t) < c belief ifTrue: [^ s].
+  (own lease remainingAt: t) < c permitFloor ifTrue: [^ s].
   entry := own queue first.
   seq := own seq + 1.
   "Valid for what remains of the owner's lease, never longer."
@@ -522,7 +522,7 @@ PBCoordinatorCore >> _issue: aState now: t effects: fx
       fx add: (PBSend to: entry first message: permit).
       state := s].
   issued := PBIssued node: entry first seq: seq inc: (entry at: 3) rid: (entry at: 2)
-    deadline: t + valid + c requestTimeout permit: permit base: base.
+    deadline: t + (c permissionDeadline: valid) permit: permit base: base.
   ^ state with: { #ownership -> (own with: { #queue -> (own queue copyFrom: 2 to: own queue size). #seq -> seq.
     #pipeline -> (own pipeline copyWith: issued) }) }.
 
