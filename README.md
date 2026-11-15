@@ -209,7 +209,11 @@ tests/run_tests.sh --audit                            # the default set and the 
 `tests/audit/` holds the cluster's timer audit: every timer of the coordination at 1/10, 10 times
 and skewed per member, 3240 simulator runs, a run of its own. Only a path that names it, or
 `--audit`, runs it; its index `tests/unit/sim_timer_audit.st` stays in the default run (the audit's
-configuration and one run per mode) and fails when an audit file is missing.
+configuration and one run per mode) and fails when an audit file is missing, extra or stale. Each
+audit file fails on a violation, and also when its runs fall below their declared floors of strict
+runs and acknowledged commits, or when a timer's probe (acquireTimeout, gatherAttempts,
+retryHold) leaves its bounds; the safety-only row-modes and the rows not exercised yet (persist,
+until Task 20) are declared and listed by the index.
 
 The runner prints `PASS`, `FAIL` or `SKIP` per test and ends with `passed N, failed N, skipped N`.
 A `.st` test starts with an `"EXPECT: <last line>"` or `"EXPECT-ERROR: <text>"` directive; a

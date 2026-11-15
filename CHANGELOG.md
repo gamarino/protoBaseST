@@ -6,12 +6,17 @@
   `PBClusterConfig timerTable` at 1/10, 10 times and skewed per member, 3 and 5 members, seeds
   1-30: 3240 simulator runs with drops and a crash; helper `tests/audit/_audit.st`), a run of its
   own: `tests/run_tests.sh tests/audit`, or `--audit` with the default set, which skips it; its
-  index `tests/unit/sim_timer_audit.st` stays in the default run. The checker's self-tests
-  (`tests/unit/sim_checker_plants.st`, eight planted histories) and one planted defect per
+  index `tests/unit/sim_timer_audit.st` stays in the default run (it fails on a missing, extra or
+  stale audit file). Each audit file asserts floors of strict runs and acknowledged commits and,
+  for acquireTimeout, gatherAttempts and retryHold, a probe that shows the timer read (1/10 and
+  10 times differ); safety-only row-modes and persist (not exercised until Task 20) are declared.
+  The checker's self-tests (`tests/unit/sim_checker_plants.st`, eight planted histories and seven
+  simulator-level plants of the derived history, `checkSafe` and the audit's gate) and one planted defect per
   applicable lesson (`tests/unit/sim_lessons.st`, twelve; L29's plant `PlantLateDoneAsNone` in
   `tests/unit/_plants.st`). The simulator checks every converged run against the history rules
   of `proto_db`'s `assert_outcomes_resolved` (`PBSimHistory`, `PBSimChecker >> checkHistory:`:
-  S4, unknown alike, H7, no stray write, nothing shown lost, the counter) and, when the members
+  S4, unknown alike, H7, no stray write, nothing shown lost, the counter; a re-commit of an
+  unchanged base credits its token nothing) and, when the members
   have not caught up, `checkSafe`; each node's configuration can be its own
   (`PBSim seed:ids:rules:configs:logs:`). `PBClusterConfig` reads its derived timers through
   `renewalLeft`, `permitFloor` and `permissionDeadline:` (same values), and the owner's late

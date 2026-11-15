@@ -19,27 +19,43 @@
      runs equal the defaults' until then);
  (4) one run per mode of the row leaseDuration on 3 members, seed 1, passes the checker;
  (5) the product's derived timers are the rows' defaults: renewalLeft half the belief,
-     permitFloor a quarter of it, permissionDeadline: valid + requestTimeout."
+     permitFloor a quarter of it, permissionDeadline: valid + requestTimeout;
+ (6) the safety-only row-modes (AuditFamilies safetyOnly) are listed and real; their parts
+     assert that they acknowledge nothing;
+ (7) the rows not exercised yet (AuditFamilies notExercised: persist, until Task 20) have no
+     reader in the cluster's sources but config.st, and their runs equal the run at factor 1:
+     once a reader appears, the declaration fails here.
+ Each part asserts its own coverage (AuditFamilies failuresOf:row:mode:): no violation, the
+ floors of strict runs and acknowledged commits, and the probe's bounds where the row has one."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '../audit/_audit'.
 
-| c peers config missing uncovered same changed runs product |
+| c peers config missing uncovered same changed runs product expected present sources stale equal |
 c := Check new.
 missing := OrderedCollection new.
 uncovered := OrderedCollection new.
+expected := Set new.
 AuditConfig rows do: [:row |
   AuditFamilies modes do: [:mode | | n held |
     n := AuditFamilies partsOf: row mode: mode.
     held := OrderedCollection new.
-    1 to: n do: [:i | | file |
+    1 to: n do: [:i | | file lines |
+      expected add: (AuditFamilies fileFor: row mode: mode part: i).
       file := FileReference path: '../audit/' , (AuditFamilies fileFor: row mode: mode part: i).
-      (file exists and: [file contents includesSubstring: (AuditFamilies callFor: row mode: mode part: i)])
-        ifFalse: [missing add: file pathString].
-      held addAll: (AuditFamilies runsOf: row mode: mode part: i)].
+      lines := file exists ifTrue: [file lines collect: [:l | l trimSeparators]] ifFalse: [#()].
+      (lines notEmpty and: [lines first = '"EXPECT: timer audit ok"'
+          and: [lines includes: (AuditFamilies callFor: row mode: mode part: i)]])
+        ifFalse: [missing add: file pathString]].
+      1 to: n do: [:i | held addAll: (AuditFamilies runsOf: row mode: mode part: i)].
     (held size = 60 and: [held asSet size = 60 and: [held asSet = AuditFamilies allRuns asSet]])
       ifFalse: [uncovered add: row , ' ' , mode]]].
-c that: '(1) every row, mode and part has its audit file' is: missing asArray equals: #().
+c that: '(1) every row, mode and part has its audit file (EXPECT line, its call on a line of its own)'
+  is: missing asArray equals: #().
+present := ((FileReference path: '../audit') files collect: [:f | f basename])
+  select: [:b | b beginsWith: 'sim_timer_audit_'].
+c that: '(1) tests/audit holds no audit file beyond those (stale or extra)'
+  is: (present reject: [:b | expected includes: b]) asArray equals: #().
 c that: '(1) the parts of every row and mode hold its 60 runs once' is: uncovered asArray equals: #().
 c that: '(1) the rows are those of timerTable' is: AuditConfig rows size equals: 18.
 
@@ -59,4 +75,28 @@ product := PBClusterConfig nodeId: 'n1' peers: peers options: Dictionary new.
 c that: '(5) renewalLeft, permitFloor, permissionDeadline: of the product'
   is: { product renewalLeft. product permitFloor. product permissionDeadline: 400000 }
   equals: { 666666 / 2. 666666 / 4. 650000 }.
-(c report = 'ok 7') ifTrue: ['timer audit ok'] ifFalse: [c report displayNl. 'timer audit failed'].
+"(6) the safety-only row-modes: declared, each a real row and mode; their parts assert it."
+Transcript show: 'safety-only (checkSafe alone, no commit acknowledged; asserted by their parts): ';
+  show: (AuditFamilies safetyOnly inject: '' into: [:a :k | a isEmpty ifTrue: [k] ifFalse: [a , ', ' , k]]); cr.
+c that: '(6) every safety-only declaration names a row and a mode'
+  is: (AuditFamilies safetyOnly reject: [:k | | parts |
+    parts := k subStrings: ' '.
+    (AuditConfig rows includes: parts first) and: [AuditFamilies modes includes: parts last asSymbol]]) asArray
+  equals: #().
+"(7) the rows not exercised yet: no source of the cluster but config.st names their timers, and
+ their runs equal the run at factor 1 (3 and 5 members, seed 1), at 1/10 and at 10 times."
+sources := (FileReference path: '../../src/protobase/cluster') files select: [:f | f extension = 'st' and: [f basename ~= 'config.st']].
+stale := OrderedCollection new.
+equal := OrderedCollection new.
+AuditFamilies notExercised do: [:e |
+  Transcript show: 'not exercised until ' , (e at: 2) , ': ' , e first; cr.
+  sources do: [:f | (e at: 3) do: [:name |
+    (f contents includesSubstring: name) ifTrue: [stale add: e first , ' (' , name , ' in ' , f basename , ')']]].
+  #(3 5) do: [:size | | one |
+    one := AuditFamilies run: e first mode: #one size: size seed: 1.
+    #(#tenth #tenfold) do: [:mode |
+      (AuditFamilies run: e first mode: mode size: size seed: 1) = one ifFalse: [equal add: e first , ' ' , mode , ' ' , size printString]]]].
+c that: '(7) no cluster source but config.st reads a not-exercised row''s timer (else the declaration is stale)'
+  is: stale asArray equals: #().
+c that: '(7) a not-exercised row''s runs equal the run at factor 1' is: equal asArray equals: #().
+(c report = 'ok 11') ifTrue: ['timer audit ok'] ifFalse: [c report displayNl. 'timer audit failed'].

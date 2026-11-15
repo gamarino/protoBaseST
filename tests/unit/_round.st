@@ -12,7 +12,8 @@
                   (PBCoordinatorCore round:in:now:): one PBRoundState per incarnation, the
                   round's effects performed by this shell (PBAskPermit, PBAskBase, PBBuild,
                   PBReplicate, PBReportDone, PBSettle of an entry, the hold PBTimer), each
-                  answer handed back to the round as its event.
+                  answer handed back to the round as its event; holdsExpired counts the
+                  holds of a kept permission that ran out (the timer audit's retryHold row).
   RoundFamilies   the scenario families.
 
 The clients. run:at:hot:builds:retries: is a transaction of a client that retries a conflict up
@@ -50,7 +51,7 @@ PlantNoKeep >> _keep: s hold: someMicros now: t effects: fx
 
 "=== RoundSim ================================================================"
 
-PBSim subclass: #RoundSim instanceVariableNames: 'rounds txs inRound waiters known started acks baseDelays onReplicate replicates reports settles decisions stopped recommits heldDelay hotVersions'.
+PBSim subclass: #RoundSim instanceVariableNames: 'rounds txs inRound waiters known started acks baseDelays onReplicate replicates reports settles decisions stopped recommits heldDelay hotVersions expired'.
 
 RoundSim >> rounds
   rounds isNil ifTrue: [rounds := Dictionary new].
@@ -165,9 +166,17 @@ RoundSim >> run: aToken at: anId hot: isHot builds: someMicros retries: n
 RoundSim >> run: aToken at: anId hot: isHot builds: someMicros retries: n then: aBlock
   ^ self run: aToken at: anId hot: isHot builds: someMicros retries: n then: aBlock caller: aToken.
 
+"As run:at:hot:builds:retries:, its first attempt queued at aTime (not before now)."
+RoundSim >> run: aToken at: anId hot: isHot builds: someMicros retries: n time: aTime
+  self run: aToken at: anId hot: isHot builds: someMicros retries: n then: nil caller: aToken time: aTime.
+
 "aCaller: the client (proto_db entry.thread) every attempt of aToken names."
 RoundSim >> run: aToken at: anId hot: isHot builds: someMicros retries: n then: aBlock caller: aCaller
+  ^ self run: aToken at: anId hot: isHot builds: someMicros retries: n then: aBlock caller: aCaller time: now.
+
+RoundSim >> run: aToken at: anId hot: isHot builds: someMicros retries: n then: aBlock caller: aCaller time: aTime
   | tx |
+  aTime < now ifTrue: [^ Error signal: 'RoundSim run: a time not before now'].
   (self nodeAt: anId) isUp ifFalse: [^ Error signal: 'RoundSim: ' , anId , ' is not running'].
   (commits includesKey: aToken) ifTrue: [^ Error signal: 'RoundSim: the token ' , aToken printString , ' is taken'].
   commits at: aToken put: #pending.
@@ -178,7 +187,8 @@ RoundSim >> run: aToken at: anId hot: isHot builds: someMicros retries: n then: 
     at: #caller put: aCaller.
   self txs at: aToken put: tx.
   self _trace: anId , ' run ' , aToken printString.
-  self _attempt: aToken.
+  aTime = now ifTrue: [^ self _attempt: aToken].
+  self _schedule: #client node: (self nodeAt: anId) payload: aToken at: aTime.
 
 "A client at anId that runs transactions anId-1, anId-2, ... one after the other until stopLoops
  (name distinguishes several clients of one node)."
@@ -249,6 +259,8 @@ RoundSim >> _round: anEvent at: aNode
   | local state step |
   local := aNode clock localAt: now.
   state := (self rounds at: aNode id) withRejoinBallot: aNode acceptor rejoinBallot.
+  ((anEvent isKindOf: PBHoldExpired) and: [state phase = #held and: [anEvent token = state holdToken]])
+    ifTrue: [expired := self holdsExpired + 1].
   self _trace: aNode id , ' round ' , anEvent printString , ' [clock ' , local printString , ']'.
   step := rules round: anEvent in: state now: local.
   self rounds at: aNode id put: step state.
@@ -382,6 +394,12 @@ RoundSim >> longestGapOf: anId upTo: aRound
 
 "How long a client takes to retry a permitHeld conflict (its fn run again), virtual
  microseconds; 0 by default."
+"How many holds of a kept permission ran out (their PBHoldExpired found the round still held
+ under that hold: the held retries had not all queued within max(min(retryHold, the time
+ left), retryWait))."
+RoundSim >> holdsExpired
+  ^ expired ifNil: [0].
+
 RoundSim >> heldDelay
   heldDelay isNil ifTrue: [heldDelay := 0].
   ^ heldDelay.

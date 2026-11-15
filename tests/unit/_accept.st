@@ -464,13 +464,23 @@ AcceptFamilies class >> certainty: aRulesBlock schedules: anArray seed: n
   | failed |
   failed := 0.
   anArray do: [:k |
-    failed := failed + ((self problemsOf: [ | sim |
-      sim := self sim: aRulesBlock value seed: n ids: self three options: Dictionary new.
-      sim watchCertain.
-      self perform: ('schedule' , k printString , ':') asSymbol with: sim.
-      sim converge: 300000.
-      sim problems size]) > 0 ifTrue: [1] ifFalse: [0])].
+    (self certainty: aRulesBlock schedule: k seed: n) isEmpty ifFalse: [failed := failed + 1]].
   ^ failed.
+
+"The problems of schedule k of certainty:schedules:seed: (watchCertain's and the majority's
+ texts, then a checker violation's), empty when it passes."
+AcceptFamilies class >> certainty: aRulesBlock schedule: k seed: n
+  | sim texts |
+  texts := OrderedCollection new.
+  [sim := self sim: aRulesBlock value seed: n ids: self three options: Dictionary new.
+   sim watchCertain.
+   self perform: ('schedule' , k printString , ':') asSymbol with: sim.
+   sim converge: 300000.
+   texts addAll: sim problems] on: Error do: [:e |
+    ((e messageText ifNil: ['']) includesSubstring: 'PBSim seed') ifFalse: [e signal].
+    sim notNil ifTrue: [texts addAll: sim problems].
+    texts add: e messageText].
+  ^ texts asArray.
 
 "a stale certain release clears a peer's suspicion: n2 holds a term granted by n1 and pauses; n1
  wins a newer term (uncertain: its grant to n2 expired) and commits 'r2' with n0; n1's release

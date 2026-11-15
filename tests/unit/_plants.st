@@ -25,7 +25,10 @@
                         L29: a dying holder's replication may still be accepted).
 
  The lessons' schedules that have no family of their own are here too (LessonFamilies, for
- sim_lessons.st): L29's dying holder."
+ sim_lessons.st): L29's dying holder. So are the simulator-level checker plants'
+ (sim_checker_plants.st) rules and builder: RecommitRules (every commit re-commits its base
+ first, the product's re-commit path) and CheckerFamilies (a converged three-member run, and the
+ plant that moves every member's head)."
 
 Import from: 'protobase'.
 
@@ -191,21 +194,29 @@ LeaseFamilies class >> window: aRulesClass seeds: someSeeds
   | failed both |
   failed := 0.
   both := 0.
-  someSeeds do: [:seed | | run n1 bad |
-    run := LeaseRun rules: aRulesClass new seed: seed options: (Dictionary new at: #requestTimeout put: 600; yourself).
-    run sim clockRate: 'n0' rate: 2/3; clockRate: 'n1' rate: 3/2; clockRate: 'n2' rate: 3/2.
-    run sim delay: 'n1' to: 'n0' by: 800000; delay: 'n2' to: 'n0' by: 800000.
-    run sim checker watchLeases.
-    n1 := false.
-    bad := self violates: [
-      run sim commit: 'a' at: 'n0'.
-      run sim runUntil: [(run owns: 'n0') or: [run sim now > 1200000]] steps: 100000.
-      run sim partition: #(#('n0') #('n1' 'n2')).
-      run sim commit: 'b' at: 'n1' time: 1400000.
-      run sim runUntil: [n1 := n1 or: [run owns: 'n1']. run sim now > 2500000] steps: 100000].
-    bad ifTrue: [failed := failed + 1].
-    ((run sim countOf: 'ownerships' at: 'n0') > 0 and: [n1]) ifTrue: [both := both + 1]].
+  someSeeds do: [:seed | | out |
+    out := self window: aRulesClass seed: seed.
+    out first notNil ifTrue: [failed := failed + 1].
+    out last ifTrue: [both := both + 1]].
   ^ { failed. both }.
+
+"One seed of window:seeds:: { the violation's text or nil. both n0 and n1 owned }."
+LeaseFamilies class >> window: aRulesClass seed: seed
+  | run n1 text |
+  run := LeaseRun rules: aRulesClass new seed: seed options: (Dictionary new at: #requestTimeout put: 600; yourself).
+  run sim clockRate: 'n0' rate: 2/3; clockRate: 'n1' rate: 3/2; clockRate: 'n2' rate: 3/2.
+  run sim delay: 'n1' to: 'n0' by: 800000; delay: 'n2' to: 'n0' by: 800000.
+  run sim checker watchLeases.
+  n1 := false.
+  text := [
+    run sim commit: 'a' at: 'n0'.
+    run sim runUntil: [(run owns: 'n0') or: [run sim now > 1200000]] steps: 100000.
+    run sim partition: #(#('n0') #('n1' 'n2')).
+    run sim commit: 'b' at: 'n1' time: 1400000.
+    run sim runUntil: [n1 := n1 or: [run owns: 'n1']. run sim now > 2500000] steps: 100000.
+    nil] on: Error do: [:e |
+      (e messageText beginsWith: 'PBSim seed') ifTrue: [e messageText] ifFalse: [e pass]].
+  ^ { text. (run sim countOf: 'ownerships' at: 'n0') > 0 and: [n1] }.
 
 "{ seeds failed. seeds where another member owned while the first owner was cut off }: one
  member (clock rate 2/3, the others 3/2) owns with a commit every 20 ms; it is cut off from the
@@ -346,3 +357,43 @@ LessonFamilies class >> lateDone: aRules seed: n
     sim countOf: 'terms_abandoned' at: 'n0'.
     sim outcomeOf: 'c'.
     sim outcomeOf: 'b' }.
+
+"=== The checker's plants at the simulator's level (sim_checker_plants.st) ===="
+
+PBCoordinatorCore subclass: #RecommitRules.
+
+"Every base decision needs a commit first (proto_db _commit_base): the base is the permission's
+ root (the empty space when it has none), re-committed unchanged, the commit's own root built on
+ that re-commit. Not a plant: the product's re-commit path on every commit."
+RecommitRules >> dispatchBaseWanted: anEvent in: s now: t
+  | root |
+  root := anEvent permission root.
+  root isNil ifTrue: [root := PBLabeledRoot label: 0 record: nil].
+  ^ PBStep state: s effects: { PBSettle waiter: anEvent waiter
+    outcome: (PBBaseDecision base: root needsCommit: true outcome: #ok) }.
+
+Object subclass: #CheckerFamilies.
+
+"A PBSim of three members formed before (startup grace 0) running aRules: the commits
+ someTokens at n0, one after the other, then converged (checkConverged, the control)."
+CheckerFamilies class >> run: aRules commits: someTokens
+  | ids logs opts sim |
+  ids := #('n0' 'n1' 'n2').
+  logs := Dictionary new.
+  ids do: [:id | logs at: id put: { PBLogAppend kind: #rejoined label: 0 root: nil sync: true }].
+  opts := Dictionary new.
+  opts at: #startupGrace put: 0.
+  sim := PBSim seed: 1 ids: ids rules: aRules options: opts logs: logs.
+  someTokens do: [:k |
+    sim commit: k at: 'n0'.
+    sim runUntil: [(sim outcomeOf: k) ~= #pending] steps: 200000].
+  sim converge: 200000.
+  ^ sim.
+
+"The text of the violation aBlock signals, nil when it signals none."
+CheckerFamilies class >> violationOf: aBlock
+  ^ [aBlock value. nil] on: Error do: [:e | e messageText].
+
+"The plant: every live member of aSim shows aRoot as its committed head."
+CheckerFamilies class >> heads: aSim to: aRoot
+  aSim ids do: [:id | (aSim nodeAt: id) isUp ifTrue: [(aSim nodeAt: id) committed: aRoot]].

@@ -1,7 +1,8 @@
 "_audit.st: the timer audit (tests/audit/sim_timer_audit_<row>_<mode>_part<i>.st, and its index
  tests/unit/sim_timer_audit.st; a helper: the runner never runs files whose name starts with _).
- Test support, not product (CC12, CC13). Imports resolve from the test's working directory, so
- this file names the simulator as ../unit/_sim: the same path from tests/audit and tests/unit.
+ Test support, not product (CC12, CC13). It imports the simulator's helpers by name (_sim,
+ _round): from tests/unit, the working directory; from tests/audit, STPATH (the runner adds
+ tests/unit for the audit's files). One name per helper: protoST loads a module once per name.
 
   AuditConfig    a PBClusterConfig whose one timer row (a name of PBClusterConfig timerTable) is
                  scaled by a factor: the options derive as the product derives them from the
@@ -35,7 +36,8 @@
                  sibling roots, sync before reply) runs in both."
 
 Import from: 'protobase'.
-Import from: '../unit/_sim'.
+Import from: '_sim'.
+Import from: '_round'.
 
 "=== AuditConfig =============================================================="
 
@@ -163,11 +165,13 @@ AuditFamilies class >> ids: aSize
   ^ aSize = 3 ifTrue: [#('n0' 'n1' 'n2')] ifFalse: [#('n0' 'n1' 'n2' 'n3' 'n4')].
 
 "The factor of the member of rank r under aMode: #tenth (1/10 at every member), #tenfold (10 at
- every member) or #skewed (1/2 at the even ranks, 2 at the odd ones)."
+ every member) or #skewed (1/2 at the even ranks, 2 at the odd ones); #one, 1."
 AuditFamilies class >> factor: aMode rank: r
   aMode = #tenth ifTrue: [^ 1/10].
   aMode = #tenfold ifTrue: [^ 10].
   aMode = #skewed ifTrue: [^ r even ifTrue: [1/2] ifFalse: [2]].
+  "The defaults (the index's comparison, not an audit mode)."
+  aMode = #one ifTrue: [^ 1].
   ^ Error signal: 'AuditFamilies: a mode is #tenth, #tenfold or #skewed, not ' , aMode printString.
 
 "A PBSim of aSize members running the product rules, aRow scaled under aMode."
@@ -212,11 +216,96 @@ AuditFamilies class >> caughtUp: aSim
     collect: [:id | (aSim nodeAt: id) committed ifNotNil: [:k | aSim keyText: k]].
   ^ heads asSet size <= 1 and: [aSim checker checkSafe = 0].
 
+"The end of a run, the strict-or-safe gate: the strict checks (checkConverged) when z was
+ acknowledged and the members have caught up (caughtUp:), else the safety checks that do not
+ need them to have (checkSafe). Answers { strict. (root, node) pairs not yet learnt }; a
+ violation signals. A real divergence is never taken for a lag: forked heads fail checkHeads in
+ either form, and a head that does not precede a lost acknowledged or published root fails
+ checkSafe (sim_checker_plants.st plants both)."
+AuditFamilies class >> judge: aSim z: isAcknowledged
+  (isAcknowledged and: [self caughtUp: aSim]) ifTrue: [
+    aSim checker checkConverged.
+    ^ #(true 0)].
+  ^ { false. aSim checker checkSafe }.
+
+"A RoundSim of aSize members whose commits run through the product's commit round (the reader of
+ retryHold, retryWait and permitRetries), aRow scaled under aMode, each log formed over r1
+ committed (RoundFamilies r1); a held retry is queued 20 ms (virtual) after its conflict: past a
+ hold of 1/10 of the default (10 ms), within the default's (100 ms)."
+AuditFamilies class >> roundSim: aRow mode: aMode size: aSize seed: n
+  | ids logs voters sim |
+  ids := self ids: aSize.
+  logs := Dictionary new.
+  ids do: [:id | logs at: id put: {
+    PBLogAppend kind: #accepted label: RoundFamilies r1 label root: RoundFamilies r1 record sync: true.
+    PBLogAppend kind: #committed label: RoundFamilies r1 label root: RoundFamilies r1 record sync: true.
+    PBLogAppend kind: #rejoined label: 0 root: nil sync: true }].
+  voters := aSize = 3 ifTrue: [nil] ifFalse: [ids].
+  sim := RoundSim seed: n ids: ids rules: PBCoordinatorCore new
+    configs: [:id :peers | AuditConfig nodeId: id peers: peers voters: voters row: aRow
+      factor: (self factor: aMode rank: (ids indexOf: id) - 1)]
+    logs: logs.
+  sim heldDelay: 20000.
+  ^ sim.
+
+"The rows whose workload is the commit round's (roundSim:mode:size:seed:)."
+AuditFamilies class >> roundRows
+  ^ #('retryHold').
+
+"aToken committed at anId, asked at aTime: a synthetic transaction of PBSim, or a hot
+ read-modify-write of the commit round (10 retries, 1 ms builds; z is a blind write)."
+AuditFamilies class >> commit: aToken at: anId time: aTime in: aSim
+  (aSim isKindOf: RoundSim) ifFalse: [^ aSim commit: aToken at: anId time: aTime].
+  ^ aSim run: aToken at: anId hot: aToken ~= 'z' builds: #(1000) retries: 10 time: aTime.
+
+"The probe of aRow, after the workload, before the faults end: a schedule under which the core
+ reads the row's timer, and the count that shows it did; nil for a row with none. acquireTimeout:
+ the last running member that owns no lease (an owner commits under its lease and never waits
+ for a permit), alone in a partition, commits 'probe' and waits up to 6 s (virtual): 1 when the
+ commit timed out (#failed: a PBTimeoutError, 3 s at 1/10), else 0 (still waiting at 30 s and
+ more). gatherAttempts: the last member loses its disk and restarts while the second member is
+ alone in a partition, for 4 s: the largest gather attempt its rejoin reached (the gather asks
+ the silent member again up to gatherAttempts attempts). retryHold: the holds of a kept
+ permission that ran out (RoundSim holdsExpired). Answers { the count. the steps it ran }."
+AuditFamilies class >> probe: aRow in: aSim
+  | ids m k end most r steps |
+  ids := aSim ids.
+  m := ids last.
+  (aSim nodeAt: m) isUp ifFalse: [aSim restart: m].
+  aRow = 'acquireTimeout' ifTrue: [
+    m := ids reverse detect: [:id | | node |
+        node := aSim nodeAt: id.
+        node isUp and: [node state ownership isNil]]
+      ifNone: [m].
+    aSim partition: { ids copyWithout: m. { m } }.
+    aSim commit: 'probe' at: m.
+    end := aSim now + 6000000.
+    steps := self run: aSim until: [(aSim outcomeOf: 'probe') ~= #pending] steps: 30000 end: end.
+    ^ { (aSim outcomeOf: 'probe') = #failed ifTrue: [1] ifFalse: [0]. steps }].
+  aRow = 'gatherAttempts' ifTrue: [
+    k := ids at: 2.
+    aSim crash: m keepDisk: false.
+    aSim partition: { ids reject: [:id | id = k]. { k } }.
+    aSim restart: m.
+    most := 0.
+    end := aSim now + 4000000.
+    steps := self run: aSim until: [
+        r := (aSim nodeAt: m) state rejoin.
+        (r notNil and: [r phase = #gather]) ifTrue: [most := most max: r attempt].
+        false]
+      steps: 30000 end: end.
+    ^ { most. steps }].
+  aRow = 'retryHold' ifTrue: [^ { aSim holdsExpired. 0 }].
+  ^ #(nil 0).
+
 "One run: { violation text or nil. z acknowledged. commits acknowledged. (root, node) pairs not
- learnt (checkSafe; 0 when the strict checks ran). steps run }."
+ learnt (checkSafe; 0 when the strict checks ran). steps run. strict checks ran. the probe's
+ count (nil: the row has no probe) }."
 AuditFamilies class >> run: aRow mode: aMode size: aSize seed: n
-  | sim ids pick start pending left resolved crashAt victim restartAt token violation z acked behind steps b tick |
-  sim := self sim: aRow mode: aMode size: aSize seed: n.
+  | sim ids pick start pending left resolved crashAt victim restartAt token violation z acked behind steps b tick strict probe out |
+  sim := (self roundRows includes: aRow)
+    ifTrue: [self roundSim: aRow mode: aMode size: aSize seed: n]
+    ifFalse: [self sim: aRow mode: aMode size: aSize seed: n].
   ids := sim ids.
   sim faults: (PBSimFaults drop: 1/20 duplicate: 0 delay: 1000 reorder: false).
   pick := Random seed: n * 7919 + 17.
@@ -231,6 +320,8 @@ AuditFamilies class >> run: aRow mode: aMode size: aSize seed: n
   token := 0.
   behind := 0.
   steps := 0.
+  strict := false.
+  probe := nil.
   b := self bounds.
   violation := [
     steps := steps + (self run: sim until: [
@@ -243,7 +334,7 @@ AuditFamilies class >> run: aRow mode: aMode size: aSize seed: n
           p := 'c' , token printString.
           pending at: id put: p.
           left at: id put: (left at: id) - 1.
-          sim commit: p at: id time: (sim now max: start)]].
+          self commit: p at: id time: (sim now max: start) in: sim]].
       (victim isNil and: [resolved >= crashAt]) ifTrue: [
         victim := ids at: (pick nextInt: ids size).
         sim crash: victim keepDisk: true.
@@ -252,11 +343,14 @@ AuditFamilies class >> run: aRow mode: aMode size: aSize seed: n
       (restartAt notNil and: [sim now >= restartAt]) ifTrue: [sim restart: victim. restartAt := nil].
       victim notNil and: [restartAt isNil and: [pending isEmpty and: [ids allSatisfy: [:id | (left at: id) = 0]]]]]
       steps: (b at: 1) first end: start + (b at: 1) last).
+    out := self probe: aRow in: sim.
+    probe := out first.
+    steps := steps + out last.
     sim heal.
     sim faults: PBSimFaults none.
     ids do: [:id | (sim nodeAt: id) isUp ifFalse: [sim restart: id]].
     steps := steps + (self run: sim until: [false] steps: (b at: 2) first end: sim now + (b at: 2) last).
-    sim commit: 'z' at: (ids at: (pick nextInt: ids size)).
+    self commit: 'z' at: (ids at: (pick nextInt: ids size)) time: sim now in: sim.
     steps := steps + (self run: sim until: [(sim outcomeOf: 'z') ~= #pending] steps: (b at: 3) first end: sim now + (b at: 3) last).
     tick := 0.
     steps := steps + (self run: sim until: [
@@ -264,19 +358,22 @@ AuditFamilies class >> run: aRow mode: aMode size: aSize seed: n
         tick \\ 32 = 0 and: [(sim outcomeOf: 'z') = #acknowledged and: [self caughtUp: sim]]]
       steps: (b at: 2) first end: sim now + (b at: 2) last).
     z := (sim outcomeOf: 'z') = #acknowledged.
-    (z and: [self caughtUp: sim]) ifTrue: [sim checker checkConverged] ifFalse: [behind := sim checker checkSafe].
+    out := self judge: sim z: z.
+    strict := out first.
+    behind := out last.
     nil] on: Error do: [:e |
       ((e messageText ifNil: ['']) includesSubstring: 'PBSim seed') ifFalse: [e signal].
       e messageText].
   acked := (sim commitOrder select: [:k | (sim outcomeOf: k) = #acknowledged]) size.
-  ^ { violation. z == true. acked. behind. steps }.
+  ^ { violation. z == true. acked. behind. steps. strict. probe }.
 
 "{ runs. violations. runs whose z was acknowledged. commits acknowledged. (root, node) pairs
- not learnt. the first violation's text or nil. steps } of aRow under aMode over someRuns, each a
- { size. seed } pair."
+ not learnt. the first violation's text or nil. steps. runs that got the strict checks. the
+ probe's count summed (nil: no probe) } of aRow under aMode over someRuns, each a { size. seed }
+ pair."
 AuditFamilies class >> row: aRow mode: aMode runs: someRuns
-  | runs failed zs acked behind first steps |
-  runs := 0. failed := 0. zs := 0. acked := 0. behind := 0. first := nil. steps := 0.
+  | runs failed zs acked behind first steps strict probe |
+  runs := 0. failed := 0. zs := 0. acked := 0. behind := 0. first := nil. steps := 0. strict := 0. probe := nil.
   someRuns do: [:r | | out |
     out := self run: aRow mode: aMode size: r first seed: r last.
     runs := runs + 1.
@@ -286,8 +383,10 @@ AuditFamilies class >> row: aRow mode: aMode runs: someRuns
     (out at: 2) ifTrue: [zs := zs + 1].
     acked := acked + (out at: 3).
     behind := behind + (out at: 4).
-    steps := steps + (out at: 5)].
-  ^ { runs. failed. zs. acked. behind. first. steps }.
+    steps := steps + (out at: 5).
+    (out at: 6) ifTrue: [strict := strict + 1].
+    (out at: 7) notNil ifTrue: [probe := (probe ifNil: [0]) + (out at: 7)]].
+  ^ { runs. failed. zs. acked. behind. first. steps. strict. probe }.
 
 "The modes of the audit, in order."
 AuditFamilies class >> modes
@@ -304,14 +403,16 @@ AuditFamilies class >> allRuns
  the runner's time limit (some 250 s): a row whose timer leaves no liveness runs every phase to
  its bound, and the renewal at 10 times renews on every grant (a renewal storm by construction).
  Measured wall clock per run: 1-2 s for most; renewal at tenfold 21-28 s; permitFloor at tenfold
- ~11 s; driftMargin at tenfold 5-8 s; renewal skewed and requestTimeout at tenfold up to 13 s."
+ ~11 s; driftMargin at tenfold 5-8 s; renewal skewed and requestTimeout at tenfold up to 13 s.
+ Fix round 1 (serial, under an outside load of 14 to 22): ownerIdleRelease skewed took 309 s in one
+ file and leaseDuration tenfold 281 s in its part 2 of 2, so they are split in 2 and 3."
 AuditFamilies class >> partsOf: aRow mode: aMode
   | key |
   key := aRow , ' ' , aMode.
   #(#('renewal tenfold' 8) #('permitFloor tenfold' 6) #('renewal skewed' 3)
-    #('requestTimeout tenfold' 2) #('leaseDuration tenfold' 2) #('driftMargin tenth' 2)
+    #('requestTimeout tenfold' 2) #('leaseDuration tenfold' 3) #('driftMargin tenth' 2)
     #('driftMargin skewed' 2) #('permissionDeadline tenfold' 2) #('driftMargin tenfold' 3)
-    #('backoff tenth' 2)) do: [:e |
+    #('backoff tenth' 2) #('ownerIdleRelease skewed' 2)) do: [:e |
       e first = key ifTrue: [^ e last]].
   ^ 1.
 
@@ -332,15 +433,104 @@ AuditFamilies class >> fileFor: aRow mode: aMode part: i
 AuditFamilies class >> callFor: aRow mode: aMode part: i
   ^ 'AuditFamilies audit: ''' , aRow , ''' mode: #' , aMode , ' part: ' , i printString , '.'.
 
+"The row-modes that keep no liveness by construction, so their runs get checkSafe alone and
+ acknowledge nothing (declared, and asserted: a run that acknowledges a commit or gets the
+ strict checks makes the declaration stale and fails the part): driftMargin at 10 times (the
+ belief capped at 1 us: no lease is usable), permitFloor at 10 times (the floor above any lease
+ left: no permission is issued), sendReserve at 10 times (the reserve above any permission:
+ nothing is sent)."
+AuditFamilies class >> safetyOnly
+  ^ #('driftMargin tenfold' 'permitFloor tenfold' 'sendReserve tenfold').
+
+"The rows no core rule reads yet: { row. the task that adds its reader }. Their runs equal the
+ defaults' (sim_timer_audit.st asserts it, and that no source of the cluster but config.st names
+ the timer), so the declaration fails once a reader appears."
+AuditFamilies class >> notExercised
+  ^ #(#('persist' 'Task 20' #('persistInterval' 'persistLag'))).
+
+"The floors of a part of aRow under aMode, per run: { runs that got the strict checks.
+ commits acknowledged } (proto_db's min_acked: an empty run proves nothing). Measured on the
+ 3240 runs (task-17-report.md, Fix round 1) and set at about three quarters of each row-mode's
+ measured rate per part, so a change that stalls progress, or that sends the runs to checkSafe,
+ fails the part. nil for a safety-only row-mode."
+AuditFamilies class >> floorOf: aRow mode: aMode
+  | key |
+  key := aRow , ' ' , aMode.
+  (self safetyOnly includes: key) ifTrue: [^ nil].
+  self floors do: [:e | e first = key ifTrue: [^ e allButFirst]].
+  ^ self defaultFloor.
+
+"The floor of every row-mode not in floors: { strict per run. acknowledged per run }."
+AuditFamilies class >> defaultFloor
+  ^ { 3/4. 5 }.
+
+"Row-modes whose measured rates are below the default floor: { key. strict per run. acknowledged
+ per run }. Measured (Fix round 1, the lowest part): driftMargin skewed 0.633 strict per run;
+ leaseDuration tenfold 0.8 (on 30-run parts; its parts now hold 20, hence 1/2); permissionDeadline
+ tenfold 0.833; renewal skewed 0.8; renewal tenfold 0.375 strict and 5.0 acknowledged per run.
+ Every other row-mode measured at least 0.933 strict and 6.867 acknowledged per run."
+AuditFamilies class >> floors
+  ^ { { 'driftMargin skewed'. 1/2. 5 }. { 'leaseDuration tenfold'. 1/2. 5 }.
+    { 'permissionDeadline tenfold'. 3/5. 5 }. { 'renewal skewed'. 3/5. 5 }. { 'renewal tenfold'. 1/4. 7/2 } }.
+
+"The bounds of the probe's count per run, { min. max } (nil: the row has no probe): the count
+ shows the probe made the core read the timer, and that 1/10 and 10 times differ.
+ acquireTimeout: at 1/10 (3 s) the probe commit times out in every run, at 10 times (300 s) and
+ skewed (the last member at 1/2: 15 s) in none. gatherAttempts: at 1/10 (one attempt) the gather
+ never asks again; at 10 times (30 attempts) it asks again through the 4 s; skewed: the last
+ member at 1/2 (2 attempts). retryHold: at 1/10 (a 10 ms hold) holds run out before the held
+ retry (20 ms) queues; at 10 times (1 s) and skewed (50 ms, 200 ms) none does. Measured over the
+ 60 runs (Fix round 1): acquireTimeout 60, 0, 0; gatherAttempts 60, 1026, 120; retryHold 347, 0, 0
+ (at 1/10, 10 times, skewed)."
+AuditFamilies class >> probeBounds: aRow mode: aMode
+  | key |
+  key := aRow , ' ' , aMode.
+  #(#('acquireTimeout tenth' 1 1) #('acquireTimeout tenfold' 0 0) #('acquireTimeout skewed' 0 0)
+    #('gatherAttempts tenth' 1 1) #('gatherAttempts tenfold' 4 30) #('gatherAttempts skewed' 2 2)
+    #('retryHold tenth' 1 1000) #('retryHold tenfold' 0 0) #('retryHold skewed' 0 0)) do: [:e |
+      e first = key ifTrue: [^ e allButFirst]].
+  ^ nil.
+
+"The reasons part i of the audit of aRow under aMode fails, given its counts out
+ (row:mode:runs:): a violation; a declared floor missed; a safety-only declaration gone stale;
+ a probe count out of its bounds. Empty when it passes."
+AuditFamilies class >> failuresOf: out row: aRow mode: aMode
+  | failures runs floor bounds |
+  failures := OrderedCollection new.
+  runs := out at: 1.
+  (out at: 2) > 0 ifTrue: [failures add: (out at: 2) printString , ' violations'].
+  runs = 0 ifTrue: [failures add: 'no runs'].
+  floor := self floorOf: aRow mode: aMode.
+  floor isNil
+    ifTrue: [
+      ((out at: 8) > 0 or: [(out at: 4) > 0]) ifTrue: [
+        failures add: 'declared safety-only, yet ' , (out at: 8) printString , ' strict runs and '
+          , (out at: 4) printString , ' commits acknowledged: the declaration is stale']]
+    ifFalse: [
+      (out at: 8) < (floor first * runs) ceiling ifTrue: [
+        failures add: 'strict runs ' , (out at: 8) printString , ' below the floor ' , (floor first * runs) ceiling printString].
+      (out at: 4) < (floor last * runs) ceiling ifTrue: [
+        failures add: 'commits acknowledged ' , (out at: 4) printString , ' below the floor ' , (floor last * runs) ceiling printString]].
+  bounds := self probeBounds: aRow mode: aMode.
+  bounds notNil ifTrue: [
+    ((out at: 9) isNil or: [(out at: 9) < (bounds first * runs) or: [(out at: 9) > (bounds last * runs)]]) ifTrue: [
+      failures add: 'probe count ' , (out at: 9) printString , ' outside ' , (bounds first * runs) printString , '..'
+        , (bounds last * runs) printString]].
+  ^ failures asArray.
+
 "Part i of the audit of aRow under aMode (allRuns, split by partsOf:mode:): prints one line for
- the timer (and the first violation, if any); answers the test's last line."
+ the timer (and the first violation and every failure, if any); answers the test's last line."
 AuditFamilies class >> audit: aRow mode: aMode part: i
-  | out n |
+  | out n failures |
   n := self partsOf: aRow mode: aMode.
   out := self row: aRow mode: aMode runs: (self runsOf: aRow mode: aMode part: i).
   Transcript show: 'timer ' , aRow , ' at ' , aMode , ' (part ' , i printString , ' of ' , n printString , '): '
-    , (out at: 1) printString , ' runs, ' , (out at: 2) printString
-    , ' violations, z acknowledged in ' , (out at: 3) printString , ', commits acknowledged ' , (out at: 4) printString
-    , ', (root, node) pairs not yet learnt ' , (out at: 5) printString , ', steps ' , (out at: 7) printString; cr.
+    , (out at: 1) printString , ' runs, ' , (out at: 2) printString , ' violations, '
+    , (out at: 8) printString , ' strict, z acknowledged in ' , (out at: 3) printString
+    , ', commits acknowledged ' , (out at: 4) printString
+    , ', (root, node) pairs not yet learnt ' , (out at: 5) printString
+    , ', probe ' , (out at: 9) printString , ', steps ' , (out at: 7) printString; cr.
   (out at: 6) notNil ifTrue: [Transcript show: 'FIRST VIOLATION ' , (out at: 6); cr].
-  ^ (out at: 2) = 0 ifTrue: ['timer audit ok'] ifFalse: ['timer audit failed'].
+  failures := self failuresOf: out row: aRow mode: aMode.
+  failures do: [:f | Transcript show: 'FAILED: ' , f; cr].
+  ^ failures isEmpty ifTrue: ['timer audit ok'] ifFalse: ['timer audit failed'].

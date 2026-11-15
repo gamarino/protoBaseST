@@ -20,7 +20,7 @@ PBNotSupportedError; any other unknown option is PBValidationError.
 
 Every row of timerTable is read by the rules through an accessor here, never computed inline
 (renewalLeft, permitFloor and permissionDeadline: included), so a test configuration can scale
-any one timer (tests/unit/_audit.st, the timer audit).
+any one timer (tests/audit/_audit.st, the timer audit).
 
 Every value here is immutable: built once by its class-side constructor."
 

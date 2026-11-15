@@ -1,11 +1,14 @@
 "EXPECT: lessons ok 12"
 "The lessons of the design (spec section 2.4, L1-L32) that have a protocol counterpart here, one
- schedule each: its planted wrong rule fails it and the product rules pass it. The plants and the
+ schedule each: its planted wrong rule fails it, by the rule the lesson names (the
+ violation's or the problem's text where the run reports one), and the product rules pass it. The plants and the
  schedules are those of the scenario families (_plants.st, _base.st, _rejoin.st, _round.st,
  _accept.st; L29's plant and schedule in _plants.st, LessonFamilies), one seed each.
-   L5   the lease runs from the send, not the win (PlantWindowFromWin: two valid leases).
+   L5   the lease runs from the send, not the win (PlantWindowFromWin: 'L5: valid leases at
+        once').
    L8   release-carried certainty is never a commit point (PlantReleaseTeachesAccepted: the
-        D45 amendment 6 schedule 3 loses a root).
+        D45 amendment 6 schedule 3 publishes a root committed 'without a majority of synced
+        acceptances').
    L12  replies of another incarnation are dropped (PlantAnyIncarnation: n0 owns on them).
    L13  rejoin is a ballot, never a wait (PlantRejoinByWaiting: R78a, the wiped node's clock
         1.3x fast, holder stalled: S4).
@@ -16,7 +19,8 @@
    L22  the send reserve (PlantNoReserve: the refused root is replicated).
    L24  proposer-qualified ballots (PlantSharedBallot: two members ask one term).
    L25  the voter-set fingerprint (PlantNoFingerprint: a member of another voter set helps a
-        quorum).
+        quorum, the lesson's own measure: 'b' acknowledged with its help; the run raises no
+        checker violation to match).
    L28  one base issued twice, the strict form (PlantBaseTwice: S4 at convergence).
    L29  a dying holder's late done: O6 abandons the term at valid + requestTimeout
         (PlantLateDoneAsNone retires the permission as none: its base issued again, two roots
@@ -37,13 +41,15 @@ has := [:aText :aPart | (aText ifNil: ['']) includesSubstring: aPart].
 "{ lesson. product passes (a Boolean). plant fails (a Boolean). what the plant's run showed }"
 lessons := OrderedCollection new.
 
-out := LeaseFamilies window: PlantWindowFromWin seeds: #(1).
-lessons add: { 'L5'. (LeaseFamilies window: LeaseRules seeds: #(1)) = #(0 1). out first > 0.
-  'window { failed. both owned } ' , out printString }.
+out := LeaseFamilies window: PlantWindowFromWin seed: 1.
+lessons add: { 'L5'. (LeaseFamilies window: LeaseRules seeds: #(1)) = #(0 1).
+  has value: out first value: 'L5: valid leases at once'.
+  (out first ifNil: ['no violation']) lines first }.
 
-out := AcceptFamilies certainty: [PlantReleaseTeachesAccepted new] schedules: #(3) seed: 1.
-lessons add: { 'L8'. (AcceptFamilies certainty: [AcceptRules new] schedules: #(1 2 3 4) seed: 1) = 0. out = 1.
-  'certainty schedules failed ' , out printString }.
+out := AcceptFamilies certainty: [PlantReleaseTeachesAccepted new] schedule: 3 seed: 1.
+lessons add: { 'L8'. (AcceptFamilies certainty: [AcceptRules new] schedules: #(1 2 3 4) seed: 1) = 0.
+  out anySatisfy: [:t | t includesSubstring: 'without a majority of synced acceptances'].
+  out isEmpty ifTrue: ['no problem'] ifFalse: [out first lines first] }.
 
 out := LeaseFamilies incarnations: PlantAnyIncarnation seeds: #(1).
 lessons add: { 'L12'. (LeaseFamilies incarnations: LeaseRules seeds: #(1)) = #(0 0). out first > 0.
@@ -80,7 +86,7 @@ lessons add: { 'L24'. [:r | r first = 0 and: [(r at: 2) = 0]] value: (LeaseFamil
   'terms { failed. shared. stalled } ' , out printString }.
 
 out := AcceptFamilies voterSets: [PlantNoFingerprint new] seeds: #(1).
-lessons add: { 'L25'. (AcceptFamilies voterSets: [AcceptRules new] seeds: #(1)) = #(0 0). out = #(1 1).
+lessons add: { 'L25'. (AcceptFamilies voterSets: [AcceptRules new] seeds: #(1)) = #(0 0). (out at: 2) = 1.
   'voter sets { failed. helped } ' , out printString }.
 
 out := BaseFamilies baseTwice: PlantBaseTwice new seed: 1.

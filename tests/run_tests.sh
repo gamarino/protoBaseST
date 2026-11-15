@@ -7,7 +7,10 @@
 # simulator runs, some three hours serially): a run of its own. It runs only when a path names it
 # or a file in it (tests/run_tests.sh tests/audit), or with --audit, which adds tests/audit to the
 # paths run (the default set when no path is given). Every other run skips it; its index,
-# tests/unit/sim_timer_audit.st, stays in the default run and fails when an audit file is missing.
+# tests/unit/sim_timer_audit.st, stays in the default run and fails when an audit file is missing,
+# stale or extra. The audit's files run with tests/unit on STPATH (they import the simulator's
+# helpers, _sim and _round, by name); by hand: cd tests/audit and
+# STPATH=<repo>/src:<repo>/tests/unit protost --print-last <file>.
 #
 # Environment:
 #   PROTOST         the protost binary (default: protost)
@@ -113,7 +116,11 @@ run_st() {
         *) echo "FAIL: $(rel "$file"): no directive on the first line"; return 1 ;;
     esac
     err="$(mktemp)"
-    out="$(cd "$dir" && timeout "$TIMEOUT" "$PROTOST" --print-last "$base" </dev/null 2>"$err")"
+    # The audit's files import the simulator's helpers by name from tests/unit (one name per
+    # helper, so a module is loaded once).
+    local path="$STPATH"
+    [[ "$dir" == "$AUDIT" || "$dir" == "$AUDIT"/* ]] && path="$STPATH:$REPO/tests/unit"
+    out="$(cd "$dir" && STPATH="$path" timeout "$TIMEOUT" "$PROTOST" --print-last "$base" </dev/null 2>"$err")"
     rc=$?
     local errtext; errtext="$(tr -d '\000' < "$err")"; rm -f "$err"
     last="$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1)"

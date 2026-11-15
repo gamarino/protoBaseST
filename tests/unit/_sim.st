@@ -104,14 +104,15 @@ belief never outlives the granters' promise). checkConverged (converge:): the co
 chains of the live nodes (from each one's published committed root through the pred links of
 the roots the simulator built) do not fork (of two heads, one is in the other's chain), then
 checkHistory: over the history the simulator derives (history, a PBSimHistory: the tokens of
-the commits each live node's chain holds), the rules of proto_db's assert_outcomes_resolved:
+the commits each live node's chain holds: a commit is in a chain that holds its own built root;
+the unchanged root of a re-commit holds none of its effect and credits no commit), the rules of proto_db's assert_outcomes_resolved:
 every acknowledged commit is in every live node's chain (S4); every unknown commit (#unknown,
 or #pending: nobody answered it) in every live node's chain or in none; a commit answered #none
 or with an error in no chain (H7); no chain holds a root the simulator did not build, no log
 held and no script persisted (a stray write); every commit in the chain of a root any node
 published as committed is still in every chain (a fork of history); and, for a history that
 carries counters, each member's counter equals its tokens. checkSafe is the form that does not
-need the nodes to have caught up (the timer audit, when the last commit was not acknowledged):
+need the nodes to have caught up (the timer audit, when its members have not caught up):
 no fork of heads; an acknowledged root, or a published one, is in every live chain whose head
 does not precede it; H7; no stray write. A violation is an Error whose text holds the seed and
 the last 200 trace lines.
@@ -617,7 +618,7 @@ PBSimChecker >> checkSafe
 
 "=== PBSim ==================================================================="
 
-Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current counts failing syncCost fixedLags peers persisted epochSteps writers published initialKeys'.
+Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current counts failing syncCost fixedLags peers persisted epochSteps writers published initialKeys recommitRoots foreignLinks'.
 
 "N nodes (anArray of ids) running aRules, each configured with aDictionary (PBClusterConfig
  options), all started at virtual time 0, every choice drawn from Random seed: n."
@@ -656,6 +657,8 @@ PBSim >> setSeed: n ids: anArray rules: aRules configs: aBlock logs: aLogs
   commits := Dictionary new.
   commitOrder := OrderedCollection new.
   commitRoots := Dictionary new.
+  recommitRoots := Dictionary new.
+  foreignLinks := Dictionary new.
   preds := Dictionary new.
   offsets := 0.
   counts := Dictionary new.
@@ -737,27 +740,67 @@ PBSim >> chainFrom: aKeyText
   key := aKeyText.
   [key notNil and: [(chain includes: key) not]] whileTrue: [
     chain add: key.
-    key := preds at: key ifAbsent: [nil]].
+    key := preds at: key ifAbsent: [foreignLinks at: key ifAbsent: [nil]]].
   ^ chain.
 
-"The token of the commit whose attempt built the root of key aKeyText (its root, or the unchanged
- root its re-commit replicated), nil for a root the simulator did not build."
+"The token of the commit whose attempt built the root of key aKeyText (its own root; the unchanged
+ root of a re-commit has no writer: it holds none of the commit's effect), nil for a root the
+ simulator did not build."
 PBSim >> writerOf: aKeyText
   ^ writers at: aKeyText ifAbsent: [nil].
 
 "Whether the root of key aKeyText was built by the simulator (every root it builds records its
- pred link) or needs no builder: the empty space (epoch 0, of any label), a root of the logs
- the nodes started over, or a root the script persisted (persist:)."
+ pred link; a re-commit's included, known through its pred link though it has no writer) or needs
+ no builder: the empty space (exactly its key, PBLabeledRoot label: 0 record: nil), a root of the
+ logs the nodes started over, or a root the script persisted (persist:)."
 PBSim >> isKnownRoot: aKeyText
-  ^ (preds includesKey: aKeyText) or: [(initialKeys includes: aKeyText) or: [((aKeyText subStrings: '/') at: 2) = '0']].
+  ^ (preds includesKey: aKeyText) or: [(initialKeys includes: aKeyText)
+      or: [aKeyText = (self keyText: (PBLabeledRoot label: 0 record: nil))]].
+
+"--- the checker's plants (sim_checker_plants.st): roots no commit wrote ---"
+
+"A root of aBase's label at aBase's epoch + 1 with a fresh offset, its pred link aBase recorded
+ as the simulator records the roots it builds: a known root no commit wrote (a plant moves a
+ member's head to it)."
+PBSim >> declare: aBase
+  | root |
+  root := self _plantRoot: aBase.
+  preds at: (self keyText: root) put: (self keyText: aBase).
+  ^ root.
+
+"As declare:, but the pred link is the chain's only (foreignLinks): the simulator never built the root
+ and does not know it (isKnownRoot: false), as a root a defect fabricated."
+PBSim >> fabricate: aBase
+  | root |
+  root := self _plantRoot: aBase.
+  foreignLinks at: (self keyText: root) put: (self keyText: aBase).
+  ^ root.
+
+PBSim >> _plantRoot: aBase
+  offsets := offsets + 1.
+  ^ PBLabeledRoot label: aBase label
+    record: (PBRootRecord segment: (self nodeAt: ids first) segment offset: offsets epoch: aBase epoch + 1).
+
+"anId publishes aRoot as its committed root, as its shell performs a PBPublishCommitted effect
+ (applyPublishCommitted:: the checker notes the root, the published keys record it)."
+PBSim >> publish: aRoot at: anId
+  | was |
+  was := current.
+  current := self nodeAt: anId.
+  self applyPublishCommitted: (PBPublishCommitted root: aRoot).
+  current := was.
+
+"The unchanged root aToken's re-commit replicated (proto_db _commit_base), nil when it had none."
+PBSim >> recommitRootOf: aToken
+  ^ recommitRoots at: aToken ifAbsent: [nil].
 
 "The keys of every root any node published as committed, in no order (a fresh Set)."
 PBSim >> publishedKeys
   ^ published copy.
 
 "The history of the commits as the live nodes' committed chains show it (a PBSimHistory): a
- node's tokens are those whose commit wrote a root of its chain (its root, or the unchanged root
- of its re-commit), and a root of its chain that the simulator did not build, no log held and
+ node's tokens are those whose commit wrote a root of its chain (its own root; never the unchanged
+ root of its re-commit, which holds none of its effect), and a root of its chain that the simulator did not build, no log held and
  no script persisted (isKnownRoot:) is the stray token 'root <key>'; acknowledged as the simulator
  recorded; unknown: #unknown, and #pending (a commit no one answered: its node's incarnation
  is gone, or it is still running); none: #none and #failed (an error other than an unknown
@@ -766,7 +809,7 @@ PBSim >> publishedKeys
 PBSim >> history
   | live present history seen tokensOf |
   live := ids select: [:id | (self nodeAt: id) isUp].
-  "The tokens whose commit wrote each root: its root, or its re-commit's (writerOf:)."
+  "The tokens whose commit wrote each root: its own built roots (writerOf:, rootOf:)."
   tokensOf := Dictionary new.
   writers keysAndValuesDo: [:k :token | (tokensOf at: k ifAbsentPut: [Set new]) add: token].
   commitRoots keysAndValuesDo: [:token :root | (tokensOf at: (self keyText: root) ifAbsentPut: [Set new]) add: token].
@@ -1177,7 +1220,7 @@ PBSim >> _settle: aWaiter outcome: anOutcome at: aNode
   permission := aWaiter at: 3.
   stage = 'base' ifTrue: [^ self _based: token decision: anOutcome permission: permission at: aNode].
   stage = 'recommit' ifTrue: [
-    anOutcome = #committed ifTrue: [^ self _build: token on: (commitRoots at: token) permission: permission step: nil at: aNode].
+    anOutcome = #committed ifTrue: [^ self _build: token on: (recommitRoots at: token) permission: permission step: nil at: aNode].
     ^ self _replicated: token outcome: anOutcome permission: permission at: aNode].
   stage = 'replicate' ifTrue: [^ self _replicated: token outcome: anOutcome permission: permission at: aNode].
   ^ Error signal: 'PBSim: settled an unknown waiter ' , aWaiter printString.
@@ -1199,8 +1242,8 @@ PBSim >> _based: aToken decision: anOutcome permission: aPermission at: aNode
   anOutcome needsCommit ifFalse: [^ self _build: aToken on: base permission: aPermission step: nil at: aNode].
   "proto_db _commit_base: an unchanged root on the base, labelled with the term, epoch + 1."
   root := self _newRoot: aPermission on: base step: 1 at: aNode.
-  commitRoots at: aToken put: root.
-  writers at: (self keyText: root) put: aToken.
+  "No writer: the unchanged root holds none of aToken's effect; aToken's own root is built on it."
+  recommitRoots at: aToken put: root.
   self _trace: aNode id , ' re-commits ' , (PBCoreValue textOf: base) , ' as ' , (PBCoreValue textOf: root)
     , ' for ' , aToken printString.
   ^ self _schedule: #dispatch node: aNode
