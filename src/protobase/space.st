@@ -16,7 +16,7 @@ ProtoBase's ObjectSpace, Database, Snapshot and HistoryEntry
   aSpace coordinator                        c, or nil without a cluster
   aSpace listDatabases                      the database names, sorted
   aSpace newDatabase: aName                 creates the database (version 0)
-                                            through the space's publisher and
+                                            through the space's round runner and
                                             answers it; an existing name is
                                             PBValidationError
   aSpace openDatabase: aName                the PBDatabase; an absent name is
@@ -52,7 +52,7 @@ Import from: 'protobase/avl'.
 Import from: 'protobase/collections'.
 Import from: 'protobase/records'.
 Import from: 'protobase/roots'.
-Import from: 'protobase/publisher'.
+Import from: 'protobase/round'.
 Import from: 'protobase/cluster/tier'.
 
 Object subclass: #_PBNameCheck.
@@ -64,7 +64,7 @@ _PBNameCheck class >> check: aName what: aWhat
 
 "=== PBObjectSpace ============================================================"
 
-Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed publisher coordinator tier'.
+Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed runner coordinator tier'.
 
 PBObjectSpace class >> registerAtomClass: aClass
   ^ PBTypeRegistry register: aClass.
@@ -116,7 +116,7 @@ PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds coordinator: aC
   coordinator := aCoordinator.
   tier := aTier.
   closed := Atom on: false.
-  publisher := (PBPublisher space: self) asActor.
+  runner := PBRoundRunner space: self.
   ^ self.
 
 "The cluster coordinator of the space, nil for a space opened without one (proto_db coordinator)."
@@ -134,35 +134,32 @@ PBObjectSpace >> isClosed
   ^ closed value.
 
 "The first wait between two attempts to take the root lock, and the longest,
- in milliseconds (ProtoBase FileStorage._acquire_process_lock: 0.001 s
+ in milliseconds: the round runner's (PBRoundRunner firstLockDelay and
+ longestLockDelay; ProtoBase FileStorage._acquire_process_lock: 0.001 s
  doubling up to 0.05 s)."
 PBObjectSpace class >> firstLockDelay
-  ^ 1.
+  ^ PBRoundRunner firstLockDelay.
 
 PBObjectSpace class >> longestLockDelay
-  ^ 50.
+  ^ PBRoundRunner longestLockDelay.
 
-"Sends one publish attempt to the publisher (aBlock: the publisher proxy -> a
- Future of true when published, false when the root lock is held) until one
- publishes. Between attempts the caller waits, never the publisher (ruling
- R19; publisher.st): (Future after: d) wait, d from firstLockDelay doubling up
- to longestLockDelay, until lockTimeout milliseconds have passed on the
- monotonic clock, then PBTimeoutError (ProtoBase's message, in milliseconds).
- An error of an attempt ends the loop. Inside an actor these waits are nested
- in blocks, so they block the caller's worker, which helps other actors
- meanwhile; the publisher is never buried under them, because it never
- waits."
-PBObjectSpace >> _untilPublished: aBlock
-  | deadline delay remaining |
-  deadline := Time millisecondClockValue + lockTimeout.
-  delay := PBObjectSpace firstLockDelay.
-  [(aBlock value: publisher) wait] whileFalse: [
-    remaining := deadline - Time millisecondClockValue.
-    remaining <= 0 ifTrue: [
-      ^ PBTimeoutError signal: 'Could not acquire the root lock within ' , lockTimeout printString
-        , ' ms (held by another process or storage)'].
-    (Future after: (delay min: remaining)) wait.
-    delay := delay * 2 min: PBObjectSpace longestLockDelay].
+"The deadline of a commit queued now: lockTimeout milliseconds later on the
+ monotonic clock, in microseconds (CC10: each queued commit keeps its own
+ deadline from the moment it was queued)."
+PBObjectSpace >> _deadline
+  ^ Time microsecondClockValue + (lockTimeout * 1000).
+
+"Queues anEntry (a PBCommitEntry) on the space's round runner and waits for
+ its outcome: true when published; the entry's error otherwise
+ (PBTimeoutError when the root lock was not taken by its deadline). The
+ runner owns the lock retry and never waits (round.st, CC10); this wait is
+ the caller's only one. Inside an actor it is nested in blocks
+ (PBTransaction >> commit), so it blocks the caller's worker, which helps
+ other actors meanwhile. A failure of the enqueue itself rejects the entry's
+ Future, so this wait always ends."
+PBObjectSpace >> _commitEntry: anEntry
+  (runner enqueue: anEntry) catch: [:e | anEntry future rejectWith: e].
+  ^ anEntry future wait.
 
 PBObjectSpace >> _checkOpen
   closed value ifTrue: [^ PBClosedError signal: 'PBObjectSpace is closed'].
@@ -211,12 +208,12 @@ PBObjectSpace >> listDatabases
   ^ _PBNames sorted: root databases keys.
 
 "Creates the database aName and answers it (ProtoBase new_database): the
- publisher commits its version 0 (PBPublisher >> createDatabase:). An existing
- name is PBValidationError."
+ round runner commits its version 0 (a PBCommitEntry createDatabase:,
+ PBPublisher >> _newDatabase:on:). An existing name is PBValidationError."
 PBObjectSpace >> newDatabase: aName
   _PBNameCheck check: aName what: 'database'.
   self _checkOpen.
-  self _untilPublished: [:p | p createDatabase: aName].
+  self _commitEntry: (PBCommitEntry createDatabase: aName deadline: self _deadline).
   ^ PBDatabase basicNew _setSpace: self name: aName.
 
 PBObjectSpace >> openDatabase: aName
@@ -227,12 +224,13 @@ PBObjectSpace >> openDatabase: aName
 
 "Closes the space and its storage. Idempotent. With a coordinator, its tier is
  detached first and the node's acceptor log closed (proto_db close); the
- coordinator keeps running. The storage is closed by the publisher, after the
- commits sent to it before (store.st: a close never interrupts a publish)."
+ coordinator keeps running. The storage is closed by the round runner, after a
+ round of the commits queued before (store.st: a close never interrupts a
+ publish)."
 PBObjectSpace >> close
   (closed value: true ifCurrent: false) ifFalse: [^ self].
   [tier isNil ifFalse: [[(coordinator _detach: tier) wait] ensure: [tier close]]]
-    ensure: [publisher closeStorage wait].
+    ensure: [runner closeStorage wait].
 
 PBObjectSpace >> printOn: aStream
   aStream nextPutAll: 'PBObjectSpace('; print: storage; nextPut: $).

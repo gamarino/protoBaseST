@@ -124,8 +124,8 @@ directory sync that follows it, the outcome of that publish is unknown until
 space.root is read again (the publisher's step 8, publisher.st).
 
 One writer at a time. The write operations (pushAtom:, flushSegment,
-replaceRoot:) are made by one actor, the space's publisher (publisher.st),
-one at a time; the storage takes no lock to serialise them. A write operation
+replaceRoot:) are made by one actor, the space's round runner (round.st),
+through its publisher (publisher.st), one round at a time; the storage takes no lock to serialise them. A write operation
 that starts while another is in progress on the same storage is refused at
 once with PBUserError and writes nothing (the storage state, an Atom changed
 by compare-and-swap: a refusal, never a wait). close never waits either, and
@@ -656,7 +656,7 @@ PBFileStorage >> refTo: aSegmentBytes offset: anOffset tag: aTag
  past the rename a publish completes and is reported. The token identifies the
  write operation, not an actor: protoST has no actor identity, so the root
  lock, like the writes, belongs to the storage; one actor (the space's
- publisher) makes its writes."
+ round runner, through its publisher) makes its writes."
 
 "Saves anAtom into this storage, with every atom it refers to that is not
  saved yet, dependents first (PBAtom >> _saveInto:), and answers its

@@ -59,8 +59,9 @@ ProtoBase's order: the name, then the value, then the state.
 
 Ending:
 
-  aTransaction commit             publishes the writes through the space's
-                                  publisher (publisher.st) and waits for it;
+  aTransaction commit             queues the commit on the space's round
+                                  runner (round.st) and waits for its
+                                  outcome;
                                   with no writes, publishes nothing (plan call
                                   C16); the transaction ends either way:
                                   committed, or aborted after a failure
@@ -81,7 +82,8 @@ invalid name is PBValidationError in any state.
 
 The commit (design spec 7.3; ProtoBase _build_root, _merged and
 _check_mutables), built by the publisher under the root lock with
-_buildOn:. When the root read under the lock is the transaction's snapshot,
+_buildOn:, on the root the previous commit of its group produced (group
+commit, proto_db D52). When the root read under the lock is the transaction's snapshot,
 nothing changed. Otherwise every read token must equal the token of the same
 name in the current version, every blindly set cell must still exist, and
 the database must still exist: PBConflictError otherwise. The new version
@@ -120,6 +122,7 @@ Import from: 'protobase/registry'.
 Import from: 'protobase/collections'.
 Import from: 'protobase/roots'.
 Import from: 'protobase/space'.
+Import from: 'protobase/round'.
 
 "=== _PBNameMap, _PBReadMap, _PBWriteMap ======================================="
 
@@ -546,22 +549,28 @@ PBTransaction >> abort
   bookkeeping swap: [:st | st checkActive withState: #aborted].
 
 "Commits the writes (design spec 7.3): the space's publisher validates the
- reads against the newest root, merges, saves and publishes. This call sends
- it attempts and waits for each (PBObjectSpace >> _untilPublished:): while the
- root lock is held by another holder, it waits and tries again, the publisher
- never does (ruling R19). Inside an actor these waits are nested in ensure:,
- so they block the actor's worker, which helps other actors meanwhile; they do
- not suspend the actor. A transaction with no writes publishes nothing (plan
- call C16). PBConflictError when a root or cell it read changed, or a merge
- conflicts; PBTimeoutError when the root lock is not taken within the space's
- lockTimeout; PBOutcomeUnknownError when the publish failed and its outcome
- could not be decided. The transaction ends either way: committed, or aborted
- after a failure (ProtoBase commit)."
+ reads against the newest root, merges, saves and publishes. This call queues
+ the commit on the space's round runner as a PBCommitEntry (round.st) and
+ waits for its Future (PBObjectSpace >> _commitEntry:): the runner decides
+ the commits queued together as one group (proto_db D52) and, while the root
+ lock is held by another holder, retries with timers until the commit's
+ deadline, lockTimeout after it was queued (CC10); it never waits (ruling
+ R19). Inside an actor the wait here is nested in ensure:, so it blocks the
+ actor's worker, which helps other actors meanwhile; it does not suspend the
+ actor. willRetry is false: the standalone round does not use it (the
+ cluster round of Task 23 does). A transaction with no writes publishes
+ nothing (plan call C16). PBConflictError when a root or cell it read
+ changed, or a merge conflicts; PBTimeoutError when the root lock is not
+ taken within the space's lockTimeout; PBOutcomeUnknownError when the
+ publish failed and its outcome could not be decided. The transaction ends
+ either way: committed, or aborted after a failure (ProtoBase commit)."
 PBTransaction >> commit
-  | st committed |
+  | st committed space |
   bookkeeping swap: [:current | st := current checkActive. current withState: #committing].
   committed := false.
-  [st hasNoWrites ifFalse: [database space _untilPublished: [:publisher | publisher commit: self]].
+  space := database space.
+  [st hasNoWrites ifFalse: [
+     space _commitEntry: (PBCommitEntry transaction: self willRetry: false deadline: space _deadline)].
    committed := true]
     ensure: [bookkeeping swap: [:current | current withState: (committed ifTrue: [#committed] ifFalse: [#aborted])]].
 

@@ -2,6 +2,24 @@
 
 ## 0.2.0 (unreleased)
 
+- Group commit on a standalone storage (Task 22, `proto_db` D52 and `_standalone_round`), with
+  the shared round runner (`round.st`). Every commit and every new database is a
+  `PBCommitEntry` (`transaction:willRetry:deadline:`, `createDatabase:deadline:`, `future`)
+  queued on the space's `PBRoundRunner`, an actor that replaces the publisher proxy and
+  `PBObjectSpace >> _untilPublished:`; `commit` waits only on the entry's `Future`. A round takes
+  the whole queue and calls `PBPublisher >> publishGroup:` (which replaces `commit:` and
+  `createDatabase:`): each entry's atoms saved, one root lock, one root read, each entry built on
+  the root the previous build saved (a build error fails that entry alone), one flush, one
+  publish with the epoch plus one, the step-8 outcome applied to the round; a failure of the
+  lock, root read, flush or publish reaches every built entry. A lone entry runs exactly the
+  single-commit protocol (`bytes_pinned.st` unchanged). A held root lock is retried by the
+  runner with `Future after:` (1 ms doubling to 50 ms); each entry keeps the `lockTimeout`
+  deadline it was queued with and then ends in `PBTimeoutError` (the same message). The runner
+  never waits (CC10). A result that is not a decision is `PBOutcomeUnknownError`, never a
+  success. Tests: `tests/unit/round_group_commit.st`, `tests/unit/round_lock_retry.st` (a peer
+  process holds `space.lock`: `tests/unit/_hold_lock.st`). Deviations:
+  [deviations.md](docs/deviations.md).
+
 - The shared tier and the cluster storage mode (Task 21, `cluster/tier.st`, `proto_db`'s
   `PlainTier` and `_node_log`). `PBFileStorage clusterPath:` (and `clusterPath:segmentMaxBytes:`,
   `isClusterMode`) opens the storage of a cluster node: `cluster/` and cluster roots are

@@ -48,6 +48,8 @@ _PBPlace>>_setPointer:storage:
 PBIndexedCollection>>_setLog:complete:
 _PBOpLog>>_setPrevious:op:
 PBPublisher>>_setSpace:
+PBCommitEntry>>_setTransaction:name:willRetry:deadline:
+PBRoundRunner>>_setSpace:publisher:queue:scheduled:delay:proxy:
 PBLogScan>>_setPayloads:validEnd:torn:
 PBFramedLog>>_setPath:file:payloads:
 PBPeer>>_setNodeId:host:port:

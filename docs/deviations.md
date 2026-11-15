@@ -146,13 +146,34 @@ explicit.
   `ProtoUnexpectedError`). Same class, earlier refusal, no stray lock file. A lock held
   elsewhere is `PBUserError` naming the lock file (cluster plan, Review Focus 3), where `proto_db`
   raises `ProtoLockingError`; a log with two hard links is `PBLockingError`, as `proto_db`.
-- **The caller owns the lock backoff, and it blocks the caller's worker.** The publisher never
-  waits (ruling R19): an attempt that finds the root lock held answers at once, and the
-  committing caller waits 1 ms, doubling to 50 ms, until `lockTimeout`. That wait sits in a
-  `whileFalse:` block, so it blocks the caller's worker thread instead of suspending the actor
-  (protoST question K23, open, see below). It is bounded and only happens while
-  another *process* holds the lock; while it waits, the worker still serves other actors.
-- **Group commit** (`proto_db` D52) is not implemented: every publish is a group of one.
+- **The round runner owns the lock retry (CC10).** `proto_db`'s round holds the root lock with
+  `root_lock(lock_timeout)`, which blocks the runner's thread. Here neither the round runner nor
+  the publisher ever waits (ruling R19): a round that finds the root lock held answers `#locked`
+  at once, and the runner schedules the next round with `Future after:` (1 ms, doubling to
+  50 ms, `proto_db`'s `_acquire_process_lock` steps). Each queued commit keeps its own
+  `lockTimeout` deadline from the moment it was queued, and ends in `PBTimeoutError` with
+  `proto_db`'s message once it has passed; `proto_db` measures one `lock_timeout` per round, from
+  the start of the round's wait. The committing caller waits only on its commit's `Future`. The
+  lock backoff no longer blocks the caller's worker (the deviation that it did is removed, and so
+  is that part of K23): the caller's single `wait` is nested in `ensure:` and so still blocks its
+  worker, as any `Future` wait inside a block does in protoST, while the worker serves other
+  actors. *Cost:* a commit queued while a retry timer is pending starts at that timer (at most
+  50 ms later), where `proto_db` would join the round after the one waiting for the lock.
+- **Group commit** (`proto_db` D52, ruling R71) is implemented, as `_standalone_round` at
+  v2.0.0rc3 (cluster plan Task 22): one round takes every queued commit, saves each one's written
+  atoms (a failure is that commit's alone, as each `proto_db` thread saves its own before it
+  joins the group), holds the root lock once, reads the root once, builds each commit on the root
+  the previous build saved (a build error is that commit's alone), and makes the last root
+  durable with one flush and one publish; a failure of the lock, the root read, the flush or the
+  publish reaches every built commit (each `wait` re-signals its own copy of the error, as
+  `proto_db` raises a copy in each thread), and the step-8 outcome of a failed publish is the
+  round's. A commit alone in the queue runs exactly the single-commit protocol (the bytes of
+  `tests/unit/bytes_pinned.st` are unchanged). The round is a message of the runner actor, so a
+  group is what was queued while the previous round ran; `proto_db`'s group is what was queued
+  while the previous runner held the group. The R148 change to `transactions.py` (`88ca21d`,
+  the `_Ending` marker of a kept permission being ended) touches only the cluster round's kept
+  permissions (`_take_kept`, `_keep`, `_drop_kept`, `_run_round`), not `_standalone_round`: it
+  has no counterpart here (Task 23 owns the cluster half).
 - **One storage failure ends writing through that storage** (`isFailed`), like `proto_db`'s, but triggered by any write error (see decisions, Task 17); reopen
   the space. Reads keep working.
 - **Step 8 of a failed publish.** A root at a different epoch is `PBConflictError`, as
@@ -757,9 +778,10 @@ requires; one question is still open and one observation was not a bug:
 - **K23 (open question for protoST, not yet filed):** an actor that blocks its worker in a
   `Future` wait can raise `deadlock:` while another actor on that worker waits for it. Whether
   the detection is a false positive is not settled. The pattern that raised it here was a
-  publisher backing off inside its actor (now removed, ruling R19). What remains is the caller's
-  lock backoff, which is bounded and only runs while another process holds the lock; while it
-  waits, its worker still serves other actors. **Not reproduced with Futures settled by network
+  publisher backing off inside its actor (now removed, ruling R19). The caller's lock backoff
+  that followed is gone too (cluster plan Task 22, CC10: the round runner retries with timers);
+  what remains is the committing caller's single wait on its commit's `Future`, nested in
+  `ensure:`, which blocks its worker while the worker still serves other actors. **Not reproduced with Futures settled by network
   events** (Task 1 of the cluster plan, 2026-11-13, protoST 0.10.0 on protoCore 3.6.0):
   `tests/week0/k23_network_settled_futures.st` has 64 actors waiting nested (blocking their
   worker) and 64 waiting at the top level of their method on Futures a hub actor hands out and a

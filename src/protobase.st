@@ -33,6 +33,7 @@ Import from: 'protobase/records'.
 Import from: 'protobase/indexes'.
 Import from: 'protobase/roots'.
 Import from: 'protobase/publisher'.
+Import from: 'protobase/round'.
 Import from: 'protobase/cluster/tier'.
 Import from: 'protobase/space'.
 Import from: 'protobase/transactions'.

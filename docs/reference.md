@@ -50,18 +50,20 @@ There is no `asOf:`: `proto_db` has none either (tutorial, section 12).
 
 ### PBObjectSpace
 
-A directory holding databases, and the process-wide registry of record classes. One publisher
-actor per space serialises commits (`publisher.st`); it takes the OS lock on `space.lock`, the
-format's inter-process protocol, and no other lock exists in the protoST layer.
+A directory holding databases, and the process-wide registry of record classes. One round
+runner actor per space (`PBRoundRunner`, `round.st`) serialises commits and decides the commits
+queued together as one group (group commit, `proto_db` D52) through the space's publisher
+(`publisher.st`); it takes the OS lock on `space.lock`, the format's inter-process protocol, and
+no other lock exists in the protoST layer.
 
 | Message | Meaning |
 |---|---|
 | `PBObjectSpace class >> storage: aStorage` | Space over a storage, with the default lock timeout (30000 ms). `PBValidationError` if not a storage. |
-| `PBObjectSpace class >> storage: aStorage lockTimeout: ms` | The same, with a positive SmallInteger of milliseconds. A commit waits at most that long for the root lock, then `PBTimeoutError`. |
+| `PBObjectSpace class >> storage: aStorage lockTimeout: ms` | The same, with a positive SmallInteger of milliseconds. A commit waits at most that long for the root lock, counted from the moment it is queued, then `PBTimeoutError`. |
 | `PBObjectSpace class >> storage: aClusterStorage coordinator: aCoordinator`, `storage:coordinator:lockTimeout:` | A space of a cluster node: the storage opened with `PBFileStorage clusterPath:`, the coordinator a started `PBClusterCoordinator`. The node's `PBSharedTier` is attached to the coordinator before the space is answered (a refused attach closes the tier and is signalled). `PBValidationError` for a storage not in cluster mode; `storage:` refuses a cluster-mode storage. `close` detaches the tier and closes the node's acceptor log; the caller owns the coordinator (it keeps running). |
 | `PBObjectSpace class >> registerAtomClass: aClass` | Registers an application record class under its `typeName` and `typeAliases` (`PBTypeRegistry register:`). Process-wide, as `proto_db`'s `register_atom_class`. `PBValidationError` for a name already taken, outside the grammar, or a `proto_db.` name outside the built-in table. |
 | `PBObjectSpace class >> defaultLockTimeout` | 30000. |
-| `firstLockDelay`, `longestLockDelay` (class) | 1 and 50 ms: the caller's backoff while the root lock is held. |
+| `firstLockDelay`, `longestLockDelay` (class) | 1 and 50 ms: the round runner's retry delays while the root lock is held (`PBRoundRunner class >> firstLockDelay`, `longestLockDelay`). |
 | `listDatabases` | The names of the databases, sorted, as an Array. |
 | `newDatabase: aName` | Creates database `aName` (version 0, empty) and answers it. `PBValidationError` if it exists. |
 | `openDatabase: aName` | Answers the existing database. `PBValidationError` if absent. |
@@ -128,7 +130,7 @@ only writes segments it created (`#create #exclusive`), and appended bytes are n
 ### PBTransaction
 
 Created by `PBDatabase >> newTransaction`, `newTransactionDo:` and `run:`. It reads the version
-current when it started, records what it reads, and commits through the space's publisher.
+current when it started, records what it reads, and commits through the space's round runner.
 States: active, committing, committed, aborted. After `commit` or `abort`, every message but
 `isActive`, `database` and `printOn:` is `PBUserError`.
 
@@ -149,17 +151,26 @@ States: active, committing, committed, aborted. After `commit` or `abort`, every
 | `abort` | Ends the transaction without publishing. |
 | `readSet`, `mutableReadSet` | A `PBFrozenDict` of name to token. For tests and diagnosis. |
 
-**Commit.** The publisher reads `space.root` under the root lock and validates every read token
-and every blindly set cell against it (`PBConflictError`). It builds the new version from the
-*current* roots. A root written but neither read nor replaced is merged when the value is a
-collection with a complete operation log (`rebaseOnto:`); otherwise the last writer wins.
-Mutable cells are never merged. Atoms are saved before the lock is taken, once. A commit with no
-writes publishes nothing. A failed commit leaves the transaction aborted. If the lock is held,
-the caller retries from 1 ms, doubling to 50 ms, until the space's `lockTimeout`
-(`PBTimeoutError`); the publisher itself never waits, because an actor must not block its worker.
-When a publish fails, `space.root` is read again: its own root means success; the root it built
-on means nothing was published (the original error); another root is `PBConflictError`; a root
-that cannot be read is `PBOutcomeUnknownError`.
+**Commit.** `commit` queues a `PBCommitEntry` on the space's round runner and waits for its
+`Future`. A round takes every commit queued (group commit, `proto_db` D52): the publisher saves
+each commit's written atoms, takes the root lock once and reads `space.root` once, then builds
+each commit in queue order on the root the previous build produced, validating every read token
+and every blindly set cell against it (`PBConflictError`, for that commit alone: conflicts inside
+a group are those of sequential commits). It builds each new version from the *current* roots.
+A root written but neither read nor replaced is merged when the value is a collection with a
+complete operation log (`rebaseOnto:`); otherwise the last writer wins. Mutable cells are never
+merged. Atoms are saved before the lock is taken, once. The round ends with one flush and one
+publish: the storage epoch advances once per round, and every commit keeps its own version in
+the history. A commit alone in the queue runs exactly the single-commit protocol (the same
+bytes). A commit with no writes publishes nothing. A failed commit leaves the transaction
+aborted. If the lock is held, the runner retries the round from 1 ms, doubling to 50 ms; each
+commit ends in `PBTimeoutError` once the space's `lockTimeout` has passed since it was queued.
+Neither the runner nor the publisher ever waits, because an actor must not block its worker
+(only the committing caller waits, on its `Future`). When a publish fails, `space.root` is read
+again: its own root means success; the root it built on means nothing was published (the
+original error); another root is `PBConflictError`; a root that cannot be read is
+`PBOutcomeUnknownError`. That outcome, and a failure of the lock, of the root read or of the
+flush, reaches every commit of the round that was not already decided.
 
 ## Mutable objects
 
@@ -875,12 +886,18 @@ For tests, tools and readers of the format. An application does not need them.
   `describeMutables:`, `describeIndexes:`, `describeOrigin:`, `dumpSpace:to:` (the JSON of
   `proto_db`'s verifier `--out`), `jsonText:`, `build:`, `describeRaw:`, `floatHex:`,
   `floatFromHex:`.
-- **`PBPublisher`**: the actor that commits (`space:`, `commit:`, `createDatabase:`,
+- **`PBPublisher`**: the publish protocol of a space's commits, owned by its round runner
+  (`space:`, `publishGroup:`: one result per entry, `true`, an `Exception` or `#locked`;
   `closeStorage`).
+- **`PBRoundRunner`** (`round.st`): the space's commit queue, an actor (`space:` answers the
+  proxy; `enqueue:` answers the entry's `Future`; `closeStorage`; `firstLockDelay`,
+  `longestLockDelay`). **`PBCommitEntry`**: `transaction:willRetry:deadline:`,
+  `createDatabase:deadline:` (the deadline in monotonic microseconds), `future`, `transaction`,
+  `databaseName`, `isCreateDatabase`, `willRetry`, `deadline`, `writtenAtoms`.
 
 ## The module and its files
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
 `notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
-`space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
+`round`, `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar`, `uuid` and `net`.
