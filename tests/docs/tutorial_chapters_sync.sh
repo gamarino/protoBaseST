@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# The chapters of docs/tutorial/ quote the programs of examples/tutorial/, and must keep quoting
-# them exactly. A chapter names its programs in comments, "<!-- example: examples/tutorial/X -->";
+# The chapters of docs/tutorial/ quote the programs of examples/tutorial/ (and the cluster chapters,
+# 13-16, those of examples/cluster/), and must keep quoting them exactly. A chapter names its
+# programs in comments, "<!-- example: examples/tutorial/X -->" or "examples/cluster/X"; a cluster
+# program that needs an API not built yet lives in examples/cluster/pending/ as X.st.pending, which
+# the test runner does not run (its README lists them and the plan task each one waits for);
 # every non-blank line of every ```smalltalk and ```python block of the chapter must appear, in
 # order within the block, in one of the programs it names. A program edited without its chapter,
 # or the reverse, fails here. The programs themselves run as tests (tests/run_tests.sh), so the
 # quoted code runs. Every numbered chapter must name at least one program that exists, and every
-# lesson of examples/tutorial must be named by a chapter. Scope: code blocks only, not prose.
+# lesson of examples/tutorial and examples/cluster (pending ones included) must be named by a chapter. Scope: code blocks only, not prose.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -20,9 +23,9 @@ if not chapters:
 for chapter in chapters:
     rel = os.path.relpath(chapter, repo)
     text = open(chapter, encoding="utf-8").read()
-    programs = re.findall(r"<!-- example: (examples/tutorial/[^ ]+) -->", text)
+    programs = re.findall(r"<!-- example: (examples/(?:tutorial|cluster)/[^ ]+) -->", text)
     if not programs:
-        bad.append("%s names no program (<!-- example: examples/tutorial/... -->)" % rel)
+        bad.append("%s names no program (<!-- example: examples/tutorial/... or examples/cluster/... -->)" % rel)
     sources = {}
     for p in programs:
         path = os.path.join(repo, p)
@@ -53,7 +56,9 @@ for chapter in chapters:
                        % (rel, first[0], " or ".join(programs) or "any program", first[1].strip()))
         blocks_checked += 1
 lessons = sorted(os.path.relpath(f, repo) for f in glob.glob(os.path.join(repo, "examples/tutorial/[0-9][0-9]_*"))
-                 if f.endswith(".st") or f.endswith(".sh"))
+                 + glob.glob(os.path.join(repo, "examples/cluster/[0-9][0-9]_*"))
+                 + glob.glob(os.path.join(repo, "examples/cluster/pending/[0-9][0-9]_*"))
+                 if f.endswith(".st") or f.endswith(".sh") or f.endswith(".st.pending"))
 for lesson in lessons:
     if lesson not in named and not lesson.endswith(".sh"):
         bad.append("%s is not named by any chapter" % lesson)

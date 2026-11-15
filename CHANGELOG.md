@@ -2,6 +2,16 @@
 
 ## 0.2.0 (unreleased)
 
+- Tutorial chapters on cluster mode, `docs/tutorial/13-16`: the ideas (why a storage lock is not
+  enough, terms as ballots, permissions, the commit point, fencing, the startup grace, rejoin by
+  ballot, the R149 renewal back-off), a three-node cluster in one process and over TCP, failures
+  and recovery mapped to the tests that prove them, and operating a cluster (options, their
+  rules, the timer table, `stats`, what is not done or not proven). Their programs are
+  `examples/cluster/` (run by the tests); the programs that need cluster commits and reads
+  (Tasks 23-25) are in `examples/cluster/pending/` as `.st.pending` files, which the runner does
+  not run, and every chapter block taken from them is marked with the task it waits for.
+  `tests/docs/tutorial_chapters_sync.sh` now also checks the chapters against `examples/cluster/`.
+
 - Group commit on a standalone storage (Task 22, `proto_db` D52 and `_standalone_round`), with
   the shared round runner (`round.st`). Every commit and every new database is a
   `PBCommitEntry` (`transaction:willRetry:deadline:`, `createDatabase:deadline:`, `future`)
