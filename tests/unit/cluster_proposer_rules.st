@@ -1,4 +1,4 @@
-"EXPECT: ok 33"
+"EXPECT: ok 35"
 "The proposer's rules (cluster/proposer.st) called directly, one rule per check (proto_db
  coordinator.py permit, _become_owner, _open_attempt, _on_reply, _close_attempt, _back_off,
  release, _own_loop_body, _renew, the fairness hints).
@@ -40,7 +40,10 @@
  _close_attempt raises it to the driving caller); a held release, a cancel of another term and
  a repeat change nothing; a lone waiter's rejection ends the acquisition; a failure arriving while
  the next attempt is open keeps that attempt for the other waiters, and when it rejects the last
- waiter it closes that attempt with its cancel (no lost round) before the acquisition ends. (29) A failure of the
+ waiter it closes that attempt with its cancel (no lost round) before the acquisition ends, and
+ a waiter arriving next (before the own acceptor reports) opens an attempt above that term: no
+ requested term is reused; nor after a lost round whose replies never named its term (a timeout
+ with no reply, before the own acceptor reported). (29) A failure of the
  own renew of the current renewal ends the ownership without a release, abandoned and fenced
  (proto_db _own_loop); a late one changes nothing."
 Import from: 'protobase'.
@@ -423,6 +426,17 @@ c that: 'a cancel failure during the next attempt: kept for the other waiters; r
   equals: { #attempt. true. 1.
     #(#(#w1 'planted')). nil. #(). #(#PBSettle #PBToAcceptor #PBSend #PBSend). { { 'n0'. lone proposer attempt term. false }. { 'n2'. lone proposer attempt term. false } }. #().
     #(#(#w1 'planted')). #(#w2). #attempt. 1 }.
+other := step value: (PBPermitWanted waiter: #w3) value: pair state value: lone proposer startedAt + 2.
+c that: 'after the attempt is closed by a cancel failure, the next waiter opens an attempt above its term'
+  is: { (phase value: other state). other state proposer notNil and: [other state proposer attempt notNil
+      and: [other state proposer attempt term > lone proposer attempt term]].
+    (sends value: other) collect: [:e | e last] }
+  equals: { #attempt. true. #('request' 'request') }.
+lost := step value: (PBTimerFired token: att state proposer token event: #proposer) value: att state value: t0 + 250000.
+c that: 'after a lost round with no reply, the next attempt asks above its term'
+  is: { stat value: lost. (phase value: (opened value: lost)). [:st | st proposer notNil and: [st proposer attempt notNil
+      and: [st proposer attempt term > 1]]] value: (opened value: lost) }
+  equals: { #('lost_attempts'). #attempt. true }.
 pair := failed value: renewMsg value: renewing value: t0 + 335000.
 other := failed value: (PBClusterMessage type: 'renew' from: 'n1' fields: { 'term' -> 1. 'rid' -> ((renewMsg at: 'rid') + 99). 'inc' -> 5.
   'vs' -> vs }) value: renewing value: t0 + 335000.
