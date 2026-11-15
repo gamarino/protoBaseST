@@ -179,13 +179,17 @@ PBRoundRunner >> _publishProxy: anActor
 
 "=== the messages (on the actor) =============================================="
 
-"Adds anEntry (a PBCommitEntry) to the queue, makes sure a round is coming,
- and answers the entry's Future. It runs no round itself."
+"Makes sure a round is coming, then adds anEntry (a PBCommitEntry) to the
+ queue, and answers the entry's Future. It runs no round itself. The round
+ posted runs after this method (one message at a time), so it finds the
+ entry queued. A failed post signals before the entry is queued: the entry is
+ never decided, and the caller is rejected with that error
+ (PBObjectSpace >> _commitEntry:), review n2."
 PBRoundRunner >> enqueue: anEntry
   (anEntry isKindOf: PBCommitEntry) ifFalse: [
     ^ PBValidationError signal: 'PBRoundRunner enqueue: a PBCommitEntry was expected, not ' , anEntry printString].
-  queue swap: [:entries | entries copyWith: anEntry].
   self _schedule.
+  queue swap: [:entries | entries copyWith: anEntry].
   ^ anEntry future.
 
 "Runs a round of what is queued (the entries queued before the close commit
@@ -234,8 +238,10 @@ PBRoundRunner >> _runRound
           settled at: i put: true.
           self _settle: entry with: result]]
        on: Error do: [:e |
+         "settled only once the rejection has returned (review n1): if even
+          the fallback fails, the last resort still covers this entry."
+         self _reject: entry with: [self _failure: e of: result while: 'settling the commit'].
          settled at: i put: true.
-         entry future rejectWith: (self _failure: e of: result while: 'settling the commit').
          e return: nil]].
    kept isEmpty ifTrue: [
      (results includes: #locked) ifFalse: [delay swap: [:d | PBRoundRunner firstLockDelay]].
@@ -265,12 +271,21 @@ PBRoundRunner >> _abandon: batch settled: settled results: results cause: anErro
     on: Error do: [:e | e return: nil].
   1 to: batch size do: [:i |
     (settled at: i) ifFalse: [
-      [(batch at: i) future rejectWith: (self _failure: anError
-          of: (results isNil ifTrue: [nil] ifFalse: [results at: i]) while: 'deciding the round')]
-        on: Error do: [:e |
-          (batch at: i) future rejectWith: (PBOutcomeUnknownError new
-            messageText: 'The commit round failed unexpectedly; the outcome of the commit is unknown'; yourself).
-          e return: nil]]].
+      [self _reject: (batch at: i) with: [self _failure: anError
+          of: (results isNil ifTrue: [nil] ifFalse: [results at: i]) while: 'deciding the round']]
+        on: Error do: [:e | e return: nil]]].
+
+"Rejects anEntry with the error anErrorBlock builds; when building it or the
+ rejection fails, with the fixed fallback (_fallbackError), which needs
+ nothing of the cause. A failure of that fallback rejection signals."
+PBRoundRunner >> _reject: anEntry with: anErrorBlock
+  [anEntry future rejectWith: anErrorBlock value]
+    on: Error do: [:e |
+      anEntry future rejectWith: self _fallbackError.
+      e return: nil].
+
+PBRoundRunner >> _fallbackError
+  ^ PBOutcomeUnknownError new messageText: 'The commit round failed unexpectedly; the outcome of the commit is unknown'; yourself.
 
 "The error of an entry whose round failed with anError while aString: the
  cause is named. PBUnexpectedError when the entry's result was #locked
@@ -301,10 +316,16 @@ PBRoundRunner >> _retryAfterLockFor: aCollection now: microseconds
   (Future after: ms) thenDo: [:x | actor _round].
 
 "Sends _round to the runner's own proxy unless a round is already coming (a
- message posted or a retry timer pending)."
+ message posted or a retry timer pending). scheduled is set only once the post
+ has returned: a post that fails leaves it false, so the next enqueue: posts
+ again (review n2)."
 PBRoundRunner >> _schedule
   scheduled value ifTrue: [^ self].
+  self _postRound.
   scheduled swap: [:old | true].
+
+"Posts a round to the runner's own proxy (a seam: a test makes it fail)."
+PBRoundRunner >> _postRound
   proxy value _round.
 
 PBRoundRunner >> _timeoutError
