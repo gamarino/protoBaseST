@@ -9,16 +9,22 @@
  (2) A message whose sender is not another member (an unknown id, or the node itself) is
  dropped and counted messages_ignored. (3) A re-attach keeps the lease activity and takes the
  new log: the terms seen are kept, the log is the new one, and the next promise is written to
- the new log (carry-over (b)); a second attach while attached is refused (PBUserError). (4) A done and a permit asked in that order are performed in
+ the new log (carry-over (b)); while a tier is attached, attaching it again is a no-op answering
+ true and attaching another is refused with PBValidationError (proto_db _attach_locked). (4) A done and a permit asked in that order are performed in
  order: the permit is issued once the done freed the permission (R148, carry-over (h)). (5) A
  forced rejoin does not outlive the log it was forced for (proto_db
  test_c2_audit_a_forced_rejoin_does_not_outlive_the_log_it_was_forced_for): forceRejoin,
  detach before it completes (the dispatcher marks the rejoin #detached, PBLogDetached),
  re-attach over a new empty log: the new rejoin is not forced.
- (6) A re-attach over the same disk builds a fresh PBLoggedRoots (N4): the rejoin runs over it
- (never left #detached) and completes once the peers run (proto_db
- test_c2_a_reattach_over_an_empty_disk_rejoins_by_ballot, over the shell; whether the round is
- plain or a ballot is the rules', cluster_rejoin_rules.st: here the peers report no history).
+ (6) A re-attach over an empty disk on a running coordinator rejoins by ballot (proto_db
+ test_c2_a_reattach_over_an_empty_disk_rejoins_by_ballot, over the shell, with a committed root
+ as the peers' history; its held-root variant is the simulator's, sim_rejoin.st R78a): the
+ re-attach builds a fresh PBLoggedRoots (N4), the rejoin is a ballot (rejoin_ballots counted)
+ and adopts the root the peers committed while the node was detached. The planted rules
+ SkipBallot (the plain round's answers complete the rejoin, R53/R54) complete it with no ballot,
+ so the ballot count tells the two apart. After a ballot, a permission under a term below it
+ replicates nothing (#none: proto_db replicate's ProtoConflictError, L14) until a term above the
+ ballot is live, so n0's next commit is retried until it commits.
  (7) A single-node cluster acquires and commits (proto_db
  test_single_node_cluster_acquires_and_releases). (8) A crashed holder: another member acquires
  after it, with a higher term (proto_db test_a_crashed_holder_blocks_others_until_its_lease_expires;
@@ -30,7 +36,42 @@ Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_cluster_shell'.
 
-| c kit three nodes tiers out p a b t1 t2 f s r q vs log1 log2 one late first0 |
+PBCoordinatorCore subclass: #SkipBallot.
+
+"The plain round's answers complete the rejoin: no ballot (the planted rules of check 6)."
+SkipBallot >> _ballotRound: aDecision answers: someAnswers in: s now: t effects: fx
+  ^ self _completeRejoin: aDecision answers: someAnswers ballot: 0 in: s now: t effects: fx.
+
+"Check 6 over rules aRules for n0: { rejoin_ballots before the re-attach. after. fresh log.
+ rejoin completed. n0's accepted root is the one the peers committed. n0 then commits }."
+Object subclass: #ReattachScenario.
+
+ReattachScenario class >> run: aRules
+  | three kit nodes t2 log1 before f committed out k |
+  k := 1.
+  three := #('n0' 'n1' 'n2').
+  kit := ShellKit ids: three.
+  nodes := three collect: [:id | id = 'n0'
+    ifTrue: [kit node: id options: Dictionary new rules: aRules acceptorClass: _PBAcceptor]
+    ifFalse: [kit node: id]].
+  nodes first start.
+  t2 := MemoryTier name: 'n0' trace: kit trace.
+  (nodes first _attach: t2) waitWithin: 60000.
+  log1 := nodes first acceptorState log.
+  (nodes first _detach) waitWithin: 60000.
+  (2 to: 3) do: [:i | (nodes at: i) start. ((nodes at: i) _attach: (MemoryTier served: (three at: i) trace: kit trace)) waitWithin: 60000].
+  committed := kit commitOn: (nodes at: 2) offset: 1.
+  before := nodes first stats at: 'rejoin_ballots'.
+  (nodes first _attach: t2) waitWithin: 60000.
+  f := kit waitUntil: [(nodes first stats at: 'rejoining') not].
+  out := { before. nodes first stats at: 'rejoin_ballots'. nodes first acceptorState log ~~ log1. f.
+    committed first = #committed and: [nodes first acceptorState accepted notNil
+      and: [nodes first acceptorState accepted key = (committed at: 3) key]].
+    kit waitUntil: [(kit commitOn: nodes first offset: (k := k + 1)) first = #committed] }.
+  kit stopAll: nodes.
+  ^ out.
+
+| same c kit three nodes tiers out p a b t1 t2 f s r q vs log1 log2 one late first0 |
 c := Check new.
 three := #('n0' 'n1' 'n2').
 
@@ -66,6 +107,8 @@ t1 := MemoryTier served: 'n0' trace: kit trace.
 (nodes first _attach: t1) waitWithin: 60000.
 log1 := nodes first acceptorState log.
 q := kit settle: (nodes first _attach: (MemoryTier served: 'n0' trace: kit trace)).
+same := kit settle: (nodes first _attach: t1).
+same := same , { nodes first acceptorState log == log1 }.
 out := kit commitOn: (nodes at: 2) offset: 2.
 f := kit waitUntil: [t1 payloads size > 1].
 s := nodes first acceptorState grants termsSeen.
@@ -77,9 +120,9 @@ a := nodes first acceptorState.
 "A new term (n0's own acquisition) needs a promise on the new log."
 r := kit commitOn: nodes first offset: 3.
 c that: 'a re-attach keeps the lease activity and takes the new log; the next promise goes to the new log'
-  is: { q first. (q at: 2) class name. out first. f. b == t1. log2 == log1. a grants termsSeen >= s. a loggedPromise. a isRejoined.
+  is: { q first. (q at: 2) class name. (q at: 2) messageText. same. out first. f. b == t1. log2 == log1. a grants termsSeen >= s. a loggedPromise. a isRejoined.
     r first. kit waitUntil: [t2 payloads anySatisfy: [:x | (PBAcceptorLog decode: { x } path: 'p') promise > 0]] }
-  equals: { #error. #PBUserError. #committed. true. true. false. true. 0. true. #committed. true }.
+  equals: { #error. #PBValidationError. 'This coordinator already serves another storage'. #(#ok true true). #committed. true. true. false. true. 0. true. #committed. true }.
 
 "(4) done, then permit, in order."
 p := (kit settle: nodes first _permit) at: 2.
@@ -110,17 +153,10 @@ b := kit waitUntil: [| r1 | r1 := nodes first nodeState rejoin. r1 notNil and: [
 c that: 'a forced rejoin does not outlive the log it was forced for'
   is: { a. f. q. b. nodes first nodeState rejoin isForced. nodes first stats at: 'rejoining' }
   equals: { true. true. true. true. false. true }.
-(nodes first _detach) waitWithin: 60000.
-log1 := nodes first nodeState rejoin log.
-(nodes first _attach: t2) waitWithin: 60000.
-b := kit waitUntil: [| r1 | r1 := nodes first nodeState rejoin. r1 notNil and: [r1 log == nodes first acceptorState log]].
-log2 := nodes first acceptorState log.
-(2 to: 3) do: [:i | (nodes at: i) start. ((nodes at: i) _attach: (MemoryTier served: (three at: i) trace: kit trace)) waitWithin: 60000].
-f := kit waitUntil: [(nodes first stats at: 'rejoining') not].
-c that: 'a re-attach over the same disk builds a fresh log and its rejoin completes once the peers run'
-  is: { b. log2 == log1. f. nodes first acceptorState isRejoined. (kit commitOn: nodes first offset: 1) first }
-  equals: { true. false. true. true. #committed }.
 kit stopAll: nodes.
+c that: 'a re-attach over an empty disk rejoins by ballot and adopts the root committed meanwhile; SkipBallot takes none'
+  is: { ReattachScenario run: PBCoordinatorCore new. ReattachScenario run: SkipBallot new }
+  equals: { { 0. 1. true. true. true. true }. { 0. 0. true. true. true. true } }.
 
 "--- (7) a single-node cluster ---"
 one := #('n0').

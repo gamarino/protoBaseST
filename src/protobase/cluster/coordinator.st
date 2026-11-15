@@ -43,8 +43,12 @@ core decides (spec 5.4).
                         gets PBAcceptorDiscarded and the acceptor PBAppendFailed, both built from
                         one reason (review m), so the tier fails for good (R57).
 
-The fence (proto_db fence, _check_healthy): any other error escaping either actor fences the
-node for the life of the process. The first reason is kept in an Atom; the node and acceptor
+Errors on the actors (proto_db _work and _on_message): a PBDBError a rule signals (proto_db's
+ProtoDBError: a protocol violation, a malformed value) is written to stderr and that message
+dropped, the node kept; a local request's waiter is rejected with it. The fence (proto_db fence,
+_check_healthy): any other error escaping either actor fences the node for the life of the
+process; the acceptor reads the fence from its Atom before each step, so an event queued before
+a dispatcher fence is never granted nor acknowledged. The first reason is kept in an Atom; the node and acceptor
 states take it (PBNodeState #fenced, PBAcceptorState withFenced:), so the acceptor refuses
 every grant, renewal and release (it sends nothing for them) and answers a replication with
 ack(ok = false); the dispatcher performs nothing more but that lane, and every waiter is
@@ -90,7 +94,7 @@ Object subclass: #_PBNodeCells instanceVariableNames: 'config node acceptorState
 "The names of the counters stats always reports (0 until counted): every PBCount of the rules,
  and messages_ignored, the shell's."
 _PBNodeCells class >> statNames
-  ^ #('accepted' 'acquired' 'attempts' 'config_mismatches' 'deferrals' 'deferral_timeouts' 'grants_given'
+  ^ #('accepted' 'acquired' 'attempts' 'config_mismatches' 'deferrals' 'deferral_timeouts' 'dispatch_slow' 'grants_given'
       'grants_refused_no_storage' 'lost_attempts' 'messages_ignored' 'ownerships' 'permit_requests_retried'
       'permit_requests_sent' 'permits_foreign_dropped' 'permits_held' 'permits_issued' 'permits_refused'
       'recoveries' 'refused' 'rejoin_ballots' 'rejoins' 'renewal_failures' 'renewals' 'replication_failures'
@@ -267,12 +271,28 @@ _PBDispatcher >> want: anEventBlock kind: aKind token: aToken future: aFuture
   event := [anEventBlock value: aToken value: cells node value] on: Error do: [:e | aFuture rejectWith: e. nil].
   event isNil ifTrue: [^ false].
   cells register: aToken kind: aKind future: aFuture.
-  ^ self handle: event.
+  ^ self _handle: event waiter: aToken.
 
-"One event: the rules' step, its state into the Atom, its effects in order. Any error fences
- the node (an error the rules signal included: the shell builds every event it dispatches, so
- none is the caller's misuse)."
+"Dispatches anEvent, then settles aFuture with true; rejected with PBClosedError once stopped,
+ with PBUnexpectedError once fenced, or with the PBDBError the rules signalled for it."
+_PBDispatcher >> post: anEvent future: aFuture
+  | token |
+  cells isStopped ifTrue: [aFuture rejectWith: cells closedError. ^ false].
+  cells isFenced ifTrue: [aFuture rejectWith: cells fencedError. ^ false].
+  token := cells nextToken.
+  cells register: token kind: #post future: aFuture.
+  (self _handle: anEvent waiter: token) ifTrue: [(cells take: token) ifNotNil: [:w | (w at: 2) resolve: true]].
+  ^ true.
+
+"One event: the rules' step, its state into the Atom, its effects in order."
 _PBDispatcher >> handle: anEvent
+  ^ self _handle: anEvent waiter: nil.
+
+"handle: (proto_db _on_message, _route): a PBDBError (proto_db's ProtoDBError) is written to
+ stderr and the event dropped, the node kept; when the event is a local request (aTokenOrNil, its
+ waiter), the waiter is rejected with it, as proto_db raises it to its caller. Any other error
+ fences the node. Answers whether the step was performed."
+_PBDispatcher >> _handle: anEvent waiter: aTokenOrNil
   | start failure |
   cells isStopped ifTrue: [^ false].
   cells isFenced ifTrue: [^ self _handleFenced: anEvent].
@@ -282,15 +302,20 @@ _PBDispatcher >> handle: anEvent
       cells node swap: [:old | step state].
       step effects do: [:e | e applyTo: self].
       nil]
-    on: Error do: [:e | e return: (cells describe: e)].
-  failure notNil ifTrue: [
-    self fence: 'the dispatcher, handling ' , anEvent printString , ': ' , failure.
-    ^ false].
+    on: Error do: [:e | e return: e].
   self _noteDispatch: Time microsecondClockValue - start.
-  ^ true.
+  failure isNil ifTrue: [^ true].
+  (failure isKindOf: PBDBError) ifFalse: [
+    self fence: 'the dispatcher, handling ' , anEvent printString , ': ' , (cells describe: failure).
+    ^ false].
+  cells warn: 'handling ' , anEvent printString , ' failed: ' , (cells describe: failure).
+  aTokenOrNil notNil ifTrue: [(cells take: aTokenOrNil) ifNotNil: [:w | (w at: 2) rejectWith: failure]].
+  ^ false.
 
+"The longest step, and the steps over 10 ms counted dispatch_slow (proto_db DISPATCH_SLOW)."
 _PBDispatcher >> _noteDispatch: someMicros
   cells dispatchMax swap: [:m | m max: someMicros].
+  someMicros > 10000 ifTrue: [cells count: 'dispatch_slow'].
 
 "A fenced node sends nothing (proto_db _enqueue, _refuse_queued): only a peer's replicate,
  store or query reaches the fenced acceptor, which acknowledges a replication with ok = false
@@ -379,15 +404,22 @@ _PBAcceptor >> _setCells: someCells rules: aRules tier: aTierAtom
   tier := aTierAtom.
   ^ self.
 
-"One acceptor event; an error that is not a tier write failure fences the node."
+"One acceptor event (proto_db _work). The fence is read from the shared Atom first: a fence the
+ dispatcher raised while this event was queued is adopted before anything is decided, so a
+ fenced node never grants nor acknowledges (proto_db _refusal reads _failure at decision time).
+ A PBDBError a rule signals (proto_db's ProtoDBError) is written to stderr and the message
+ dropped, the node kept; any other error fences it."
 _PBAcceptor >> handle: anEvent
   | failure |
   cells isStopped ifTrue: [^ false].
-  failure := [self _step: anEvent. nil] on: Error do: [:e | cells describe: e].
-  failure notNil ifTrue: [
-    self _fault: 'the acceptor, handling ' , anEvent printString , ': ' , failure.
+  cells isFenced ifTrue: [self fence: cells fence value].
+  failure := [self _step: anEvent. nil] on: Error do: [:e | e return: e].
+  failure isNil ifTrue: [^ true].
+  (failure isKindOf: PBDBError) ifTrue: [
+    cells warn: 'the acceptor, handling ' , anEvent printString , ', failed: ' , (cells describe: failure).
     ^ false].
-  ^ true.
+  self _fault: 'the acceptor, handling ' , anEvent printString , ': ' , (cells describe: failure).
+  ^ false.
 
 "The atomic acceptor step (CC2): the appends in order, then the state published, then the
  reply, then the step to the dispatcher. A failed append discards the step."
@@ -459,10 +491,17 @@ _PBAcceptor >> fence: aReason
 "Attaches aTier (proto_db attach, _attach_locked): a fresh PBLoggedRoots from its loadRoots (N4),
  the startupGrace check (L17), the acceptor state attached (carry-over (b)), then the start
  step over that log (the rejoined marker of a learner or lone voter, the committed root
- published), reported to the dispatcher. PBUserError when a tier is attached already."
+ published), reported to the dispatcher. The tier attached already: true at once (a no-op);
+ another while one is attached: PBValidationError, before its roots are loaded."
 _PBAcceptor >> attach: aTier
-  | loaded logged config restart |
+  | loaded logged config restart current |
   cells isStopped ifTrue: [^ cells closedError signal].
+  "proto_db _attach_locked 1092-1096, before load_roots: the tier attached already is a no-op,
+   another is refused (the storage identity proto_db also compares is Task 21's)."
+  current := tier value.
+  current notNil ifTrue: [
+    current == aTier ifTrue: [^ true].
+    ^ PBValidationError signal: 'This coordinator already serves another storage'].
   config := cells config.
   loaded := aTier loadRoots.
   logged := PBLoggedRoots accepted: loaded accepted committed: loaded committed promise: loaded promise top: loaded top
@@ -472,7 +511,6 @@ _PBAcceptor >> attach: aTier
     ^ PBValidationError signal: 'Node ' , config nodeId , ': startupGrace=' , (config startupGrace / 1000) printString
       , ' ms is accepted only on a cluster''s first start; this node''s acceptor log shows it has served the cluster before, so it may have granted a lease that is still running. Start it with a startupGrace of at least leaseDuration + driftMargin = '
       , (restart / 1000) printString , ' ms (the default)'].
-  "A second attach is refused by the state (attached: is PBUserError when a log is attached)."
   cells acceptorState swap: [:s | s attached: logged].
   tier value: aTier ifCurrent: nil.
   self handle: PBStartNode new.
@@ -511,8 +549,8 @@ _PBAcceptor >> probe: aRoot token: aToken
   readable := t notNil and: [[t canRead: aRoot] on: Error do: [:e | false]].
   cells dispatcher value handle: (PBRootProbed token: aToken readable: readable).
 
-"Answers once every acceptor step queued before it has run (mailbox order): an acceptance
- being logged finishes before stop answers."
+"Answers once the acceptor step in progress has run (mailbox order): an acceptance being logged
+ finishes before stop answers; the steps queued behind it are dropped (handle: once stopped)."
 _PBAcceptor >> finish
   ^ true.
 
@@ -610,8 +648,8 @@ PBClusterCoordinator >> isRunning
   ^ run value = #running and: [cells isStopped not].
 
 "Stops the node (proto_db stop): every pending Future settled (a replication in flight #unknown,
- the rest PBClusterCoordinator's PBClosedError), every acceptor step queued finished, then the
- transport stopped. Answers a Future that resolves (with true) once all that is done;
+ the rest PBClosedError), the acceptor step in progress finished (the steps queued behind the
+ stop are dropped, as proto_db's lanes return once not running), then the transport stopped. Answers a Future that resolves (with true) once all that is done;
  idempotent. Never waits."
 PBClusterCoordinator >> stop
   | current done d a |
@@ -629,9 +667,10 @@ PBClusterCoordinator >> stop
 
 "--- the tier ---"
 
-"Attaches aTier (Task 21's PBSharedTier, or a test double): a Future that resolves with true, or
- is rejected (PBValidationError for a startupGrace below leaseDuration + driftMargin over a log
- that is not empty, L17; PBUserError when a tier is attached; PBClosedError when not running)."
+"Attaches aTier (Task 21's PBSharedTier, or a test double): a Future that resolves with true (also
+ for the tier attached already, a no-op), or is rejected (PBValidationError for another tier
+ while one is attached, or for a startupGrace below leaseDuration + driftMargin over a log that
+ is not empty, L17; PBClosedError when not running)."
 PBClusterCoordinator >> _attach: aTier
   | f |
   self isRunning ifFalse: [f := Future new. f rejectWith: cells closedError. ^ f].
@@ -684,16 +723,23 @@ PBClusterCoordinator >> _done: aPermission outcome: aSymbol
   ^ self _done: aPermission outcome: aSymbol root: nil.
 
 PBClusterCoordinator >> _done: aPermission outcome: aSymbol root: aRootOrNil
-  | event f |
-  event := PBDoneReport permission: aPermission outcome: aSymbol root: aRootOrNil.
-  self isRunning ifFalse: [f := Future new. f rejectWith: cells closedError. ^ f].
-  ^ cells dispatcher value handle: event.
+  ^ self _post: [PBDoneReport permission: aPermission outcome: aSymbol root: aRootOrNil].
 
 "The space starts its confirmation round (proto_db confirmed())."
 PBClusterCoordinator >> _confirmed
-  | f |
-  self isRunning ifFalse: [f := Future new. f rejectWith: cells closedError. ^ f].
-  ^ cells dispatcher value handle: PBConfirmed new.
+  ^ self _post: [PBConfirmed new].
+
+"A Future resolved with true once the event anEventBlock builds is dispatched; rejected with the
+ error building it signals, PBClosedError when not running (also when it races the stop), or
+ PBUnexpectedError when fenced."
+PBClusterCoordinator >> _post: anEventBlock
+  | f event |
+  f := Future new.
+  self isRunning ifFalse: [f rejectWith: cells closedError. ^ f].
+  event := [anEventBlock value] on: Error do: [:e | f rejectWith: e. e return: nil].
+  event isNil ifTrue: [^ f].
+  cells dispatcher value post: event future: f.
+  ^ f.
 
 "--- what readers see ---"
 

@@ -271,14 +271,37 @@ PBCoordinatorCore >> _commitPoint: aReplication majority: aMajority valid: isVal
  permission builds on it), else unknown (the root left this node: counted, the node suspect for
  its term, its acceptor too)."
 PBCoordinatorCore >> _endReplication: aReplication committed: isCommitted in: s effects: fx
-  | state label |
+  | state label violation |
   isCommitted ifFalse: [^ PBValidationError signal: 'PBCoordinatorCore: an unknown replication ends with its reason'].
+  violation := self _violationOf: aReplication root in: s.
+  violation notNil ifTrue: [^ self _endReplication: aReplication violation: violation in: s effects: fx].
   state := self _replaceReplication: aReplication with: nil in: s.
   label := aReplication root label.
   fx add: (PBToAcceptor event: (PBLearnCommitted root: aReplication root accept: true logged: true)).
   state := state with: { #suspectTerm -> (self _learnLabel: label clears: state suspectTerm) }.
   state := self _bindCommitted: aReplication permission root: aReplication root in: state.
   ^ self _settle: aReplication waiter with: #committed in: state effects: fx.
+
+"The PBCorruptionError of a protocol violation that committing aRoot would observe, nil when
+ none: aRoot and the root the acceptor last reported accepted are two different roots of one
+ label and epoch (PBRootOrder compare:with:, proto_db compare_roots in its own acceptance). The
+ own acceptor refused aRoot as a sibling; its peers took it."
+PBCoordinatorCore >> _violationOf: aRoot in: s
+  | view |
+  view := s acceptorView.
+  view isNil ifTrue: [^ nil].
+  ^ [PBRootOrder compare: aRoot with: view accepted. nil] on: PBCorruptionError do: [:e | e return: e].
+
+"aReplication ends in a protocol violation (proto_db replicate's except ProtoCorruptionError: an
+ invariant breach, never an unknown outcome): counted replication_failures, the node suspect for
+ its term (its acceptor too), its waiter settled with anError, nothing learnt committed."
+PBCoordinatorCore >> _endReplication: aReplication violation: anError in: s effects: fx
+  | state label |
+  state := self _replaceReplication: aReplication with: nil in: s.
+  label := aReplication root label.
+  fx add: (PBCount stat: 'replication_failures'); add: (PBToAcceptor event: (PBSuspect term: label)).
+  state := state with: { #suspectTerm -> (state suspectTerm max: label) }.
+  ^ self _settle: aReplication waiter with: anError in: state effects: fx.
 
 "aReplication ends unknown: counted, the node suspect for its term (its acceptor too); its
  waiter is settled with a PBOutcomeUnknownError of aText (proto_db's text for the case)."

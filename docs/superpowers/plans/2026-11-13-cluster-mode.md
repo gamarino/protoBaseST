@@ -1297,6 +1297,12 @@ record needs it); tests: a new `tests/unit/cluster_renew_backoff_rules.st` porti
     `replaceRoot:` with epoch + 1, step 8 outcome rule applied to the round; a failure of the
     flush, the publish or the lock reaches every built entry; a lone entry runs exactly the
     single-commit protocol (D52).
+- **Carried from Task 20 (review I4; origin Task 15 re-review, carry-over (j) of Task 20):**
+  `PBRoundRunner` is its own actor, and no round is ever driven synchronously from inside a
+  caller's own thread (its fn or its wait): `enqueue:` only adds the entry and answers its
+  Future, so a kept permission waiting for a held caller's retry never waits on the thread that
+  must make it (`proto_db` excludes the runner's own thread from `held` for this reason). The
+  source scan of Step 1 covers it: no method reachable from `enqueue:` calls `wait`.
 - **Checklist (Task 18):** no row of `tests/unit/cluster_checklist.tsv` is deferred to this task (0 rows); a row this task ports is turned into `ported`, and none is deferred to it.
 - [ ] **Step 1: write the failing tests.** `round_group_commit.st` (`"EXPECT: ok 5"`): 20
   transactions committed from 20 actors all succeed, the history holds 20 versions, the storage
@@ -1334,6 +1340,25 @@ record needs it); tests: a new `tests/unit/cluster_renew_backoff_rules.st` porti
   group bound and `stats` (`critical_commits`, build µs, replication µs). Each
   `PBCommitEntry` enters the core as a `PBRoundEntry` whose `token` is the entry itself;
   `PBSettle` effects settle the entry's Future.
+- **Carried from Task 20 (review I4):**
+  - (h), the runner's half (Task 15 review note, R148): `_endPermission:` emits `PBReportDone`
+    and then, when commits are queued, `PBAskPermit` in the same step; `PBClusterRound` performs
+    the effects of a step in their order and sends both into the one dispatcher mailbox
+    (`PBClusterCoordinator >> _done:outcome:root:`, then `_permit`), never the permit first nor
+    from another actor, so the permit is issued only once the done has freed the node's write
+    permission (the coordinator's half, mailbox FIFO, is `cluster_coordinator_attach.st`
+    check 4); otherwise it reproduces `proto_db`'s pre-R148 "already holds a write permission"
+    misuse error.
+  - (i) (Task 15 review): the runner sets each `PBRoundEntry`'s `caller` to its client
+    (`proto_db` `entry.thread`) and sends `PBDropKept caller:` naming that client when a held
+    caller will not retry (`run:` returned or raised: `_dropKept`).
+  - (j) (Task 15 re-review): a round is never driven from a held caller's thread; the runner is
+    Task 22's actor (see Task 22).
+  - The shell's outcomes the round maps (Task 20): `_replicate:under:` answers `#committed`,
+    `#none` (nothing sent: the permission ended, the send reserve, or a term below the rejoin
+    ballot, L14) or `#unknown`, and is rejected with `PBCorruptionError` for a protocol violation
+    (x4, ported in Task 20: never an unknown outcome), `PBValidationError` for a root not built
+    for its permission, `PBUnexpectedError` once fenced and `PBClosedError` once stopped.
 - **Checklist (Task 18):** turn the 9 `deferred 23` rows of `tests/unit/cluster_checklist.tsv` (`awk -F'\t' '$2=="deferred" && $3==23' tests/unit/cluster_checklist.tsv`) into `ported` rows, each naming the whole check label of a test this task adds; a row this task cannot port is re-justified as `n/a` in its review, never left deferred.
 - [ ] **Step 1: write the failing tests.**
   - `cluster_commit_path.st` (`"EXPECT: ok 5"`): three in-process nodes over one directory;

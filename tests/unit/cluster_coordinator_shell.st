@@ -15,7 +15,8 @@
  (PBAcceptorDiscarded) is the acceptor's tierFailed (review m). (7) _attach: refuses a
  startupGrace below leaseDuration + driftMargin over a log that is not empty (L17, proto_db
  test_a_restart_on_a_log_needs_a_grace_of_one_lease_plus_the_drift_margin: 0, 0.2 D, D and
- the safe value less 1 ms refused; the safe value and the default accepted). (8) stop settles
+ the safe value less 1 ms refused; the safe value and the default accepted; a one-member
+ cluster has no lease to wait out and attaches with a grace of 0). (8) stop settles
  every pending Future: a permit that cannot be granted (no majority) is rejected with
  PBClosedError, as are _permit before start and after stop. (9) stop settles a replication in
  flight #unknown, never #none. (10) A failed acceptance write is refused and fails the tier
@@ -50,7 +51,7 @@ _PBAcceptor subclass: #FaultyAcceptor.
 FaultyAcceptor >> _append: anAppend
   ^ Error signal: 'planted fault in the acceptor shell'.
 
-| c kit three nodes tiers out p r trace first a b grace n f rules root q |
+| s c kit three nodes tiers out p r trace first a b grace n f rules root q |
 c := Check new.
 three := #('n0' 'n1' 'n2').
 
@@ -107,17 +108,16 @@ r := kit settle: (nodes at: 3) _permit.
 a := kit commitOn: nodes first offset: 2.
 b := ((kit trace value copyFrom: n + 1 to: kit trace value size) select: [:l | l beginsWith: 'n2 send'])
   reject: [:l | (l includesSubstring: 'send ack') and: [l endsWith: 'ok=false']].
-"A fenced dispatcher drops its own events too: a confirmation never reaches the acceptor (the
- dispatcher has handled it before the attach is queued, so the refused attach is the acceptor's
- barrier)."
-(nodes at: 3) _confirmed waitWithin: 60000.
+"A fenced node refuses its own events too: a confirmation is rejected PBUnexpectedError and
+ never reaches the acceptor (the refused attach, of another tier, is the acceptor's barrier)."
+s := kit settle: (nodes at: 3) _confirmed.
 q := kit settle: ((nodes at: 3) _attach: (MemoryTier served: 'n2' trace: kit trace)).
 c that: 'an error escaping the acceptor fences its node; its permit is refused PBUnexpectedError naming the cause; the others commit'
   is: { out first. a first. b. (nodes at: 3) needsConfirmation. q first. f. (nodes at: 3) stats at: 'fenced'. (nodes at: 3) stats at: 'healthy'. r first. (r at: 2) class name.
     ((r at: 2) messageText includesSubstring: 'fenced after an internal failure').
     ((r at: 2) messageText includesSubstring: 'planted fault'). (nodes at: 3) acceptorState fenced notNil.
-    (tiers at: 3) payloads size }
-  equals: { #committed. #committed. #(). true. #error. true. true. false. #error. #PBUnexpectedError. true. true. true. 1 }.
+    (tiers at: 3) payloads size. s first. (s at: 2) class name }
+  equals: { #committed. #committed. #(). true. #error. true. true. false. #error. #PBUnexpectedError. true. true. true. 1. #error. #PBUnexpectedError }.
 kit stopAll: nodes.
 
 "--- (6), (10): a tier whose writes fail ---"
@@ -167,8 +167,8 @@ c that: 'a failed acceptance write is refused (ack ok=false) and fails the tier;
 kit stopAll: nodes.
 
 "--- (7): the startup grace of a restart (L17) ---"
-grace := [:ms | | k x |
-  k := ShellKit ids: three.
+grace := [:ms :ids | | k x |
+  k := ShellKit ids: ids.
   x := k node: 'n1' options: (ms isNil ifTrue: [Dictionary new] ifFalse: [Dictionary new at: #startupGrace put: ms; yourself])
     rules: PBCoordinatorCore new acceptorClass: _PBAcceptor.
   x start.
@@ -176,8 +176,8 @@ grace := [:ms | | k x |
   x stop waitWithin: 60000.
   r first = #ok ifTrue: [#ok] ifFalse: [{ (r at: 2) class name. (r at: 2) messageText includesSubstring: 'startupGrace' }]].
 c that: 'a restart on a log needs a grace of one lease plus the drift margin'
-  is: ({ 0. 120. 600. 999. 1000. nil } collect: [:ms | grace value: ms])
-  equals: { #(#PBValidationError true). #(#PBValidationError true). #(#PBValidationError true). #(#PBValidationError true). #ok. #ok }.
+  is: ({ 0. 120. 600. 999. 1000. nil } collect: [:ms | grace value: ms value: three]) , { grace value: 0 value: #('n1') }
+  equals: { #(#PBValidationError true). #(#PBValidationError true). #(#PBValidationError true). #(#PBValidationError true). #ok. #ok. #ok }.
 
 "--- (8), (9): stop settles every pending Future ---"
 kit := ShellKit ids: three.

@@ -543,18 +543,43 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     only logs it). The transport cannot check the sender (one-way connections, an HMAC that
     binds the receiver, CC4), so the count is the operator's only sign of it.
   - A tier write fails the tier (R57) when it signals a `PBDBError` or a `FileSystemError`
-    (`proto_db`'s `ProtoDBError` or `OSError`); any other error fences the node, as `proto_db`'s
-    lane does. A peer's replication whose accepted append failed is decided again over the
+    (`proto_db`'s `ProtoDBError` or `OSError`). A `PBDBError` a rule signals while handling a
+    message (a protocol violation in a peer's message, a malformed value) is written to stderr
+    and the message dropped, the node kept, as `proto_db`'s `_work` and `_route` do; a local
+    request it interrupts (`_replicate:under:` of a root not labelled with its term, for one) is
+    rejected with it, as `proto_db` raises it to its caller. Any other error fences the node, as
+    `proto_db`'s lanes do; the acceptor reads the fence before each step (`proto_db`'s
+    `_refusal` reads `_failure` at decision time), so a message queued before a dispatcher fence
+    is never granted nor acknowledged ok. A peer's replication whose accepted append failed is decided again over the
     failed tier and refused with `ack(ok = false)` (`proto_db`'s behaviour); a grant whose promise
     append failed is never answered, as `proto_db`.
   - A fence settles a replication in flight `#unknown` (its root may have left the node) and
     rejects every other waiter with `PBUnexpectedError` (`'Node n is fenced after an internal
-    failure: ...'`). A `PBCorruptionError` that escapes an actor (a protocol violation) fences
-    the node too, so the replication it interrupted is `#unknown`, where `proto_db` reports the
-    violation to the replicator (`test_x4_...`, deferred to Task 23: an open item).
+    failure: ...'`). A replication whose majority acknowledged a root that clashes (same label
+    and epoch, another record) with the root the holder's acceptor reported accepted is
+    rejected `PBCorruptionError` (`'Protocol violation: ...'`), counted
+    `replication_failures`, nothing learnt committed (`proto_db` `replicate`'s
+    `except ProtoCorruptionError`, `test_x4_...`). `proto_db` raises it from its own acceptance
+    or from `_observe_committed`; here the own acceptor refuses the sibling (D50, S3) and the
+    holder compares when the majority is reached, so the replicator gets the violation, never an
+    unknown outcome.
+  - The attach of a tier follows `proto_db` `_attach_locked`: the tier attached already is a
+    no-op answering `true`, another is refused `PBValidationError` (`'This coordinator already
+    serves another storage'`) before its roots are loaded; `proto_db` also accepts a second
+    tier over the same storage, an identity Task 21's `PBSharedTier` defines (open until then).
+  - An own acceptance queued in the acceptor's mailbox behind a detach and an attach is decided
+    and logged on the new log, where `proto_db` refuses it (the tier changed under the
+    replicate, ruling R55) and the replication ends unknown; the outcome reported is the
+    majority's either way (`n1_a_holder_moved_to_another_disk_mid_commit...`, `n/a`).
+  - `stop` finishes the acceptor step in progress; the steps queued behind it are dropped, as
+    `proto_db`'s lanes return once the node is not running.
   - `stats` `'rejoining'` is derived from the published acceptor state (attached, no rejoined
-    marker, healthy) rather than from a thread flag; `'persisting'` is `true` until the
-    persister exists (Task 25); `'dispatch_seconds_max'` is the longest single dispatcher step.
+    marker, healthy) rather than from a thread flag, so it turns `false`, and
+    `'rejoin_blocked'` `nil`, once the tier failed or the node is fenced, where `proto_db` keeps
+    `_rejoining` true (its rejoin thread stops; nothing completes the rejoin either way);
+    `'persisting'` is `true` until the persister exists (Task 25); `'dispatch_seconds_max'` is
+    the longest single dispatcher step and `'dispatch_slow'` counts the steps over 10 ms
+    (`proto_db` `DISPATCH_SLOW`), both measured with `Time microsecondClockValue`.
   - The L17 refusal of a short `#startupGrace` states the durations in milliseconds, the unit of
     the options, where `proto_db` states seconds.
   - Before a tier is attached the acceptor is `PBAcceptorState config:detachedAt:`: requests are

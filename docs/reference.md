@@ -816,22 +816,27 @@ For tests, tools and readers of the format. An application does not need them.
   transport and starts the node with no acceptor log; `_attach: aTier` (a `Future`) loads the
   tier's roots into a fresh `PBLoggedRoots` and attaches the acceptor, refusing with
   `PBValidationError` a `#startupGrace` below `leaseDuration + driftMargin` over a log that is not
-  empty (L17) and with `PBUserError` a second attach; `_detach` (a `Future` of the tier) hands the
+  not empty in a cluster of more than one member (L17); it answers `true` at once for the tier
+  attached already and refuses another with `PBValidationError`; `_detach` (a `Future` of the tier) hands the
   dispatcher `PBLogDetached`. `stop` answers a `Future` that settles once every pending `Future`
-  is settled (a replication in flight `#unknown`, the rest `PBClosedError`), every acceptor step
-  queued has run and the transport stopped. `stats` (CC24) holds every counter of the rules (0
+  is settled (a replication in flight `#unknown`, the rest `PBClosedError`), the acceptor step in
+  progress has run (the steps queued behind the stop are dropped) and the transport stopped. `stats` (CC24) holds every counter of the rules (0
   until counted), `'messages_ignored'` (messages whose sender is not another member) and
   `'healthy'`, `'fenced'`, `'tier_failed'`, `'persisting'`, `'rejoining'`, `'rejoin_blocked'`,
-  `'failure'`, `'dispatch_seconds_max'`. `forceRejoin`, `committedRoot` (a `PBLabeledRoot` read from an Atom),
+  `'failure'`, `'dispatch_seconds_max'`, `'dispatch_slow'` (dispatcher steps over 10 ms). `forceRejoin`, `committedRoot` (a `PBLabeledRoot` read from an Atom),
   `committedEpoch`, `needsConfirmation`, `isFenced`, `isRunning`, `nodeId`, `config`,
   `acceptorState` and `nodeState` (the published states). For the round runner, all `Future`s:
   `_permit` (a `PBPermission`, or rejected with `PBTimeoutError`, `PBUnexpectedError` when fenced,
   `PBClosedError` when not running), `_baseFor:` (a `PBBaseDecision`), `_replicate:under:`
-  (`#committed`, `#none` or `#unknown`), `_done:outcome:` and `_done:outcome:root:`,
-  `_confirmed`. A tier answers the protocol the shared tier of Task 21 implements: loadRoots,
+  (`#committed`, `#none` or `#unknown`; rejected with `PBCorruptionError` for a protocol
+  violation, `PBValidationError` for a root not built for its permission), `_done:outcome:` and
+  `_done:outcome:root:`, `_confirmed` (each `true` once dispatched; rejected with
+  `PBClosedError` when not running, also when it races the stop, and `PBUnexpectedError` when
+  fenced). A tier answers the protocol the shared tier of Task 21 implements: loadRoots,
   logAccepted:, logCommitted:, logPromise:, logRejoined, readPersisted and canRead:; a write that signals a `PBDBError` or a
-  `FileSystemError` fails the tier (the step discarded, `'tier_failed'`), any other error escaping
-  the dispatcher or acceptor actor fences the node for the life of the process. The test seam
+  `FileSystemError` fails the tier (the step discarded, `'tier_failed'`); a `PBDBError` a rule
+  signals drops that message (written to stderr; a local request is rejected with it); any other
+  error escaping the dispatcher or acceptor actor fences the node for the life of the process. The test seam
   `nodeId:peers:options:rules:acceptorClass:` takes other rules and a subclass of `_PBAcceptor`.
   The differences from `proto_db` are in [deviations.md](deviations.md#cluster-mode).
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
