@@ -283,14 +283,20 @@ PBCoordinatorCore >> _endReplication: aReplication committed: isCommitted in: s 
   ^ self _settle: aReplication waiter with: #committed in: state effects: fx.
 
 "The PBCorruptionError of a protocol violation that committing aRoot would observe, nil when
- none: aRoot and the root the acceptor last reported accepted are two different roots of one
- label and epoch (PBRootOrder compare:with:, proto_db compare_roots in its own acceptance). The
- own acceptor refused aRoot as a sibling; its peers took it."
+ none: aRoot and the root the acceptor last reported accepted, or committed, are two different
+ roots of one label and epoch (PBRootOrder compare:with:; proto_db _observe_committed compares
+ with the accepted root through _observe_accepted, 1708, and with the committed root, 1725: a
+ committed root learnt with accept: false, as the persisted root, a base decision or a rejoin
+ adoption, may order above the accepted one). The own acceptor refused aRoot as a sibling, or
+ knows another root of its key committed; the peers took it."
 PBCoordinatorCore >> _violationOf: aRoot in: s
   | view |
   view := s acceptorView.
   view isNil ifTrue: [^ nil].
-  ^ [PBRootOrder compare: aRoot with: view accepted. nil] on: PBCorruptionError do: [:e | e return: e].
+  { view accepted. view committed } do: [:known | | error |
+    error := [PBRootOrder compare: aRoot with: known. nil] on: PBCorruptionError do: [:e | e return: e].
+    error notNil ifTrue: [^ error]].
+  ^ nil.
 
 "aReplication ends in a protocol violation (proto_db replicate's except ProtoCorruptionError: an
  invariant breach, never an unknown outcome): counted replication_failures, the node suspect for
@@ -302,6 +308,19 @@ PBCoordinatorCore >> _endReplication: aReplication violation: anError in: s effe
   fx add: (PBCount stat: 'replication_failures'); add: (PBToAcceptor event: (PBSuspect term: label)).
   state := state with: { #suspectTerm -> (state suspectTerm max: label) }.
   ^ self _settle: aReplication waiter with: anError in: state effects: fx.
+
+"The acceptor's decision of this node's own replicate signalled aPBDBError (PBOwnStepFailed): the
+ root left this node already, so the replication ends unknown, or in the protocol violation
+ when the error is one (proto_db replicate: except ProtoCorruptionError, then except
+ ProtoDBError, both around its own acceptance)."
+PBCoordinatorCore >> _ownAcceptanceFailed: aMessage error: anError in: s effects: fx
+  | rep |
+  rep := self _replication: (aMessage at: 'rid') in: s.
+  rep isNil ifTrue: [^ s].
+  (anError isKindOf: PBCorruptionError) ifTrue: [^ self _endReplication: rep violation: anError in: s effects: fx].
+  ^ self _endReplication: rep unknown: 'Node ' , s config nodeId , ': the commit of root epoch '
+    , (self _epochOf: rep root) printString , ' failed after the root was sent (' , anError class name , ': ' , anError messageText
+    , '); peers may have acknowledged it, so it may or may not take effect' in: s effects: fx.
 
 "aReplication ends unknown: counted, the node suspect for its term (its acceptor too); its
  waiter is settled with a PBOutcomeUnknownError of aText (proto_db's text for the case)."

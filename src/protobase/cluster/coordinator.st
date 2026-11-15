@@ -288,28 +288,32 @@ _PBDispatcher >> post: anEvent future: aFuture
 _PBDispatcher >> handle: anEvent
   ^ self _handle: anEvent waiter: nil.
 
-"handle: (proto_db _on_message, _route): a PBDBError (proto_db's ProtoDBError) is written to
- stderr and the event dropped, the node kept; when the event is a local request (aTokenOrNil, its
- waiter), the waiter is rejected with it, as proto_db raises it to its caller. Any other error
- fences the node. Answers whether the step was performed."
+"handle: (proto_db _on_message, _route). A PBDBError (proto_db's ProtoDBError) the rules'
+ decision signals, before anything changed, is written to stderr and the event dropped, the node
+ kept; when the event is a local request (aTokenOrNil, its waiter), the waiter is rejected with
+ it, as proto_db raises it to its caller. Any other error of the decision, and any error while
+ its effects are performed (the state is already published, so state and effects would
+ diverge), fences the node: a replication in flight then settles #unknown (H7). Answers whether
+ the step was performed."
 _PBDispatcher >> _handle: anEvent waiter: aTokenOrNil
-  | start failure |
+  | start step failure |
   cells isStopped ifTrue: [^ false].
   cells isFenced ifTrue: [^ self _handleFenced: anEvent].
   start := Time microsecondClockValue.
-  failure := [| step |
-      step := rules dispatch: anEvent in: cells node value now: cells now.
-      cells node swap: [:old | step state].
-      step effects do: [:e | e applyTo: self].
-      nil]
-    on: Error do: [:e | e return: e].
+  failure := [step := rules dispatch: anEvent in: cells node value now: cells now. nil] on: Error do: [:e | e return: e].
+  failure notNil ifTrue: [
+    self _noteDispatch: Time microsecondClockValue - start.
+    (failure isKindOf: PBDBError) ifFalse: [
+      self fence: 'the dispatcher, handling ' , anEvent printString , ': ' , (cells describe: failure).
+      ^ false].
+    cells warn: 'handling ' , anEvent printString , ' failed: ' , (cells describe: failure).
+    aTokenOrNil notNil ifTrue: [(cells take: aTokenOrNil) ifNotNil: [:w | (w at: 2) rejectWith: failure]].
+    ^ false].
+  cells node swap: [:old | step state].
+  failure := [step effects do: [:e | e applyTo: self]. nil] on: Error do: [:e | e return: e].
   self _noteDispatch: Time microsecondClockValue - start.
   failure isNil ifTrue: [^ true].
-  (failure isKindOf: PBDBError) ifFalse: [
-    self fence: 'the dispatcher, handling ' , anEvent printString , ': ' , (cells describe: failure).
-    ^ false].
-  cells warn: 'handling ' , anEvent printString , ' failed: ' , (cells describe: failure).
-  aTokenOrNil notNil ifTrue: [(cells take: aTokenOrNil) ifNotNil: [:w | (w at: 2) rejectWith: failure]].
+  self fence: 'the dispatcher, performing the effects of ' , anEvent printString , ': ' , (cells describe: failure).
   ^ false.
 
 "The longest step, and the steps over 10 ms counted dispatch_slow (proto_db DISPATCH_SLOW)."
@@ -407,25 +411,37 @@ _PBAcceptor >> _setCells: someCells rules: aRules tier: aTierAtom
 "One acceptor event (proto_db _work). The fence is read from the shared Atom first: a fence the
  dispatcher raised while this event was queued is adopted before anything is decided, so a
  fenced node never grants nor acknowledges (proto_db _refusal reads _failure at decision time).
- A PBDBError a rule signals (proto_db's ProtoDBError) is written to stderr and the message
- dropped, the node kept; any other error fences it."
+ A PBDBError the rules' decision signals (proto_db's ProtoDBError) is written to stderr and the
+ message dropped, the node kept; for this node's own request or replicate the dispatcher is
+ handed PBOwnStepFailed with the error at once, so the waiter behind it is settled now, as
+ proto_db raises it to the caller of permit() or replicate(). Any other error of the decision,
+ and any error after it (the appends aside, which fail the tier: _append:), fences the node."
 _PBAcceptor >> handle: anEvent
-  | failure |
+  | failure step |
   cells isStopped ifTrue: [^ false].
   cells isFenced ifTrue: [self fence: cells fence value].
-  failure := [self _step: anEvent. nil] on: Error do: [:e | e return: e].
-  failure isNil ifTrue: [^ true].
-  (failure isKindOf: PBDBError) ifTrue: [
+  failure := [step := rules accept: anEvent in: cells acceptorState value now: cells now. nil] on: Error do: [:e | e return: e].
+  failure notNil ifTrue: [
+    (failure isKindOf: PBDBError) ifFalse: [
+      self _fault: 'the acceptor, handling ' , anEvent printString , ': ' , (cells describe: failure).
+      ^ false].
     cells warn: 'the acceptor, handling ' , anEvent printString , ', failed: ' , (cells describe: failure).
+    ((anEvent isKindOf: PBReceived) and: [anEvent message from = cells config nodeId]) ifTrue: [
+      cells dispatcher value handle: (PBOwnStepFailed message: anEvent message error: failure)].
     ^ false].
-  self _fault: 'the acceptor, handling ' , anEvent printString , ': ' , (cells describe: failure).
+  failure := [self _perform: step of: anEvent. nil] on: Error do: [:e | e return: e].
+  failure isNil ifTrue: [^ true].
+  self _fault: 'the acceptor, performing the step of ' , anEvent printString , ': ' , (cells describe: failure).
   ^ false.
 
 "The atomic acceptor step (CC2): the appends in order, then the state published, then the
  reply, then the step to the dispatcher. A failed append discards the step."
 _PBAcceptor >> _step: anEvent
-  | step failure |
-  step := rules accept: anEvent in: cells acceptorState value now: cells now.
+  ^ self _perform: (rules accept: anEvent in: cells acceptorState value now: cells now) of: anEvent.
+
+"The step decided for anEvent performed: the appends, the state, the reply, the report."
+_PBAcceptor >> _perform: step of: anEvent
+  | failure |
   failure := self _writeAll: step appends.
   failure notNil ifTrue: [^ self _discard: step of: anEvent reason: failure].
   cells acceptorState swap: [:old | step state].

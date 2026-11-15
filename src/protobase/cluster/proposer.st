@@ -791,6 +791,24 @@ PBCoordinatorCore >> dispatchAcceptorDecided: anEvent in: s now: t
         ifFalse: [self _onReply: vote in: state now: t effects: fx]].
     self _poke: state now: t effects: fx].
 
+"The acceptor's decision of this node's own message signalled a PBDBError (proto_db raises it in
+ the caller's thread). A replicate: its replication ends unknown, or in the protocol violation
+ (_ownAcceptanceFailed:error:in:effects:). A request: every waiter of the acquisition is settled
+ with the error (proto_db _acquire raises it out of permit()); the attempt, missing the own
+ vote, ends by its timer. Any other message has no waiter: unchanged."
+PBCoordinatorCore >> dispatchOwnStepFailed: anEvent in: s now: t
+  ^ self _step: [:fx | | m state |
+    m := anEvent message.
+    m type = 'replicate'
+      ifTrue: [self _ownAcceptanceFailed: m error: anEvent error in: s effects: fx]
+      ifFalse: [
+        m type = 'request'
+          ifTrue: [
+            state := s.
+            s waiters do: [:w | state := self _settle: w with: anEvent error in: state effects: fx].
+            state with: { #waiters -> #() }]
+          ifFalse: [s]]].
+
 "The acceptor could not make the promise of this node's own grant durable (proto_db _promise
  failing): the own vote is the refusal 'promise_failed' (highest the term, remaining 0). An own
  acceptance that could not be made durable ends its replication unknown (holder.st); the

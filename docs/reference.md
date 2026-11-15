@@ -424,7 +424,7 @@ For tests, tools and readers of the format. An application does not need them.
   `PBStartNode`, `PBStopNode`, `PBPermitWanted waiter:`, `PBBaseWanted permission:waiter:`,
   `PBReplicateWanted permission:root:pred:waiter:` (the root built and the root it was built on), `PBDoneReport permission:outcome:` (`#committed`,
   `#unknown` or `#none`), `PBRejoinWanted`, `PBAcceptorDecided step:`, `PBAcceptorDiscarded
-  step:reason:` (the step the shell discarded because its append failed, and the failure's text; `dispatchAcceptorDiscarded:in:now:`). Effects, each answering
+  step:reason:` (the step the shell discarded because its append failed, and the failure's text; `dispatchAcceptorDiscarded:in:now:`), `PBOwnStepFailed message:error:` (this node's own request or replicate whose acceptor decision signalled a `PBDBError`; `dispatchOwnStepFailed:in:now:` settles the waiter behind it). Effects, each answering
   `applyTo:` with one message the shell implements (applySend:, applyToAcceptor:, applyTimer:,
   applySettle:, applyPublishCommitted:, applyPublishAcceptor:, applyFence:, and for the base
   choice applyReadPersisted: and applyProbeRoot:): `PBSend
@@ -834,8 +834,10 @@ For tests, tools and readers of the format. An application does not need them.
   `PBClosedError` when not running, also when it races the stop, and `PBUnexpectedError` when
   fenced). A tier answers the protocol the shared tier of Task 21 implements: loadRoots,
   logAccepted:, logCommitted:, logPromise:, logRejoined, readPersisted and canRead:; a write that signals a `PBDBError` or a
-  `FileSystemError` fails the tier (the step discarded, `'tier_failed'`); a `PBDBError` a rule
-  signals drops that message (written to stderr; a local request is rejected with it); any other
+  `FileSystemError` fails the tier (the step discarded, `'tier_failed'`); a `PBDBError` a rule's
+  decision signals drops that message (written to stderr; a local request, or the waiter of an
+  own message the acceptor decides, is rejected with it); an error while a decided step's effects
+  are performed fences; any other
   error escaping the dispatcher or acceptor actor fences the node for the life of the process. The test seam
   `nodeId:peers:options:rules:acceptorClass:` takes other rules and a subclass of `_PBAcceptor`.
   The differences from `proto_db` are in [deviations.md](deviations.md#cluster-mode).

@@ -543,11 +543,17 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     only logs it). The transport cannot check the sender (one-way connections, an HMAC that
     binds the receiver, CC4), so the count is the operator's only sign of it.
   - A tier write fails the tier (R57) when it signals a `PBDBError` or a `FileSystemError`
-    (`proto_db`'s `ProtoDBError` or `OSError`). A `PBDBError` a rule signals while handling a
-    message (a protocol violation in a peer's message, a malformed value) is written to stderr
-    and the message dropped, the node kept, as `proto_db`'s `_work` and `_route` do; a local
-    request it interrupts (`_replicate:under:` of a root not labelled with its term, for one) is
-    rejected with it, as `proto_db` raises it to its caller. Any other error fences the node, as
+    (`proto_db`'s `ProtoDBError` or `OSError`). A `PBDBError` a rule's decision signals while handling
+    a message (a protocol violation in a peer's message, a malformed value), before anything
+    changed, is written to stderr and the message dropped, the node kept, as `proto_db`'s `_work`
+    and `_route` do; a local request it interrupts (`_replicate:under:` of a root not labelled
+    with its term, for one) is rejected with it, as `proto_db` raises it to its caller, and the
+    acceptor hands the dispatcher the error of its decision on this node's own request or
+    replicate (`PBOwnStepFailed`), so the permit waiters are rejected with it and the replication
+    ends unknown, or in the violation, at once rather than at a timer. An error while the effects
+    of a decided step are performed (its state already published) fences the node whatever its
+    class, where `proto_db` would leave the step half done: here a lost timer would strand a
+    waiter; a replication whose root was sent then settles `#unknown`. Any other error fences the node, as
     `proto_db`'s lanes do; the acceptor reads the fence before each step (`proto_db`'s
     `_refusal` reads `_failure` at decision time), so a message queued before a dispatcher fence
     is never granted nor acknowledged ok. A peer's replication whose accepted append failed is decided again over the
@@ -556,8 +562,8 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   - A fence settles a replication in flight `#unknown` (its root may have left the node) and
     rejects every other waiter with `PBUnexpectedError` (`'Node n is fenced after an internal
     failure: ...'`). A replication whose majority acknowledged a root that clashes (same label
-    and epoch, another record) with the root the holder's acceptor reported accepted is
-    rejected `PBCorruptionError` (`'Protocol violation: ...'`), counted
+    and epoch, another record) with the root the holder's acceptor reported accepted, or
+    committed (`proto_db` `_observe_committed` compares with both, 1708 and 1725), is rejected `PBCorruptionError` (`'Protocol violation: ...'`), counted
     `replication_failures`, nothing learnt committed (`proto_db` `replicate`'s
     `except ProtoCorruptionError`, `test_x4_...`). `proto_db` raises it from its own acceptance
     or from `_observe_committed`; here the own acceptor refuses the sibling (D50, S3) and the

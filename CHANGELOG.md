@@ -13,11 +13,13 @@
   `_confirmed`; the tier's `_attach:` (a fresh `PBLoggedRoots` each time; a short
   `#startupGrace` refused over a log that served before, L17, except for a one-member cluster;
   the tier attached already is a no-op, another refused `PBValidationError`) and `_detach`. A
-  failed tier write fails the tier (R57); a `PBDBError` a rule signals drops that message (and
-  rejects a local request with it) without fencing, as `proto_db`'s lanes; any other error
+  failed tier write fails the tier (R57); a `PBDBError` a rule's decision signals drops that message (and
+  rejects a local request with it, also an own request or replicate the acceptor decides,
+  `PBOwnStepFailed`) without fencing, as `proto_db`'s lanes; an error while a decided step's
+  effects are performed fences; any other error
   escaping an actor fences the node, and the acceptor reads the fence before each step, so a
   request queued before a dispatcher fence is never granted (review I1). A replication that
-  would commit a root clashing with the holder's accepted root (a protocol
+  would commit a root clashing with the holder's accepted or committed root (a protocol
   violation, x4) is rejected `PBCorruptionError`, never `#unknown`. `stats` gains
   `dispatch_slow` (steps over 10 ms). The core gains the
   detached acceptor (`PBAcceptorState config:detachedAt:`, `attached:`, `detached`,

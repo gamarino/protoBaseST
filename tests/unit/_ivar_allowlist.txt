@@ -127,3 +127,4 @@ _PBNodeCells>>_setConfig:node:acceptorState:committed:counters:fence:stopped:wai
 _PBDispatcher>>_setCells:rules:
 _PBAcceptor>>_setCells:rules:tier:
 PBClusterCoordinator>>_setConfig:rules:acceptorClass:cells:run:
+PBOwnStepFailed>>_setMessage:error:

@@ -17,7 +17,8 @@ clock, a socket or a file, sends, logs or waits.
     dispatcher: the reply to this node's own vote and acceptance travels this way, CC1) and
     PBAcceptorDiscarded step: reason: (an acceptor step whose append failed, discarded by the
     shell, and the failure's text, the reason it gives PBAppendFailed: the dispatcher withdraws
-    the own vote it carried).
+    the own vote it carried), PBOwnStepFailed message: error: (this node's own request or
+    replicate whose acceptor decision signalled a PBDBError: the waiter behind it is settled).
   Effects (PBEffect): PBSend to: message:, PBToAcceptor event: (an event for this node's own
     acceptor, never through the transport: CC1), PBLogAppend kind: label: root: sync: (an
     acceptor-log entry: only in the appends of an acceptor step), PBTimer after: token: event:
@@ -413,6 +414,37 @@ PBAcceptorDiscarded >> reason
 
 PBAcceptorDiscarded >> dispatchWith: aCore in: aNodeState now: t
   ^ aCore dispatchAcceptorDiscarded: self in: aNodeState now: t.
+
+"--- PBOwnStepFailed ---"
+
+PBCoreEvent subclass: #PBOwnStepFailed instanceVariableNames: 'message error'.
+
+"aMessage, this node's own message (a request or a replicate) whose acceptor decision signalled
+ anError, a PBDBError: the shell dropped the step (nothing of it was decided) and hands the
+ dispatcher the error, so the waiter behind the message is settled at once (proto_db raises it to
+ the caller of permit() or replicate())."
+PBOwnStepFailed class >> message: aMessage error: anError
+  (aMessage isKindOf: PBClusterMessage) ifFalse: [
+    ^ PBValidationError signal: 'PBOwnStepFailed: a message is a PBClusterMessage, not ' , aMessage printString].
+  (anError isKindOf: PBDBError) ifFalse: [
+    ^ PBValidationError signal: 'PBOwnStepFailed: an error is a PBDBError, not ' , anError printString].
+  ^ self basicNew _setMessage: aMessage error: anError.
+
+PBOwnStepFailed >> _setMessage: aMessage error: anError
+  "Runs once, on a fresh instance."
+  message isNil ifFalse: [^ PBUserError signal: 'PBOwnStepFailed is immutable'].
+  message := aMessage.
+  error := anError.
+  ^ self.
+
+PBOwnStepFailed >> message
+  ^ message.
+
+PBOwnStepFailed >> error
+  ^ error.
+
+PBOwnStepFailed >> dispatchWith: aCore in: aNodeState now: t
+  ^ aCore dispatchOwnStepFailed: self in: aNodeState now: t.
 
 "=== Effects =================================================================="
 
