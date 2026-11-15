@@ -72,6 +72,11 @@ MemoryTier >> logPromise: aTerm
 MemoryTier >> logRejoined
   ^ self write: #rejoined label: 0 root: nil.
 
+"The storage of the tier (the identity the coordinator compares tiers by): each MemoryTier is
+ its own."
+MemoryTier >> storage
+  ^ self.
+
 MemoryTier >> readPersisted
   ^ nil.
 

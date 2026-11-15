@@ -8,6 +8,12 @@ ProtoBase's ObjectSpace, Database, Snapshot and HistoryEntry
                                             close closes it); lockTimeout 30000 ms
   PBObjectSpace storage: s lockTimeout: ms  ms, a positive SmallInteger (the root
                                             lock wait of a commit)
+  PBObjectSpace storage: s coordinator: c   a space of the cluster node c over s, a
+                                            storage in cluster mode (PBFileStorage
+                                            clusterPath:, CC20); the node's tier
+                                            (PBSharedTier) attached to c; also
+                                            storage:coordinator:lockTimeout:
+  aSpace coordinator                        c, or nil without a cluster
   aSpace listDatabases                      the database names, sorted
   aSpace newDatabase: aName                 creates the database (version 0)
                                             through the space's publisher and
@@ -26,9 +32,12 @@ ProtoBase's ObjectSpace, Database, Snapshot and HistoryEntry
             getRootObject:, as in ProtoBase: open the version with snapshotAt:)
 
 Every read goes to the storage's current root: there is no cache of roots. A
-space whose SpaceRoot carries cluster_term was committed by a cluster node and
-is PBNotSupportedError, like a directory holding cluster/ (PBFileStorage),
-since clusters are outside the prototype (design spec 10.5). snapshotAt:
+space without a coordinator whose SpaceRoot carries cluster_term was committed
+by a cluster node and is PBNotSupportedError, like a directory holding
+cluster/ (PBFileStorage path:). storage: refuses a storage in cluster mode and
+storage:coordinator: one that is not (PBValidationError); close detaches the
+node's tier from the coordinator and closes its acceptor log, and leaves the
+coordinator running (proto_db: the caller owns it). snapshotAt:
 checks that the version is one of this database: the name its entry or
 snapshot records, and its origin (DatabaseRoot origin), must be this
 database's, else PBReferenceError (ProtoBase Database._check_owned); any
@@ -44,6 +53,7 @@ Import from: 'protobase/collections'.
 Import from: 'protobase/records'.
 Import from: 'protobase/roots'.
 Import from: 'protobase/publisher'.
+Import from: 'protobase/cluster/tier'.
 
 Object subclass: #_PBNameCheck.
 
@@ -54,7 +64,7 @@ _PBNameCheck class >> check: aName what: aWhat
 
 "=== PBObjectSpace ============================================================"
 
-Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed publisher'.
+Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed publisher coordinator tier'.
 
 PBObjectSpace class >> registerAtomClass: aClass
   ^ PBTypeRegistry register: aClass.
@@ -66,21 +76,52 @@ PBObjectSpace class >> storage: aStorage
   ^ self storage: aStorage lockTimeout: self defaultLockTimeout.
 
 PBObjectSpace class >> storage: aStorage lockTimeout: milliseconds
+  self _checkStorage: aStorage lockTimeout: milliseconds.
+  ((aStorage respondsTo: #isClusterMode) and: [aStorage isClusterMode]) ifTrue: [
+    ^ PBValidationError signal: 'PBObjectSpace storage: ' , aStorage printString
+      , ' was opened in cluster mode (PBFileStorage clusterPath:): it is written only through a coordinator, PBObjectSpace storage:coordinator:'].
+  ^ self basicNew _setStorage: aStorage lockTimeout: milliseconds coordinator: nil tier: nil.
+
+"A space of the cluster node aCoordinator (a started PBClusterCoordinator) over aClusterStorage,
+ a storage opened in cluster mode (PBFileStorage clusterPath:, CC20), with the default lock
+ timeout. The node's tier (PBSharedTier storage:nodeId:) is attached to the coordinator before
+ the space is answered (proto_db ObjectSpace(coordinator=)); a refused attach closes the tier
+ and is signalled. The caller owns the coordinator: close detaches it, never stops it."
+PBObjectSpace class >> storage: aClusterStorage coordinator: aCoordinator
+  ^ self storage: aClusterStorage coordinator: aCoordinator lockTimeout: self defaultLockTimeout.
+
+PBObjectSpace class >> storage: aClusterStorage coordinator: aCoordinator lockTimeout: milliseconds
+  | aTier ok |
+  self _checkStorage: aClusterStorage lockTimeout: milliseconds.
+  "A storage not in cluster mode is refused by PBSharedTier storage:nodeId: (PBValidationError)."
+  (aCoordinator isKindOf: PBClusterCoordinator) ifFalse: [
+    ^ PBValidationError signal: 'PBObjectSpace storage:coordinator: a PBClusterCoordinator was expected, not ' , aCoordinator printString].
+  aTier := PBSharedTier storage: aClusterStorage nodeId: aCoordinator nodeId.
+  ok := false.
+  [(aCoordinator _attach: aTier) wait. ok := true] ensure: [ok ifFalse: [aTier close]].
+  ^ self basicNew _setStorage: aClusterStorage lockTimeout: milliseconds coordinator: aCoordinator tier: aTier.
+
+PBObjectSpace class >> _checkStorage: aStorage lockTimeout: milliseconds
   (aStorage isNil or: [aStorage isClassObject]) ifTrue: [
     ^ PBValidationError signal: 'PBObjectSpace storage: a storage was expected, not ' , aStorage printString].
   ((milliseconds isKindOf: SmallInteger) and: [milliseconds > 0]) ifFalse: [
     ^ PBValidationError signal: 'PBObjectSpace: lockTimeout is a positive SmallInteger of milliseconds, not '
       , milliseconds printString].
-  ^ self basicNew _setStorage: aStorage lockTimeout: milliseconds.
 
-PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds
+PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds coordinator: aCoordinator tier: aTier
   "Runs once, on a fresh instance."
   storage isNil ifFalse: [^ PBUserError signal: 'PBObjectSpace is initialised once'].
   storage := aStorage.
   lockTimeout := milliseconds.
+  coordinator := aCoordinator.
+  tier := aTier.
   closed := Atom on: false.
   publisher := (PBPublisher space: self) asActor.
   ^ self.
+
+"The cluster coordinator of the space, nil for a space opened without one (proto_db coordinator)."
+PBObjectSpace >> coordinator
+  ^ coordinator.
 
 PBObjectSpace >> storage
   ^ storage.
@@ -138,17 +179,17 @@ PBObjectSpace >> _snapshotRecord
   ^ storage readRoot.
 
 "The PBSpaceRoot aRootRecord points to, nil for nil. A space root committed by
- a cluster node is PBNotSupportedError."
+ a cluster node is PBNotSupportedError, unless the space has a coordinator."
 PBObjectSpace >> _spaceRootAt: aRootRecord
   | record root |
   record := aRootRecord.
   record isNil ifTrue: [^ nil].
   root := PBTypeRegistry unloadedAtomFor: (PBTypeRegistry aliasOf: PBSpaceRoot typeName)
     at: record pointer storage: storage.
-  root clusterTerm isNil ifFalse: [
+  (coordinator isNil and: [root clusterTerm notNil]) ifTrue: [
     ^ PBNotSupportedError signal: 'PBObjectSpace: the space root at ' , record pointer printString
       , ' was committed by a cluster node (cluster_term ' , root clusterTerm printString
-      , '): clusters are not supported by protoBaseST'].
+      , '): it is read only by a cluster node, PBObjectSpace storage:coordinator:'].
   ^ root.
 
 "The current PBDatabaseRoot of the database aName, or nil."
@@ -184,11 +225,14 @@ PBObjectSpace >> openDatabase: aName
     ^ PBValidationError signal: 'Database ' , (PBCodec repr: aName) , ' does not exist'].
   ^ PBDatabase basicNew _setSpace: self name: aName.
 
-"Closes the space and its storage. Idempotent. The storage is closed by the
- publisher, after the commits sent to it before (store.st: a close never
- interrupts a publish)."
+"Closes the space and its storage. Idempotent. With a coordinator, its tier is
+ detached first and the node's acceptor log closed (proto_db close); the
+ coordinator keeps running. The storage is closed by the publisher, after the
+ commits sent to it before (store.st: a close never interrupts a publish)."
 PBObjectSpace >> close
-  (closed value: true ifCurrent: false) ifTrue: [publisher closeStorage wait].
+  (closed value: true ifCurrent: false) ifFalse: [^ self].
+  [tier isNil ifFalse: [[(coordinator _detach: tier) wait] ensure: [tier close]]]
+    ensure: [publisher closeStorage wait].
 
 PBObjectSpace >> printOn: aStream
   aStream nextPutAll: 'PBObjectSpace('; print: storage; nextPut: $).

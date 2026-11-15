@@ -58,6 +58,7 @@ format's inter-process protocol, and no other lock exists in the protoST layer.
 |---|---|
 | `PBObjectSpace class >> storage: aStorage` | Space over a storage, with the default lock timeout (30000 ms). `PBValidationError` if not a storage. |
 | `PBObjectSpace class >> storage: aStorage lockTimeout: ms` | The same, with a positive SmallInteger of milliseconds. A commit waits at most that long for the root lock, then `PBTimeoutError`. |
+| `PBObjectSpace class >> storage: aClusterStorage coordinator: aCoordinator`, `storage:coordinator:lockTimeout:` | A space of a cluster node: the storage opened with `PBFileStorage clusterPath:`, the coordinator a started `PBClusterCoordinator`. The node's `PBSharedTier` is attached to the coordinator before the space is answered (a refused attach closes the tier and is signalled). `PBValidationError` for a storage not in cluster mode; `storage:` refuses a cluster-mode storage. `close` detaches the tier and closes the node's acceptor log; the caller owns the coordinator (it keeps running). |
 | `PBObjectSpace class >> registerAtomClass: aClass` | Registers an application record class under its `typeName` and `typeAliases` (`PBTypeRegistry register:`). Process-wide, as `proto_db`'s `register_atom_class`. `PBValidationError` for a name already taken, outside the grammar, or a `proto_db.` name outside the built-in table. |
 | `PBObjectSpace class >> defaultLockTimeout` | 30000. |
 | `firstLockDelay`, `longestLockDelay` (class) | 1 and 50 ms: the caller's backoff while the root lock is held. |
@@ -65,7 +66,7 @@ format's inter-process protocol, and no other lock exists in the protoST layer.
 | `newDatabase: aName` | Creates database `aName` (version 0, empty) and answers it. `PBValidationError` if it exists. |
 | `openDatabase: aName` | Answers the existing database. `PBValidationError` if absent. |
 | `close` | Ends the space; a later message to it or its databases is `PBClosedError`. |
-| `isClosed`, `storage`, `lockTimeout` | State. |
+| `isClosed`, `storage`, `lockTimeout`, `coordinator` | State (`coordinator` is `nil` without a cluster). |
 
 ### PBDatabase
 
@@ -105,14 +106,15 @@ use it only to open a space; the other messages are the publisher's and the test
 |---|---|
 | `PBFileStorage class >> path: aPath` | Opens the directory, creating it if needed. Refuses (`PBNotSupportedError`) a directory with `cluster/`, or whose SpaceRoot carries a `cluster_term`. Durability is always `fsync`. |
 | `PBFileStorage class >> path: aPath segmentMaxBytes: n` | A segment rolls over before it exceeds `n` bytes (default 256 MiB). |
+| `PBFileStorage class >> clusterPath: aPath`, `clusterPath:segmentMaxBytes:` | Cluster mode (`isClusterMode`), the storage of a cluster node: the directory may hold `cluster/` and cluster roots; `replaceRoot:` publishes only a SpaceRoot that carries a `cluster_term` (`PBValidationError`). Every other check of `path:` stays. |
 | `PBFileStorage class >> path: aPath atomCacheEntries: n`, `path:atomCacheEntries:atomCacheBytes:`, `path:segmentMaxBytes:atomCacheEntries:`, `path:segmentMaxBytes:atomCacheEntries:atomCacheBytes:` | The atom cache holds at most `n` records (default 20,000, `defaultAtomCacheEntries`) and at most the given bytes of record payload, measured on disk (default 64 MiB, `defaultAtomCacheBytes`, `proto_db`'s storage cache default); `0` for either disables it. It keeps records already decoded or written, as decoded state, so a load does not read and decode them again; that state takes several times its payload size in memory. Records are immutable once written, so it is never stale, even with other processes writing. A load still answers new, unloaded stubs for the references and runs the class's checks, as a decode does; nothing a transaction loaded stays reachable from it. It is emptied on `close` and on a write failure; each storage instance has its own. |
-| `directory`, `segmentMaxBytes`, `atomCacheEntries`, `atomCacheBytes`, `atomCacheSize`, `atomCacheWeight`, `isClosed`, `isFailed`, `isCluster` | State. A write failure of the file system is `PBUnexpectedError` and ends writing through that storage (`isFailed`); reads keep working. |
+| `directory`, `segmentMaxBytes`, `atomCacheEntries`, `atomCacheBytes`, `atomCacheSize`, `atomCacheWeight`, `isClosed`, `isFailed`, `isCluster`, `isClusterMode` | State. A write failure of the file system is `PBUnexpectedError` and ends writing through that storage (`isFailed`); reads keep working. |
 | `readRoot` | The `PBRootRecord` of `space.root`, `nil` for a new space. |
 | `recordAt:`, `loadAt:expecting:`, `refTo:offset:tag:`, `recordsOfSegment:`, `openSegmentCount` | Reading by pointer. |
 | `save: anAtom` | Writes the atom and its dependents (dependents first) and answers its `PBAtomPointer`. |
 | `pushAtom: anEnvelope`, `flushSegment`, `currentSegment`, `newSegmentId` | One record into the storage's own segment; sync; the segment; a fresh id. |
 | `tryLockRoot`, `unlockRoot`, `holdsRootLock` | The OS lock on `space.lock`. `tryLockRoot` answers at once. |
-| `replaceRoot: aRootRecord` | Publishes: lock held (`PBUserError`), segments synced, SpaceRoot pointer checked (the SpaceRoot this storage just wrote is read back and compared byte for byte with what was written; any other pointer is decoded in full), epoch is current + 1 (`PBConflictError`), then `space.root.tmp` is synced, renamed, and the directory synced. |
+| `replaceRoot: aRootRecord` | Publishes: lock held (`PBUserError`), segments synced, SpaceRoot pointer checked (the SpaceRoot this storage just wrote is read back and compared byte for byte with what was written; any other pointer is decoded in full), epoch is current + 1 (`PBConflictError`), a plain storage refuses a cluster node's space (`PBNotSupportedError`) and a cluster-mode one a SpaceRoot without `cluster_term` (`PBValidationError`), then `space.root.tmp` is synced, renamed, and the directory synced. |
 | `close` | Never waits and never releases the root lock under a publish. |
 | `PBFileStorage class >> rootFileName`, `segmentSuffix`, `rootTempFileName`, `lockFileName`, `clusterDirectoryName`, `defaultSegmentMaxBytes`, `spaceRootTag` | Format constants. |
 
@@ -817,7 +819,9 @@ For tests, tools and readers of the format. An application does not need them.
   tier's roots into a fresh `PBLoggedRoots` and attaches the acceptor, refusing with
   `PBValidationError` a `#startupGrace` below `leaseDuration + driftMargin` over a log that is not
   not empty in a cluster of more than one member (L17); it answers `true` at once for the tier
-  attached already and refuses another with `PBValidationError`; `_detach` (a `Future` of the tier) hands the
+  attached already, or for a tier over the same `storage` object, and refuses another with
+  `PBValidationError`; `_detach: aTier` detaches only that tier (or one over its storage) and
+  `_detach` whatever is attached (each a `Future` of the tier detached, `nil` for none); a detach hands the
   dispatcher `PBLogDetached`. `stop` answers a `Future` that settles once every pending `Future`
   is settled (a replication in flight `#unknown`, the rest `PBClosedError`), the acceptor step in
   progress has run (the steps queued behind the stop are dropped) and the transport stopped. `stats` (CC24) holds every counter of the rules (0
@@ -832,8 +836,8 @@ For tests, tools and readers of the format. An application does not need them.
   violation, `PBValidationError` for a root not built for its permission), `_done:outcome:` and
   `_done:outcome:root:`, `_confirmed` (each `true` once dispatched; rejected with
   `PBClosedError` when not running, also when it races the stop, and `PBUnexpectedError` when
-  fenced). A tier answers the protocol the shared tier of Task 21 implements: loadRoots,
-  logAccepted:, logCommitted:, logPromise:, logRejoined, readPersisted and canRead:; a write that signals a `PBDBError` or a
+  fenced). A tier answers the protocol `PBSharedTier` implements: `storage`, `loadRoots`,
+  `logAccepted:`, `logCommitted:`, `logPromise:`, `logRejoined`, `readPersisted` and `canRead:`; a write that signals a `PBDBError` or a
   `FileSystemError` fails the tier (the step discarded, `'tier_failed'`); a `PBDBError` a rule's
   decision signals drops that message (written to stderr; a local request, or the waiter of an
   own message the acceptor decides, is rejected with it); an error while a decided step's effects
@@ -841,6 +845,21 @@ For tests, tools and readers of the format. An application does not need them.
   error escaping the dispatcher or acceptor actor fences the node for the life of the process. The test seam
   `nodeId:peers:options:rules:acceptorClass:` takes other rules and a subclass of `_PBAcceptor`.
   The differences from `proto_db` are in [deviations.md](deviations.md#cluster-mode).
+- **The shared tier** (`cluster/tier.st`, `proto_db`'s `PlainTier`): `PBSharedTier storage:
+  aClusterStorage nodeId: anId` opens the node's acceptor log at
+  `cluster/<logName>.roots` in the space directory (`logName:`: the id when it matches
+  `[A-Za-z0-9._-]{1,64}`, else the hex of its UTF-8 bytes, CC21). A second open of one node's log
+  is `PBUserError` naming `cluster/<logName>.roots.lock`; a log holding kind-5 or kind-6 entries
+  is `PBNotSupportedError` (CC15); a storage not opened with `clusterPath:` is
+  `PBValidationError`. It answers the coordinator's tier protocol (`storage`, `loadRoots`,
+  `logAccepted:` and `logCommitted:` taking a `PBLabeledRoot`, `logPromise:`, `logRejoined`,
+  `readPersisted`: the storage root as a `PBLabeledRoot`, label and epoch from the SpaceRoot's
+  cluster fields, or label 0 and the storage epoch for a plain root, `nil` for an empty space;
+  `canRead:`), and `flushLocal`, `persist: aLabeledRoot` (`true` once published, `false` when the
+  storage holds that root or a newer one in root order, `#busy` when the root lock is held
+  elsewhere; it never waits, CC19), `close`, `nodeId`, `logPath`. `logClass` is a test seam, and
+  so is `PBAcceptorLog class >> _syncDirectory:`. The differences from `proto_db` are in
+  [deviations.md](deviations.md#cluster-mode).
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.
@@ -849,7 +868,7 @@ For tests, tools and readers of the format. An application does not need them.
   `databases:` and, for a cluster commit, `databases:term:epoch:previous:`),
   `PBDatabaseRoot` (`objects`, `mutables`, `version`, `committedAt`, `previous`, `origin`).
   A DatabaseRoot without `mutables` is `PBCorruptionError`; a SpaceRoot written by a cluster node
-  is `PBNotSupportedError`.
+  is `PBNotSupportedError` in a space without a coordinator.
 - **`PBNotation`**: `describe:`, `describeObject:`, `describeDatabase:`, `describeRoots:`,
   `describeMutables:`, `describeIndexes:`, `describeOrigin:`, `dumpSpace:to:` (the JSON of
   `proto_db`'s verifier `--out`), `jsonText:`, `build:`, `describeRaw:`, `floatHex:`,

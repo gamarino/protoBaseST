@@ -2,6 +2,27 @@
 
 ## 0.2.0 (unreleased)
 
+- The shared tier and the cluster storage mode (Task 21, `cluster/tier.st`, `proto_db`'s
+  `PlainTier` and `_node_log`). `PBFileStorage clusterPath:` (and `clusterPath:segmentMaxBytes:`,
+  `isClusterMode`) opens the storage of a cluster node: `cluster/` and cluster roots are
+  accepted, and `replaceRoot:` publishes only a SpaceRoot with a `cluster_term`
+  (`PBValidationError`); `path:` keeps refusing a node's directory (CC20).
+  `PBSharedTier storage:nodeId:` opens the node's acceptor log at `cluster/<logName>.roots`
+  (`logName:`: the id, or the hex of its UTF-8 bytes outside `[A-Za-z0-9._-]{1,64}`, CC21); a
+  second open of a node's log is `PBUserError` naming `cluster/<name>.roots.lock` (Review Focus
+  3); a log with kind-5 or kind-6 entries is `PBNotSupportedError` (CC15). It answers the
+  coordinator's tier protocol (`storage`, `loadRoots`, `logAccepted:`, `logCommitted:`,
+  `logPromise:`, `logRejoined`, `readPersisted`, `canRead:`) and `flushLocal`, `persist:`
+  (`true`, `false` when the persisted root is that one or newer, `#busy` when the root lock is
+  held; never waits, CC19) and `close`. `PBObjectSpace storage:coordinator:` (and
+  `storage:coordinator:lockTimeout:`, `coordinator`) attaches the node's tier to a coordinator,
+  reads cluster roots, and detaches it on `close`; `storage:` refuses a cluster-mode storage.
+  The coordinator compares tiers by `storage` as `proto_db` `_attach_locked` (the same storage
+  is a no-op) and gains `_detach: aTier` (`proto_db` `detach(tier)`). Test seam
+  `PBAcceptorLog class >> _syncDirectory:`. Tests: `tests/unit/cluster_tier.st`,
+  `tests/unit/store_cluster_refusal.st`; the 2 checklist rows deferred to Task 21 are ported.
+  Deviations: [deviations.md](docs/deviations.md#cluster-mode).
+
 - The coordinator shell (Task 20, `cluster/coordinator.st`, `proto_db`'s `ClusterCoordinator`):
   `PBClusterCoordinator nodeId:peers:options:` runs a cluster node on two high-band actors, a
   dispatcher (the core's `dispatch:in:now:`, timers by `Future after:`, waiters settled from

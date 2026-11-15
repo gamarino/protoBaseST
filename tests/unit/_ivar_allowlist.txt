@@ -30,11 +30,11 @@ PBRootRecord>>_setVersion:segment:offset:epoch:
 PBAtomEnvelope>>_setTag:oid:state:slots:size:
 PBSegmentReader>>_setSegment:file:header:
 PBSegmentWriter>>_setSegment:file:
-PBFileStorage>>_setDirectory:segmentMaxBytes:atomCacheEntries:atomCacheBytes:
+PBFileStorage>>_setDirectory:segmentMaxBytes:atomCacheEntries:atomCacheBytes:clusterMode:
 _PBAtomCache>>_setCapacity:bytes:
 PBHistoryEntry>>_setRoot:database:
 PBSnapshot>>_setRoot:database:
-PBObjectSpace>>_setStorage:lockTimeout:
+PBObjectSpace>>_setStorage:lockTimeout:coordinator:tier:
 PBDatabase>>_setSpace:name:
 PBNotation class>>_setJSON:
 PBTxState>>_setReads:writes:replaced:mreads:mwrites:mexpected:state:
@@ -58,6 +58,7 @@ PBClusterMessage class>>_initializeSchema
 PBLogEntry>>_setKind:label:root:seq:pred:records:ranges:flags:
 PBLoggedRoots>>_setAccepted:committed:promise:top:rejoined:dataEntryCount:entries:
 PBAcceptorLog>>_setPath:lock:log:promised:failed:
+PBSharedTier>>_setStorage:nodeId:log:
 PBClusterConfig>>_setMembership:nodeId:durations:authKey:seed:transport:clock:
 PBActiveGrant>>_setHolder:inc:term:expiry:
 PBGrantDecision>>_setVerdict:reason:highest:remaining:promiseToLog:endedTerm:newState:

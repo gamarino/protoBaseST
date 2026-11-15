@@ -20,7 +20,7 @@ core decides (spec 5.4).
                         The round runner's interface answers Futures and never waits: _permit
                         (a PBPermission), _baseFor: (a PBBaseDecision), _replicate:under:
                         (#committed, #none or #unknown), _done:outcome:[root:] and _confirmed.
-                        The tier's: _attach: aTier and _detach (Futures).
+                        The tier's: _attach: aTier, _detach: aTier and _detach (Futures).
   _PBDispatcher         an actor of the high band (spec 5.4): runs dispatch:in:now: over the
                         PBNodeState of the node's Atom, one event at a time, and performs the
                         step's effects in order: PBSend through the transport, PBToAcceptor to
@@ -56,7 +56,8 @@ settled: a permit, base or later commit gets PBUnexpectedError naming the cause 
 fenced after an internal failure: ...'), a replication in flight #unknown (its root may have
 left the node).
 
-The tier (Task 21's PBSharedTier, or a test double) answers loadRoots (a PBLoggedRoots),
+The tier (Task 21's PBSharedTier, or a test double) answers storage (the identity attach: and
+detach: compare, proto_db _attach_locked), loadRoots (a PBLoggedRoots),
 logAccepted: and logCommitted: (a PBLabeledRoot), logPromise: (a term), logRejoined,
 readPersisted (a PBLabeledRoot or nil) and canRead: (a PBLabeledRoot). Every call is made on the
 acceptor actor, which owns the log (PBAcceptorLog is not serialised). _attach: builds a fresh
@@ -512,11 +513,11 @@ _PBAcceptor >> fence: aReason
 _PBAcceptor >> attach: aTier
   | loaded logged config restart current |
   cells isStopped ifTrue: [^ cells closedError signal].
-  "proto_db _attach_locked 1092-1096, before load_roots: the tier attached already is a no-op,
-   another is refused (the storage identity proto_db also compares is Task 21's)."
+  "proto_db _attach_locked 1081-1084, before load_roots: the tier attached already, or a tier
+   over the same storage object (tier storage), is a no-op; another is refused."
   current := tier value.
   current notNil ifTrue: [
-    current == aTier ifTrue: [^ true].
+    (current == aTier or: [current storage == aTier storage]) ifTrue: [^ true].
     ^ PBValidationError signal: 'This coordinator already serves another storage'].
   config := cells config.
   loaded := aTier loadRoots.
@@ -546,6 +547,15 @@ _PBAcceptor >> detach
   cells dispatcher value handle: (PBLogDetached log: old log).
   cells dispatcher value handle: (PBAcceptorDecided step: (PBAcceptorStep state: detached appends: #() reply: #())).
   ^ t.
+
+"Detaches aTier (proto_db detach(tier)): only when it is the tier attached, or a tier over the
+ same storage object (the identity rule of attach:); else nothing is detached and the answer is
+ nil."
+_PBAcceptor >> detach: aTier
+  | t |
+  t := tier value.
+  (t notNil and: [t == aTier or: [t storage == aTier storage]]) ifFalse: [^ nil].
+  ^ self detach.
 
 "The persisted root, read on the tier for the dispatcher (PBStorageRead)."
 _PBAcceptor >> readPersisted: aToken
@@ -697,6 +707,13 @@ PBClusterCoordinator >> _detach
   | f |
   self isRunning ifFalse: [f := Future new. f resolve: nil. ^ f].
   ^ cells acceptor value detach.
+
+"Detaches aTier (proto_db detach(tier), what PBObjectSpace close calls): a Future of the tier
+ detached, nil when aTier (or a tier over its storage) was not the one attached."
+PBClusterCoordinator >> _detach: aTier
+  | f |
+  self isRunning ifFalse: [f := Future new. f resolve: nil. ^ f].
+  ^ cells acceptor value detach: aTier.
 
 "--- the operator ---"
 

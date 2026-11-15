@@ -422,13 +422,17 @@ PBAcceptorLog class >> path: aPath
   ok := false.
   [[log := self framedLogClass openAppend: ref kind: self logKind.
     log sync.
-    FileSystem syncDirectory: ref parent.
-    FileSystem syncDirectory: ref parent parent] on: FileSystemError do: [:e |
+    self _syncDirectory: ref parent.
+    self _syncDirectory: ref parent parent] on: FileSystemError do: [:e |
       ^ PBUnexpectedError signal: 'Cannot open the root log ' , ref pathString , ': ' , (self _describe: e)].
    promised := (self decode: log payloads path: ref pathString) promise.
    ok := true] ensure: [
      ok ifFalse: [[log isNil ifFalse: [log close]] ensure: [lock close]]].
   ^ self basicNew _setPath: ref lock: lock log: log promised: (Atom on: promised) failed: (Atom on: nil).
+
+"Syncs the directory aFileReference (path:, L10). A seam: tests observe the syncs."
+PBAcceptorLog class >> _syncDirectory: aFileReference
+  FileSystem syncDirectory: aFileReference.
 
 PBAcceptorLog >> _setPath: aFileReference lock: aBinaryFile log: aPBFramedLog promised: anAtom failed: anotherAtom
   "Runs once, on a fresh instance."

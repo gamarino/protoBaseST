@@ -127,12 +127,16 @@ explicit.
 
 ## Transactions and storage
 
-- **No cluster mode.** A directory with `cluster/`, or whose SpaceRoot carries a `cluster_term`,
-  is refused (`PBNotSupportedError`). `proto_db`'s "held retries" (an immediate retry without
-  backoff, `permit_held`) are therefore not ported. Mixed Python/protoST clusters are outside
+- **Cluster mode only through a coordinator.** A plain storage (`PBFileStorage path:`) refuses a
+  directory with `cluster/`, and a space without a coordinator a SpaceRoot that carries a
+  `cluster_term` (`PBNotSupportedError`); a cluster node opens its directory with
+  `PBFileStorage clusterPath:` and `PBObjectSpace storage:coordinator:` (see Cluster mode, the
+  shared tier). `proto_db`'s "held retries" (an immediate retry without
+  backoff, `permit_held`) are not ported. Mixed Python/protoST clusters are outside
   acceptance until a protocol freeze.
 - **Framed log files** (the `log` and `roots_log` layers) are read and written by the cluster
-  modules (`PBFramedLog`, `PBAcceptorLog`), which no space uses yet. The acceptor log writes
+  modules (`PBFramedLog`, `PBAcceptorLog`); a space uses the acceptor log only through a
+  coordinator (`PBSharedTier`). The acceptor log writes
   kinds 1 to 4 and reads 1 to 6 (it never writes kinds 5 and 6, which belong to `proto_db`'s
   tiered storage), and it is never compacted (`proto_db`'s `RootsLog` rewrites a log over 1 MiB).
   The lock file is named after the real path (`FileReference >> realPath`, as `proto_db`'s
@@ -588,10 +592,16 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     or from `_observe_committed`; here the own acceptor refuses the sibling (D50, S3) and the
     holder compares when the majority is reached, so the replicator gets the violation, never an
     unknown outcome.
-  - The attach of a tier follows `proto_db` `_attach_locked`: the tier attached already is a
-    no-op answering `true`, another is refused `PBValidationError` (`'This coordinator already
-    serves another storage'`) before its roots are loaded; `proto_db` also accepts a second
-    tier over the same storage, an identity Task 21's `PBSharedTier` defines (open until then).
+  - The attach of a tier follows `proto_db` `_attach_locked`: the tier attached already, or a
+    tier whose `storage` is the same object as the attached tier's (`proto_db`
+    `self._tier.storage is tier.storage`), is a no-op answering `true`; another is refused
+    `PBValidationError` (`'This coordinator already serves another storage'`) before its roots
+    are loaded. Two `PBFileStorage` objects over one directory are two storages, as two
+    `FileStorage` objects are in `proto_db`. A second `PBSharedTier` of the same node over the
+    same directory never reaches the attach: opening its acceptor log is `PBUserError` naming
+    `cluster/<name>.roots.lock` (Review Focus 3). `_detach: aTier` (what `PBObjectSpace close`
+    calls) follows `proto_db` `detach(tier)`: it detaches only that tier or one over its
+    storage; the test-only `_detach` detaches whatever is attached.
   - An own acceptance queued in the acceptor's mailbox behind a detach and an attach is decided
     and logged on the new log, where `proto_db` refuses it (the tier changed under the
     replicate, ruling R55) and the replication ends unknown; the outcome reported is the
@@ -611,6 +621,37 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     refused `no_storage` after `learner` (`proto_db` `_refusal`'s order, `fenced` aside: a
     fenced node sends nothing), counted `grants_refused_no_storage` for a peer; a plain query
     is answered `'unknown'`.
+- **The shared tier and cluster storage mode (Task 21, `cluster/tier.st`, `proto_db`
+  `PlainTier`).**
+  - Cluster mode is chosen when the storage opens (`PBFileStorage clusterPath:`, CC20), not
+    inferred: `proto_db`'s `FileStorage` has no mode, and its `ObjectSpace` takes any storage
+    with a coordinator. protoBaseST refuses `PBObjectSpace storage:` of a cluster-mode storage,
+    `PBObjectSpace storage:coordinator:` of a plain one and `PBSharedTier storage:nodeId:` of a
+    plain one (`PBValidationError`), and `PBFileStorage path:` keeps refusing a directory holding
+    `cluster/` (`PBNotSupportedError`). In cluster mode `replaceRoot:` publishes only a SpaceRoot
+    that carries a `cluster_term` (`PBValidationError`, nothing written), a check `proto_db`
+    does not make: a plain commit through a cluster node's storage would publish a root the
+    cluster's order cannot place. *Cost:* none for a cluster; a plain process must not open a
+    node's directory, as before.
+  - `persist:` (CC19) takes the root lock without waiting (`tryLockRoot`) and answers `#busy`
+    when another holder has it; the root is read and compared under the lock, then published
+    with `replaceRoot:` (storage epoch + 1). `proto_db` reads outside the lock and retries a
+    lost compare-and-swap up to 100 times inside a waiting `publish_root`. Under the lock no
+    lock-respecting writer can move the root between the read and the publish, so there is no
+    retry loop: a `PBConflictError` (a writer that ignores the lock) is signalled to the
+    caller. The persister reschedules a busy attempt (Task 25), so it never waits.
+  - A log holding entries of kind 5 or 6 (written by a node of a tiered storage) is refused
+    `PBNotSupportedError` when the tier opens (CC15); `proto_db` `PlainTier` reads it.
+  - The log name follows `proto_db` `_node_log` (CC21): an id outside `[A-Za-z0-9._-]{1,64}`
+    is not refused, its file is `cluster/<lowercase hex of its UTF-8 bytes>.roots`. A storage
+    without a directory (`proto_db`'s in-memory logs over `MemoryStorage`) does not exist here.
+  - `canRead:` (the probe of a base, R133) answers whether the storage can load the SpaceRoot
+    record; `proto_db`'s `PlainTier` has no such method (the probe is a protoBaseST addition,
+    see the rejoin and base entries above).
+  - The ported power-loss check (`test_a_new_acceptor_log_and_its_directories_survive_a_power_loss`,
+    kind `plain`) observes the directory syncs through the `PBAcceptorLog _syncDirectory:` seam
+    and reloads the log; protoST cannot simulate a power loss. The `tiered` kind is not ported
+    (DEPTH = 0).
 
 ## Errors and messages
 

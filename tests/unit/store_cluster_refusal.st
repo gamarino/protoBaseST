@@ -1,9 +1,10 @@
-"EXPECT: ok 12"
+"EXPECT: ok 15"
 "PBFileStorage replaceRoot: refuses a cluster node's space (design spec 10.5; format spec,
  'A minimal external writer', step 6), with nothing written: a cluster/ directory created
  after the storage opened, and a current SpaceRoot that carries a cluster_term (a space
  committed by a cluster node, written here with the test builder). isCluster says so in
- both cases; a SpaceRoot whose cluster_term is nil is not a cluster's."
+ both cases; a SpaceRoot whose cluster_term is nil is not a cluster's. Plain path: still refuses
+ a directory holding cluster/ when it opens; clusterPath: (cluster mode, CC20) opens it."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_spaces'.
@@ -56,5 +57,15 @@ c that: 'it publishes' is: (st replaceRoot: (PBRootRecord segment: p segmentByte
 c that: 'over the builder''s root' is: st readRoot pointer equals: p.
 st close.
 c that: 'a closed storage: isCluster' signals: PBClosedError during: [st isCluster].
+
+"Plain path: refuses a cluster node's directory; clusterPath: opens it."
+c that: 'path: refuses a directory holding cluster/' signals: PBNotSupportedError containing: 'clusterPath:' during: [
+  PBFileStorage path: (base / 'late') pathString].
+st := PBFileStorage clusterPath: (base / 'late') pathString.
+c that: 'clusterPath: opens it in cluster mode' is: { st isClusterMode. st isCluster } equals: { true. true }.
+st close.
+st := PBFileStorage path: (base / 'nilterm') pathString.
+c that: 'path: is not cluster mode' is: st isClusterMode equals: false.
+st close.
 base deleteAll.
 c report displayNl.
