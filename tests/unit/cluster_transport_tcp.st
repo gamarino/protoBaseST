@@ -1,4 +1,4 @@
-"EXPECT: ok 11"
+"EXPECT: ok 12"
 "PBTcpTransport (cluster/transport.st): length-prefixed frames over TCP (proto_db
  cluster/transport.py TcpTransport), one listener actor, one reader actor per accepted
  connection, one sender actor per peer. Every transport listens on 127.0.0.1, port 0, through
@@ -18,7 +18,9 @@
  the frames written into the old, dead connection are lost (as in proto_db), the write that
  fails is retried at once on a new connection, and nothing is dropped. Every transport but
  those of check (10) has a 60 s connect and write timeout (requestTimeout:), so no outcome
- depends on how fast a loaded machine connects or writes. Every wait is for a
+ depends on how fast a loaded machine connects or writes. (12) A stray error while a sender
+ writes one frame (a stand-in peer whose port signals once) drops and counts that frame only:
+ the next frame is delivered without another send. Every wait is for a
  condition with a generous deadline (60 s at least) that turns a hang into a failure; nothing
  asserts a duration. A raw socket's read has a 60 s timeout, so a connection the receiver
  failed to close fails the check instead of hanging."
@@ -59,6 +61,27 @@ Object subclass: #Hole.
 
 Hole >> acceptOn: aServer
   ^ aServer accept.
+
+"A stand-in for a PBPeer whose port signals MessageNotUnderstood the first time it is asked (a
+ stray error inside a sender's write), then answers the real port."
+Object subclass: #FlakyPeer instanceVariableNames: 'port asked'.
+
+FlakyPeer class >> port: aPort
+  ^ self basicNew setPort: aPort.
+
+FlakyPeer >> setPort: aPort
+  port := aPort.
+  asked := Atom on: 0.
+
+FlakyPeer >> nodeId
+  ^ 'b'.
+
+FlakyPeer >> host
+  ^ '127.0.0.1'.
+
+FlakyPeer >> port
+  (asked swap: [:n | n + 1]) = 1 ifTrue: [^ nil zork].
+  ^ port.
 
 | c request listen membership await stats vectors ids ts inboxes raw rawRead ok a b hole holeServer held big
   key2 reserved port server delivered before frames t0 |
@@ -237,6 +260,21 @@ t0 := (inboxes at: 2) terms.
 c that: 'after a peer restarts, only frames written into the dead connection are lost: the failed write is retried on a new one'
   is: { stats value: a value: 'frames_dropped'. stats value: a value: 'frames_sent'. t0 notEmpty and: [t0 = (t0 first to: 30) asArray] }
   equals: { 0. 30. true }.
+(a stop) waitWithin: 60000. (b stop) waitWithin: 60000.
+
+"(12) A stray error in a write drops and counts that frame; the frame behind it still goes."
+a := listen value. b := listen value.
+inboxes := { Inbox new. Inbox new }.
+a start: 'a' peers: (membership value: { { 'a'. a port }. { 'b'. b port } }) key: nil handler: (inboxes at: 1) handler.
+b start: 'b' peers: (membership value: { { 'a'. a port }. { 'b'. b port } }) key: nil handler: (inboxes at: 2) handler.
+server := _PBTcpSender transport: a peer: (FlakyPeer port: b port).
+server offer: (PBClusterFrame encode: (request value: 'a' value: 1) to: 'b' key: nil).
+server offer: (PBClusterFrame encode: (request value: 'a' value: 2) to: 'b' key: nil).
+await value: [(inboxes at: 2) size >= 1].
+c that: 'a stray error while writing a frame drops and counts it, and the next frame is delivered without another send'
+  is: { (inboxes at: 2) terms. stats value: a value: 'frames_dropped'. stats value: a value: 'frames_sent' }
+  equals: #(#(2) 1 1).
+(server stop) waitWithin: 60000.
 (a stop) waitWithin: 60000. (b stop) waitWithin: 60000.
 
 c report displayNl.

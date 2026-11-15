@@ -677,14 +677,16 @@ _PBTcpSender >> offer: aFrame
 "Writes the queued frames, oldest first, until the queue is empty or closed (an actor method)."
 _PBTcpSender >> drain
   | frame |
-  [[(frame := self _take) notNil] whileTrue: [self _write: frame]] on: Error do: [:e |
-    "A stray error must not leave the queue draining with no drain running: offer: would never
-     start one again and the peer would be cut off. It is reported, the connection is dropped,
-     and the next offer: starts a new drain."
-    transport class _warn: 'the sender to ' , peer nodeId printString , ' failed: ' , e messageText.
-    self _discard: link value first.
-    queue swap: [:old | old idle].
-    ^ false].
+  [(frame := self _take) notNil] whileTrue: [
+    [self _write: frame] on: Error do: [:e |
+      "A stray error while writing one frame drops and counts that frame only, drops the
+       connection, and the loop goes on: only _take, finding the queue empty, ends the drain,
+       so no frame is stranded behind it. MessageNotUnderstood is caught here on purpose
+       (unlike the other guards of this file, which pass it on): the sender must survive a bug
+       in one write, and the error is written to stderr."
+      transport class _warn: 'writing a frame to ' , peer nodeId printString , ' failed: ' , e messageText.
+      self _discard: link value first.
+      transport _count: 'frames_dropped']].
   queue value isClosed ifTrue: [self _closeLink].
   ^ true.
 
@@ -814,10 +816,6 @@ _PBSendQueue >> withoutFirst
   frames isEmpty ifTrue: [^ self class basicNew _setFrames: #() bytes: 0 draining: false closed: closed].
   ^ self class basicNew _setFrames: (frames copyFrom: 2 to: frames size) bytes: bytes - frames first size
     draining: true closed: closed.
-
-"This queue, not draining (its frames kept)."
-_PBSendQueue >> idle
-  ^ self class basicNew _setFrames: frames bytes: bytes draining: false closed: closed.
 
 "Closed, its frames discarded."
 _PBSendQueue >> closed

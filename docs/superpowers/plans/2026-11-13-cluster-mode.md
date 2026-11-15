@@ -1174,6 +1174,11 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
     requestTimeout:`, or keep its default of 1000 ms, `proto_db`'s.
   - (e) A sender blocked in a connect is not woken by `stop`: stop settles at most
     `requestTimeout` later.
+  - (f) A handler error that is not a `PBDBError` ends that connection's reader, which closes
+    the connection and loses the frames behind it: the coordinator's handler must not signal.
+  - (g) `PBInProcessNetwork` has no delays: a `proto_db` test that uses `set_faults(delay=)` or
+    `set_link_delay` is ported to the simulator (`PBSimFaults delay:reorder:`, `delay:to:by:`),
+    or uses real timers only through a condition with a generous deadline.
 - **Checklist (Task 18):** turn the 22 `deferred 20` rows of `tests/unit/cluster_checklist.tsv` (`awk -F'\t' '$2=="deferred" && $3==20' tests/unit/cluster_checklist.tsv`) into `ported` rows, each naming the whole check label of a test this task adds; a row this task cannot port is re-justified as `n/a` in its review, never left deferred.
 - [ ] **Step 1: write the failing test** `cluster_coordinator_shell.st` (`"EXPECT: ok 10"`): three
   coordinators over `PBInProcessNetwork` and a memory tier test double (test file only) elect an
