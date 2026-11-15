@@ -70,7 +70,7 @@ PBSharedTier class >> logName: anId
 PBSharedTier class >> storage: aClusterStorage nodeId: anId
   | name opened ok roots |
   ((aClusterStorage isKindOf: PBFileStorage) and: [aClusterStorage isClusterMode]) ifFalse: [
-    ^ PBValidationError signal: 'PBSharedTier: the storage of a cluster node is a PBFileStorage opened with clusterPath:, not '
+    ^ PBValidationError signal: 'The storage of a cluster node is a PBFileStorage opened with clusterPath:, not '
       , aClusterStorage printString].
   name := self logName: anId.
   opened := self logClass path: aClusterStorage directory / PBFileStorage clusterDirectoryName / (name , '.roots').
@@ -152,13 +152,17 @@ PBSharedTier >> _labeled: aRootRecord
 
 "Publishes the record of aLabeledRoot as the storage root (CC19, proto_db PlainTier.persist):
  true once published; false when the storage holds that root or a newer one in the order of
- roots; #busy when another holder has the root lock. The lock is released whatever happens."
+ roots; #busy when another holder has the root lock. The lock is released whatever happens.
+ A protoBaseST addition: the label and epoch of aLabeledRoot must be the cluster_term and
+ cluster_epoch its SpaceRoot carries (PBValidationError, nothing written), so the root persisted
+ is ordered as readPersisted later reports it."
 PBSharedTier >> persist: aLabeledRoot
   | current |
   ((aLabeledRoot isKindOf: PBLabeledRoot) and: [aLabeledRoot record notNil]) ifFalse: [
     ^ PBValidationError signal: 'PBSharedTier persist: a PBLabeledRoot of a record was expected, not ' , aLabeledRoot printString].
   storage tryLockRoot ifFalse: [^ #busy].
-  ^ [current := storage readRoot.
+  ^ [self _checkFieldsOf: aLabeledRoot.
+     current := storage readRoot.
      (current notNil and: [(PBRootOrder compare: (self _labeled: current) with: aLabeledRoot) >= 0])
        ifTrue: [false]
        ifFalse: [
@@ -167,14 +171,31 @@ PBSharedTier >> persist: aLabeledRoot
          true]]
     ensure: [storage unlockRoot].
 
+"Refuses (PBValidationError) aLabeledRoot when its SpaceRoot carries cluster fields other than
+ its label and epoch. A SpaceRoot without cluster_epoch is left to replaceRoot:, which refuses it
+ in cluster mode (no cluster_term)."
+PBSharedTier >> _checkFieldsOf: aLabeledRoot
+  | space term epoch |
+  space := PBTypeRegistry unloadedAtomFor: (PBTypeRegistry aliasOf: PBSpaceRoot typeName)
+    at: aLabeledRoot record pointer storage: storage.
+  epoch := space clusterEpoch.
+  epoch isNil ifTrue: [^ self].
+  term := space clusterTerm.
+  term isNil ifTrue: [term := 0].
+  (term = aLabeledRoot label and: [epoch = aLabeledRoot epoch]) ifTrue: [^ self].
+  ^ PBValidationError signal: 'PBSharedTier persist: the root is labelled ' , aLabeledRoot label printString
+    , ' with epoch ' , aLabeledRoot epoch printString , ', but its SpaceRoot at ' , aLabeledRoot record pointer printString
+    , ' carries cluster_term ' , term printString , ' and cluster_epoch ' , epoch printString.
+
 "Whether the shared storage can read the SpaceRoot of aLabeledRoot (the probe of a base,
  PBProbeRoot): true for the empty space; false when its record is missing, damaged or not a
- SpaceRoot (a PBDBError) or the file system fails."
+ SpaceRoot (a PBDBError) or the file system fails. A closed storage is PBClosedError: the
+ probe has no tier to ask."
 PBSharedTier >> canRead: aLabeledRoot
   aLabeledRoot record isNil ifTrue: [^ true].
   ^ [storage loadAt: aLabeledRoot record pointer expecting: PBFileStorage spaceRootTag. true]
     on: Error do: [:e |
-      ((e isKindOf: PBDBError) or: [e isKindOf: FileSystemError])
+      ((e isKindOf: PBClosedError) not and: [(e isKindOf: PBDBError) or: [e isKindOf: FileSystemError]])
         ifTrue: [e return: false]
         ifFalse: [e pass]].
 

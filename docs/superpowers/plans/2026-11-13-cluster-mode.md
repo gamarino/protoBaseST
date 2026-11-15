@@ -1426,6 +1426,24 @@ record needs it); tests: a new `tests/unit/cluster_renew_backoff_rules.st` porti
   `PBObjectSpace >> sync: milliseconds` → nil once the persisted epoch reaches the committed
   epoch, `PBTimeoutError` after `milliseconds` (a durability barrier, not a visibility
   barrier). Never on the commit path.
+- **Carry-over from Task 21 review (I1): one writer per storage.** The persister and the commit
+  round write the node's one `PBFileStorage`, which takes no lock to serialise its writes
+  (`_writeOperation:` refuses an overlapping one with `PBUserError`, and the root lock is per
+  storage object, not re-entrant). Run side by side, they fail in two ways that `#busy` cannot
+  absorb: (1) `persist:` while the node's own storage holds the root lock (a commit's
+  publish, or the reverse) makes `tryLockRoot` signal `PBLockingError` ('not re-entrant', or
+  'another tryLockRoot of this storage ran at the same time') instead of answering false;
+  (2) `persist:`'s `ensure: [storage unlockRoot]` running while the commit path's `pushAtom:`
+  (or `flushSegment`) is a write in progress is refused (logged, 'the root lock is kept'), so
+  the root lock stays held by this storage for good: every later `persist:` on the node
+  signals `PBLockingError`, every other node's answers `#busy` forever, `space.root` never
+  advances and `sync:` times out. Required fix: every storage write of the persister
+  (`persist:`, `flushLocal`) goes through the same actor as the commit round's writes on the
+  node (for example the space's publisher, which then calls the tier), so `tryLockRoot`,
+  `replaceRoot:` and `unlockRoot` never overlap a `pushAtom:` or `flushSegment` of the same
+  storage. Treating the refusal as `#busy` is not enough (failure 2). Test (in
+  `cluster_persister.st`): a commit and a persist run together on one node, then
+  `holdsRootLock` is false and a later `persist:` succeeds.
 - **Checklist (Task 18):** turn the 8 `deferred 25` rows of `tests/unit/cluster_checklist.tsv` (`awk -F'\t' '$2=="deferred" && $3==25' tests/unit/cluster_checklist.tsv`) into `ported` rows, each naming the whole check label of a test this task adds; a row this task cannot port is re-justified as `n/a` in its review, never left deferred.
 - [ ] **Step 1: write the failing test** `cluster_persister.st` (`"EXPECT: ok 4"`): after commits
   and `sync: 10000`, `space.root` holds a cluster root whose epoch equals `committedEpoch`;

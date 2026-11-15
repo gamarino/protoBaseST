@@ -639,14 +639,27 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     lost compare-and-swap up to 100 times inside a waiting `publish_root`. Under the lock no
     lock-respecting writer can move the root between the read and the publish, so there is no
     retry loop: a `PBConflictError` (a writer that ignores the lock) is signalled to the
-    caller. The persister reschedules a busy attempt (Task 25), so it never waits.
+    caller. The persister reschedules a busy attempt (Task 25), so it never waits. `proto_db`
+    also retries a `ProtoOutcomeUnknownError` (reading the root again decides) and raises
+    `ProtoUnexpectedError` after 100 lost races; here neither exists: a file-system failure
+    inside `replaceRoot:` is `PBUnexpectedError`, leaves the storage failed (every later write
+    refused) and is signalled to the persister, and no re-read decides it.
+  - `persist:` refuses (`PBValidationError`, nothing written, the lock released) a
+    `PBLabeledRoot` whose label or epoch differs from the `cluster_term` or `cluster_epoch` of
+    the SpaceRoot it points to (a protoBaseST addition; `proto_db` trusts the caller). Without
+    it the persisted root would be ordered by one key and reported by `readPersisted` with
+    another, which can look like the persisted root went backwards. *Cost:* one SpaceRoot read
+    per persist.
+  - `PBObjectSpace close` on a node whose coordinator is stopping closes the tier's log only
+    once the stop has settled (`_detach:` chains on `stop`'s `Future`), so the acceptor step in
+    progress has finished; `proto_db`'s `detach` takes the log lock instead.
   - A log holding entries of kind 5 or 6 (written by a node of a tiered storage) is refused
     `PBNotSupportedError` when the tier opens (CC15); `proto_db` `PlainTier` reads it.
   - The log name follows `proto_db` `_node_log` (CC21): an id outside `[A-Za-z0-9._-]{1,64}`
     is not refused, its file is `cluster/<lowercase hex of its UTF-8 bytes>.roots`. A storage
     without a directory (`proto_db`'s in-memory logs over `MemoryStorage`) does not exist here.
   - `canRead:` (the probe of a base, R133) answers whether the storage can load the SpaceRoot
-    record; `proto_db`'s `PlainTier` has no such method (the probe is a protoBaseST addition,
+    record (a closed storage is `PBClosedError`, not false); `proto_db`'s `PlainTier` has no such method (the probe is a protoBaseST addition,
     see the rejoin and base entries above).
   - The ported power-loss check (`test_a_new_acceptor_log_and_its_directories_survive_a_power_loss`,
     kind `plain`) observes the directory syncs through the `PBAcceptorLog _syncDirectory:` seam

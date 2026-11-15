@@ -709,11 +709,19 @@ PBClusterCoordinator >> _detach
   ^ cells acceptor value detach.
 
 "Detaches aTier (proto_db detach(tier), what PBObjectSpace close calls): a Future of the tier
- detached, nil when aTier (or a tier over its storage) was not the one attached."
+ detached, nil when aTier (or a tier over its storage) was not the one attached. On a node that
+ is stopping, the Future resolves with nil once the stop has settled, so the acceptor step in
+ progress has finished before the caller closes the tier's log (proto_db detach takes _log_lock);
+ it is chained on stop's Future, never waited. Before start, nil at once."
 PBClusterCoordinator >> _detach: aTier
-  | f |
-  self isRunning ifFalse: [f := Future new. f resolve: nil. ^ f].
-  ^ cells acceptor value detach: aTier.
+  | f current |
+  self isRunning ifTrue: [^ cells acceptor value detach: aTier].
+  f := Future new.
+  current := run value.
+  (current isKindOf: Future)
+    ifTrue: [(PBClusterTransport _settled: current) thenDo: [:x | f resolve: nil]]
+    ifFalse: [f resolve: nil].
+  ^ f.
 
 "--- the operator ---"
 

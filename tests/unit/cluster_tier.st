@@ -1,4 +1,4 @@
-"EXPECT: ok 32"
+"EXPECT: ok 38"
 "The shared tier and the cluster storage mode (cluster/tier.st, store.st clusterPath:, space.st
  storage:coordinator:; proto_db cluster/persister.py PlainTier and _node_log, transactions.py
  ObjectSpace(coordinator=)).
@@ -32,14 +32,29 @@ SeamLog class >> _syncDirectory: aFileReference
   ^ super _syncDirectory: aFileReference.
 SeamLog _setSynced: (Atom on: #()).
 PBSharedTier subclass: #SeamTier.
+_PBAcceptor subclass: #GatedAcceptor instanceVariableNames: '' classVariableNames: 'Gate Trace'.
+GatedAcceptor class >> _setGate: aFuture trace: anAtom
+  Gate := aFuture.
+  Trace := anAtom.
+GatedAcceptor class >> gate
+  ^ Gate.
+GatedAcceptor class >> trace
+  ^ Trace.
+GatedAcceptor >> finish
+  Gate wait.
+  Trace swap: [:old | old , #('finish')].
+  ^ super finish.
+GatedAcceptor _setGate: Future new trace: (Atom on: #()).
 SeamTier class >> logClass
   ^ SeamLog.
 
-| c base dir st tier other rec p1 p2 p3 r1 r2 r3 lockFile held plain kit node space s2 w t2 t3 st3 framed d |
+| c base dir st tier other rec p1 p2 p3 r1 r2 r3 lockFile held plain kit node space s2 w t2 t3 st3 framed d closing p4 kit2 node2 space2 detached trace |
 c := Check new.
 base := FileSystem temp / ('pbst-cluster-tier-' , Smalltalk pid printString).
 base deleteAll.
 "A labelled root at the pointer aPointer, label aLabel and cluster epoch anEpoch."
+"aBlock run with the storage aStorage, which is closed afterwards (refusal blocks, M6)."
+closing := [:aStorage :aBlock | [aBlock value: aStorage] ensure: [aStorage close]].
 rec := [:aPointer :aLabel :anEpoch |
   PBLabeledRoot label: aLabel record: (PBRootRecord segment: aPointer segmentBytes offset: aPointer offset epoch: anEpoch)].
 
@@ -62,7 +77,7 @@ dir := base / 'twice'.
 st := PBFileStorage clusterPath: dir pathString.
 tier := PBSharedTier storage: st nodeId: 'n0'.
 c that: 'a second tier of n0 is refused naming its lock file' signals: PBUserError containing: 'cluster/n0.roots.lock' during: [
-  PBSharedTier storage: (PBFileStorage clusterPath: dir pathString) nodeId: 'n0'].
+  closing value: (PBFileStorage clusterPath: dir pathString) value: [:s | PBSharedTier storage: s nodeId: 'n0']].
 tier logPromise: 5.
 c that: 'the first tier is unaffected' is: tier loadRoots promise equals: 5.
 tier close.
@@ -107,11 +122,19 @@ plain := st save: (PBSpaceRoot databases: PBDictionary new).
 c that: 'a plain SpaceRoot is refused in cluster mode' signals: PBValidationError containing: 'cluster_term' during: [
   tier persist: (rec value: plain value: 10 value: 4)].
 c that: 'the refusal wrote nothing and released the lock' is: { st readRoot epoch. st holdsRootLock } equals: { 3. false }.
+p4 := st save: (PBSpaceRoot databases: PBDictionary new term: 11 epoch: 5 previous: nil).
+c that: 'persist refuses a label that is not its SpaceRoot''s' signals: PBValidationError containing: 'carries cluster_term 11' during: [
+  tier persist: (rec value: p4 value: 12 value: 5)].
+c that: 'persist refuses an epoch that is not its SpaceRoot''s' signals: PBValidationError containing: 'cluster_epoch 5' during: [
+  tier persist: (rec value: p4 value: 11 value: 6)].
+c that: 'the mismatches wrote nothing and released the lock' is: { st readRoot epoch. st holdsRootLock. tier persist: (rec value: p4 value: 11 value: 5) }
+  equals: { 3. false. true }.
 c that: 'canRead: a written root' is: (tier canRead: r3) equals: true.
 c that: 'canRead: a root at no record' is: (tier canRead: (PBLabeledRoot label: 9 record: (PBRootRecord
   segment: p3 segmentBytes offset: 999999 epoch: 4))) equals: false.
 tier close.
 st close.
+c that: 'canRead: on a closed storage signals PBClosedError' signals: PBClosedError during: [tier canRead: r3].
 "A plain space: label 0, the storage epoch."
 dir := base / 'plain'.
 st := PBFileStorage path: dir pathString.
@@ -130,16 +153,16 @@ st close.
 "--- (5) the mode refusals ---"
 dir := base / 'modes'.
 c that: 'storage: refuses a cluster-mode storage' signals: PBValidationError containing: 'storage:coordinator:' during: [
-  PBObjectSpace storage: (PBFileStorage clusterPath: dir pathString)].
+  closing value: (PBFileStorage clusterPath: dir pathString) value: [:s | PBObjectSpace storage: s]].
 kit := ShellKit ids: #('n0').
 node := kit node: 'n0'.
 node start.
 c that: 'storage:coordinator: refuses a plain storage' signals: PBValidationError containing: 'clusterPath:' during: [
-  PBObjectSpace storage: (PBFileStorage path: (base / 'modes-plain') pathString) coordinator: node].
+  closing value: (PBFileStorage path: (base / 'modes-plain') pathString) value: [:s | PBObjectSpace storage: s coordinator: node]].
 c that: 'storage:coordinator: refuses what is not a coordinator' signals: PBValidationError containing: 'PBClusterCoordinator' during: [
-  PBObjectSpace storage: (PBFileStorage clusterPath: (base / 'modes-nocoord') pathString) coordinator: 'n0'].
+  closing value: (PBFileStorage clusterPath: (base / 'modes-nocoord') pathString) value: [:s | PBObjectSpace storage: s coordinator: 'n0']].
 c that: 'a tier needs a cluster-mode storage' signals: PBValidationError containing: 'clusterPath:' during: [
-  PBSharedTier storage: (PBFileStorage path: (base / 'modes-plain2') pathString) nodeId: 'n0'].
+  closing value: (PBFileStorage path: (base / 'modes-plain2') pathString) value: [:s | PBSharedTier storage: s nodeId: 'n0']].
 
 "--- (6) a new log and its directories are synced ---"
 dir := base / 'synced'.
@@ -187,7 +210,7 @@ c that: 'storage:coordinator: attaches the node''s tier and reads a cluster root
   (PBAcceptorLog decode: (PBFramedLog read: dir / 'cluster' / 'n0.roots' kind: PBAcceptorLog logKind) payloads path: 'n0') isRejoined }
   equals: { true. #(). true. true }.
 c that: 'a second space of the node over the directory is refused at its lock' signals: PBUserError containing: 'cluster/n0.roots.lock' during: [
-  PBObjectSpace storage: (PBFileStorage clusterPath: dir pathString) coordinator: node].
+  closing value: (PBFileStorage clusterPath: dir pathString) value: [:s | PBObjectSpace storage: s coordinator: node]].
 t2 := PBSharedTier storage: space storage nodeId: 'x'.
 c that: 'a tier over the attached storage is a no-op' is: ([(node _attach: t2) wait] on: PBDBError do: [:e | e return: e class name])
   equals: true.
@@ -206,5 +229,27 @@ c that: 'close detached the tier and released its log' is: { node acceptorState 
 tier close.
 s2 close.
 node stop waitWithin: 60000.
+
+"A detach while the node stops settles only once the acceptor step in progress has finished
+ (M4): GatedAcceptor holds stop's finish step until the test releases it; the order of the trace
+ is fixed by the code (a Future already settled runs thenDo: at once)."
+kit2 := ShellKit ids: #('n0').
+node2 := kit2 node: 'n0' options: Dictionary new rules: PBCoordinatorCore new acceptorClass: GatedAcceptor.
+node2 start.
+dir := base / 'stopping'.
+space2 := PBObjectSpace storage: (PBFileStorage clusterPath: dir pathString) coordinator: node2.
+trace := GatedAcceptor trace.
+w := node2 stop.
+detached := node2 _detach: nil.
+detached thenDo: [:x | trace swap: [:old | old , #('detached')]].
+trace swap: [:old | old , #('released')].
+GatedAcceptor gate resolve: true.
+w waitWithin: 60000.
+detached waitWithin: 60000.
+c that: 'a detach during a stop settles after the acceptor step in progress' is: trace value equals: #('released' 'finish' 'detached').
+space2 close.
+s2 := PBFileStorage clusterPath: dir pathString.
+c that: 'a space closed after its node stopped releases its log' is: ((PBSharedTier storage: s2 nodeId: 'n0') close; yourself) class equals: PBSharedTier.
+s2 close.
 base deleteAll.
 c report displayNl.

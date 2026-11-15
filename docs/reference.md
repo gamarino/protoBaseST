@@ -820,8 +820,8 @@ For tests, tools and readers of the format. An application does not need them.
   `PBValidationError` a `#startupGrace` below `leaseDuration + driftMargin` over a log that is not
   not empty in a cluster of more than one member (L17); it answers `true` at once for the tier
   attached already, or for a tier over the same `storage` object, and refuses another with
-  `PBValidationError`; `_detach: aTier` detaches only that tier (or one over its storage) and
-  `_detach` whatever is attached (each a `Future` of the tier detached, `nil` for none); a detach hands the
+  `PBValidationError`; `_detach: aTier` detaches only that tier (or one over its storage), and
+  on a stopping node resolves only once the stop has settled; `_detach` detaches whatever is attached (each a `Future` of the tier detached, `nil` for none); a detach hands the
   dispatcher `PBLogDetached`. `stop` answers a `Future` that settles once every pending `Future`
   is settled (a replication in flight `#unknown`, the rest `PBClosedError`), the acceptor step in
   progress has run (the steps queued behind the stop are dropped) and the transport stopped. `stats` (CC24) holds every counter of the rules (0
@@ -857,7 +857,9 @@ For tests, tools and readers of the format. An application does not need them.
   cluster fields, or label 0 and the storage epoch for a plain root, `nil` for an empty space;
   `canRead:`), and `flushLocal`, `persist: aLabeledRoot` (`true` once published, `false` when the
   storage holds that root or a newer one in root order, `#busy` when the root lock is held
-  elsewhere; it never waits, CC19), `close`, `nodeId`, `logPath`. `logClass` is a test seam, and
+  elsewhere; it never waits, CC19; `PBValidationError` when the label or epoch is not the
+  SpaceRoot's `clusterTerm` or `clusterEpoch`), `close`, `nodeId`, `logPath`. `canRead:`
+  signals `PBClosedError` on a closed storage. `logClass` is a test seam, and
   so is `PBAcceptorLog class >> _syncDirectory:`. The differences from `proto_db` are in
   [deviations.md](deviations.md#cluster-mode).
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and

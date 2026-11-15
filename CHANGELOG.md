@@ -18,7 +18,10 @@
   `storage:coordinator:lockTimeout:`, `coordinator`) attaches the node's tier to a coordinator,
   reads cluster roots, and detaches it on `close`; `storage:` refuses a cluster-mode storage.
   The coordinator compares tiers by `storage` as `proto_db` `_attach_locked` (the same storage
-  is a no-op) and gains `_detach: aTier` (`proto_db` `detach(tier)`). Test seam
+  is a no-op) and gains `_detach: aTier` (`proto_db` `detach(tier)`; on a stopping node it
+  settles once the stop has, so a space closed meanwhile closes its log after the acceptor's
+  step in progress). `persist:` refuses a label or epoch that is not its SpaceRoot's
+  (`PBValidationError`); `canRead:` signals `PBClosedError` on a closed storage. Test seam
   `PBAcceptorLog class >> _syncDirectory:`. Tests: `tests/unit/cluster_tier.st`,
   `tests/unit/store_cluster_refusal.st`; the 2 checklist rows deferred to Task 21 are ported.
   Deviations: [deviations.md](docs/deviations.md#cluster-mode).
