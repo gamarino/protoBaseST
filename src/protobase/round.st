@@ -34,7 +34,13 @@ answer has one result per entry: true, an Exception (that entry's error, or
 the round's, which reaches every built entry), or #locked (nothing was
 decided: the root lock is held by another process or storage). Only true is
 reported as a success: any other result (which publishGroup: never answers)
-is PBOutcomeUnknownError, never a guess. Rounds run
+is PBOutcomeUnknownError, never a guess. Every entry a round takes is
+settled (proto_db _standalone_round's except BaseException): an error while
+settling one entry settles that one with an error naming the cause, and any
+other error of the round settles every entry it took and not settled yet,
+and takes them out of the queue. The error is PBUnexpectedError when the
+entry's result was #locked (nothing of it was published) and
+PBOutcomeUnknownError otherwise (the round may have published it). Rounds run
 one at a time: a round is a message of this actor, and the entries queued
 while it runs form the next one.
 
@@ -143,8 +149,14 @@ PBRoundRunner class >> longestLockDelay
  proxy (medium band). The proxy is published to the runner's own cell before
  any message reaches it, so a round can schedule the next one."
 PBRoundRunner class >> space: aSpace
+  ^ self space: aSpace publisher: (PBPublisher space: aSpace).
+
+"The runner of aSpace over aPublisher (a PBPublisher of aSpace): the seam a test
+ uses to supply its own publisher (PBObjectSpace >> _newRunner). Answers the
+ actor proxy."
+PBRoundRunner class >> space: aSpace publisher: aPublisher
   | runner actor |
-  runner := self basicNew _setSpace: aSpace publisher: (PBPublisher space: aSpace) queue: (Atom on: #())
+  runner := self basicNew _setSpace: aSpace publisher: aPublisher queue: (Atom on: #())
     scheduled: (Atom on: false) delay: (Atom on: self firstLockDelay) proxy: (Atom on: nil).
   actor := runner asActor.
   runner _publishProxy: actor.
@@ -179,51 +191,108 @@ PBRoundRunner >> enqueue: anEntry
 "Runs a round of what is queued (the entries queued before the close commit
  or fail as they would have), then closes the storage, between two rounds,
  never during one. Entries left waiting for the lock meet the closed storage
- in their next round (PBClosedError). Answers nil."
+ in their next round (PBClosedError). The round is run directly
+ (_runRound), so a round already coming stays the one that is coming: no
+ second retry chain is started (review m4). Answers nil."
 PBRoundRunner >> closeStorage
-  queue value isEmpty ifFalse: [self _round].
+  queue value isEmpty ifFalse: [self _runRound].
   publisher closeStorage.
   ^ nil.
 
+"The message of a round (posted by _schedule, or sent by a retry timer): the
+ round that was coming is now running, so a later one may be scheduled."
+PBRoundRunner >> _round
+  scheduled swap: [:old | false].
+  self _runRound.
+
 "One round: takes the whole queue, publishes it as one group and settles each
  entry, or, when the root lock is held, settles the entries past their
- deadline and schedules the retry of the others."
-PBRoundRunner >> _round
-  | batch results kept now |
-  scheduled swap: [:old | false].
+ deadline and schedules the retry of the others. Every entry taken is
+ settled (proto_db _standalone_round's except BaseException, review m1): an
+ error while settling one entry settles that entry alone (_failure:of:);
+ any other error of the round after the batch was taken settles every entry
+ of the batch not settled yet and takes them out of the queue
+ (_abandon:settled:results:cause:). So no caller waits for ever on its Future."
+PBRoundRunner >> _runRound
+  | batch settled results kept now |
   batch := queue value.
   queue swap: [:entries | #()].
   batch isEmpty ifTrue: [^ self].
-  results := [publisher publishGroup: batch] on: Error do: [:e |
-    "publishGroup: answers every error as a result; an error here is the
-     round's own and reaches every entry."
-    e return: (Array new: batch size withAll: e)].
-  kept := OrderedCollection new.
-  now := Time microsecondClockValue.
-  1 to: batch size do: [:i | | entry result |
-    entry := batch at: i.
-    result := results at: i.
-    result == #locked
-      ifTrue: [now >= entry deadline
-        ifTrue: [entry future rejectWith: self _timeoutError]
-        ifFalse: [kept addLast: entry]]
-      ifFalse: [result == true
-        ifTrue: [entry future resolve: true]
-        ifFalse: [entry future rejectWith: ((result isKindOf: Exception)
-          ifTrue: [result]
-          ifFalse: [self _undecidedError: result])]]].
-  kept isEmpty ifTrue: [
-    (results includes: #locked) ifFalse: [delay swap: [:d | PBRoundRunner firstLockDelay]].
-    queue value isEmpty ifFalse: [self _schedule].
-    ^ self].
-  queue swap: [:entries | kept asArray , entries].
-  self _retryAfterLockFor: kept now: now.
+  settled := Array new: batch size withAll: false.
+  [results := [publisher publishGroup: batch] on: Error do: [:e |
+     "publishGroup: answers every error as a result; an error here is the
+      round's own and reaches every entry."
+     e return: (Array new: batch size withAll: e)].
+   kept := OrderedCollection new.
+   now := Time microsecondClockValue.
+   1 to: batch size do: [:i | | entry result |
+     entry := batch at: i.
+     result := results at: i.
+     [(result == #locked and: [now < entry deadline])
+        ifTrue: [kept addLast: entry]
+        ifFalse: [
+          settled at: i put: true.
+          self _settle: entry with: result]]
+       on: Error do: [:e |
+         settled at: i put: true.
+         entry future rejectWith: (self _failure: e of: result while: 'settling the commit').
+         e return: nil]].
+   kept isEmpty ifTrue: [
+     (results includes: #locked) ifFalse: [delay swap: [:d | PBRoundRunner firstLockDelay]].
+     queue value isEmpty ifFalse: [self _schedule].
+     ^ self].
+   queue swap: [:entries | kept asArray , entries].
+   self _retryAfterLockFor: kept now: now]
+    on: Error do: [:e |
+      self _abandon: batch settled: settled results: results cause: e.
+      e return: nil].
+
+"Settles anEntry with the round's result for it: true is a success; #locked
+ (past the deadline) is PBTimeoutError; an Exception is the entry's error;
+ anything else is undecided: PBOutcomeUnknownError, never a success."
+PBRoundRunner >> _settle: anEntry with: aResult
+  aResult == true ifTrue: [^ anEntry future resolve: true].
+  aResult == #locked ifTrue: [^ anEntry future rejectWith: self _timeoutError].
+  (aResult isKindOf: Exception) ifTrue: [^ anEntry future rejectWith: aResult].
+  ^ anEntry future rejectWith: (self _undecidedError: aResult).
+
+"The last resort of a round that failed after it took batch: every entry not
+ settled yet is rejected with the cause, and taken out of the queue (a kept
+ entry was put back before its retry could be scheduled). One rejection that
+ fails never skips the others."
+PBRoundRunner >> _abandon: batch settled: settled results: results cause: anError
+  [queue swap: [:entries | entries reject: [:each | batch anySatisfy: [:taken | taken == each]]]]
+    on: Error do: [:e | e return: nil].
+  1 to: batch size do: [:i |
+    (settled at: i) ifFalse: [
+      [(batch at: i) future rejectWith: (self _failure: anError
+          of: (results isNil ifTrue: [nil] ifFalse: [results at: i]) while: 'deciding the round')]
+        on: Error do: [:e |
+          (batch at: i) future rejectWith: (PBOutcomeUnknownError new
+            messageText: 'The commit round failed unexpectedly; the outcome of the commit is unknown'; yourself).
+          e return: nil]]].
+
+"The error of an entry whose round failed with anError while aString: the
+ cause is named. PBUnexpectedError when the entry's result was #locked
+ (nothing of it was published: the root lock was held); PBOutcomeUnknownError
+ otherwise, since the round may have published it."
+PBRoundRunner >> _failure: anError of: aResult while: aString
+  | cause |
+  cause := anError class name , ': ' , (anError messageText ifNil: ['(no message)']).
+  aResult == #locked ifTrue: [
+    ^ PBUnexpectedError new messageText: 'The commit round failed while ' , aString , ' (' , cause
+      , '); nothing of the commit was published (the root lock was held)'; yourself].
+  ^ PBOutcomeUnknownError new messageText: 'The commit round failed while ' , aString , ' (' , cause
+    , '); the outcome of the commit is unknown'; yourself.
 
 "Schedules the next round after a #locked round: after the current delay,
  never past the nearest deadline of aCollection's entries, and doubles the
- delay up to longestLockDelay."
+ delay up to longestLockDelay. Nothing when a round is already coming (a
+ posted message or a pending timer, after closeStorage's direct round): that
+ round takes the entries put back (review m4)."
 PBRoundRunner >> _retryAfterLockFor: aCollection now: microseconds
   | nearest ms actor |
+  scheduled value ifTrue: [^ self].
   nearest := aCollection inject: aCollection first deadline into: [:soonest :entry | soonest min: entry deadline].
   ms := delay value min: (nearest - microseconds + 999 // 1000 max: 0).
   delay swap: [:d | d * 2 min: PBRoundRunner longestLockDelay].

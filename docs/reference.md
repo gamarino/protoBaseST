@@ -890,8 +890,13 @@ For tests, tools and readers of the format. An application does not need them.
   (`space:`, `publishGroup:`: one result per entry, `true`, an `Exception` or `#locked`;
   `closeStorage`).
 - **`PBRoundRunner`** (`round.st`): the space's commit queue, an actor (`space:` answers the
-  proxy; `enqueue:` answers the entry's `Future`; `closeStorage`; `firstLockDelay`,
-  `longestLockDelay`). **`PBCommitEntry`**: `transaction:willRetry:deadline:`,
+  proxy, `space:publisher:` over a given publisher, the seam `PBObjectSpace >> _newRunner` a
+  test subclass overrides; `enqueue:` answers the entry's `Future`; `closeStorage`;
+  `firstLockDelay`, `longestLockDelay`). Every entry a round takes is settled: an error while
+  settling one entry, or any later error of the round, ends the entries it concerns in
+  `PBUnexpectedError` naming the cause (`PBOutcomeUnknownError` unless the entry only found the
+  root lock held), and a result that is not a decision is `PBOutcomeUnknownError`, never a
+  success. **`PBCommitEntry`**: `transaction:willRetry:deadline:`,
   `createDatabase:deadline:` (the deadline in monotonic microseconds), `future`, `transaction`,
   `databaseName`, `isCreateDatabase`, `willRetry`, `deadline`, `writtenAtoms`.
 

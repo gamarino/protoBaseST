@@ -14,7 +14,13 @@
 #
 # Environment:
 #   PROTOST         the protost binary (default: protost)
-#   PROTOBASE_REPO  a ProtoBase checkout (default: ../ProtoBase), used by the vector fetch
+#   PROTOBASE_REPO  a ProtoBase checkout (default: ../ProtoBase), used by the vector fetch and by
+#                   tests/unit/cluster_checklist.sh. The runner always exports it (the default
+#                   when unset), and records in PROTOBASE_REPO_EXPLICIT whether the caller set it
+#                   (1) or not (empty): a test that needs the checkout skips (exit 77) when the
+#                   default path is missing and nobody named one, and fails when the checkout was
+#                   named explicitly but is missing or wrong. A caller may set
+#                   PROTOBASE_REPO_EXPLICIT itself; the runner keeps a value it is given.
 #   RUN_TIMEOUT     seconds allowed per test (default 600: the simulator tests of the cluster
 #                   take up to about 4 minutes each on a loaded machine)
 #
@@ -49,6 +55,7 @@ if [[ ! -x "$PROTOST" ]]; then
     exit 1
 fi
 export PROTOST
+export PROTOBASE_REPO_EXPLICIT="${PROTOBASE_REPO_EXPLICIT-${PROTOBASE_REPO:+1}}"
 export PROTOBASE_REPO="${PROTOBASE_REPO:-$REPO/../ProtoBase}"
 export STPATH="$REPO/src${STPATH:+:$STPATH}"
 TIMEOUT="${RUN_TIMEOUT:-600}"

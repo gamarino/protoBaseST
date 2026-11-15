@@ -116,8 +116,14 @@ PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds coordinator: aC
   coordinator := aCoordinator.
   tier := aTier.
   closed := Atom on: false.
-  runner := PBRoundRunner space: self.
+  runner := self _newRunner.
   ^ self.
+
+"The space's round runner (an actor proxy), made once by the initialiser. A
+ seam: a test subclass answers a runner over its own publisher
+ (PBRoundRunner space:publisher:)."
+PBObjectSpace >> _newRunner
+  ^ PBRoundRunner space: self.
 
 "The cluster coordinator of the space, nil for a space opened without one (proto_db coordinator)."
 PBObjectSpace >> coordinator

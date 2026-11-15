@@ -16,9 +16,18 @@
   runner with `Future after:` (1 ms doubling to 50 ms); each entry keeps the `lockTimeout`
   deadline it was queued with and then ends in `PBTimeoutError` (the same message). The runner
   never waits (CC10). A result that is not a decision is `PBOutcomeUnknownError`, never a
-  success. Tests: `tests/unit/round_group_commit.st`, `tests/unit/round_lock_retry.st` (a peer
-  process holds `space.lock`: `tests/unit/_hold_lock.st`). Deviations:
-  [deviations.md](docs/deviations.md).
+  success. Every entry a round takes is settled, as `_standalone_round`'s `except BaseException`:
+  an error while settling one entry ends that entry alone, and any other error of the round
+  after the batch was taken ends every entry not settled yet (taken out of the queue) in
+  `PBUnexpectedError` naming the cause (`PBOutcomeUnknownError` unless the entry only found the
+  lock held). `closeStorage`'s round never starts a second retry chain. Seams:
+  `PBRoundRunner class >> space:publisher:`, `PBObjectSpace >> _newRunner`. Tests:
+  `tests/unit/round_group_commit.st`, `tests/unit/round_lock_retry.st` (a peer process holds
+  `space.lock`: `tests/unit/_hold_lock.st`; the deadline's scale), `tests/unit/round_settlement.st`.
+  `tests/run_tests.sh` records `PROTOBASE_REPO_EXPLICIT` (whether the caller set
+  `PROTOBASE_REPO`), and `tests/unit/cluster_checklist.sh` skips (exit 77) without a checkout at
+  the default path when none was named, and fails for a named checkout that is missing or lacks
+  the tag. Deviations: [deviations.md](docs/deviations.md).
 
 - The shared tier and the cluster storage mode (Task 21, `cluster/tier.st`, `proto_db`'s
   `PlainTier` and `_node_log`). `PBFileStorage clusterPath:` (and `clusterPath:segmentMaxBytes:`,

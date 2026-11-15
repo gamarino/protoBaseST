@@ -17,14 +17,18 @@
 # family that is not a whole check label of its file, and prints the counts, then the deferred
 # rows grouped by task. With CHECKLIST_FINAL=1 (the final gate, plan Task 30) every deferred row
 # is an error too. The functions are listed from the tag with git show (the ProtoBase checkout is
-# only read). Without a checkout it is skipped (exit 77); a checkout named by PROTOBASE_REPO or
-# present at the default path that lacks the tag is a failure, not a skip.
+# only read). Without a checkout at the default path, and none named, it is skipped (exit 77); a
+# checkout named explicitly (PROTOBASE_REPO set by the caller: PROTOBASE_REPO_EXPLICIT=1 under
+# tests/run_tests.sh, which always exports PROTOBASE_REPO, or PROTOBASE_REPO set when run directly)
+# that is missing or lacks the tag, or one present at the default path that lacks the tag, is a
+# failure, not a skip.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 PB="${PROTOBASE_REPO:-$REPO/../ProtoBase}"
 TAG=v2.0.0rc3
-if [[ -z "${PROTOBASE_REPO:-}" && ! -e "$PB" ]]; then
+explicit="${PROTOBASE_REPO_EXPLICIT-${PROTOBASE_REPO:+1}}"
+if [[ -z "$explicit" && ! -e "$PB" ]]; then
     echo "SKIP: no ProtoBase checkout"
     exit 77
 fi

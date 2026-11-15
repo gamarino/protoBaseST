@@ -1,4 +1,4 @@
-"EXPECT: ok 2"
+"EXPECT: ok 3"
 "The round runner's lock retry (cluster plan Task 22, CC10, proto_db D52). (1) A peer process
  (_hold_lock.st, the pattern of tests/interop/hold_lock.py) holds space.lock and never releases
  it while this test waits: a commit with lockTimeout: 50, made from an actor, ends in
@@ -9,7 +9,9 @@
  a sleep). (2) No actor method of the runner waits (carry-over (j) of cluster plan Task 20):
  the code of src/protobase/round.st, comments and strings left out, sends no wait, waitWithin:
  or sleep:, so a round is never driven synchronously from a caller's thread and the runner never
- blocks its worker."
+ blocks its worker. (3) The deadline of a commit queued now is lockTimeout milliseconds later,
+ in microseconds of the monotonic clock (review m5): the clock read just before and just after
+ PBObjectSpace >> _deadline brackets it exactly; values are compared, no duration is measured."
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -19,7 +21,7 @@ Committer >> commitIn: db
   ^ [db newTransactionDo: [:t | t setRootObject: 'x' value: 1]. 'committed']
     on: Error do: [:e | { e class name. e messageText }].
 
-| c base protost lockFile ready pid deadline space db outcome versions source code state i n reaped |
+| c base protost lockFile ready pid deadline space db outcome versions source code state i n reaped a d z |
 c := Check new.
 base := FileSystem temp / ('pbst-round-lock-retry-' , Smalltalk pid printString).
 base deleteAll.
@@ -70,6 +72,16 @@ code := code contents.
 c that: 'round.st exists and no code of it waits (wait, waitWithin:, sleep:)'
   is: { source exists. code size > 0. (code includesSubstring: 'wait'). (code includesSubstring: 'sleep:') }
   equals: { true. true. false. false }.
+
+"(3) The deadline's scale: before + 50 000 us <= deadline <= after + 50 000 us."
+space := PBObjectSpace storage: (PBFileStorage path: (base / 'deadline') pathString) lockTimeout: 50.
+a := Time microsecondClockValue.
+d := space _deadline.
+z := Time microsecondClockValue.
+c that: 'a commit queued now has its deadline lockTimeout ms later, in monotonic microseconds'
+  is: { d - a >= 50000. d - z <= 50000 }
+  equals: { true. true }.
+space close.
 
 base deleteAll.
 c report displayNl.

@@ -989,7 +989,7 @@ PBFileStorage >> _writeOperation: aBlock
   s := state value.
   (s == #idle and: [state value: mine ifCurrent: s]) ifFalse: [
     self _checkOpen.
-    ^ PBUserError signal: 'PBFileStorage: a write is in progress on this storage: its writes are made by one actor at a time (the space''s publisher)'].
+    ^ PBUserError signal: 'PBFileStorage: a write is in progress on this storage: its writes are made by one actor at a time (the space''s round runner)'].
   ^ [self _checkNotFailed. aBlock value] ensure: [self _endWrite: mine].
 
 "Ends the write operation whose state is aState: back to #idle, or, when a
