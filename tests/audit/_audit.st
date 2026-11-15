@@ -457,74 +457,105 @@ AuditFamilies class >> safetyOnly
 AuditFamilies class >> notExercised
   ^ #(#('persist' 'Task 20' #('persistInterval' 'persistLag'))).
 
-"The floors of a part of aRow under aMode, per run: { runs that got the strict checks.
- commits acknowledged } (proto_db's min_acked: an empty run proves nothing). nil for a
- safety-only row-mode; a row-mode without a declared floor fails loudly."
-AuditFamilies class >> floorOf: aRow mode: aMode
+"The floors of part i of aRow under aMode: { runs that got the strict checks. commits
+ acknowledged } (proto_db's min_acked: an empty run proves nothing). nil for a part of a
+ safety-only row-mode; a part without a declared floor fails loudly."
+AuditFamilies class >> floorOf: aRow mode: aMode part: i
   | key |
-  key := aRow , ' ' , aMode.
-  (self safetyOnly includes: key) ifTrue: [^ nil].
+  (self safetyOnly includes: aRow , ' ' , aMode) ifTrue: [^ nil].
+  key := self floorKey: aRow mode: aMode part: i.
   self floors do: [:e | e first = key ifTrue: [^ e allButFirst]].
   ^ Error signal: 'AuditFamilies: no floor declared for ' , key.
 
-"{ row-mode. strict runs per run. commits acknowledged per run }, measured (task-17-report.md,
- Fix rounds 1 and 2; the runs are deterministic per seed): a row-mode whose every measured run
- got the strict checks requires every run strict (1); any other keeps the lowest part's measured
- values, written as count/runs of that part (a part of r runs then needs at least
- (value * r) ceiling, which every measured part meets)."
+"The key of part i of aRow under aMode in floors: 'row mode i'."
+AuditFamilies class >> floorKey: aRow mode: aMode part: i
+  ^ aRow , ' ' , aMode , ' ' , i printString.
+
+"The keys floors must declare, exactly: every part of every row-mode but the safety-only ones
+ (the index, sim_timer_audit.st, checks floors against it)."
+AuditFamilies class >> floorKeys
+  | keys |
+  keys := OrderedCollection new.
+  AuditConfig rows do: [:row | self modes do: [:mode |
+    (self safetyOnly includes: row , ' ' , mode) ifFalse: [
+      1 to: (self partsOf: row mode: mode) do: [:i | keys add: (self floorKey: row mode: mode part: i)]]]].
+  ^ keys asArray.
+
+"{ 'row mode part'. strict runs. commits acknowledged } per part: that part's own measured
+ counts (the runs are deterministic per seed). Measured serially in task-17-report.md: Fix
+ round 1's data pass, and Fix round 2's re-measured parts for acquireTimeout (non-owner probe),
+ retryHold (every attempt writing its token), leaseDuration tenfold and ownerIdleRelease skewed
+ (re-split). A run that moves to checkSafe, or a commit no longer acknowledged, fails its part."
 AuditFamilies class >> floors
   ^ {
-    { 'acquireTimeout skewed'. 1. 517/60 }.
-    { 'acquireTimeout tenfold'. 1. 517/60 }.
-    { 'acquireTimeout tenth'. 1. 450/60 }.
-    { 'backoff skewed'. 1. 459/60 }.
-    { 'backoff tenfold'. 59/60. 457/60 }.
-    { 'backoff tenth'. 28/30. 206/30 }.
-    { 'driftMargin skewed'. 19/30. 206/30 }.
-    { 'driftMargin tenth'. 28/30. 225/30 }.
-    { 'gatherAttempts skewed'. 1. 454/60 }.
-    { 'gatherAttempts tenfold'. 57/60. 451/60 }.
-    { 'gatherAttempts tenth'. 1. 453/60 }.
-    { 'idleEnd skewed'. 1. 456/60 }.
-    { 'idleEnd tenfold'. 1. 454/60 }.
-    { 'idleEnd tenth'. 1. 460/60 }.
-    { 'leaseDuration skewed'. 58/60. 449/60 }.
-    { 'leaseDuration tenfold'. 15/20. 138/20 }.
-    { 'leaseDuration tenth'. 1. 465/60 }.
-    { 'ownerIdleRelease skewed'. 1. 225/30 }.
-    { 'ownerIdleRelease tenfold'. 1. 454/60 }.
-    { 'ownerIdleRelease tenth'. 1. 468/60 }.
-    { 'permissionDeadline skewed'. 1. 454/60 }.
-    { 'permissionDeadline tenfold'. 25/30. 206/30 }.
-    { 'permissionDeadline tenth'. 1. 472/60 }.
-    { 'permitFloor skewed'. 1. 454/60 }.
-    { 'permitFloor tenth'. 1. 454/60 }.
-    { 'persist skewed'. 1. 454/60 }.
-    { 'persist tenfold'. 1. 454/60 }.
-    { 'persist tenth'. 1. 454/60 }.
-    { 'renewal skewed'. 16/20. 134/20 }.
-    { 'renewal tenfold'. 3/8. 40/8 }.
-    { 'renewal tenth'. 1. 459/60 }.
-    { 'requestTimeout skewed'. 1. 457/60 }.
-    { 'requestTimeout tenfold'. 29/30. 230/30 }.
-    { 'requestTimeout tenth'. 1. 467/60 }.
-    { 'retryHold skewed'. 59/60. 464/60 }.
-    { 'retryHold tenfold'. 58/60. 467/60 }.
-    { 'retryHold tenth'. 59/60. 475/60 }.
-    { 'sendReserve skewed'. 1. 462/60 }.
-    { 'sendReserve tenth'. 1. 468/60 }.
-    { 'startupGrace skewed'. 1. 453/60 }.
-    { 'startupGrace tenfold'. 1. 454/60 }.
-    { 'startupGrace tenth'. 1. 451/60 }.
-    { 'straggle skewed'. 59/60. 444/60 }.
-    { 'straggle tenfold'. 1. 456/60 }.
-    { 'straggle tenth'. 1. 460/60 }.
-    { 'turnSilence skewed'. 1. 457/60 }.
-    { 'turnSilence tenfold'. 59/60. 451/60 }.
-    { 'turnSilence tenth'. 1. 453/60 }.
-    { 'wakeSpread skewed'. 1. 450/60 }.
-    { 'wakeSpread tenfold'. 1. 458/60 }.
-    { 'wakeSpread tenth'. 1. 448/60 } }.
+    { 'acquireTimeout skewed 1'. 60. 517 }.
+    { 'acquireTimeout tenfold 1'. 60. 517 }.
+    { 'acquireTimeout tenth 1'. 60. 450 }.
+    { 'backoff skewed 1'. 60. 459 }.
+    { 'backoff tenfold 1'. 59. 457 }.
+    { 'backoff tenth 1'. 28. 216 }.
+    { 'backoff tenth 2'. 28. 206 }.
+    { 'driftMargin skewed 1'. 19. 206 }.
+    { 'driftMargin skewed 2'. 22. 208 }.
+    { 'driftMargin tenth 1'. 29. 235 }.
+    { 'driftMargin tenth 2'. 28. 225 }.
+    { 'gatherAttempts skewed 1'. 60. 454 }.
+    { 'gatherAttempts tenfold 1'. 57. 451 }.
+    { 'gatherAttempts tenth 1'. 60. 453 }.
+    { 'idleEnd skewed 1'. 60. 456 }.
+    { 'idleEnd tenfold 1'. 60. 454 }.
+    { 'idleEnd tenth 1'. 60. 460 }.
+    { 'leaseDuration skewed 1'. 58. 449 }.
+    { 'leaseDuration tenfold 1'. 15. 138 }.
+    { 'leaseDuration tenfold 2'. 17. 142 }.
+    { 'leaseDuration tenfold 3'. 17. 142 }.
+    { 'leaseDuration tenth 1'. 60. 465 }.
+    { 'ownerIdleRelease skewed 1'. 30. 234 }.
+    { 'ownerIdleRelease skewed 2'. 30. 225 }.
+    { 'ownerIdleRelease tenfold 1'. 60. 454 }.
+    { 'ownerIdleRelease tenth 1'. 60. 468 }.
+    { 'permissionDeadline skewed 1'. 60. 454 }.
+    { 'permissionDeadline tenfold 1'. 25. 207 }.
+    { 'permissionDeadline tenfold 2'. 27. 206 }.
+    { 'permissionDeadline tenth 1'. 60. 472 }.
+    { 'permitFloor skewed 1'. 60. 454 }.
+    { 'permitFloor tenth 1'. 60. 454 }.
+    { 'persist skewed 1'. 60. 454 }.
+    { 'persist tenfold 1'. 60. 454 }.
+    { 'persist tenth 1'. 60. 454 }.
+    { 'renewal skewed 1'. 17. 138 }.
+    { 'renewal skewed 2'. 16. 134 }.
+    { 'renewal skewed 3'. 17. 143 }.
+    { 'renewal tenfold 1'. 3. 42 }.
+    { 'renewal tenfold 2'. 3. 40 }.
+    { 'renewal tenfold 3'. 4. 45 }.
+    { 'renewal tenfold 4'. 4. 42 }.
+    { 'renewal tenfold 5'. 5. 45 }.
+    { 'renewal tenfold 6'. 5. 42 }.
+    { 'renewal tenfold 7'. 3. 47 }.
+    { 'renewal tenfold 8'. 3. 36 }.
+    { 'renewal tenth 1'. 60. 459 }.
+    { 'requestTimeout skewed 1'. 60. 457 }.
+    { 'requestTimeout tenfold 1'. 29. 230 }.
+    { 'requestTimeout tenfold 2'. 29. 236 }.
+    { 'requestTimeout tenth 1'. 60. 467 }.
+    { 'retryHold skewed 1'. 59. 464 }.
+    { 'retryHold tenfold 1'. 58. 467 }.
+    { 'retryHold tenth 1'. 59. 475 }.
+    { 'sendReserve skewed 1'. 60. 462 }.
+    { 'sendReserve tenth 1'. 60. 468 }.
+    { 'startupGrace skewed 1'. 60. 453 }.
+    { 'startupGrace tenfold 1'. 60. 454 }.
+    { 'startupGrace tenth 1'. 60. 451 }.
+    { 'straggle skewed 1'. 59. 444 }.
+    { 'straggle tenfold 1'. 60. 456 }.
+    { 'straggle tenth 1'. 60. 460 }.
+    { 'turnSilence skewed 1'. 60. 457 }.
+    { 'turnSilence tenfold 1'. 59. 451 }.
+    { 'turnSilence tenth 1'. 60. 453 }.
+    { 'wakeSpread skewed 1'. 60. 450 }.
+    { 'wakeSpread tenfold 1'. 60. 458 }.
+    { 'wakeSpread tenth 1'. 60. 448 } }.
 
 "The bounds of the probe's count per run, { min. max } (nil: the row has no probe): the count
  shows the probe made the core read the timer, and that 1/10 and 10 times differ.
@@ -547,23 +578,23 @@ AuditFamilies class >> probeBounds: aRow mode: aMode
 "The reasons part i of the audit of aRow under aMode fails, given its counts out
  (row:mode:runs:): a violation; a declared floor missed; a safety-only declaration gone stale;
  a probe count out of its bounds. Empty when it passes."
-AuditFamilies class >> failuresOf: out row: aRow mode: aMode
+AuditFamilies class >> failuresOf: out row: aRow mode: aMode part: i
   | failures runs floor bounds |
   failures := OrderedCollection new.
   runs := out at: 1.
   (out at: 2) > 0 ifTrue: [failures add: (out at: 2) printString , ' violations'].
   runs = 0 ifTrue: [failures add: 'no runs'].
-  floor := self floorOf: aRow mode: aMode.
+  floor := self floorOf: aRow mode: aMode part: i.
   floor isNil
     ifTrue: [
       ((out at: 8) > 0 or: [(out at: 4) > 0]) ifTrue: [
         failures add: 'declared safety-only, yet ' , (out at: 8) printString , ' strict runs and '
           , (out at: 4) printString , ' commits acknowledged: the declaration is stale']]
     ifFalse: [
-      (out at: 8) < (floor first * runs) ceiling ifTrue: [
-        failures add: 'strict runs ' , (out at: 8) printString , ' below the floor ' , (floor first * runs) ceiling printString].
-      (out at: 4) < (floor last * runs) ceiling ifTrue: [
-        failures add: 'commits acknowledged ' , (out at: 4) printString , ' below the floor ' , (floor last * runs) ceiling printString]].
+      (out at: 8) < floor first ifTrue: [
+        failures add: 'strict runs ' , (out at: 8) printString , ' below the floor ' , floor first printString].
+      (out at: 4) < floor last ifTrue: [
+        failures add: 'commits acknowledged ' , (out at: 4) printString , ' below the floor ' , floor last printString]].
   bounds := self probeBounds: aRow mode: aMode.
   bounds notNil ifTrue: [
     ((out at: 9) isNil or: [(out at: 9) < (bounds first * runs) or: [(out at: 9) > (bounds last * runs)]]) ifTrue: [
@@ -584,6 +615,6 @@ AuditFamilies class >> audit: aRow mode: aMode part: i
     , ', (root, node) pairs not yet learnt ' , (out at: 5) printString
     , ', probe ' , (out at: 9) printString , ', steps ' , (out at: 7) printString; cr.
   (out at: 6) notNil ifTrue: [Transcript show: 'FIRST VIOLATION ' , (out at: 6); cr].
-  failures := self failuresOf: out row: aRow mode: aMode.
+  failures := self failuresOf: out row: aRow mode: aMode part: i.
   failures do: [:f | Transcript show: 'FAILED: ' , f; cr].
   ^ failures isEmpty ifTrue: ['timer audit ok'] ifFalse: ['timer audit failed'].

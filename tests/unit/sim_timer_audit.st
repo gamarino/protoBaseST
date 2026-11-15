@@ -25,13 +25,16 @@
  (7) the rows not exercised yet (AuditFamilies notExercised: persist, until Task 20) have no
      reader in the cluster's sources but config.st, and their runs equal the run at factor 1:
      once a reader appears, the declaration fails here.
- Each part asserts its own coverage (AuditFamilies failuresOf:row:mode:): no violation, the
- floors of strict runs and acknowledged commits, and the probe's bounds where the row has one."
+ (8) AuditFamilies floors declares exactly the parts of floorKeys (none missing, extra,
+     misspelt or twice), each with two integer counts.
+ Each part asserts its own coverage (AuditFamilies failuresOf:row:mode:part:): no violation,
+ its own measured floors of strict runs and acknowledged commits, and the probe's bounds where
+ the row has one."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '../audit/_audit'.
 
-| c peers config missing uncovered same changed runs product expected present sources stale equal |
+| c peers config missing uncovered same changed runs product expected present sources stale equal declared wanted |
 c := Check new.
 missing := OrderedCollection new.
 uncovered := OrderedCollection new.
@@ -99,4 +102,15 @@ AuditFamilies notExercised do: [:e |
 c that: '(7) no cluster source but config.st reads a not-exercised row''s timer (else the declaration is stale)'
   is: stale asArray equals: #().
 c that: '(7) a not-exercised row''s runs equal the run at factor 1' is: equal asArray equals: #().
-(c report = 'ok 11') ifTrue: ['timer audit ok'] ifFalse: [c report displayNl. 'timer audit failed'].
+"(8) floors declares exactly one floor for every part of every row-mode but the safety-only
+ ones: no part missing, no key extra (a misspelt key, a stale part, a safety-only row-mode), no
+ key twice; each floor is two counts."
+declared := AuditFamilies floors collect: [:e | e first].
+wanted := AuditFamilies floorKeys.
+c that: '(8) every part has a floor (missing keys)' is: (wanted reject: [:k | declared includes: k]) equals: #().
+c that: '(8) every floor names a part (extra or misspelt keys)' is: (declared reject: [:k | wanted includes: k]) equals: #().
+c that: '(8) no part has two floors' is: declared size = declared asSet size equals: true.
+c that: '(8) every floor is { key. strict runs. commits acknowledged } of integers'
+  is: ((AuditFamilies floors reject: [:e | e size = 3 and: [(e at: 2) isInteger and: [(e at: 3) isInteger]]]) collect: [:e | e first])
+  equals: #().
+(c report = 'ok 15') ifTrue: ['timer audit ok'] ifFalse: [c report displayNl. 'timer audit failed'].
