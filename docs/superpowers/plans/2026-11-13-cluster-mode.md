@@ -1440,8 +1440,16 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
 
 ### Task 30: Final verification gate
 
+Test scope (maintainer ruling, 2026-11-15): every earlier task runs only its own tests, i.e. the
+tests it adds or changes and those that exercise the code it touches. The whole default suite,
+the timer audit (`tests/audit`) and the hunt for integration problems run once, here. A failure
+found here is fixed in the owning module, fail-first.
+
 - [ ] **Step 1:** run the whole suite with the venv present. Expected: all PASS, no `SKIP` under
   `tests/conformance/cluster.st`, `cluster_checklist.sh` passing with 261 rows.
+- [ ] **Step 1b:** run the timer audit: `tests/run_tests.sh tests/audit`. Expected: all parts
+  PASS at their declared floors. A floor that moved with a deliberate core change is re-measured
+  and the change is named in the commit.
 - [ ] **Step 2:** soak: `PBST_SIM_SEEDS=5000 RUN_TIMEOUT=7200 tests/run_tests.sh tests/unit/sim_*.st`.
   Expected: PASS; a failure is a seed to reproduce and fix fail-first.
 - [ ] **Step 3:** re-read the planner's calls (CC1-CC25) against what was built; update
