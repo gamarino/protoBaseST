@@ -384,22 +384,23 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   not as the read error, and when live members hold the unreadable root accepted, every new
   term's floor reports it again, so commits keep getting retryable conflicts where `proto_db`
   surfaces the storage error each time; one storage probe per base that needs a commit first.
-- **Open item: no back-off after a lost renewal (`proto_db` behaviour, kept).** After a
-  renewal lost to a majority that rejects at once (a rejoin ballot a majority promised under a
-  live holder, the most common trigger since the rejoin exists: every disk-loss rejoin; members
-  restarted inside their startup grace; or a newer term granted), the owner renews again
-  immediately, one round per RTT,
-  until its lease ends (at most belief / 2): `proto_db`'s `_own_loop_body` and `_renew` do the
-  same, so this is not a deviation today. Messages and acceptor-lane work only, no log write;
-  safety is unaffected (nothing is issued once 4 x remaining < belief, and a won renewal counts
-  only before its validUntil). In the simulator, at about 1 us per round, it makes such runs
-  long in virtual time, which the acceptance families avoid by crashing between terms and the
-  rejoin families by cutting the holder off before its timer resumes (`tests/unit/_rejoin.st`
-  r78a) or by 1 ms links (`lagged:`, belowBallot and majorityLoss); without them a run does not
-  finish. The
-  decision (keep it, adopt a timing-only lost-renewal back-off here as a recorded deviation,
-  or propose one to `proto_db` upstream) is carried by the plan's Task 20. *Cost:* network and
-  acceptor-lane load for up to belief / 2 after such a loss.
+- **The renewal back-off and the fenced term: adopted from `proto_db` `88ca21d` (post-rc3,
+  R149/R149a).** gamarino/ProtoDB#1 (an owner whose renewal a majority refused renewed again
+  once per round trip until its lease ended) was fixed upstream after `v2.0.0rc3` (merge
+  `88ca21d`, CHANGELOG 2.0.0rc4, the D50 amendment); the core follows it
+  (`PBAttempt isTermFenced`, `cluster/lease.st`; `_ownLoop:now:effects:` and
+  `_closeRenewal:now:effects:`, `cluster/proposer.st`; `receivedPermitReq:in:now:`,
+  `cluster/owner.st`; `PBClusterConfig renewBackoffFloor`, the timer row `renewBackoff`). It is
+  not a deviation from `proto_db` at `88ca21d`; it is ahead of the Task 18 checklist, which stays
+  pinned to `v2.0.0rc3`. The simulator workarounds the storm needed are gone: the `r78a`
+  schedule no longer cuts the holder off before its timer resumes, and `lagged:` (1 ms links)
+  is no longer applied (`tests/unit/_rejoin.st`). Representation and timing differences, none
+  read by a safety rule: `proto_db`'s ownership thread is woken by a notify when a fenced term's
+  permission ends; here `_permitOutcome:` re-evaluates the ownership in the same step, and the
+  fenced term's timer is the lease's end. A local commit that asks while its own node's term is
+  fenced waits for that term to end (its permission's done, or the lease's end) and then
+  acquires, as a waiter does for any ownership that no longer serves; `proto_db`'s `permit`
+  thread goes on to `_become_owner` at once. *Cost:* none beyond `proto_db`'s.
 - **The rejoin-ballot refusal is made twice (L14).** `proto_db`'s `replicate` refuses
   (`ProtoConflictError`) a term below the node's rejoin ballot, read under its lock at the send.
   protoBaseST refuses first in the commit round (`mayReplicate:now:`, `cluster/holder.st`), from

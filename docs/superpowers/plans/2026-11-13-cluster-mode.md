@@ -1119,7 +1119,9 @@ record needs it); tests: a new `tests/unit/cluster_renew_backoff_rules.st` porti
     drops lane messages once fenced; replicate and store get `ack(ok=false)`, Task 13): the
     acceptor drops request, renew and release when `fenced`; the dispatcher's fence is this
     task's. (e) `PBCount` effects (`config_mismatches`, `grants_given`) feed `stats` (CC24).
-    (f) Carried from Task 13 (review m1, open item; Task 16 review m5): after a renewal lost
+    (f) **Settled by Task 19b** (2026-11-15): `proto_db` adopted the fix upstream (`88ca21d`,
+    R149/R149a), and the core follows it; nothing is left for this task. The original item:
+    Carried from Task 13 (review m1, open item; Task 16 review m5): after a renewal lost
     to a majority that rejects at once (a rejoin ballot that a majority promised under a live
     holder, the most common trigger since Task 16: every disk-loss rejoin; members restarted
     inside their startup grace; or a newer term granted),

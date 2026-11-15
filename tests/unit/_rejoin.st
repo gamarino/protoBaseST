@@ -160,13 +160,6 @@ RejoinFamilies class >> formed: aRules seed: n
       PBLogAppend kind: #rejoined label: 0 root: nil sync: true }].
   ^ self sim: aRules seed: n logs: logs.
 
-"aSim with every link 1 ms long: an owner whose renewals the members refuse (they promised a
- rejoin ballot) renews again at once until its lease ends (deviations.md, the open item on a
- lost renewal); at one round per 2 ms that is a few hundred rounds, not hundreds of thousands."
-RejoinFamilies class >> lagged: aSim
-  aSim ids do: [:a | aSim ids do: [:b | a = b ifFalse: [aSim delay: a to: b by: 1000]]].
-  ^ aSim.
-
 RejoinFamilies class >> isRejoined: anId in: aSim
   | node |
   node := aSim nodeAt: anId.
@@ -182,8 +175,8 @@ RejoinFamilies class >> isRejoined: anId in: aSim
  disk and restarts with its timer rate times as fast; with isStall a's timer stands still from
  then on (a clock fault P5 admits: its permission stays valid on its own clock) until c's ack
  has arrived. Once c has rejoined, a's own acceptance runs, then the held ack arrives (what a
- sends b and c from then on is lost, so what it learns stays with it); a is cut off and its
- timer runs again. Then b commits b with c. The product: c's rejoin is a ballot that a and b promise
+ sends b and c from then on is lost, so what it learns stays with it); its timer runs again
+ (its renewal, refused by the ballot's promises, fences its term, R149). Then b commits b with c. The product: c's rejoin is a ballot that a and b promise
  before they answer, so a's own acceptance and every later acceptance of R are refused: R is
  never committed and b builds on r1. A rejoin that waits for time instead completes on answers
  that miss R; with a's timer standing still, a then counts c's old ack: R is acknowledged and b
@@ -211,14 +204,10 @@ RejoinFamilies class >> r78a: aRules seed: n rate: aRate stall: isStall
     #('done' 'release' 'replicate') do: [:type | #('n1' 'n2') do: [:to | sim drop: type from: 'n0' to: to]].
     sim releaseMessages.
     BaseFamilies run: sim until: sim now + 1000.
-    "a is cut off before its timer runs again: its renewals, refused by the ballot's promises,
-     would otherwise be retried at once until its lease ends (deviations.md, the open item on
-     a lost renewal)."
-    sim partition: #(#('n0') #('n1' 'n2')).
     isStall ifTrue: [sim clockRate: 'n0' rate: 1].
     sim runUntil: [(sim outcomeOf: 'a') ~= #pending] steps: 2000000.
     out at: 2 put: (sim outcomeOf: 'a').
-    "a's term ends while it is cut off (the same open item)."
+    "a's term ends: its renewal, refused by the ballot's promises, fences it (R149)."
     BaseFamilies run: sim until: sim now + (2 * d).
     out at: 3 put: (BaseFamilies commit: 'b' at: 'n1' in: sim).
     sim undrop.
@@ -306,8 +295,8 @@ RejoinFamilies class >> wiped: aRules seed: n
     logs at: id put: { PBLogAppend kind: #accepted label: r1 label root: r1 record sync: true.
       PBLogAppend kind: #committed label: r1 label root: r1 record sync: true.
       PBLogAppend kind: #rejoined label: 0 root: nil sync: true }].
-  sim := self lagged: (RejoinSim seed: n ids: BaseFamilies five rules: aRules
-    options: (BaseFamilies fiveVoters at: #startupGrace put: 0; yourself) logs: logs).
+  sim := RejoinSim seed: n ids: BaseFamilies five rules: aRules
+    options: (BaseFamilies fiveVoters at: #startupGrace put: 0; yourself) logs: logs.
   out := Array new: 5.
   out at: 1 put: (BaseFamilies violationOf: [
     #('replicate' 'done' 'release') do: [:type | #('n3' 'n4') do: [:id | sim drop: type from: 'n0' to: id]].
@@ -342,7 +331,7 @@ RejoinFamilies class >> wiped: aRules seed: n
  once and two leases are valid at the same time (the checker's L5 text)."
 RejoinFamilies class >> restartGrace: aRules seed: n grace: aGrace
   | sim out |
-  sim := self lagged: (self formed: aRules seed: n).
+  sim := self formed: aRules seed: n.
   sim checker watchLeases.
   out := Array new: 2.
   out at: 1 put: (BaseFamilies violationOf: [
@@ -366,7 +355,7 @@ RejoinFamilies class >> restartGrace: aRules seed: n grace: aGrace
  certain. PlantReleaseForgets (a release without its committed root) teaches nothing."
 RejoinFamilies class >> releaseTeaches: aRules seed: n
   | sim out a permission |
-  sim := self lagged: (self formed: aRules seed: n).
+  sim := self formed: aRules seed: n.
   out := Array new: 5.
   out at: 1 put: (BaseFamilies violationOf: [
     #('n1' 'n2') do: [:id | sim drop: 'done' from: 'n0' to: id].
@@ -390,13 +379,13 @@ RejoinFamilies class >> releaseTeaches: aRules seed: n
  ballot above the owner's term }: proto_db test_probe_inflight_a_granter_wiped_during_a_lease and
  the L14 refusal of replicate. Three voters hold r1; n0 owns a term T0 and commits a0. n2 loses
  its disk and restarts; n0's next commit a1 reaches it while it rejoins (it learns that n0 owns
- T0; its queries are late by 20 ms; every link takes 1 ms, lagged:). Its rejoin ballot B > T0 is promised by n0 and n1. n2 then
+ T0; its queries are late by 20 ms). Its rejoin ballot B > T0 is promised by n0 and n1. n2 then
  commits x: it asks n0, whose lease of T0 is still valid on its clock, for a permission, and gets
  one of T0. The product sends nothing under T0 < B (#none: a retryable conflict); the plant sends
  the replicate, which n0 and n1 refuse (the ballot rule): an unknown outcome that ends the term."
 RejoinFamilies class >> belowBallot: aRules seed: n
   | sim out term below |
-  sim := self lagged: (self formed: aRules seed: n).
+  sim := self formed: aRules seed: n.
   out := Array new: 4.
   out at: 1 put: (BaseFamilies violationOf: [
     BaseFamilies commit: 'a0' at: 'n0' in: sim.
@@ -407,8 +396,8 @@ RejoinFamilies class >> belowBallot: aRules seed: n
     sim restart: 'n2'.
     BaseFamilies commit: 'a1' at: 'n0' in: sim.
     sim runUntil: [self isRejoined: 'n2' in: sim] steps: 2000000.
-    sim delay: 'n2' to: 'n0' by: 1000.
-    sim delay: 'n2' to: 'n1' by: 1000.
+    sim delay: 'n2' to: 'n0' by: 0.
+    sim delay: 'n2' to: 'n1' by: 0.
     out at: 4 put: (sim nodeAt: 'n2') acceptor rejoinBallot > term.
     out at: 2 put: (BaseFamilies commit: 'x' at: 'n2' in: sim).
     sim converge: 2000000]).
@@ -432,7 +421,7 @@ RejoinFamilies class >> belowBallot: aRules seed: n
  this is outside the failure model, so no convergence check runs."
 RejoinFamilies class >> majorityLoss: aRules seed: n
   | sim d out r error |
-  sim := self lagged: (self formed: aRules seed: n).
+  sim := self formed: aRules seed: n.
   d := (sim nodeAt: 'n0') config leaseDuration.
   out := Array new: 6.
   sim partition: #(#('n0' 'n2') #('n1')).

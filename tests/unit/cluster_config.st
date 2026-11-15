@@ -47,7 +47,7 @@ cfg := build value: { #leaseDuration -> 3000. #requestTimeout -> 100. #backoff -
 c that: 'other options derive their defaults from the lease' is:
   { cfg driftMargin. cfg sendReserve. cfg startupGrace. cfg backoffLow. cfg backoffHigh. cfg membership voters }
   equals: { 2000000. 100000. 5000000. 2000. 9000. #('n0' 'n1' 'n2') }.
-expected := #('leaseDuration' 'driftMargin' 'renewal' 'permitFloor' 'idleEnd' 'ownerIdleRelease' 'requestTimeout'
+expected := #('leaseDuration' 'driftMargin' 'renewal' 'permitFloor' 'renewBackoff' 'idleEnd' 'ownerIdleRelease' 'requestTimeout'
   'sendReserve' 'permissionDeadline' 'startupGrace' 'backoff' 'wakeSpread' 'straggle' 'turnSilence'
   'acquireTimeout' 'gatherAttempts' 'persist' 'retryHold').
 names := PBClusterConfig timerTable collect: [:row | row first].

@@ -19,7 +19,7 @@ defaults to D + margin; idleEnd is D // 4. Options that name tiered storage (CC8
 PBNotSupportedError; any other unknown option is PBValidationError.
 
 Every row of timerTable is read by the rules through an accessor here, never computed inline
-(renewalLeft, permitFloor and permissionDeadline: included), so a test configuration can scale
+(renewalLeft, permitFloor, renewBackoffFloor and permissionDeadline: included), so a test configuration can scale
 any one timer (tests/audit/_audit.st, the timer audit).
 
 Every value here is immutable: built once by its class-side constructor."
@@ -203,6 +203,13 @@ PBClusterConfig >> renewalLeft
 PBClusterConfig >> permitFloor
   ^ self belief / 4.
 
+"The least back-off after a renewal round that is neither won nor fenced (proto_db _renew at
+ 88ca21d, rulings R149 and R149a: max(busy_remaining, request_timeout / 4, 0.001)):
+ requestTimeout / 4, at least 1 ms. The back-off is the refusals' busy remaining when longer,
+ never past the lease (proposer.st _closeRenewal:now:effects:)."
+PBClusterConfig >> renewBackoffFloor
+  ^ self requestTimeout // 4 max: 1000.
+
 "How long after its issue an owner waits for the done of a permission valid for aValid
  microseconds before it abandons the term (O6, L29): aValid + requestTimeout."
 PBClusterConfig >> permissionDeadline: aValid
@@ -255,8 +262,9 @@ PBClusterConfig class >> timerTable
   ^ #(
     #('leaseDuration' '2000 ms' 'How long a grant blocks other holders on the granter''s timer.')
     #('driftMargin' 'ceiling(2/3 x leaseDuration), the minimum' 'The holder''s belief is leaseDuration - driftMargin: a third of the promise (R78b).')
-    #('renewal' 'at half the belief left' 'When the owner renews while it has demand; a failed renewal does not end the term.')
+    #('renewal' 'at half the belief left' 'When the owner renews while it has demand; a failed renewal ends the term only when a majority fenced it (R149).')
     #('permitFloor' 'a quarter of the belief left' 'No permission is issued with less left; the owner renews first.')
+    #('renewBackoff' 'requestTimeout / 4, at least 1 ms' 'After a renewal round neither won nor fenced, no renewal before the refusals'' remaining, at least this, within the lease (R149a).')
     #('idleEnd' 'leaseDuration / 4 without demand' 'When an owner releases its term.')
     #('ownerIdleRelease' 'nil (off)' 'Ends a term whose own threads stopped asking (R80).')
     #('requestTimeout' '250 ms' 'How long an attempt, a renewal, a recovery round or a query waits; shorter than the belief.')

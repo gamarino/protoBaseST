@@ -25,11 +25,12 @@ Nothing here reads a clock: t is the node's clock (CC3).
        permission's (counted as 'unknown', L12); no done by the deadline; the lease expiring
        with a permission out (proposer.st _ownLoop:).
     O7 (receivedPermitReq:): a retried request whose permit is out gets that same permit again,
-       never a second; a request already queued is not queued twice.
+       never a second, also while the term is fenced and its lease valid (R149, proto_db
+       88ca21d review M1); a request already queued is not queued twice.
     O8: the term ends idle (or by the R80 drain) only with an empty pipeline (_ownLoop:).
-    A permit_req for a term this node does not serve is refused: permit_no(term = max(highest
-    term seen, own term), reason 'not_owner' when it owns no term or another one, 'ending' when
-    that term no longer serves).
+    A permit_req for a term this node does not serve (abandoned, expired or fenced, R149) is
+    refused: permit_no(term = max(highest term seen, own term), reason 'not_owner' when it owns
+    no term or another one, 'ending' when that term no longer serves).
   Abandoning a term (_abandon:why:now:effects:, D50): counted terms_abandoned; the node is
     suspect for the term (suspectTerm, and PBSuspect to its acceptor, which then reports certain
     = false); every queued member gets permit_no 'abandoned' and the local waiters wait again;
@@ -579,17 +580,23 @@ PBCoordinatorCore >> _permitOutcome: anIssued outcome: anOutcome root: aRoot in:
           state := self _abandon: s why: anOutcome now: t effects: fx]].
   ^ self _ownLoop: (self _issue: state now: t effects: fx) now: t effects: fx.
 
-"proto_db _on_permit_req: a member asks this node, as owner of term, for a permission. O7: a
- retried request whose permit is out gets that permit again; a request already queued is not
- queued twice. A term this node does not serve is refused."
+"proto_db _on_permit_req (88ca21d): a member asks this node, as owner of term, for a permission.
+ O7: a retried request (same sender, incarnation, request id and term) whose permit is out gets
+ that permit again while the term is live, also once fenced (R149, proto_db review M1: the
+ permit can still end by its done; it carries the valid fixed at issue, which the holder dates
+ from its first send, D45); a request already queued is not queued twice. Any other request for
+ a term this node does not serve is refused."
 PBCoordinatorCore >> receivedPermitReq: anEvent in: s now: t
-  ^ self _step: [:fx | | m own sender out state view reason |
+  ^ self _step: [:fx | | m own sender out state view reason live |
     m := anEvent message.
     own := s ownership.
     sender := m from.
-    (own notNil and: [own term = (m at: 'term') and: [(own isServingAt: t) and: [s fenced isNil]]])
+    live := own notNil and: [own term = (m at: 'term') and: [s fenced isNil and: [own isLiveAt: t]]].
+    out := live
+      ifTrue: [own pipeline detect: [:e | e node = sender and: [e inc = (m at: 'inc') and: [e rid = (m at: 'rid')]]] ifNone: [nil]]
+      ifFalse: [nil].
+    (out notNil or: [live and: [own isServingAt: t]])
       ifTrue: [
-        out := own pipeline detect: [:e | e node = sender and: [e inc = (m at: 'inc') and: [e rid = (m at: 'rid')]]] ifNone: [nil].
         out notNil
           ifTrue: [
             out permit notNil ifTrue: [fx add: (PBSend to: sender message: out permit)].

@@ -2,6 +2,19 @@
 
 ## 0.2.0 (unreleased)
 
+- The cluster core follows `proto_db` `88ca21d` (post-rc3, gamarino/ProtoDB#1, rulings R149 and
+  R149a; Task 19b): an owner whose renewal a majority refused no longer renews again once per
+  round trip. When the permanent refusals (`stale_term`, `term_taken`, or a highest term above
+  its own) exceed `voters - needed` (`PBAttempt isTermFenced`), the term is fenced: no renewal,
+  no new permission, its queue refused `ending`, released once its outstanding permission ends
+  (stat `terms_fenced`; an O7 retry of that permission still gets it). Any other round that is
+  not won, one left pending included, backs off until the refusals' remaining, at least
+  `requestTimeout / 4` (`PBClusterConfig renewBackoffFloor`, the timer row `renewBackoff`: the
+  timer audit grows to 19 rows, 3420 runs, its floors measured in Task 30),
+  never past the lease. Tests: `tests/unit/cluster_renew_backoff_rules.st` (proto_db's
+  `test_cluster_renew_backoff.py`); the rejoin families no longer cut the holder off nor lag
+  every link to survive the renewal storm. Deviations: [deviations.md](docs/deviations.md#cluster-mode).
+
 - The cluster's transports (Task 19, `cluster/transport.st`, `proto_db`'s `transport.py`):
   `PBInProcessNetwork` / `PBInProcessTransport` (every message framed and decoded with each
   endpoint's key; drop and duplicate faults from a seeded generator, partitions, crashes) and

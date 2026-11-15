@@ -3,7 +3,7 @@
 #
 # Usage: tests/run_tests.sh [--audit] [path...]     (default: tests/ and examples/, less tests/audit)
 #
-# tests/audit holds the cluster's timer audit (every timer row at 1/10, 10x and skewed, 3240
+# tests/audit holds the cluster's timer audit (every timer row at 1/10, 10x and skewed, 3420
 # simulator runs, some three hours serially): a run of its own. It runs only when a path names it
 # or a file in it (tests/run_tests.sh tests/audit), or with --audit, which adds tests/audit to the
 # paths run (the default set when no path is given). Every other run skips it; its index,

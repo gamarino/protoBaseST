@@ -8,7 +8,8 @@
                  scaled by a factor: the options derive as the product derives them from the
                  option set to the scaled value (leaseDuration scaled moves the default margin,
                  belief, reserve, startup grace and idle end with it), and the constants of the
-                 protocol and the derived timers (renewalLeft, permitFloor, permissionDeadline:,
+                 protocol and the derived timers (renewalLeft, permitFloor, renewBackoffFloor,
+                 permissionDeadline:,
                  idleEnd, wakeSpread, the straggle, turnSilence, gatherAttempts, the held
                  retries) answer the scaled value. Built without the constructor's validation:
                  the audit runs the rules with values the constructor refuses too, since those
@@ -26,9 +27,7 @@
                  resolved commits a drawn member crashes (#drop: power loss, its disk kept) and
                  restarts up to 500 ms later. Then the faults end, every member runs, the queue
                  drains, and a last commit z is asked. Each phase is bounded in virtual time and
-                 in steps (AuditFamilies bounds; a renewal
-                 storm after a lost renewal, gamarino/ProtoDB#1, kept as proto_db rc3
-                 behaviour, can keep a queue busy): liveness may suffer, safety may not. When
+                 in steps (AuditFamilies bounds): liveness may suffer, safety may not. When
                  z is acknowledged and every live member shows the same committed head (they
                  have caught up, AuditFamilies caughtUp:), the checks are the strict ones
                  (checkConverged); otherwise the safety checks that do not need the members to
@@ -118,6 +117,9 @@ AuditConfig >> renewalLeft
 AuditConfig >> permitFloor
   ^ row = 'permitFloor' ifTrue: [super permitFloor * factor] ifFalse: [super permitFloor].
 
+AuditConfig >> renewBackoffFloor
+  ^ self _micros: super renewBackoffFloor row: 'renewBackoff'.
+
 AuditConfig >> permissionDeadline: aValid
   ^ self _micros: (super permissionDeadline: aValid) row: 'permissionDeadline'.
 
@@ -151,6 +153,7 @@ AuditConfig >> permitRetries
 "Every timer accessor of a configuration, in a fixed order (factor 1 must answer the product's)."
 AuditConfig class >> timersOf: aConfig
   ^ { aConfig leaseDuration. aConfig driftMargin. aConfig belief. aConfig renewalLeft. aConfig permitFloor.
+    aConfig renewBackoffFloor.
     aConfig idleEnd. aConfig ownerIdleRelease. aConfig requestTimeout. aConfig sendReserve.
     aConfig permissionDeadline: 123456. aConfig startupGrace. aConfig backoffLow. aConfig backoffHigh.
     aConfig wakeSpread. aConfig minStraggle. aConfig straggleFactor. aConfig turnSilence. aConfig acquireTimeout.
@@ -196,7 +199,7 @@ AuditFamilies class >> run: aSim until: aBlock steps: n end: anEnd
 
 "The bounds of one run's phases: { steps. virtual microseconds } of the workload, of each drain,
  and of the last commit. A healthy run takes some thousands of steps in a few virtual seconds;
- a run whose timer leaves no liveness (no lease usable, no permission issued, a renewal storm)
+ a run whose timer leaves no liveness (no lease usable, no permission issued, renewals at every grant)
  stops at these bounds and is checked as it stands. (A bound on steps without a resolved commit
  was tried and dropped: it ended healthy runs during a crash's recovery, and their z then failed,
  leaving them to the weaker checkSafe.)"
@@ -208,7 +211,7 @@ AuditFamilies class >> bounds
  (checkSafe finds no pair not yet learnt; it also signals any violation of its rules). Both are
  needed: a proposer answers acknowledged a step before its own acceptor records the root, when
  every head is still the older one; and a drain bounded in steps can end with a done or a learn
- still in flight (or a renewal storm, gamarino/ProtoDB#1, holding the queue). Judging such a
+ still in flight. Judging such a
  run by the strict rules would report a member's lag as a lost commit."
 AuditFamilies class >> caughtUp: aSim
   | heads |
@@ -523,6 +526,10 @@ AuditFamilies class >> floors
     { 'persist skewed 1'. 60. 454 }.
     { 'persist tenfold 1'. 60. 454 }.
     { 'persist tenth 1'. 60. 454 }.
+    "renewBackoff (Task 19b, R149a): not measured yet; its floors are measured in Task 30."
+    { 'renewBackoff skewed 1'. 0. 0 }.
+    { 'renewBackoff tenfold 1'. 0. 0 }.
+    { 'renewBackoff tenth 1'. 0. 0 }.
     { 'renewal skewed 1'. 17. 138 }.
     { 'renewal skewed 2'. 16. 134 }.
     { 'renewal skewed 3'. 17. 143 }.

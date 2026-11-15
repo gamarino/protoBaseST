@@ -21,7 +21,9 @@ PBClusterConfig), and every transition answers a new value.
                    none: the caller is suspect for it) and newState.
   PBAttempt        the replies to one request of a requester (LeaseAttempt): won at a majority
                    of the voters (V // 2 + 1, the requester's own vote included), lost when that
-                   is out of reach. A peer counts once, by its first reply.
+                   is out of reach. A peer counts once, by its first reply. Its term is
+                   fenced (isTermFenced, R149) when more than voters - needed refusals are
+                   permanent.
   PBLease          a won lease: valid on the holder's clock until validUntil, which the caller
                    computes as the request's send + belief (L5: from the send, never the win).
   PBPermission     a write permission of the owner of a term (D50): a PBLease whose validUntil
@@ -351,6 +353,17 @@ PBAttempt >> state
   grants size >= self needed ifTrue: [^ #won].
   rejects size > (voters - self needed) ifTrue: [^ #lost].
   ^ #pending.
+
+"Whether no majority will ever renew this term (proto_db LeaseAttempt.term_fenced at 88ca21d,
+ ruling R149, gamarino/ProtoDB#1): the permanent refusals exceed voters - needed. A refusal is
+ permanent when its reason is 'stale_term' or 'term_taken', or when its highest term is above
+ this term whatever its reason ('busy' and 'starting' included): once that peer's other grant or
+ its grace ends, a renewal of this term meets term < highest, and a peer's highest and granted
+ terms only grow. highestSeen alone never decides it: a single peer can raise it."
+PBAttempt >> isTermFenced
+  | permanent |
+  permanent := (rejects select: [:e | (e at: 2) = 'stale_term' or: [(e at: 2) = 'term_taken' or: [(e at: 3) > term]]]) size.
+  ^ permanent > (voters - self needed).
 
 "The longest remaining promise among the busy and starting refusals, 0 if none."
 PBAttempt >> busyRemaining

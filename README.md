@@ -207,7 +207,7 @@ tests/run_tests.sh --audit                            # the default set and the 
 ```
 
 `tests/audit/` holds the cluster's timer audit: every timer of the coordination at 1/10, 10 times
-and skewed per member, 3240 simulator runs, a run of its own. Only a path that names it, or
+and skewed per member, 3420 simulator runs, a run of its own. Only a path that names it, or
 `--audit`, runs it; its index `tests/unit/sim_timer_audit.st` stays in the default run (the audit's
 configuration and one run per mode) and fails when an audit file is missing, extra or stale. Each
 audit file fails on a violation, and also when its runs fall below their declared floors of strict

@@ -371,7 +371,9 @@ For tests, tools and readers of the format. An application does not need them.
   `requestTimeout`, `sendReserve`, `acquireTimeout`, `backoffLow`, `backoffHigh`, `startupGrace`, `idleEnd`,
   `persistInterval`, `persistLag`, `ownerIdleRelease`; the constants `wakeSpread`, `minStraggle`, `straggleFactor`,
   `turnSilence`, `gatherAttempts`, `retryHold`, `retryWait`, `permitRetries`, `depth` (0); and `membership`, `nodeId`,
-  `rank`, `authKey`, `seed`, `transport`, `clock`. `PBClusterConfig timerTable` answers the timers that apply at depth 0 as
+  `rank`, `authKey`, `seed`, `transport`, `clock`; the derived timers `renewalLeft` (half the belief), `permitFloor` (a
+  quarter of it), `renewBackoffFloor` (`requestTimeout // 4`, at least 1 ms: the least back-off after a renewal
+  round neither won nor fenced, R149a) and `permissionDeadline:`. `PBClusterConfig timerTable` answers the timers that apply at depth 0 as
   rows `{ name. default. what it drives }`.
 - **Lease values** (`cluster/lease.st`): `proto_db`'s `lease.py` as immutable values; time is
   the argument `now:` in microseconds and nothing reads a clock. `PBGrantState initial:now:`
@@ -395,6 +397,8 @@ For tests, tools and readers of the format. An application does not need them.
   `PBAttempt term:rid:sentAt:voters:` answers `withGrant:root:committed:certain:`,
   `withReject:reason:highest:remaining:` (a peer counts once), `state` (`#pending`, `#won` at
   `voters // 2 + 1` grants, `#lost` past reach), `needed`, `replies`, `busyRemaining`,
+  `isTermFenced` (R149: more than `voters - needed` refusals are permanent: `'stale_term'`,
+  `'term_taken'`, or any reason with a highest term above the term),
   `highestSeen`, `committedRoots`, `validUntil:` (a configuration: the send plus the belief,
   never the win) and `bestRoot:suspect:` (`{ root. certain }`: the highest root in root order
   of the granters' and the requester's own). `PBLease term:validUntil:root:certain:` answers
@@ -498,7 +502,7 @@ For tests, tools and readers of the format. An application does not need them.
   `#spread`; `attempt`, `failures`, `marks`, `token`, `wakeAt`, `startedAt`, `straggling`,
   `backoffEnd`, `busyEnd`, `waited`; `start`) and `PBOwnership` (`lease`, `term`, `queue`,
   `lastDemand`, `lastLocal`, `renewal`, `renewStarted`, `straggling`, `token`, `seq`, `pipeline`,
-  `base`, `isCommitted`, `isAbandoned`, `isServingAt:`, `entryOf:seq:`;
+  `base`, `isCommitted`, `isAbandoned`, `isTermFenced`, `renewAfter`, `isLiveAt:`, `isServingAt:`, `entryOf:seq:`;
   `lease:base:committed:now:`), each answering `with:` (an Array of field -> value associations).
   `dispatchPermitWanted:in:now:` records the waiter's deadline (`acquireTimeout`), queues it at a
   serving ownership, else asks the owner the hint names (`cluster/owner.st`), else adds it to the
@@ -519,7 +523,12 @@ For tests, tools and readers of the format. An application does not need them.
   to `leaseDuration` like any busy remaining): a held release or a newly learnt owner ends the back-off, any release only
   its busy extension, after which a member the release did not name waits a random spread of up
   to `wakeSpread`. An owner with demand renews at half the belief left (`'renewals'`,
-  `'renewal_failures'`; a failed renewal does not end the term); without demand for `idleEnd`, or
+  `'renewal_failures'`). A renewal round that is not won either fences the term (`isTermFenced`
+  of its attempt, `proto_db` 88ca21d, R149: `'terms_fenced'`, the queue refused `'ending'`,
+  nothing new issued, never renewed again, released once its pipeline is empty, abandoned only if
+  the lease ends first) or backs off (R149a, also a round left pending): no renewal before
+  `renewAfter`, the round's close plus min(remaining, max(`busyRemaining`, `renewBackoffFloor`)),
+  cleared by a won renewal; without demand for `idleEnd`, or
   without local demand for `ownerIdleRelease` (`'terms_released_idle_local'`), it releases (held,
   certain), naming the member seen waiting longest (`'turns_named'`) and saying `'more'` while local
   waiters remain. `receivedRequest:in:now:`, `receivedRenew:in:now:` (the owner hint),
@@ -543,7 +552,7 @@ For tests, tools and readers of the format. An application does not need them.
   removes it (O5), anything else, a done of another incarnation, a missed deadline or a lease
   expiring with a permission out abandons the term (`'terms_abandoned'`, `PBSuspect` to the
   acceptor, `'permit_no'` `'abandoned'` to the queue, an uncertain release). A retried request gets
-  the same permit again (O7); the term ends idle only with an empty pipeline (O8); a request for
+  the same permit again (O7), also while the term is fenced and its lease valid (R149); the term ends idle only with an empty pipeline (O8); a request for
   a term the node does not serve gets `'permit_no'` (`'not_owner'` or `'ending'`, term the highest
   seen). `receivedDone:in:now:` counts a wake-up and progress, sequences the owner's outcome and
   forwards the done to the acceptor; `dispatchDoneReport:in:now:` broadcasts the holder's done

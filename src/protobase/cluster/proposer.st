@@ -3,7 +3,9 @@
 The proposer side of proto_db's ClusterCoordinator (cluster/coordinator.py at v2.0.0rc3:
 permit's loop, _become_owner, _await_turn, _open_attempt, _close_attempt, _back_off, release,
 _own_loop_body, _renew, _on_reply and the fairness hints _note_wanting, _note_request,
-_note_release, _next_turn) as rule methods of PBCoordinatorCore over the values of lease.st,
+_note_release, _next_turn; _own_loop_body and _renew as amended at 88ca21d, post-rc3, by the
+renewal back-off and the fenced term, rulings R149 and R149a, gamarino/ProtoDB#1) as rule
+methods of PBCoordinatorCore over the values of lease.st,
 core.st and this module. proto_db's threads wait on a condition; here each wait is a phase of
 the state value and a PBTimer, and every event that would notify the condition re-evaluates the
 phase (_poke:now:effects:). Nothing here reads a clock: t is the node's clock (CC3).
@@ -50,8 +52,14 @@ phase (_poke:now:effects:). Nothing here reads a clock: t is the node's clock (C
     Otherwise, while there is demand (a waiter queued, or one within leaseDuration / 2), it
     renews when less than half the belief is left: renew(term, rid, inc, vs) to the other
     voters and its own acceptor, closed as an attempt; a renewal won before its validUntil:
-    extends the lease to the later of the two ends (counted renewals), else counted
-    renewal_failures, and the term goes on. The ending releases the lease: the release (held
+    extends the lease to the later of the two ends (counted renewals) and ends any back-off,
+    else counted renewal_failures. A round that is not won fences the term when its permanent
+    refusals exceed voters - needed (PBAttempt isTermFenced, R149: counted terms_fenced; the
+    queue refused 'ending', nothing new issued, never renewed again; it ends once its pipeline
+    is empty, a permission's done re-evaluating it at once, and only the lease ending first
+    abandons it); any other such round, one left pending after a majority answered included
+    (R149a), backs off: no renewal before renewAfter, the close + min(remaining,
+    max(busyRemaining, renewBackoffFloor)), with a timer for it. The ending releases the lease: the release (held
     true) carries the accepted and committed roots, certain (the node is not suspect), next
     (the member seen waiting longest, taken out of the queue, counted turns_named) and more
     (local waiters remain), goes to the other members and frees its own grant; the local
@@ -258,13 +266,16 @@ PBProposer >> printOn: aStream
  the running renewal (a PBAttempt, or nil) with its start and straggling; the token of its timer;
  the last permission number issued (seq), the pipeline of issued permissions not yet retired
  (PBIssued, oldest first: at most one at DEPTH 0), the base (the newest root it knows committed
- in its term, nil when unknown) and whether that base is known committed; and whether the term
- was abandoned (owner.st)."
+ in its term, nil when unknown) and whether that base is known committed; whether the term
+ was abandoned (owner.st); whether a lost renewal fenced it (R149: a majority will never renew
+ it, so it issues nothing new and ends once its pipeline is empty); and renewAfter, the time
+ before which it is not renewed again after a renewal round that was neither won nor fenced
+ (R149a), nil once a renewal won (proto_db _Ownership.fenced and renew_after at 88ca21d)."
 PBProposerValue subclass: #PBOwnership.
 
 PBOwnership class >> fieldNames
   ^ #(#lease #queue #lastDemand #lastLocal #renewal #renewStarted #straggling #token #seq #pipeline #base #committed
-      #abandoned).
+      #abandoned #termFenced #renewAfter).
 
 "The ownership of aLease from t, with no request queued, aRoot as its base (the lease's phase-1
  value, a PBLabeledRoot or nil: unknown), known committed when isCommitted."
@@ -275,7 +286,7 @@ PBOwnership class >> lease: aLease base: aRoot committed: isCommitted now: t
     at: #lease put: aLease; at: #queue put: #(); at: #lastDemand put: t; at: #lastLocal put: t;
     at: #renewal put: nil; at: #renewStarted put: 0; at: #straggling put: false; at: #token put: nil;
     at: #seq put: 0; at: #pipeline put: #(); at: #base put: aRoot; at: #committed put: isCommitted;
-    at: #abandoned put: false; yourself).
+    at: #abandoned put: false; at: #termFenced put: false; at: #renewAfter put: nil; yourself).
 
 PBOwnership >> lease
   ^ self _at: #lease.
@@ -326,9 +337,22 @@ PBOwnership >> isCommitted
 PBOwnership >> isAbandoned
   ^ self _at: #abandoned.
 
-"Whether permissions may be issued at t (proto_db serving): not abandoned, the lease valid."
-PBOwnership >> isServingAt: t
+"Whether a lost renewal proved that no majority will renew the term (R149)."
+PBOwnership >> isTermFenced
+  ^ self _at: #termFenced.
+
+"The time before which the term is not renewed again (R149a), nil when no back-off runs."
+PBOwnership >> renewAfter
+  ^ self _at: #renewAfter.
+
+"Whether the term is live at t: neither abandoned nor expired (proto_db _on_permit_req's live,
+ 88ca21d), serving or fenced."
+PBOwnership >> isLiveAt: t
   ^ self isAbandoned not and: [self lease isValidAt: t].
+
+"Whether permissions may be issued at t (proto_db serving): live and not fenced."
+PBOwnership >> isServingAt: t
+  ^ self isTermFenced not and: [self isLiveAt: t].
 
 "The issued permission aSeq of aNode in the pipeline, or nil (proto_db entry)."
 PBOwnership >> entryOf: aNode seq: aSeq
@@ -781,12 +805,14 @@ PBCoordinatorCore >> dispatchAcceptorDiscarded: anEvent in: s now: t
 
 "=== PBCoordinatorCore: owning ==============================================="
 
-"proto_db _own_loop_body at DEPTH 0: a permission past its deadline abandons the term (O6); an
- abandoned term ends; the lease expiring ends the term, abandoning it first when a permission is
- out (O6); the term ends idle only with an empty pipeline (O8); else it renews, or sleeps until
- the next of its deadlines. Nothing while a renewal runs."
+"proto_db _own_loop_body at DEPTH 0 (88ca21d): a permission past its deadline abandons the term
+ (O6); an abandoned term ends; the lease expiring ends the term, abandoning it first when a
+ permission is out (O6); a fenced term ends once its pipeline is empty (R149); the term ends idle
+ only with an empty pipeline (O8); else it renews (never when fenced, nor before renewAfter:
+ R149a), or sleeps until the next of its deadlines (a fenced term: the lease's end, or the done
+ of its permission, which re-evaluates it in _permitOutcome:). Nothing while a renewal runs."
 PBCoordinatorCore >> _ownLoop: s now: t effects: fx
-  | own c lease idle release remaining demand waits pair state late queued |
+  | own c lease idle release remaining demand waits pair state late queued backingOff due |
   own := s ownership.
   (own isNil or: [own renewal notNil]) ifTrue: [^ s].
   c := s config.
@@ -807,6 +833,10 @@ PBCoordinatorCore >> _ownLoop: s now: t effects: fx
       state := self _abandon: state why: 'lease expired with permission ' , own pipeline first seq printString , ' of '
         , own pipeline first node , ' outstanding' now: t effects: fx].
     ^ self _endOwnership: state now: t effects: fx].
+  (own isTermFenced and: [own pipeline isEmpty]) ifTrue: [
+    "No majority will renew this term (R149) and no permission is outstanding any more: it
+     ends, and is released as any other end (certain unless suspect)."
+    ^ self _endOwnership: state now: t effects: fx].
   (own pipeline isEmpty and: [own queue isEmpty and: [t - own lastDemand > idle]]) ifTrue: [
     ^ self _endOwnership: state now: t effects: fx].
   (own pipeline isEmpty and: [release notNil and: [t - own lastLocal > release]]) ifTrue: [
@@ -816,10 +846,24 @@ PBCoordinatorCore >> _ownLoop: s now: t effects: fx
     ^ self _endOwnership: state now: t effects: fx].
   remaining := lease remainingAt: t.
   demand := own pipeline notEmpty or: [own queue notEmpty or: [2 * (t - own lastDemand) <= c leaseDuration]].
-  "Renewed when half of the belief is left (R78b, renewalLeft)."
-  (demand and: [remaining < c renewalLeft]) ifTrue: [^ self _renew: state now: t effects: fx].
+  "Renewed when half of the belief is left (R78b, renewalLeft), never once fenced (R149), nor
+   before the back-off of the last round that was not won ends (R149a)."
+  backingOff := own renewAfter notNil and: [t < own renewAfter].
+  (demand and: [own isTermFenced not and: [backingOff not and: [remaining < c renewalLeft]]]) ifTrue: [
+    ^ self _renew: state now: t effects: fx].
   waits := OrderedCollection new.
-  waits add: (demand ifTrue: [1000 max: (remaining - c renewalLeft) ceiling] ifFalse: [idle]).
+  own isTermFenced
+    ifTrue: [
+      "Never renewed: woken by its permission's done (or its deadline); the lease's end
+       abandons it (proto_db review I3)."
+      waits add: (1000 max: remaining)]
+    ifFalse: [
+      demand
+        ifTrue: [
+          due := (remaining - c renewalLeft) ceiling.
+          backingOff ifTrue: [due := due max: own renewAfter - t].
+          waits add: (1000 max: due)]
+        ifFalse: [waits add: idle]].
   own pipeline notEmpty
     ifTrue: [waits add: (1000 max: (own pipeline inject: own pipeline first deadline into: [:m :e | m min: e deadline]) - t)]
     ifFalse: [own queue isEmpty ifTrue: [waits add: (1000 max: idle - (t - own lastDemand))]].
@@ -865,25 +909,41 @@ PBCoordinatorCore >> _renewalAnswered: s now: t effects: fx
   fx add: (PBTimer after: (self _straggleFrom: own renewStarted in: s now: t) token: pair last event: #owner).
   ^ state with: { #ownership -> (state ownership with: { #straggling -> true. #token -> pair last }) }.
 
-"A renewal won before its validUntil: extends the lease; any other outcome leaves it. Then the
- ownership goes on (proto_db _renew, then the loop). The waiters that arrived while the lease
- had lapsed join the queue of the renewed lease (proto_db permit loops back to the owner)."
+"A renewal won before its validUntil: extends the lease and ends any back-off; any other outcome
+ leaves the lease (proto_db _renew at 88ca21d, then the loop). A round that is not won either
+ fences the term (R149: its permanent refusals exceed voters - needed; counted terms_fenced, the
+ queue refused 'ending', nothing new issued, never abandoned for it) or backs off: no renewal
+ before t + min(remaining, max(busyRemaining, renewBackoffFloor)), also after a round left
+ pending once a majority answered (R149a). The waiters that arrived while the lease had lapsed
+ join the queue of the renewed lease (proto_db permit loops back to the owner)."
 PBCoordinatorCore >> _closeRenewal: s now: t effects: fx
-  | own a lease state |
+  | own a lease state locals |
   own := s ownership.
   a := own renewal.
   lease := own lease.
   ((self _won: a) and: [self _inTime: a in: s now: t])
     ifTrue: [
       fx add: (PBCount stat: 'renewals').
-      own := own with: { #renewal -> nil.
+      own := own with: { #renewal -> nil. #renewAfter -> nil.
         #lease -> (PBLease term: lease term validUntil: (lease validUntil max: (self _leaseEnd: a in: s now: t))
           root: lease root certain: lease isCertain) }.
       state := self _queueLocal: s waiters in: (s with: { #ownership -> own. #waiters -> #() }) now: t.
       state := self _issue: state now: t effects: fx]
     ifFalse: [
       fx add: (PBCount stat: 'renewal_failures').
-      state := s with: { #ownership -> (own with: { #renewal -> nil }) }].
+      own := own with: { #renewal -> nil }.
+      a isTermFenced
+        ifTrue: [
+          "No majority will ever renew this term: it steps down without abandoning. Its
+           permission ends by its done (or its deadline), then the loop releases the lease."
+          fx add: (PBCount stat: 'terms_fenced').
+          locals := self _refuse: own queue reason: 'ending' term: own term in: s effects: fx.
+          state := s with: { #ownership -> (own with: { #termFenced -> true. #queue -> #() }). #waiters -> (locals , s waiters) }]
+        ifFalse: [
+          "Lost, or left pending (a member silent): possibly transient, and renewing sooner
+           cannot win."
+          state := s with: { #ownership -> (own with: { #renewAfter ->
+            (t + ((lease remainingAt: t) min: (a busyRemaining max: s config renewBackoffFloor))) }) }]].
   ^ self _ownLoop: state now: t effects: fx.
 
 "The ownership ends (proto_db _refuse_queue with 'ending'): the members queued are refused, its
