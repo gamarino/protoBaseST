@@ -1063,6 +1063,37 @@ after every step. Pipelined permits (spec T12) are **not** in this plan (Q3: `DE
 - [ ] **Step 4:** run, then the suite. Expected: PASS.
 - [ ] **Step 5:** reference, CHANGELOG; commit `Cluster C1: in-process and TCP transports`.
 
+### Task 19b: Port proto_db R149/R149a (renewal back-off and fenced term) into the core
+
+Added 2026-11-15. `proto_db` adopted gamarino/ProtoDB#1 after rc3: merge commit `88ca21d`
+(branch `fix/renew-backoff`, R149/R149a, CHANGELOG 2.0.0rc4, D50 amendment). The port follows
+`proto_db`, so the core takes the change before the shell gives it real timers. This settles
+Task 20 carry-over (f).
+
+**Files:** modify `src/protobase/cluster/proposer.st` (and `lease.st` if the per-peer refusal
+record needs it); tests: a new `tests/unit/cluster_renew_backoff_rules.st` porting
+`tests/unit/test_cluster_renew_backoff.py` at `88ca21d`, and plants that follow
+`tests/support/plant_defects.py` at `88ca21d`.
+
+- Fenced term (R149): a refusal is permanent when its reason is `stale_term` or `term_taken`,
+  or it carries `highest > own.term`. When the permanent refusals exceed `size - needed`, the
+  owner stops renewing and issues no new permit, refuses the queue with `"ending"`, lets the
+  outstanding permit end by its done or its deadline, then ends the ownership with reason
+  `"fenced"` and releases; a stat counts fenced terms. A retry of the outstanding permit request
+  (same sender, inc, rid, term) gets the same permit again.
+- Back-off (R149a): every renewal round that is neither won nor fenced, including a round left
+  pending after a majority answered, sets `renewAfter = now + min(remaining, max(busyRemaining,
+  requestTimeout / 4, 1 ms))`; the ownership loop does not renew before it and schedules a timer
+  for it; a won renewal clears it.
+- Tests are fail-first, on virtual time only. Every new guard is mutation-pinned. Re-run the
+  simulator families of Task 16 whose cost came from the storm (`_rejoin.st` r78a, `lagged:`,
+  belowBallot, majorityLoss), and each sim test whose code path changed. Do not run the whole
+  suite or the audit (Task 30). Audit floors that this change moves are re-measured in Task 30.
+- `docs/deviations.md`: replace the open-item entry for ProtoDB#1 with "adopted from proto_db
+  `88ca21d` (post-rc3, R149/R149a)". The Task 18 checklist stays pinned to `v2.0.0rc3`; list the
+  ported `test_cluster_renew_backoff.py` functions in the report.
+- Commit `Cluster C1b: renewal back-off and fenced term (proto_db R149/R149a)`.
+
 ### Task 20: Coordinator shell: actors, timers, effects, fencing, stats
 
 **Files:**
