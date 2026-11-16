@@ -3,7 +3,9 @@
 <!-- example: examples/cluster/15_losing_members.st -->
 <!-- example: examples/cluster/15_wiped_disk.st -->
 <!-- example: examples/cluster/15_majority_loss.st -->
+<!-- example: examples/cluster/15_what_the_application_sees.st -->
 Programs: [examples/cluster/15_losing_members.st](../../examples/cluster/15_losing_members.st),
+[15_what_the_application_sees.st](../../examples/cluster/15_what_the_application_sees.st),
 [15_wiped_disk.st](../../examples/cluster/15_wiped_disk.st) and
 [15_majority_loss.st](../../examples/cluster/15_majority_loss.st).
 Previous: [14. A three-node cluster](14-a-three-node-cluster.md). Next: [16. Operating a cluster](16-operating-a-cluster.md).
@@ -16,6 +18,12 @@ the same rules under seeded faults in virtual time, and by the coordinator's own
 proofs. The real-process tests (`tests/cluster/real_*.sh`, Tasks 27 and 28 of the
 [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md)) run every member as a protost
 process of its own and kill members with `kill -9`; each run is verified by the token rule below.
+
+The first program works one level down, with write permissions asked by hand (`_permit` and
+`_done:outcome:`, private selectors of the commit path, as in chapter 14), so that each step of
+the protocol is visible. An application never calls them: it calls `run:`, and the section
+[What the application sees](#what-the-application-sees) replays the same losses through `run:` and
+quotes the errors an application gets.
 
 In these programs **stopping a coordinator is a crash**: its endpoint stops, so the member neither
 sends nor receives, and its disk stays as it was. A wait is always a condition with a deadline.
@@ -32,7 +40,7 @@ does yet, it says so.
 | A voter dies | the others go on while a majority of voters lives | `15_losing_members.st` (permissions); `sim_acceptance.st` (1) (an acceptor crashing before its reply: the commit completes without it) |
 | The owner dies | after its lease, another member owns a higher term | `cluster_coordinator_attach.st` (8); `sim_leases.st` (3), (4) (no two leases valid at once) |
 | | no acknowledged commit is lost | `sim_base_seeds_a.st`, `sim_base_seeds_b.st` (S4 with a member crashing) |
-| A minority is cut off, or left alone | it gets no permission and commits nothing (`PBTimeoutError`) | `15_losing_members.st`; `sim_permits.st` (4); `sim_round_rules.st` (11) |
+| A minority is cut off, or left alone | it gets no permission and commits nothing (`PBTimeoutError`) | `15_losing_members.st`; `15_what_the_application_sees.st` (through `run:`); `sim_permits.st` (4); `sim_round_rules.st` (11) |
 | A paused holder wakes up | once a majority promised a newer term, nothing it sends under its old term is accepted | `sim_acceptance.st` (3) |
 | A holder dies mid-round | its commit is committed or absent everywhere, never on some nodes only | `sim_base_seeds_a.st`, `sim_base_seeds_b.st` (unknown commits on all members or none); `cluster_coordinator_shell.st` (9) |
 | A member restarts on its disk | its promises come back | `15_losing_members.st` (no rejoin needed); `sim_grants.st` (4) |
@@ -176,6 +184,90 @@ programs assert exactly that: every acknowledged token is present, the counter i
 acknowledged commits and the acknowledged plus the unknown ones, and it equals the number of
 tokens (no commit applied twice).
 
+## What the application sees
+
+The program `15_what_the_application_sees.st` loses the same members as the first one, but it
+only calls `run:`, as an application does. Each commit adds 1 to a counter and writes its own
+token, and the program keeps what `run:` answered:
+
+```smalltalk
+commit := [:aDatabase :token |
+  [aDatabase run: [:t |
+      t setRootObject: 'counter' value: (t getRootObject: 'counter') + 1.
+      t setRootObject: 'tokens' value: ((t getRootObject: 'tokens') setAt: token value: true)].
+    #committed]
+    on: PBTimeoutError, PBOutcomeUnknownError, PBConflictError
+    do: [:e | e return: { e class name. e messageText }]].
+```
+
+With one voter of three down, nothing changes for the application:
+
+```smalltalk
+(nodes at: 3) stop waitWithin: 60000.
+lesson check: 'with one voter down, run: still commits' is: (commit value: db value: 'b') equals: #committed.
+```
+
+With a second voter down, n0 is one of three. Its next commits cannot be acknowledged by a
+majority:
+
+```smalltalk
+(nodes at: 2) stop waitWithin: 60000.
+first := commit value: db value: 'c'.
+lesson check: 'the first commit after the loss ends unknown or timed out, never committed'
+  isTrue: (first ~= #committed and: [#(#PBOutcomeUnknownError #PBTimeoutError) includes: first first asSymbol]).
+second := commit value: db value: 'd'.
+lesson check: 'the next ends in PBTimeoutError: no write permission'
+  isTrue: (second first = #PBTimeoutError and: [second last includesSubstring: 'could not obtain a write permission within 8000 ms']).
+```
+
+A run printed the second error as the application gets it:
+
+```
+PBTimeoutError: Node n0 could not obtain a write permission within 8000 ms (no majority granted it)
+```
+
+The first commit after the loss can end two ways, and the program accepts both:
+
+- If n0 still owned its term, it built the root and sent it, and then could not count a majority
+  of acknowledgements. That commit ends in `PBOutcomeUnknownError` ('... it may or may not take
+  effect'). `run:` never retries it.
+- If n0's term had already ended, no permission comes. The commit ends in `PBTimeoutError` after
+  `acquireTimeout`, and nothing was sent. `run:` does not retry a timeout either. A commit that
+  started with too little of its permission left ends in a `PBConflictError`, which `run:`
+  retries; the retries then meet the same timeout.
+
+Every commit after that ends in the `PBTimeoutError` above. When n1 comes back on its disk, the
+application tries again, as it would after any timeout. n1 grants nothing during its startup
+grace, so the first attempts may time out too:
+
+```smalltalk
+later := nil.
+attempt := 0.
+[later ~= #committed and: [attempt < 5]] whileTrue: [
+  attempt := attempt + 1.
+  later := commit value: db value: 'e'.
+  (later ~= #committed and: [later first ~= #PBTimeoutError]) ifTrue: [attempt := 5]].
+lesson check: 'with n1 back, run: commits again' is: later equals: #committed.
+```
+
+Then the tokens settle what the errors left open, by the rule of the previous section:
+
+```smalltalk
+lesson check: 'every acknowledged commit is present' isTrue: (#('a' 'b' 'e') allSatisfy: [:k | tokens has: k]).
+lesson check: 'the timed-out commit is absent' isTrue: (tokens has: 'd') not.
+lesson check: 'the counter counts exactly the tokens present (none applied twice)'
+  is: (tr getRootObject: 'counter') equals: tokens size.
+```
+
+Two runs on one machine both printed:
+
+```
+commit c ended in PBOutcomeUnknownError; its token is present: true
+```
+
+The application could not know at the time whether c took effect; the token, read later, says
+it did. Another run may find it absent, and both are correct outcomes of an unknown commit.
+
 ## A wiped disk: rejoin by ballot
 
 The second program loses n2's acceptor log. First, a term is promised and served, so that the
@@ -310,6 +402,8 @@ Two failures are the node's own, and both end with a node that refuses to take p
 ## What to take away
 
 - A cluster of three voters survives any one failure; a minority never writes, it times out.
+  Through `run:`, that is `PBTimeoutError` ('could not obtain a write permission within N ms'),
+  or `PBOutcomeUnknownError` for a commit whose root had already left.
 - A restarted member remembers its promises; its startup grace only saves wasted work.
 - A wiped member rejoins by a ballot, and the simulator tests it with clocks running at different
   rates; a majority of lost logs needs `forceRejoin`, the operator's decision.

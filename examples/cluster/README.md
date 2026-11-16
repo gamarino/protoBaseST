@@ -13,6 +13,7 @@ check exits with status 1.
 | [14_three_nodes_tcp.st](14_three_nodes_tcp.st) | the same over TCP on localhost | [14](../../docs/tutorial/14-a-three-node-cluster.md) |
 | [14_cluster_commits.st](14_cluster_commits.st) | commits and reads on three nodes, the barrier commit, the three outcomes, `committedEpoch`, `sync:` and `persistedEpoch` | [14](../../docs/tutorial/14-a-three-node-cluster.md) |
 | [15_losing_members.st](15_losing_members.st) | a voter dies, then the owner: the member left alone times out; a restart on an intact disk and its startup grace | [15](../../docs/tutorial/15-failures-and-recovery.md) |
+| [15_what_the_application_sees.st](15_what_the_application_sees.st) | the same losses through `run:` only: the errors an application gets (`PBTimeoutError`, `PBOutcomeUnknownError`), a retry once a member is back, and the tokens that settle them | [15](../../docs/tutorial/15-failures-and-recovery.md) |
 | [15_wiped_disk.st](15_wiped_disk.st) | a lost acceptor log and a rejoin by ballot; a double start refused | [15](../../docs/tutorial/15-failures-and-recovery.md) |
 | [15_majority_loss.st](15_majority_loss.st) | a minority times out; a majority of logs lost, stuck until `forceRejoin`; the cluster commits again | [15](../../docs/tutorial/15-failures-and-recovery.md) |
 | [16_configuration.st](16_configuration.st) | defaults, the rules among options, the timer table, `stats`, the startup grace over a used log | [16](../../docs/tutorial/16-operating-a-cluster.md) |
