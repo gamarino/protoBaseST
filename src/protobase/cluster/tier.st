@@ -1,6 +1,7 @@
 "-- cluster/tier.st: the shared tier, the cluster tier of a space every node shares --
 
-proto_db cluster/persister.py at v2.0.0rc3 (PlainTier, _node_log, cluster_fields): what the
+proto_db cluster/persister.py at v2.0.0rc3 (PlainTier, _node_log, cluster_fields; persist: and
+readPersisted at v2.0.0rc4, which keep the root's version outside its identity): what the
 coordinator and the persister need from the storage of a space that every node of the cluster
 shares, a PBFileStorage opened in cluster mode (PBFileStorage clusterPath:, CC20) on a shared
 file system. Records live in the shared storage, so nothing is shipped or applied (DEPTH = 0);
@@ -28,12 +29,15 @@ the persisted root is the storage's own root (space.root).
                 and the storage epoch for a root written outside cluster mode (proto_db
                 cluster_fields); nil for an empty space.
                 persist: aLabeledRoot publishes its record as space.root and answers true, or
-                false when the storage holds that root or a newer one in the order of roots
-                (PBRootOrder: the persisted root never goes backwards), or #busy when another
+                false when the storage holds a newer root in the order of roots, or that root at
+                a version at or above aLabeledRoot's (PBRootOrder, rc4's shape: the persisted
+                root never goes backwards; the version is outside the order), or #busy when another
                 holder has the root lock: tryLockRoot, readRoot, the order check, then
                 replaceRoot: with the storage epoch plus one (the compare-and-swap), the lock
                 released whatever happens. It never waits; the persister reschedules a busy
-                attempt (Task 25).
+                attempt (cluster/persister.st). The persister never calls it itself: it runs on
+                the space's round runner, the one actor that writes the node's storage (Task 21
+                review I1, PBRoundRunner >> persist:).
 
 Every value here is immutable; a PBSharedTier holds its storage and its open log."
 
@@ -138,17 +142,18 @@ PBSharedTier >> readPersisted
 
 "The PBLabeledRoot of the storage root aRootRecord (proto_db cluster_fields and read_persisted):
  the cluster term and epoch of its SpaceRoot, or label 0 and the storage epoch outside cluster
- mode."
+ mode; the record keeps the version aRootRecord was read at (rc4 read_persisted, record.version)."
 PBSharedTier >> _labeled: aRootRecord
   | space term epoch |
   space := PBTypeRegistry unloadedAtomFor: (PBTypeRegistry aliasOf: PBSpaceRoot typeName)
     at: aRootRecord pointer storage: storage.
   epoch := space clusterEpoch.
   epoch isNil ifTrue: [
-    ^ PBLabeledRoot label: 0 record: (PBRootRecord segment: aRootRecord segment offset: aRootRecord offset epoch: aRootRecord epoch)].
+    ^ PBLabeledRoot label: 0 record: (PBRootRecord _version: aRootRecord version segment: aRootRecord segment
+      offset: aRootRecord offset epoch: aRootRecord epoch)].
   term := space clusterTerm.
   ^ PBLabeledRoot label: (term isNil ifTrue: [0] ifFalse: [term])
-    record: (PBRootRecord segment: aRootRecord segment offset: aRootRecord offset epoch: epoch).
+    record: (PBRootRecord _version: aRootRecord version segment: aRootRecord segment offset: aRootRecord offset epoch: epoch).
 
 "Publishes the record of aLabeledRoot as the storage root (CC19, proto_db PlainTier.persist):
  true once published; false when the storage holds that root or a newer one in the order of
@@ -163,13 +168,26 @@ PBSharedTier >> persist: aLabeledRoot
   storage tryLockRoot ifFalse: [^ #busy].
   ^ [self _checkFieldsOf: aLabeledRoot.
      current := storage readRoot.
-     (current notNil and: [(PBRootOrder compare: (self _labeled: current) with: aLabeledRoot) >= 0])
+     (current notNil and: [self _holds: (self _labeled: current) over: aLabeledRoot])
        ifTrue: [false]
        ifFalse: [
          storage replaceRoot: (PBRootRecord segment: aLabeledRoot record segment offset: aLabeledRoot record offset
            epoch: (current isNil ifTrue: [1] ifFalse: [current epoch + 1])).
          true]]
     ensure: [storage unlockRoot].
+
+"Whether the persisted root aCurrent (a PBLabeledRoot read from space.root) makes the persist of
+ aLabeledRoot a no-op (CC19 in rc4's shape, proto_db PlainTier.persist at v2.0.0rc4): it orders
+ after aLabeledRoot, or it is the same root at a version at or above aLabeledRoot's. The version
+ is outside the order of roots (rc4 RootRecord.version, compare=False): the same root held at a
+ lower version is published again, at the version replaceRoot: writes (4, the only one this port
+ writes; rc4 hands publish_root the committer's version, a no-op at format 4). At format 4 every
+ root is version 4 on both sides, so the second case is the old '>= 0' (rc4 delta C4)."
+PBSharedTier >> _holds: aCurrent over: aLabeledRoot
+  | order |
+  order := PBRootOrder compare: aCurrent with: aLabeledRoot.
+  order > 0 ifTrue: [^ true].
+  ^ order = 0 and: [aCurrent record version >= aLabeledRoot record version].
 
 "Refuses (PBValidationError) aLabeledRoot when its SpaceRoot carries cluster fields other than
  its label and epoch. A SpaceRoot without cluster_epoch is left to replaceRoot:, which refuses it

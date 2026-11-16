@@ -20,7 +20,8 @@
  space), and later snapshots never go below it. (6) The same node, cut off from its peers: the
  recovery fails (written to stderr), the persisted root is read once and taken as committed, so
  its next snapshot neither recovers nor reads the storage again; a persisted root read from a tier
- detached meanwhile is counted and says nothing."
+ detached meanwhile is counted and says nothing. The persisters of this file's spaces are not
+ started (SeamSpace quietPersisters:): the roots these checks drop or lose are never persisted."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_cluster_commit'.
@@ -34,6 +35,10 @@ base deleteAll.
 base ensureCreateDirectory.
 SeamRound setUp.
 SeamSpace setUp.
+"These checks need roots that are committed but not persisted (R, dropped with the logs; the
+ storage holding no root in (6)): the spaces of this file never start their persister (Task 25;
+ cluster_persister_recovery.st reads the persisted root a persister wrote)."
+SeamSpace quietPersisters: true.
 
 kit := Reads kit: CommitKit dir: base / 'restarts' acquire: 8000.
 kit openAll.

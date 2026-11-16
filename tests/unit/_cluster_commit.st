@@ -29,7 +29,8 @@
                 each warning it writes ('<id> warn <text>') and each information line
                 ('<id> info <text>'), for the cluster read tests; holdConfirmationOf:until:
                 holds a node's next confirmation commit (after the coordinator recorded that
-                it started) until a Future resolves.
+                it started) until a Future resolves. quietPersisters: true keeps the persister of
+                every space opened afterwards from starting (Task 25).
   CommitKit     a cluster of coordinators over one PBInProcessNetwork and one space directory
                 each node opens with its own TraceStorage; waits are conditions with a
                 deadline of 60 s (waitUntil:; settle: 120 s; limit: sets another), never a
@@ -132,6 +133,20 @@ RoundSeam >> flushedBeforeEachReplicate
     x = 'flush' ifTrue: [flushed := true].
     x = 'replicate' ifTrue: [flushed ifFalse: [^ false]. flushed := false]].
   ^ true.
+
+"How many 'publish' entries of the trace fall between a 'flush' and the 'replicate' after it (a
+ root published under a commit). Since Task 25 the persister publishes space.root, through the
+ round runner, between the runner's messages; a flush and its replicate are one message
+ (PBClusterRound >> _sendNow:), so none can fall there."
+RoundSeam >> publishedUnderAReplicate
+  | open n |
+  open := false.
+  n := 0.
+  trace value do: [:x |
+    x = 'flush' ifTrue: [open := true].
+    x = 'replicate' ifTrue: [open := false].
+    (x = 'publish' and: [open]) ifTrue: [n := n + 1]].
+  ^ n.
 
 "Whether the n-th 'permit' of the trace (n > 1) follows at least n - 1 'done' (R148: a
  permission's done reaches the node before the next permit asks)."
@@ -248,11 +263,22 @@ SeamRound >> applySettle: aSettle
 
 SeamRound setUp.
 
-PBObjectSpace subclass: #SeamSpace instanceVariableNames: '' classVariableNames: 'Notes ConfirmGates'.
+PBObjectSpace subclass: #SeamSpace instanceVariableNames: '' classVariableNames: 'Notes ConfirmGates Quiet'.
 
 SeamSpace class >> setUp
   Notes := Atom on: #().
   ConfirmGates := Atom on: Dictionary new.
+  Quiet := Atom on: false.
+
+"With true, the spaces opened afterwards never start their persister (Task 25): space.root then
+ holds only what the test writes, as before the persister existed (the read tests of Task 24 whose
+ scenario needs a root that is not persisted)."
+SeamSpace class >> quietPersisters: aBoolean
+  Quiet swap: [:old | aBoolean].
+
+SeamSpace >> _startPersister
+  Quiet value == true ifTrue: [^ self].
+  ^ super _startPersister.
 
 "The confirmation commit of anId's next space waits for aFuture first (20 s at most; an expired
  gate is noted '<id> confirm gate expired'). The gate is used once."

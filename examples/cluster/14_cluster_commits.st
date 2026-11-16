@@ -1,11 +1,5 @@
 "EXPECT: 14 cluster commits ok (8 checks)"
-"PENDING: runs once Task 25 (the persister and sync:) of
- docs/superpowers/plans/2026-11-13-cluster-mode.md lands; the test runner does not run it (the
- .st.pending extension). Since Task 24 everything but its last check runs (the lines that call
- sync: and persistedEpoch). When Task 25 is merged, rename it to
- examples/cluster/14_cluster_commits.st, run it, and fix what the API turned out to be.
-
- Cluster lesson 14, third program: commits and reads on three nodes.
+"Cluster lesson 14, third program: commits and reads on three nodes.
  Tutorial chapter: docs/tutorial/14-a-three-node-cluster.md
 
  What it teaches:
@@ -15,7 +9,7 @@
    a commit another node acknowledged a moment ago;
  - a commit that writes something and returns normally is a barrier: once it returns, its node
    has seen every commit acknowledged before it started (a run: that writes '_read_barrier';
-   newDatabase: is expected to be one, as in proto_db, and the check below confirms it);
+   newDatabase: is one, as in proto_db, and the check below shows it);
  - a commit has three outcomes: committed, PBConflictError (nothing left the node: run: retries
    it) and PBOutcomeUnknownError (run: never retries it); a unique token per commit settles an
    unknown one later;
@@ -56,8 +50,8 @@ shop run: [:t |
   t setRootObject: 'tokens' value: t newDictionary].
 lesson check: 'n0 committed under a permission' isTrue: ((nodes at: 1) stats at: 'permits_issued') + ((nodes at: 2) stats at: 'permits_issued') + ((nodes at: 3) stats at: 'permits_issued') >= 2.
 
-"newDatabase: on n1 is expected to be a barrier (a commit under a permission, as in proto_db):
- afterwards n1 knows every commit acknowledged before it. To be confirmed when Task 24 lands."
+"newDatabase: on n1 is a barrier (a commit under a permission, as in proto_db): afterwards n1
+ knows every commit acknowledged before it."
 (spaces at: 2) newDatabase: 'n1-scratch'.
 lesson check: 'after its own commit n1 sees the database n0 made'
   isTrue: ((spaces at: 2) listDatabases includes: 'shop').

@@ -39,6 +39,10 @@ runner; the caller waits only on the entry's Future.
                               closed (PBClusterRound >> close); a Future of nil
   aRunner dropKept: aCaller   a space with a coordinator: PBDropKept (a held
                               retry that is not coming); nothing otherwise
+  aRunner persist: aRoot      a space with a coordinator: the persister's write
+                              of aRoot, the tier's persist: on this actor
+                              (cluster/persister.st); a Future of true, false
+                              or #busy
 
 With a coordinator (PBObjectSpace storage:coordinator:) the runner hands every
 entry, every dropKept: and every answer of the coordinator to its
@@ -257,6 +261,14 @@ PBRoundRunner >> closeStorage
 PBRoundRunner >> closeRound
   cluster isNil ifFalse: [cluster close].
   ^ nil.
+
+"The persister's write of aLabeledRoot (cluster/persister.st): the tier's persist: (true, false or
+ #busy), made on this actor, the one that makes every other write of the node's storage (the
+ round's pushAtom: and flushSegment), so the root lock persist: takes and releases never overlaps
+ them (Task 21 review I1). PBValidationError without a coordinator."
+PBRoundRunner >> persist: aLabeledRoot
+  cluster isNil ifTrue: [^ PBValidationError signal: 'PBRoundRunner persist: needs a space with a coordinator'].
+  ^ space _tier persist: aLabeledRoot.
 
 "aCaller's held retry is not coming (Database.run): PBDropKept. Nothing without a coordinator."
 PBRoundRunner >> dropKept: aCaller

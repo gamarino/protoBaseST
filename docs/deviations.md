@@ -663,7 +663,9 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     marker, healthy) rather than from a thread flag, so it turns `false`, and
     `'rejoin_blocked'` `nil`, once the tier failed or the node is fenced, where `proto_db` keeps
     `_rejoining` true (its rejoin thread stops; nothing completes the rejoin either way);
-    `'persisting'` is `true` until the persister exists (Task 25); `'dispatch_seconds_max'` is
+    `'persisting'` turns `false` when the persister of the node's space stops after an
+    unexpected error (`_persistenceFailed:`, Task 25), and `'failure'` then names it, as
+    `proto_db`'s; `'rejoining'` does not depend on it (`proto_db`'s does not either); `'dispatch_seconds_max'` is
     the longest single dispatcher step and `'dispatch_slow'` counts the steps over 10 ms
     (`proto_db` `DISPATCH_SLOW`), both measured with `Time microsecondClockValue`.
   - The L17 refusal of a short `#startupGrace` states the durations in milliseconds, the unit of
@@ -719,6 +721,42 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     acceptor's published state and posts `_confirmed` to the dispatcher, which hands it to the
     acceptor. Two snapshots that pass the check before the record both confirm in either; the
     window here is wider by that hop. *Cost:* an extra empty round, never a weaker read.
+- **The persister (Task 25, `cluster/persister.st`, `proto_db` `Persister` at v2.0.0rc4).**
+  - Every storage write of the persister goes through the space's round runner
+    (`PBRoundRunner >> persist:`), the actor that makes the commit round's `pushAtom:` and
+    `flushSegment` on the same storage; `proto_db`'s persister thread calls `PlainTier.persist`
+    itself, whose storage serialises writes with its own lock. protoBaseST's storage takes no
+    lock to serialise its writes and its root lock is per storage object and not re-entrant
+    (Task 21 review I1): run side by side, a persist refused inside a commit's write in progress
+    would keep the root lock for good. *Cost:* a persist waits behind the commit work queued on
+    the runner before it; commits never wait for a persist longer than one `persist:`.
+  - The persister belongs to the space: `PBObjectSpace storage:coordinator:` starts it after the
+    attach and `close` stops it before the detach (a write in flight finishes first). `proto_db`'s
+    coordinator starts it in `attach` and stops it in `detach` and `stop`; here a coordinator
+    stopped under an open space stops the persister at its next pass (its waiters then end
+    `PBTimeoutError`, 'The persister stopped before the root was persisted', as `proto_db`'s).
+  - "This node committed it" (`proto_db`'s `committed_root()` committer `== node_id`) is the
+    readers' committed root being the highest root this node's commit round published at its
+    commit point (`PBClusterCoordinator >> _committedHere:`); a drop or an attach forgets it, as
+    `proto_db`'s `_committed_by` is replaced by the next root observed. *Cost:* none.
+  - `#busy` (another holder has the root lock; `persist:` never waits) is counted `'roots_busy'`,
+    a protoBaseST counter, and retried at the next pass, one `persistInterval` later; `proto_db`
+    waits for the lock inside `publish_root`.
+  - DEPTH = 0: nothing is shipped, verified, uploaded or released, and `check_backlog` has no
+    counterpart, as `proto_db`'s `PlainTier` answers each of them with a no-op (`_persistable` is
+    true for a tier that is not a cluster tier). The persister never calls `flushLocal`, as
+    `proto_db`'s does not: the commit round flushes before its replicate (L11).
+  - `sync:` takes milliseconds (a SmallInteger >= 0, or `nil` for no deadline), `proto_db`'s
+    `sync` seconds; `PBDatabase >> sync:` is the space's. The persister's counters are its own
+    (`aSpace _persister stats`: cycles, roots_written, roots_behind, roots_busy, errors,
+    refreshes, persisted_epoch, last_error), as `proto_db`'s `persister.stats()`. The lag is
+    measured on the node's clock (the `#clock` option's when set), `proto_db`'s on
+    `time.monotonic`. An unexpected error is written to stderr and kept, not re-raised: no
+    thread dies with it.
+  - A refresh hands the root it read to the acceptor (`_learnPersisted:from:`, a message never
+    waited) and records it persisted at once, so a waiter may return a moment before the
+    readers' committed root shows that root; `proto_db` does both under its lock. *Cost:* none
+    for `sync:`, which promises durability, not visibility.
 - **The shared tier and cluster storage mode (Task 21, `cluster/tier.st`, `proto_db`
   `PlainTier`).**
   - Cluster mode is chosen when the storage opens (`PBFileStorage clusterPath:`, CC20), not
@@ -737,7 +775,11 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     lost compare-and-swap up to 100 times inside a waiting `publish_root`. Under the lock no
     lock-respecting writer can move the root between the read and the publish, so there is no
     retry loop: a `PBConflictError` (a writer that ignores the lock) is signalled to the
-    caller. The persister reschedules a busy attempt (Task 25), so it never waits. `proto_db`
+    caller. The persister reschedules a busy attempt (Task 25), so it never waits. The
+    comparison has rc4's shape (delta C4): the storage's root makes the persist a no-op when it
+    orders after the new one, or is the same root at a version at or above the new one's (the
+    version is outside the order of roots), and `readPersisted` keeps the version read; at
+    format 4 every root is version 4, so this is the old comparison. `proto_db`
     also retries a `ProtoOutcomeUnknownError` (reading the root again decides) and raises
     `ProtoUnexpectedError` after 100 lost races; here neither exists: a file-system failure
     inside `replaceRoot:` is `PBUnexpectedError`, leaves the storage failed (every later write

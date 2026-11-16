@@ -10,7 +10,9 @@
  on a ReadWorker actor, so a commit that does not return shows up as { #hung. ... } or as an
  expired gate, never as a hang.
  (1) Transactions read the committed root, not the storage: ten commits over two nodes, read on
- both, with at most four storage root reads and no root published under them by a commit
+ both, with at most four storage root reads made for transactions (storage_root_reads; the
+ persister's reads, since Task 25, are not theirs) and no root published by a commit (every
+ publish is a persister's write)
  (proto_db transactions::test_transactions_read_the_committed_root_not_the_storage).
  (2) Read-your-writes: a commit returns after its node's readers see its root, also while the
  node's acceptor has not learnt it yet: the readers held the root when the commit was settled.
@@ -46,11 +48,16 @@ db0 := s0 newDatabase: 'db'.
 db0 run: [:t | t setRootObject: 'counter' value: 0].
 db1 := kit db: 'db' on: 'n1'.
 0 to: 9 do: [:i | (i \\ 2 = 0 ifTrue: [db0] ifFalse: [db1]) run: Reads incr].
-reads := #('n0' 'n1') inject: 0 into: [:n :id | n + (((kit storage: id) instVarNamed: 'trace') value select: [:x | x = 'read root']) size].
-publishes := kit ids inject: 0 into: [:n :id | n + (((kit storage: id) instVarNamed: 'trace') value select: [:x | x = 'publish']) size].
+"The storage root reads made for transactions (the read path and the coordinator's refound reads,
+ 'storage_root_reads'), not the persister's (since Task 25; proto_db's RecordingStorage skips the
+ persister threads' reads too); every publish of space.root is a write of a persister (its
+ 'roots_written'), none a commit's."
+reads := #('n0' 'n1') inject: 0 into: [:n :id | n + ((kit node: id) stats at: 'storage_root_reads')].
+publishes := [kit ids inject: 0 into: [:n :id | n + (((kit storage: id) instVarNamed: 'trace') value select: [:x | x = 'publish']) size]].
 c that: 'the committed root, not the storage: ten commits over two nodes are read on both, at most four storage root reads, no root published by a commit'
-  is: { Reads counter: db1. kit waitUntil: [(Reads counter: db0) = 10]. reads <= 4. publishes }
-  equals: { 10. true. true. 0 }.
+  is: { Reads counter: db1. kit waitUntil: [(Reads counter: db0) = 10]. reads <= 4.
+    kit waitUntil: [publishes value = (kit ids inject: 0 into: [:n :id | n + ((kit space: id) _persister stats at: 'roots_written')])] }
+  equals: { 10. true. true. true }.
 
 Reads step: '(2)'.
 "(2) n0's acceptor is held at the learning of its own commit; the commit runs on a worker."

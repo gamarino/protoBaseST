@@ -18,7 +18,8 @@
  the counter is 100, every run: finished, none unknown. (6) Every node's committed root holds
  the commits of every node. (7) L11: the records of every replicated root were flushed to the
  shared storage before its replicate left the node, and no cluster commit published a root
- under them (space.root untouched) (durability::test_a_holder_never_ships_own_records_it_has_not_
+ under them: no publish of space.root between a flush and its replicate (since Task 25 only the
+ persister publishes, between the round runner's messages) (durability::test_a_holder_never_ships_own_records_it_has_not_
  made_durable_locally, transactions::test_records_reach_the_storage_before_the_replication_and_
  no_root_is_published_under_it). (8) CC18: a build longer than the belief never commits; run:
  ends, after its retries, in PBConflictError naming leaseDuration. (9) A holder paused past its
@@ -144,7 +145,7 @@ c that: 'every node''s committed root holds the commits of every node: the count
 "(7)"
 c that: 'L11: every replicate of every node follows the flush of its records; no cluster commit publishes space.root'
   is: (kit ids collect: [:id | | s | s := SeamRound seamOf: id.
-    { (s calls: #('replicate')) notEmpty or: [id ~= 'n0']. s flushedBeforeEachReplicate. (s calls: #('publish')) size }])
+    { (s calls: #('replicate')) notEmpty or: [id ~= 'n0']. s flushedBeforeEachReplicate. s publishedUnderAReplicate }])
   equals: { { true. true. 0 }. { true. true. 0 }. { true. true. 0 } }.
 
 "(8)"

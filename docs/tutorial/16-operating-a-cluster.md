@@ -27,7 +27,7 @@ startup grace over a used log, which is checked when the space attaches (rule 5 
 | `#acquireTimeout` | 30000 | When a commit that cannot get a permission gives up with `PBTimeoutError`. |
 | `#backoff` | `#(1 50)` | The jittered delay between lost attempts, (min, max). |
 | `#startupGrace` | D + margin | Grants refused after a start. |
-| `#persistInterval`, `#persistLag` | 50, 1000 | The persister's passes, and when a node persists another's commits (Task 25; nothing reads them yet). |
+| `#persistInterval`, `#persistLag` | 50, 1000 | The persister's passes, and how long a committed root waits unpersisted before a node that did not commit it persists it (chapter 14, *Durability*). |
 | `#ownerIdleRelease` | nil (off) | Ends a term whose own commits stopped asking. |
 | `#voters` | the first three ids (every member of a cluster of fewer than three) | An explicit voter set. |
 | `#authKey` | nil | A `ByteArray` of at least 32 bytes: HMAC-SHA-256 on every frame. A protoBaseST addition. |
@@ -136,8 +136,9 @@ safety checker must pass every one. Its state today, honestly:
   changed, the full run is not repeated task by task: it runs once, in the final verification
   phase (Task 30), on the commit that is to be released;
 - the *renewBackoff* parts have no measured floors yet: they are measured in Task 30;
-- the *persist* row tests nothing until the persister exists (Task 25): no rule reads it, so its
-  runs equal the runs at the defaults.
+- the *persist* row tests nothing: the persister is a shell outside the simulator (Task 25), so no
+  rule reads its knobs and its runs equal the runs at the defaults; `cluster_persister.st` tests
+  the persister itself.
 
 What the default test run does check is the audit's configuration: every row has its files, and
 each row's knob changes what the rules read (`sim_timer_audit.st`).
@@ -184,13 +185,13 @@ lesson check: 'the counters count what happened: grants given, a permission issu
 
 | Key | Meaning |
 |---|---|
-| `'healthy'` | no fence and no failed tier |
+| `'healthy'` | no fence, no failed tier, and a persister that did not stop |
 | `'fenced'` | fenced for the life of the process by an internal error (chapter 13) |
 | `'tier_failed'` | a write to the log failed: everything refused until reopened |
-| `'failure'` | the reason of either, nil when healthy |
+| `'failure'` | the reason of any of them, nil when healthy |
 | `'rejoining'` | attached, healthy, rejoined marker not logged yet |
 | `'rejoin_blocked'` | while rejoining, why a rejoin that has its answers cannot complete (its ballot not confirmed by enough witnesses, an unreadable adopted root, a failed write); nil while it is still gathering answers, for example with too few live witnesses (chapter 15) |
-| `'persisting'` | always true until the persister exists (Task 25) |
+| `'persisting'` | false once the persister of the node's space stopped after an unexpected internal error; the node still grants, acknowledges and commits (persistence is off the commit path), and `sync:` fails at once with `PBUnexpectedError` |
 | `'dispatch_seconds_max'` | the longest single dispatcher step, in seconds |
 
 The counters start at zero. The ones to watch:

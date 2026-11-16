@@ -11,14 +11,14 @@ check exits with status 1.
 | [13_terms_and_majorities.st](13_terms_and_majorities.st) | voters, majorities, ballots, the lease margin, refused options; pure values | [13](../../docs/tutorial/13-cluster-concepts.md) |
 | [14_three_nodes.st](14_three_nodes.st) | three coordinators over `PBInProcessNetwork`, the shared directory, a cluster forming, a permission | [14](../../docs/tutorial/14-a-three-node-cluster.md) |
 | [14_three_nodes_tcp.st](14_three_nodes_tcp.st) | the same over TCP on localhost | [14](../../docs/tutorial/14-a-three-node-cluster.md) |
+| [14_cluster_commits.st](14_cluster_commits.st) | commits and reads on three nodes, the barrier commit, the three outcomes, `committedEpoch`, `sync:` and `persistedEpoch` | [14](../../docs/tutorial/14-a-three-node-cluster.md) |
 | [15_losing_members.st](15_losing_members.st) | a voter dies, then the owner: the member left alone times out; a restart on an intact disk and its startup grace | [15](../../docs/tutorial/15-failures-and-recovery.md) |
 | [15_wiped_disk.st](15_wiped_disk.st) | a lost acceptor log and a rejoin by ballot; a double start refused | [15](../../docs/tutorial/15-failures-and-recovery.md) |
 | [15_majority_loss.st](15_majority_loss.st) | a minority times out; a majority of logs lost, stuck until `forceRejoin`; the cluster commits again | [15](../../docs/tutorial/15-failures-and-recovery.md) |
 | [16_configuration.st](16_configuration.st) | defaults, the rules among options, the timer table, `stats`, the startup grace over a used log | [16](../../docs/tutorial/16-operating-a-cluster.md) |
 
-[pending/](pending/README.md) holds the program that needs the persister:
-`14_cluster_commits.st.pending` needs Task 25 of the cluster plan (`sync:`, `persistedEpoch`); its
-`.st.pending` extension keeps it out of the test runner.
+[pending/](pending/README.md) is for programs written ahead of the API they need; none is
+pending today.
 
 ## Run them
 

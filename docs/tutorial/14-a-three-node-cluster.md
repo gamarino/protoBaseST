@@ -2,19 +2,18 @@
 
 <!-- example: examples/cluster/14_three_nodes.st -->
 <!-- example: examples/cluster/14_three_nodes_tcp.st -->
-<!-- example: examples/cluster/pending/14_cluster_commits.st.pending -->
+<!-- example: examples/cluster/14_cluster_commits.st -->
 Programs: [examples/cluster/14_three_nodes.st](../../examples/cluster/14_three_nodes.st) (in one
-process), [14_three_nodes_tcp.st](../../examples/cluster/14_three_nodes_tcp.st) (over TCP), and,
-pending, [pending/14_cluster_commits.st.pending](../../examples/cluster/pending/14_cluster_commits.st.pending)
-(commits and reads).
+process), [14_three_nodes_tcp.st](../../examples/cluster/14_three_nodes_tcp.st) (over TCP), and
+[14_cluster_commits.st](../../examples/cluster/14_cluster_commits.st) (commits, reads and
+durability).
 Previous: [13. The ideas behind cluster mode](13-cluster-concepts.md). Next: [15. Failures and recovery](15-failures-and-recovery.md).
 
 > **What runs today.** Starting members, the transports, attaching the shared directory, the
-> cluster forming, permissions and `stats` run, and the first two programs show it. Committing
-> and reading through the coordinator run too (Tasks 23 and 24); the third program stays pending
-> only for its durability check, which needs the persister (`sync:`, Task 25 of the
-> [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md)): that section is marked
-> **Runs once Task 25 lands**.
+> cluster forming, permissions and `stats` run, and the first two programs show it. Committing,
+> reading through the coordinator and the persister with `sync:` run too (Tasks 23 to 25 of the
+> [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md)), and the third program shows
+> them.
 
 ## A member
 
@@ -197,8 +196,7 @@ authenticates, it does not encrypt.
 
 ## Committing
 
-> The blocks of this section come from `examples/cluster/pending/14_cluster_commits.st.pending`;
-> everything in it but its last check (`sync:`, Task 25) runs. It uses a 3000 ms lease: a commit's
+> The blocks of this section come from `examples/cluster/14_cluster_commits.st`. It uses a 3000 ms lease: a commit's
 > build and replication must fit within the belief, and the 200 ms belief of a 600 ms lease is
 > shorter than a build may take on a loaded machine (CC18, `PBConflictError` naming `sendReserve`).
 
@@ -304,12 +302,20 @@ epoch of the newest root the node knows committed. It never goes down, except af
 
 ## Durability: the persister
 
-> **Runs once Task 25 lands.** It needs the persister with `sync:` and the persisted epoch (Task 25);
-> commits (Task 23) and `committedEpoch` on the space (Task 24) are there.
+> The persister and `sync:` are Task 25 (`tests/unit/cluster_persister.st`,
+> `cluster_persister_recovery.st`).
 
 `space.root` is written by each node's persister, after the commit, by compare-and-swap, never
 backwards. The commit point does not need it: acknowledged commits are durable in the voters'
-synced logs. The plan's `sync:` waits until the persisted epoch reaches the committed one:
+synced logs. Every `persistInterval` (50 ms) the persister of each space looks at the newest root
+its node knows committed. It writes it when its own node committed that root, or, when the root
+has waited `persistLag` (1000 ms) unpersisted, whoever committed it: a crashed or cut-off
+committer's commits are still persisted by another member. Only the newest root is written, so a
+burst of commits costs one write. The write goes through the space's round runner, the one actor
+that writes the node's storage, so it never overlaps a commit's own writes; when another member
+holds the root lock at that moment, the persister simply tries again on its next pass.
+`persistedEpoch` is the epoch of the newest root the node knows persisted, and `sync:` waits until
+it reaches the committed one, `PBTimeoutError` after the milliseconds given:
 
 ```smalltalk
 (spaces at: 1) sync: 10000.

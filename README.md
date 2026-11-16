@@ -198,7 +198,7 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 |---|---|
 | [docs/tutorial/erp.md](docs/tutorial/erp.md) | A guided build of a small ERP, with the reasoning at each step. Every snippet is run by the tests. |
 | [docs/tutorial/](docs/tutorial/README.md) | The chaptered tutorial: chapters 1-12 on a single process, chapters 13-16 on cluster mode, each quoting a program of `examples/tutorial/` or `examples/cluster/`; and two orientation chapters, coming from GemStone/S and coming from Soil, with their sources. |
-| [examples/cluster/](examples/cluster/README.md) | The cluster chapters' programs, run by the tests; `pending/` holds those that need API still being built. |
+| [examples/cluster/](examples/cluster/README.md) | The cluster chapters' programs, run by the tests; `pending/` is for those that need API still being built (none today). |
 | [examples/tutorial/](examples/tutorial/README.md) | Twelve small programs, one concept each, each checking its own results; run by the tests. |
 | [docs/reference.md](docs/reference.md) | Every public class and message. |
 | [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from `proto_db`. |

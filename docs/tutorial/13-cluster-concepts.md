@@ -5,11 +5,10 @@ Program: [examples/cluster/13_terms_and_majorities.st](../../examples/cluster/13
 Previous: [12. What is refused, and why](12-refusals.md). Next: [14. A three-node cluster](14-a-three-node-cluster.md).
 
 > **Status.** Cluster mode belongs to protoBaseST 0.2.0, which is not released. The protocol core,
-> the simulator that tests it, the transports, the coordinator shell and the shared tier are
-> built; commits and reads through the coordinator (Tasks 23 and 24 of the
-> [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md)) and the persister (Task 25) are
-> not yet. This chapter explains the design; it has no code that depends on the missing parts.
-> Chapters 14 and 15 mark every block that does not run yet.
+> the simulator that tests it, the transports, the coordinator shell, the shared tier, commits
+> and reads through the coordinator and the persister (Tasks 23 to 25 of the
+> [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md)) are built. This chapter
+> explains the design; chapters 14 to 16 run it.
 
 This chapter has no new API to learn. It is the reasoning that the next three chapters assume.
 Every rule here is `proto_db`'s: protoBaseST follows its cluster protocol rule by rule, including

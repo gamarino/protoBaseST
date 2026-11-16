@@ -69,6 +69,8 @@ no other lock exists in the protoST layer.
 | `openDatabase: aName` | Answers the existing database. `PBValidationError` if absent. |
 | `close` | Ends the space; a later message to it or its databases is `PBClosedError`. |
 | `committedEpoch` | The epoch of the newest committed root the node knows (`proto_db`'s committed_epoch), `0` when none; without a coordinator, the storage's root epoch (`0` for an empty space). It never goes backwards, `forceRejoin` on a survivor aside. |
+| `persistedEpoch` | The epoch of the newest root the node knows persisted in `space.root` (`proto_db`'s persisted_epoch, the persister's), `0` when none; without a coordinator, `committedEpoch`. |
+| `sync: ms` | Waits until every commit the node knows is persisted (`proto_db`'s sync): `nil` once the persisted root orders at or above the node's committed root, so `persistedEpoch >= committedEpoch`; `PBTimeoutError` after ms milliseconds (a SmallInteger >= 0, or `nil` for no deadline); `PBUnexpectedError` at once when the persister failed. `nil` at once without a coordinator, or when the node knows no committed root. A durability barrier, not a visibility barrier: a commit on this node that writes something is the barrier for reads. `PBDatabase >> sync:` is the space's. |
 | `isClosed`, `storage`, `lockTimeout`, `coordinator` | State (`coordinator` is `nil` without a cluster). |
 
 ### PBDatabase
@@ -82,6 +84,7 @@ no other lock exists in the protoST layer.
 | `PBDatabase class >> backoffFor: attempt low: l high: h random: aRandom` | The wait in milliseconds; the random source is a parameter so tests need no clock. |
 | `history` | The committed versions, newest first, as `PBHistoryEntry` objects. |
 | `snapshotAt: aReference` | A `PBSnapshot` of the version a `PBHistoryEntry` or `PBSnapshot` names. `PBReferenceError` if the version does not belong to this database (name or origin). |
+| `sync: ms` | The space's `sync:` (`proto_db`'s `Database.sync`). |
 
 ### PBHistoryEntry, PBSnapshot
 
@@ -879,7 +882,8 @@ For tests, tools and readers of the format. An application does not need them.
   `readPersisted`: the storage root as a `PBLabeledRoot`, label and epoch from the SpaceRoot's
   cluster fields, or label 0 and the storage epoch for a plain root, `nil` for an empty space;
   `canRead:`), and `flushLocal`, `persist: aLabeledRoot` (`true` once published, `false` when the
-  storage holds that root or a newer one in root order, `#busy` when the root lock is held
+  storage holds a newer root in root order, or that root at a version at or above its own (rc4's
+  shape: the version is outside the order), `#busy` when the root lock is held
   elsewhere; it never waits, CC19; `PBValidationError` when the label or epoch is not the
   SpaceRoot's `clusterTerm` or `clusterEpoch`), `close`, `nodeId`, `logPath`. `canRead:`
   signals `PBClosedError` on a closed storage. `logClass` is a test seam, and
@@ -901,7 +905,7 @@ For tests, tools and readers of the format. An application does not need them.
   backoff (it counts as an attempt), and tells the round when a held retry is not coming.
   `close` closes the round first: a commit in it whose root has not left the node is
   `PBClosedError`, one whose replicate left is `PBOutcomeUnknownError`. A cluster commit never
-  writes `space.root` (the persister's, Task 25). The
+  writes `space.root` (the persister's, below). The
   coordinator's `stats` add `'critical_commits'` and `critical` (a Dictionary of summed seconds,
   `'build'` and `'replication'`).
 - **Reads in cluster mode** (`space.st`, Task 24; `proto_db`'s `_read_storage_root`,
@@ -931,6 +935,26 @@ For tests, tools and readers of the format. An application does not need them.
   (`storage:coordinator:lockTimeout:`), else up to the coordinator's `acquireTimeout`.
   A transaction that writes nothing asks for no permission and is no barrier; a commit that writes
   something and returns normally is (`run:` writing `'_read_barrier'`, and `newDatabase:`).
+- **The persister** (`cluster/persister.st`, Task 25; `proto_db`'s `Persister`): `PBPersister
+  tier: aTier coordinator: aCoordinator writer: aWriter` (made by `PBObjectSpace
+  storage:coordinator:`, the seam `_newPersister`, started after the attach and stopped by
+  `close` before the detach) runs a pass every `persistInterval` on a low band actor: the
+  node's newest committed root, when it orders after the persisted one, is written when this
+  node committed it (`PBClusterCoordinator >> _committedHere:`) or when the oldest unpersisted
+  root has waited `persistLag`; only the newest root is written, through `aWriter persist:`
+  (the space's round runner, `PBRoundRunner >> persist:`, the tier's `persist:` on the actor that
+  makes every other write of the storage); `false` reads the persisted root again (never
+  backwards), `#busy` is retried at the next pass. A pass that does not write while behind reads
+  the persisted root at most every max(`persistInterval`, min(250 ms, `persistLag` / 4)), at
+  once when `sync:` waits, and teaches it to the coordinator as committed
+  (`_learnPersisted:from:`, not counted `'storage_root_reads'`). A `PBDBError` or
+  `FileSystemError` of a pass is retried with a delay doubling up to 1 s; any other error stops
+  persisting on the node (`_persistenceFailed:`: `stats` `'healthy'` and `'persisting'` false,
+  `'failure'` names it; the node keeps voting and committing) and fails every `sync:` at once.
+  `start`, `stop` (a `Future`), `waitFor:within:` (what `sync:` waits on), `persistedEpoch`,
+  `persistedRoot`, `isRunning`, `failure`, `stats` (`'cycles'`, `'roots_written'`,
+  `'roots_behind'`, `'roots_busy'`, `'errors'`, `'refreshes'`, `'persisted_epoch'`, `'last_error'`). The
+  space's `_persister` answers it.
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.
@@ -949,7 +973,8 @@ For tests, tools and readers of the format. An application does not need them.
   `closeStorage`).
 - **`PBRoundRunner`** (`round.st`): the space's commit queue, an actor (`space:` answers the
   proxy, `space:publisher:` over a given publisher, the seam `PBObjectSpace >> _newRunner` a
-  test subclass overrides; `enqueue:` answers the entry's `Future`; `closeStorage`;
+  test subclass overrides; `enqueue:` answers the entry's `Future`; `closeStorage`; in cluster
+  mode `persist:`, the persister's write, the tier's `persist:` on this actor;
   `firstLockDelay`, `longestLockDelay`). Every entry a round takes is settled: an error while
   settling one entry, or any later error of the round, ends the entries it concerns in
   `PBUnexpectedError` naming the cause (`PBOutcomeUnknownError` unless the entry only found the

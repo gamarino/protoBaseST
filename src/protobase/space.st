@@ -17,6 +17,16 @@ ProtoBase's ObjectSpace, Database, Snapshot and HistoryEntry
                                             storage:coordinator:lockTimeout: ms,
                                             whose commits wait up to ms
   aSpace coordinator                        c, or nil without a cluster
+  aSpace committedEpoch, persistedEpoch     the epoch of the newest root the node
+                                            knows committed, and persisted in
+                                            space.root (its persister,
+                                            cluster/persister.st); without a
+                                            cluster both the storage's
+  aSpace sync: ms                           (also aDatabase sync: ms) nil once
+                                            persistedEpoch reaches committedEpoch,
+                                            PBTimeoutError after ms (nil: no
+                                            deadline); a durability barrier, not
+                                            a visibility barrier
   aSpace listDatabases                      the database names, sorted
   aSpace newDatabase: aName                 creates the database (version 0)
                                             through the space's round runner and
@@ -57,6 +67,7 @@ Import from: 'protobase/records'.
 Import from: 'protobase/roots'.
 Import from: 'protobase/round'.
 Import from: 'protobase/cluster/tier'.
+Import from: 'protobase/cluster/persister'.
 
 Object subclass: #_PBNameCheck.
 
@@ -67,7 +78,7 @@ _PBNameCheck class >> check: aName what: aWhat
 
 "=== PBObjectSpace ============================================================"
 
-Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed runner coordinator tier permitTimeout'.
+Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed runner coordinator tier permitTimeout persister'.
 
 PBObjectSpace class >> registerAtomClass: aClass
   ^ PBTypeRegistry register: aClass.
@@ -110,8 +121,8 @@ PBObjectSpace class >> _storage: aClusterStorage coordinator: aCoordinator lockT
   aTier := PBSharedTier storage: aClusterStorage nodeId: aCoordinator nodeId.
   ok := false.
   [(aCoordinator _attach: aTier) wait. ok := true] ensure: [ok ifFalse: [aTier close]].
-  ^ self basicNew _setStorage: aClusterStorage lockTimeout: milliseconds coordinator: aCoordinator tier: aTier
-    permitTimeout: aBound.
+  ^ (self basicNew _setStorage: aClusterStorage lockTimeout: milliseconds coordinator: aCoordinator tier: aTier
+    permitTimeout: aBound) _startPersister.
 
 PBObjectSpace class >> _checkStorage: aStorage lockTimeout: milliseconds
   (aStorage isNil or: [aStorage isClassObject]) ifTrue: [
@@ -130,7 +141,22 @@ PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds coordinator: aC
   tier := aTier.
   closed := Atom on: false.
   runner := self _newRunner.
+  persister := aCoordinator isNil ifTrue: [nil] ifFalse: [self _newPersister].
   ^ self.
+
+"The persister of a space with a coordinator (cluster/persister.st), made once by the
+ initialiser: its writer is the space's round runner, the actor that makes every write of the
+ storage. A seam: a test subclass answers a subclass of PBPersister."
+PBObjectSpace >> _newPersister
+  ^ PBPersister tier: tier coordinator: coordinator writer: runner.
+
+"Starts the persister (proto_db attach starts it); answers self."
+PBObjectSpace >> _startPersister
+  persister start.
+
+"The persister, nil without a coordinator."
+PBObjectSpace >> _persister
+  ^ persister.
 
 "The space's round runner (an actor proxy), made once by the initialiser. A
  seam: a test subclass answers a runner over its own publisher
@@ -275,6 +301,36 @@ PBObjectSpace >> _warn: aString
 PBObjectSpace >> _inform: aString
   [Stdio stderr nextPutAll: self printString , ': ' , aString; lf; flush] on: Error do: [:e | nil].
 
+"The epoch of the newest root this node knows persisted in space.root (proto_db persisted_epoch:
+ the persister's), 0 when none; without a coordinator, committedEpoch (every commit is persisted
+ when it returns)."
+PBObjectSpace >> persistedEpoch
+  self _checkOpen.
+  coordinator isNil ifTrue: [^ self committedEpoch].
+  ^ persister persistedEpoch.
+
+"Waits until every commit this node knows is persisted in space.root (proto_db sync): nil once
+ the persisted root orders at or above the newest committed root this node knows, so that
+ persistedEpoch >= committedEpoch; PBTimeoutError after milliseconds (a SmallInteger >= 0, or nil
+ for no deadline); PBUnexpectedError at once when the persister failed. Nil at once when the node
+ knows no committed root, and without a coordinator (commits are persisted when they return).
+ A durability barrier, not a visibility barrier: it says nothing about commits this node has not
+ learnt yet. A commit another member acknowledged reaches this node asynchronously, so a
+ transaction started right after sync: can still miss it. To read every commit acknowledged
+ anywhere before the read starts, commit on this node first something that writes (a run: that
+ sets a root, such as '_read_barrier') and start the read after it returns normally: a commit
+ that writes nothing, or one that ends in an error, is no barrier."
+PBObjectSpace >> sync: milliseconds
+  | root |
+  (milliseconds isNil or: [(milliseconds isKindOf: SmallInteger) and: [milliseconds >= 0]]) ifFalse: [
+    ^ PBValidationError signal: 'sync: takes milliseconds, a SmallInteger >= 0, or nil, not ' , milliseconds printString].
+  self _checkOpen.
+  coordinator isNil ifTrue: [^ nil].
+  root := coordinator committedRoot.
+  root isNil ifTrue: [^ nil].
+  (persister waitFor: root within: milliseconds) wait.
+  ^ nil.
+
 "The epoch of the newest committed root this node knows (proto_db committed_epoch), 0 when none;
  without a coordinator, the storage's root epoch (0 for an empty space). It never goes backwards,
  forceRejoin on a survivor aside (PBClusterCoordinator >> committedRoot)."
@@ -335,13 +391,15 @@ PBObjectSpace >> openDatabase: aName
 "Closes the space and its storage. Idempotent. With a coordinator, its cluster
  round is closed first (every commit in it settled: PBClosedError when nothing
  of it left the node, PBOutcomeUnknownError once its root's replicate left),
- then its tier is detached and the node's acceptor log closed (proto_db close); the
+ then its persister is stopped (a sync: waiting fails with PBTimeoutError; a
+ write in flight finishes first, proto_db detach stops the persister), then its tier is detached and the node's acceptor log closed (proto_db close); the
  coordinator keeps running. The storage is closed by the round runner, after a
  round of the commits queued before (store.st: a close never interrupts a
  publish)."
 PBObjectSpace >> close
   (closed value: true ifCurrent: false) ifFalse: [^ self].
-  [[coordinator isNil ifFalse: [runner closeRound wait]]
+  [[[coordinator isNil ifFalse: [runner closeRound wait]]
+      ensure: [persister isNil ifFalse: [persister stop wait]]]
      ensure: [tier isNil ifFalse: [[(coordinator _detach: tier) wait] ensure: [tier close]]]]
     ensure: [runner closeStorage wait].
 
@@ -402,6 +460,10 @@ PBDatabase >> snapshotAt: aReference
     ^ PBReferenceError signal: 'The reference names a version of another database, not of ' , (PBCodec repr: dbName)
       , ' (another incarnation of the name, or another space)'].
   ^ PBSnapshot basicNew _setRoot: root database: self.
+
+"The space's sync: (proto_db Database.sync): a durability barrier, not a visibility one."
+PBDatabase >> sync: milliseconds
+  ^ space sync: milliseconds.
 
 PBDatabase >> printOn: aStream
   aStream nextPutAll: 'PBDatabase('; print: dbName; nextPut: $).

@@ -90,7 +90,7 @@ Import from: 'protobase/cluster/rejoin'.
 
 "=== _PBNodeCells: the shared cells of one node ============================="
 
-Object subclass: #_PBNodeCells instanceVariableNames: 'config node acceptorState committed counters fence stopped waiters dispatcher acceptor transport dispatchMax tokens critical'.
+Object subclass: #_PBNodeCells instanceVariableNames: 'config node acceptorState committed counters fence stopped waiters dispatcher acceptor transport dispatchMax tokens critical own persistFailure'.
 
 "The names of the counters stats always reports (0 until counted): every PBCount of the rules,
  and messages_ignored, the shell's."
@@ -115,9 +115,10 @@ _PBNodeCells class >> config: aConfig
   ^ self basicNew _setConfig: aConfig node: (Atom on: nil) acceptorState: (Atom on: nil) committed: (Atom on: nil)
     counters: (Atom on: zero) fence: (Atom on: nil) stopped: (Atom on: false) waiters: (Atom on: Dictionary new)
     dispatcher: (Atom on: nil) acceptor: (Atom on: nil) transport: (Atom on: nil) dispatchMax: (Atom on: 0)
-    tokens: (Atom on: 0) critical: (Atom on: (self criticalNames collect: [:k | 0])).
+    tokens: (Atom on: 0) critical: (Atom on: (self criticalNames collect: [:k | 0])) own: (Atom on: nil)
+    persistFailure: (Atom on: nil).
 
-_PBNodeCells >> _setConfig: aConfig node: aNode acceptorState: anAcceptorState committed: aCommitted counters: aCounters fence: aFence stopped: aStopped waiters: aWaiters dispatcher: aDispatcher acceptor: anAcceptor transport: aTransport dispatchMax: aMax tokens: aTokens critical: aCritical
+_PBNodeCells >> _setConfig: aConfig node: aNode acceptorState: anAcceptorState committed: aCommitted counters: aCounters fence: aFence stopped: aStopped waiters: aWaiters dispatcher: aDispatcher acceptor: anAcceptor transport: aTransport dispatchMax: aMax tokens: aTokens critical: aCritical own: anOwn persistFailure: aPersistFailure
   "Runs once, on a fresh instance."
   config isNil ifFalse: [^ PBUserError signal: '_PBNodeCells is immutable'].
   config := aConfig.
@@ -134,6 +135,8 @@ _PBNodeCells >> _setConfig: aConfig node: aNode acceptorState: anAcceptorState c
   dispatchMax := aMax.
   tokens := aTokens.
   critical := aCritical.
+  own := anOwn.
+  persistFailure := aPersistFailure.
   ^ self.
 
 _PBNodeCells >> config
@@ -180,6 +183,17 @@ _PBNodeCells >> dispatchMax
 _PBNodeCells >> critical
   ^ critical.
 
+"The highest root this node's commit round published at its commit point (proto_db's
+ _committed_by == node_id: the readers' committed root is this node's own while it equals it),
+ nil when none or once the readers' root was dropped or reset."
+_PBNodeCells >> own
+  ^ own.
+
+"The unexpected error that stopped the persister of this node's space, nil when none (proto_db
+ _persist_failure: kept for the life of the process, the first one)."
+_PBNodeCells >> persistFailure
+  ^ persistFailure.
+
 "A new waiter token: an Integer, never repeated in this coordinator."
 _PBNodeCells >> nextToken
   ^ tokens swap: [:n | n + 1].
@@ -220,7 +234,9 @@ _PBNodeCells >> closedError
  older root is published after a newer one (the acceptor's learning after the commit point's
  publish, Task 24); nil drops it (the acceptor forgot its committed root, review I2)."
 _PBNodeCells >> publishCommitted: aPublish
-  aPublish isDrop ifTrue: [^ committed swap: [:old | nil]].
+  aPublish isDrop ifTrue: [
+    own swap: [:old | nil].
+    ^ committed swap: [:old | nil]].
   ^ committed swap: [:old | PBRootOrder max: old with: aPublish root].
 
 "aString on stderr, prefixed with the node; never signals."
@@ -558,6 +574,7 @@ _PBAcceptor >> attach: aTier
   tier value: aTier ifCurrent: nil.
   "proto_db attach: the node must not inherit the committed root of the log it replaces; the
    readers' root is reset, and the start step publishes this log's (Task 24 fix round 1, I3)."
+  cells own swap: [:old | nil].
   cells committed swap: [:old | nil].
   self handle: PBStartNode new.
   ^ true.
@@ -601,7 +618,12 @@ _PBAcceptor >> readPersisted: aToken
  counted storage_root_reads, and learnt committed (PBLearnCommitted accept: false logged: false)
  when aTier is still the tier attached; answers true."
 _PBAcceptor >> observePersisted: aRoot from: aTier
-  cells count: 'storage_root_reads'.
+  ^ self observePersisted: aRoot from: aTier counted: true.
+
+"As observePersisted:from:, counted storage_root_reads only when aBoolean (the persister's
+ refresh is not a space's storage read: proto_db observe_root(from_storage=False))."
+_PBAcceptor >> observePersisted: aRoot from: aTier counted: aBoolean
+  aBoolean ifTrue: [cells count: 'storage_root_reads'].
   tier value == aTier ifTrue: [self handle: (PBLearnCommitted root: aRoot accept: false logged: false)].
   ^ true.
 
@@ -870,7 +892,36 @@ PBClusterCoordinator >> committedRoot
  is published to the readers before the commit settles, so a commit reads its own write; the
  acceptor learns it later (PBLearnCommitted), and publishing it then changes nothing."
 PBClusterCoordinator >> _publishCommitted: aLabeledRoot
+  cells own swap: [:old | PBRootOrder max: old with: aLabeledRoot].
   cells publishCommitted: (PBPublishCommitted root: aLabeledRoot).
+
+"Whether aLabeledRoot, the readers' committed root, is a root this node committed (proto_db
+ committed_root()'s committer == node_id, what the persister asks): the highest root this node's
+ commit round published (_publishCommitted:) is that root. The own root is set before the
+ readers' root, so a reader that sees this node's root sees it as its own; a drop or an attach
+ forgets it (_PBNodeCells >> own)."
+PBClusterCoordinator >> _committedHere: aLabeledRoot
+  | mine |
+  aLabeledRoot isNil ifTrue: [^ false].
+  mine := cells own value.
+  mine isNil ifTrue: [^ false].
+  ^ (PBRootOrder compareKey: mine key with: aLabeledRoot key) = 0.
+
+"The persister of this node's space read aLabeledRoot from aTier's persisted root (proto_db
+ observe_root(record, term=, accept=False, tier=)): learnt committed, not accepted, unless aTier
+ was detached meanwhile; not counted storage_root_reads. A Future, never waited by the persister."
+PBClusterCoordinator >> _learnPersisted: aLabeledRoot from: aTier
+  | f |
+  self isRunning ifFalse: [f := Future new. f resolve: false. ^ f].
+  ^ cells acceptor value observePersisted: aLabeledRoot from: aTier counted: false.
+
+"The persister of this node's space stopped after the unexpected error anError (proto_db
+ persistence_failed): kept (the first one), written to stderr, and the node reported unhealthy
+ (stats healthy false, persisting false, failure); it keeps granting, acknowledging and acquiring,
+ persistence being off the commit path."
+PBClusterCoordinator >> _persistenceFailed: anError
+  (cells persistFailure value: (cells describe: anError) ifCurrent: nil) ifFalse: [^ self].
+  cells warn: 'stopped persisting after an internal failure: ' , (cells describe: anError).
 
 "A recovery round (proto_db recover_root(), what current_root runs when the node knows no
  committed root): a Future of { known. root }, the highest accepted root among a majority of
@@ -926,10 +977,11 @@ PBClusterCoordinator >> stats
   v := cells acceptorState value.
   failure := cells fence value ifNil: [v isNil ifTrue: [nil] ifFalse: [v tierFailed]].
   rejoining := v notNil and: [v isAttached and: [v isRejoined not and: [failure isNil]]].
+  failure := failure ifNil: [cells persistFailure value].
   d at: 'healthy' put: failure isNil;
     at: 'fenced' put: cells isFenced;
     at: 'tier_failed' put: (v notNil and: [v tierFailed notNil]);
-    at: 'persisting' put: true;
+    at: 'persisting' put: cells persistFailure value isNil;
     at: 'rejoining' put: rejoining;
     at: 'rejoin_blocked' put: ((rejoining and: [s notNil]) ifTrue: [rules rejoinBlockedIn: s] ifFalse: [nil]);
     at: 'failure' put: failure;

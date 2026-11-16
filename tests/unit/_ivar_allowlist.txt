@@ -129,8 +129,9 @@ _PBTcpReader>>_setTransport:socket:nodeId:key:handler:
 _PBTcpSender>>_setTransport:peer:queue:link:proxy:
 _PBSendQueue>>_setFrames:bytes:draining:closed:
 PBLogDetached>>_setLog:
-_PBNodeCells>>_setConfig:node:acceptorState:committed:counters:fence:stopped:waiters:dispatcher:acceptor:transport:dispatchMax:tokens:critical:
+_PBNodeCells>>_setConfig:node:acceptorState:committed:counters:fence:stopped:waiters:dispatcher:acceptor:transport:dispatchMax:tokens:critical:own:persistFailure:
 _PBDispatcher>>_setCells:rules:
 _PBAcceptor>>_setCells:rules:tier:
+PBPersister>>_setTier:coordinator:writer:interval:lag:stats:
 PBClusterCoordinator>>_setConfig:rules:acceptorClass:cells:run:
 PBOwnStepFailed>>_setMessage:error:

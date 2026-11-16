@@ -2,6 +2,28 @@
 
 ## 0.2.0 (unreleased)
 
+- The persister, `persistedEpoch` and `sync:` (Task 25, `cluster/persister.st`; `proto_db`'s
+  `Persister`, `persisted_epoch` and `sync` at v2.0.0rc4): each cluster space runs a
+  `PBPersister` on a low band actor, started after the attach and stopped by `close` before the
+  detach. Every `persistInterval` it writes the newest committed root its node knows to
+  `space.root` when its node committed it (`PBClusterCoordinator >> _committedHere:`), or when
+  the oldest unpersisted root has waited `persistLag` (a crashed or cut-off committer's commits
+  are persisted by another member); only the newest root is written, never backwards (CC19: a
+  refused write reads the persisted root again), and a `#busy` root lock is retried at the next
+  pass. The write is `PBRoundRunner >> persist:`, the tier's `persist:` made on the actor that
+  makes the commit round's writes, so the root lock never overlaps a `pushAtom:` or a
+  `flushSegment` of the same storage (Task 21 review I1). A pass behind that does not write
+  reads the persisted root back and teaches it to the coordinator (`_learnPersisted:from:`).
+  Errors of the storage are retried with a delay doubling up to 1 s; any other error stops
+  persisting on that node only (`_persistenceFailed:`: `stats` `'healthy'` and `'persisting'`
+  false, `'failure'` names it) and fails every `sync:` at once. `PBObjectSpace >>
+  persistedEpoch`, `sync: ms` (a durability barrier, not a visibility barrier; also `PBDatabase
+  >> sync:`). `PBSharedTier >> persist:` compares in rc4's shape (the version outside the order
+  of roots: the same root held at a lower version is published again) and `readPersisted` keeps
+  the version read. Tests: `tests/unit/cluster_persister.st`, `cluster_persister_recovery.st`;
+  the eight `deferred 25` checklist rows ported. `examples/cluster/14_cluster_commits.st` left
+  `pending/`.
+
 - Reads in cluster mode (Task 24, `space.st`; `proto_db`'s `_read_storage_root`, `current_root`
   and `committed_epoch`): a snapshot of a cluster space starts from the newest committed root its
   node knows (`committedRoot`); when it knows none, from the committed root a majority of its
