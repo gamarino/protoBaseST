@@ -158,7 +158,7 @@ test_cluster_protocol.py::test_root_encoding_distinguishes_unknown_empty_and_a_r
 test_cluster_protocol.py::test_roots_carry_their_label_term	ported	tests/unit/cluster_messages.st	the 3-item root reads with label 0
 test_cluster_protocol.py::test_replicate_records_are_validated	ported	tests/unit/cluster_messages.st	records and segments are validated; replicate has no pred_committed
 test_cluster_protocol.py::test_decode_root_rejects_malformed_values	ported	tests/unit/cluster_messages.st	a root of a 15-byte segment is refused
-test_cluster_recovery_base.py::test_c1_a_recovery_ended_at_a_majority_never_drops_the_phase_1_root	ported	tests/unit/sim_base_choice.st	C1: R' is acknowledged and never dropped ({ violation. lease uncertain on R'. a base on R' re-committed })
+test_cluster_recovery_base.py::test_c1_a_recovery_ended_at_a_majority_never_drops_the_phase_1_root	ported	tests/unit/sim_base_choice.st	C1: R' is acknowledged and never dropped ({ violation. lease uncertain on R'. a base on R' })
 test_cluster_recovery_base.py::test_c1_an_uncertain_permission_base_never_orders_below_its_issued_root	ported	tests/unit/cluster_base_rules.st	the phase-1 floor raises the base above the recovery result ({ product }, { PlantC1NoFloor })
 test_cluster_recovery_base.py::test_c1_a_recovery_root_above_the_phase_1_root_is_still_adopted	ported	tests/unit/cluster_base_rules.st	the hint rises to an answer's accepted label; a recovery result above the floor root is the base
 test_cluster_recovery_base.py::test_m6_a_recovery_with_every_waits_for_the_holder_that_knows_the_commit	ported	tests/unit/sim_base_choice.st	M6: every waits for the holder that knows the commit ({ known. c committed R })
