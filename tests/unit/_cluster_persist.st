@@ -4,7 +4,8 @@
 
   PersistSeams   the seams of the persisters and storages, by node id, every field an Atom the test
                  sets: holdWritesOf:until: (the next write of that node's persister waits for a
-                 Future first, 20 s at most: used once), dropWrites: (the writes of that node's
+                 Future first, 20 s at most, used once; the wait is a callback, never a wait that
+                 blocks the persister's worker), dropWrites: (the writes of that node's
                  persister are dropped, noted, never sent: an outage of the storage root for that
                  node), breakPasses: (every pass of that node's persister signals a plain Error, an
                  unexpected failure), and notes ('<id> write held', '<id> write sent', '<id> write
@@ -79,19 +80,33 @@ PersistSeams setUp.
 
 PBPersister subclass: #SeamPersister.
 
+"A held write never blocks the persister's worker: a nested wait (inside a block) blocks its
+ worker, which helps other actors meanwhile, and a turn it helps, such as a commit's pushAtom:
+ held by GateStorage, then buries the persister's wait until that turn ends (protoST LANGUAGE.md
+ 10.3). The hold is a callback instead: the write is marked in progress (busy, so no pass writes
+ meanwhile) and handed on, as a message to this actor, once the gate resolves (20 s at most)."
 SeamPersister >> _write: aRoot
-  | id gate |
+  | id gate p |
   id := coordinator nodeId.
   (PersistSeams drops: id) ifTrue: [
     (PersistSeams noted: id , ' write dropped') ifFalse: [PersistSeams note: id , ' write dropped'].
     ^ self].
   gate := PersistSeams takeHoldOf: id.
-  gate isNil ifFalse: [
-    PersistSeams note: id , ' write held'.
-    ([gate waitWithin: 20000. true] on: Error do: [:e | e return: false]) ifFalse: [
-      PersistSeams note: id , ' gate expired']].
+  gate isNil ifTrue: [^ self _sendWrite: aRoot].
+  PersistSeams note: id , ' write held'.
+  busy swap: [:old | true].
+  p := proxy value.
+  (gate within: 20000)
+    thenDo: [:x | p _heldWrite: aRoot];
+    catch: [:e | PersistSeams note: id , ' gate expired'. p _heldWrite: aRoot].
+
+"The held write, once its gate resolved (a message to this actor)."
+SeamPersister >> _heldWrite: aRoot
+  ^ self _sendWrite: aRoot.
+
+SeamPersister >> _sendWrite: aRoot
   super _write: aRoot.
-  PersistSeams note: id , ' write sent'.
+  PersistSeams note: coordinator nodeId , ' write sent'.
 
 SeamPersister >> _cycle
   (PersistSeams breaks: coordinator nodeId) ifTrue: [^ Error new signal: 'upload queue corrupted'].
