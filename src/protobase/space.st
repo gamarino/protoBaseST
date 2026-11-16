@@ -276,20 +276,30 @@ PBObjectSpace >> _confirm
  answers); a PBConflictError of the recovery is written to stderr (_inform:) and only then, if
  the node still knows none, the persisted root is read and taken as committed
  (_observePersisted:from:: the empty space too, so the next snapshot neither recovers nor reads
- the storage again)."
+ the storage again). A fenced node's recovery is refused at once (PBUnexpectedError); it reads
+ the persisted root too, as proto_db's fenced node, whose recovery query goes unanswered and ends
+ in ProtoConflictError. A persisted root read but not learnt (the tier detached meanwhile, or a
+ fence that landed before the acceptor learnt it: a fenced acceptor learns nothing) is answered
+ as it was read, never as the empty space (review M5)."
 PBObjectSpace >> _committedRecord
   | root persisted |
   root := coordinator committedRoot.
   root isNil ifTrue: [
-    [coordinator _recover wait] on: PBConflictError do: [:e |
-      self _inform: 'Node ' , coordinator nodeId , ': recovery from the peers failed ('
-        , (e messageText ifNil: ['(no message)']) , '); reading the persisted root'.
-      e return: nil].
+    [coordinator _recover wait]
+      on: PBConflictError, PBUnexpectedError
+      do: [:e |
+        ((e isKindOf: PBUnexpectedError) and: [coordinator isFenced not]) ifTrue: [e pass].
+        self _inform: 'Node ' , coordinator nodeId , ': recovery from the peers failed ('
+          , (e messageText ifNil: ['(no message)']) , '); reading the persisted root'.
+        e return: nil].
     root := coordinator committedRoot].
   root isNil ifTrue: [
     persisted := tier readPersisted.
     (coordinator _observePersisted: persisted from: tier) wait.
-    root := coordinator committedRoot].
+    root := coordinator committedRoot.
+    "Read but not learnt (the tier detached meanwhile, or the node fenced before its acceptor
+     learnt it): the persisted root is still a committed root, never the empty space (review M5)."
+    (root isNil and: [persisted notNil]) ifTrue: [^ persisted record]].
   root isNil ifTrue: [^ nil].
   ^ root record.
 

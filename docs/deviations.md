@@ -776,6 +776,21 @@ The detail:
     as `proto_db`'s attach resets `_committed`) clear it. A recovery round publishes the committed
     roots it learnt there before it answers, as `proto_db`'s `recover_root` observes them under
     its lock before it returns. *Cost:* none; the readers see what `proto_db`'s do.
+  - A persisted root read but not learnt (final review M5, `_committedRecord`). A read that
+    knows no committed root, and whose recovery failed, reads the persisted root and has the
+    acceptor learn it. Two things can stop the learn. The first is a fence that lands between
+    the read and the learn: a fenced acceptor learns nothing (`acceptLearnCommitted:`), while
+    `proto_db`'s `_observe_committed` does not check the fence and learns it. The second is a tier
+    detached meanwhile: `proto_db`'s `current_root` then says nothing and answers `None`, the
+    empty space. In both cases protoBaseST answers the persisted root it read, which is a
+    committed root, and never the empty space. For the fence, this is what `proto_db` reads. For
+    the detach, it differs from rc4: rc4 reads the empty space (`listDatabases` would answer
+    `#()`, `openDatabase:` "does not exist"), which is a wrong state, not an older one. *Cost:*
+    on a fenced node that learnt no root, every snapshot reads the storage root again.
+  - A fenced node's recovery is refused at once (`PBUnexpectedError`). `proto_db`'s fenced node
+    sends its query, gets no answer, and ends in `ProtoConflictError`. Either way the read falls
+    back to the persisted root: `_committedRecord` treats the fenced refusal as a failed
+    recovery. *Cost:* none (the fenced node answers sooner).
   - The confirmation's check (`needsConfirmation`) and its record that it started (`_confirmed`)
     are two steps in both: `proto_db` takes the coordinator's lock for each, protoBaseST reads the
     acceptor's published state and posts `_confirmed` to the dispatcher, which hands it to the
