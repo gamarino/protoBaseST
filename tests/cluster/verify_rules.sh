@@ -24,13 +24,18 @@ base() {
 }
 
 checked=0
-# expect <name> <expected text|PASS> <shell edit run in out/>
+# expect <name> <expected text|PASS|PASS:<note>> <shell edit run in out/> [<worker>...]
+# (workers n0 n1 n2 by default; PASS expects the base case's note, PASS:<note> that note).
 expect() {
-    local name="$1" want="$2" edit="$3" dir="$TMP/$1" got
+    local name="$1" want="$2" edit="$3" dir="$TMP/$1" got; shift 3
+    local workers=("$@")
+    (( ${#workers[@]} )) || workers=(n0 n1 n2)
     base "$dir"
     (cd "$dir/out" && eval "$edit") || fail "$name: the edit failed"
-    got="$( (cluster_verify "$dir" v n0 n1 n2) 2>&1 | grep -E '^(FAIL|NOTE): ' | tail -n 1)"
-    if [[ "$want" == PASS ]]; then
+    got="$( (cluster_verify "$dir" v "${workers[@]}") 2>&1 | grep -E '^(FAIL|NOTE): ' | tail -n 1)"
+    if [[ "$want" == PASS:* ]]; then
+        [[ "$got" == "NOTE: $name: ${want#PASS:}" ]] || fail "$name: expected [${want#PASS:}], got [$got]"
+    elif [[ "$want" == PASS ]]; then
         [[ "$got" == "NOTE: $name: counter 8 = 7 acknowledged + 1 of 3 unknown present; n0 n2 killed with kill -9" ]] \
             || fail "$name: expected the base case to pass, got [$got]"
     else
@@ -49,5 +54,10 @@ expect phantom 'counter 9 != acked 7 + unknown present 1' 'echo "counter 9 count
 expect two-in-flight 'n0, killed, left more than one token unresolved' 'echo n0-4 >> n0.attempt'
 expect acked-and-unknown 'a token is both acked and unknown' 'echo n1-1 >> n1.unknown'
 expect never-attempted 'n2 resolved a token it never attempted' 'echo n2-9 >> n2.acked'
+# A restarted incarnation (n0.2, Task 28): tokens with a dot, which the locale's collation orders
+# apart from the plain ones (a sort and a comm of different collations reported n0-3 missing).
+expect incarnation 'PASS:counter 18 = 17 acknowledged + 1 of 3 unknown present; n0 n2 killed with kill -9' \
+    'printf "n0.2-%s\n" 1 2 3 4 5 6 7 8 9 10 | tee n0.2.attempt n0.2.acked >> v.present; : > n0.2.unknown; echo "counter 18 count 18" > v.result' \
+    n0 n1 n2 n0.2
 expect second-kill-list 'n2 left tokens unresolved without being killed: n2-4' 'mv killed2 ../killed2.dropped'
 echo "verify rules ok ($checked cases)"

@@ -224,7 +224,10 @@ tests/run_tests.sh --audit                            # the default set and the 
 
 `tests/cluster/` runs cluster members as separate protost processes over TCP on 127.0.0.1
 (`_node.st`, driven by `_cluster.sh`): three members committing concurrently, and `kill -9` of the
-owner, of a voter, and of two owners in turn in a five-voter cluster, while they commit. Each run
+owner, of a voter, and of two owners in turn in a five-voter cluster, while they commit;
+`kill -9` of a permission holder mid-round (its root built, its replicate sent, its done sent),
+each restarted on its disk, then the whole cluster killed before its commits were persisted and
+restarted on its disks; a voter stopped, its acceptor log lost, rejoining by ballot. Each run
 starts four to six processes; every one is killed and reaped when the test ends, on every exit
 path. `verify_rules.sh` checks the verifier's rules on synthetic files, with no process.
 

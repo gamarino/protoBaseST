@@ -13,8 +13,14 @@
 #
 # A run lives in a directory <run>: <run>/space is the cluster space every member shares,
 # <run>/out holds the marker files of _node.st (its header lists them) and each process's
-# stderr, <run>/out/<id>.log.
+# stderr, <run>/out/<log>.log. A process is named by its log, the incarnation of a member that
+# _node.st takes (the member's id for its first start; '<id>.2' and so on for a restart on its
+# disk, which keeps the node id, the acceptor log and the port).
 set -u
+# One byte order for every sort and comm of the verifier: in a locale whose collation ignores
+# punctuation (es_ES.UTF-8 here), a sort and a comm that collate differently disagree on the
+# order of '<id>.2-<i>' and '<id>-<i>' tokens, and comm then misses a token that is there.
+export LC_ALL=C
 CLUSTER_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLUSTER_REPO="$(cd "$CLUSTER_HERE/../.." && pwd)"
 export STPATH="$CLUSTER_REPO/src${STPATH:+:$STPATH}"
@@ -22,8 +28,8 @@ export PROTOST="${PROTOST:-protost}"
 WAIT_SECONDS="${WAIT_SECONDS:-400}"
 TMP="$(mktemp -d)"
 
-declare -A PID_OF=()      # id -> pid, per run (keys are "<run>/<id>")
-declare -A RUN_OF=()      # pid -> "<run>/<id>"
+declare -A PID_OF=()      # log -> pid, per run (keys are "<run>/<log>")
+declare -A RUN_OF=()      # pid -> "<run>/<log>"
 LIVE=()                   # pids expected to be running
 ALL=()                    # every pid started
 
@@ -82,19 +88,30 @@ cluster_run() {
     printf '%s\n' "$run"
 }
 
+# _start <run> <log> <argument>...: one _node.st process, named <log>.
 _start() {
-    local run="$1" id="$2"; shift 2
-    (cd "$CLUSTER_HERE" && exec "$PROTOST" _node.st "$@" </dev/null >"$run/out/$id.stdout" 2>"$run/out/$id.log") &
+    local run="$1" log="$2"; shift 2
+    [[ -z "${PID_OF["$run/$log"]:-}" ]] || fail_run "$run" "$log was started already"
+    (cd "$CLUSTER_HERE" && exec "$PROTOST" _node.st "$@" </dev/null >"$run/out/$log.stdout" 2>"$run/out/$log.log") &
     local pid=$!
-    PID_OF["$run/$id"]=$pid
-    RUN_OF[$pid]="$run/$id"
+    PID_OF["$run/$log"]=$pid
+    RUN_OF[$pid]="$run/$log"
     LIVE+=("$pid")
     ALL+=("$pid")
 }
 
-# cluster_worker <run> <id> <n> <after> <marks> (as _node.st takes them); cluster_verifier <run> <id>.
-cluster_worker() { _start "$1" "$2" worker "$2" "$1/out" "$1/space" "$3" "$4" "$5"; }
-cluster_verifier() { _start "$1" "$2" verifier "$2" "$1/out" "$1/space"; }
+# cluster_worker <run> <id> <n> <after> <marks> [<log>] (as _node.st takes them);
+# cluster_verifier <run> <id> [<log>]. <log> defaults to <id>.
+cluster_worker() { _start "$1" "${6:-$2}" worker "$2" "$1/out" "$1/space" "$3" "$4" "$5" "${6:-$2}"; }
+cluster_verifier() { _start "$1" "${3:-$2}" verifier "$2" "$1/out" "$1/space" "${3:-$2}"; }
+
+# cluster_persisted <run> <id>: reads the root space.root holds, with no node (_node.st
+# 'persisted'), into <run>/out/<id>.present and <id>.result; it must exit 0 within WAIT_SECONDS.
+cluster_persisted() {
+    local run="$1" id="$2"
+    _start "$run" "$id" persisted "$id" "$run/out" "$run/space"
+    cluster_reap "$run" "$id"
+}
 
 # Fails the test when a process of LIVE has exited (with the end of its log).
 _check_live() {
@@ -142,26 +159,61 @@ cluster_peers() {
     mv "$run/out/peers.tmp" "$run/out/peers"
 }
 
-# cluster_kill <run> <id> <killed file>: kill -9 of that member's recorded PID (checked to be
-# this shell's running child), reaped; then <run>/out/<killed file> names it.
-cluster_kill() {
-    local run="$1" id="$2" file="$3" pid
-    pid="${PID_OF["$run/$id"]:-}"
-    [[ -n "$pid" ]] || fail_run "$run" "no process for $id"
-    _is_child "$pid" || fail_run "$run" "$id (pid $pid) is not running when it should be killed"
+# _kill9 <run> <log>: kill -9 of that process's recorded PID (checked to be this shell's
+# running child), reaped.
+_kill9() {
+    local run="$1" log="$2" pid
+    pid="${PID_OF["$run/$log"]:-}"
+    [[ -n "$pid" ]] || fail_run "$run" "no process for $log"
+    _is_child "$pid" || fail_run "$run" "$log (pid $pid) is not running when it should be killed"
     kill -9 "$pid"
     wait "$pid" 2>/dev/null
     _forget "$pid"
-    echo "$id" > "$run/out/$file"
 }
 
-# cluster_finish <run> <verifier>: once every worker is done, the verifier joins and reads the
-# space (<run>/out/verify), then every member stops (<run>/out/stop); each must exit 0 within
+# cluster_kill <run> <log> <killed file>: kill -9 of that process; then <run>/out/<killed file>
+# names it (cluster_verify: its one token in flight counts as unknown).
+cluster_kill() {
+    _kill9 "$1" "$2"
+    echo "$2" > "$1/out/$3"
+}
+
+# cluster_crash <run> <log>...: kill -9 of each, with no killed file: processes that resolved
+# every token they attempted (a whole-cluster crash once the workload is done).
+cluster_crash() {
+    local run="$1" log; shift
+    for log in "$@"; do _kill9 "$run" "$log"; done
+}
+
+# cluster_reap <run> <log>: waits until that process exits on its own (WAIT_SECONDS, a zombie
+# counting as exited), reaps it, and fails unless it exited 0.
+cluster_reap() {
+    local run="$1" log="$2" pid rc deadline
+    pid="${PID_OF["$run/$log"]:-}"
+    [[ -n "$pid" ]] || fail_run "$run" "no process for $log"
+    deadline=$((SECONDS + WAIT_SECONDS))
+    while _is_child "$pid" && [[ "$(ps -o stat= -p "$pid" 2>/dev/null)" != Z* ]]; do
+        (( SECONDS > deadline )) && fail_run "$run" "$log (pid $pid) did not exit within $WAIT_SECONDS s"
+        sleep 0.1
+    done
+    wait "$pid"; rc=$?
+    _forget "$pid"
+    [[ $rc -eq 0 ]] || fail_run "$run" "$log exited $rc"
+}
+
+# cluster_finish <run> <verifier>...: once every worker is done, the verifiers join and commit
+# their barriers (<run>/out/verify); once every one has (<verifier>.barrier), they read the space
+# (<run>/out/read) and sync it; then every member stops (<run>/out/stop); each must exit 0 within
 # WAIT_SECONDS, or the test fails naming the member that hung.
 cluster_finish() {
-    local run="$1" verifier="$2" pid rc deadline
+    local run="$1" pid rc deadline r waits=(); shift
     : > "$run/out/verify"
-    cluster_wait "$run" "$verifier.result"
+    for r in "$@"; do waits+=("$r.barrier"); done
+    cluster_wait "$run" "${waits[@]}"
+    : > "$run/out/read"
+    waits=()
+    for r in "$@"; do waits+=("$r.result" "$r.synced"); done
+    cluster_wait "$run" "${waits[@]}"
     : > "$run/out/stop"
     deadline=$((SECONDS + WAIT_SECONDS))
     for pid in "${LIVE[@]}"; do
@@ -229,3 +281,48 @@ cluster_verify() {
         || fail_run "$run" "counter $counter != acked $acked + unknown present $unk_present ($present attempted tokens present)"
     echo "NOTE: $(basename "$run"): counter $counter = $acked acknowledged + $unk_present of $unknown unknown present${killed:+; $killed killed with kill -9}"
 }
+
+# cluster_verify_same <run> <verifier> <reader>...: after cluster_verify <run> <verifier> ...,
+# every other reader read what the verifier read: the same tokens present (so a token whose
+# outcome is unknown is present on every node or on none) and the same counter and count.
+cluster_verify_same() {
+    local run="$1" verifier="$2" r; shift 2
+    local o="$run/out" v="$run/out/.verify"
+    for r in "$@"; do
+        sort "$o/$r.present" > "$v/present.$r"
+        cmp -s "$v/present" "$v/present.$r" \
+            || fail_run "$run" "$r and $verifier read different tokens: $(comm -3 "$v/present" "$v/present.$r" | tr -d '\t' | tr '\n' ' ')"
+        [[ "$(cat "$o/$r.result")" == "$(cat "$o/$verifier.result")" ]] \
+            || fail_run "$run" "$r read [$(cat "$o/$r.result")], $verifier [$(cat "$o/$verifier.result")]"
+    done
+    echo "NOTE: $(basename "$run"): $verifier $* read the same $(wc -l < "$v/present") tokens"
+}
+
+# cluster_verify_persisted <run> <id> <verifier>: after cluster_verify <run> <verifier> ..., the
+# root space.root holds as cluster_persisted <run> <id> read it (proto_db test_cluster_crash.py
+# _verify, its reader): every acknowledged token and every token the verifier read is persisted;
+# the counter equals the size of 'tokens' and the number of attempted tokens present (applied
+# whole, none twice, no token no commit wrote); every token persisted was acknowledged or has an
+# unknown outcome.
+cluster_verify_persisted() {
+    local run="$1" id="$2" verifier="$3"
+    local o="$run/out" v="$run/out/.verify" counter count missing
+    [[ "$(cat "$o/$id.result")" != none ]] || fail_run "$run" "space.root holds no 'shop' after sync:"
+    read -r _ counter _ count < "$o/$id.result" || fail_run "$run" "unreadable $id.result"
+    [[ "$counter" =~ ^[0-9]+$ && "$count" =~ ^[0-9]+$ ]] || fail_run "$run" "$id.result: $(cat "$o/$id.result")"
+    sort "$o/$id.present" > "$v/persisted"
+    missing="$(comm -23 "$v/acked" "$v/persisted" | tr '\n' ' ')"
+    [[ -z "$missing" ]] || fail_run "$run" "acknowledged tokens are not persisted: $missing"
+    missing="$(comm -23 "$v/present" "$v/persisted" | tr '\n' ' ')"
+    [[ -z "$missing" ]] || fail_run "$run" "tokens $verifier read are not persisted: $missing"
+    [[ "$counter" -eq "$count" && "$count" -eq "$(wc -l < "$v/persisted")" ]] \
+        || fail_run "$run" "persisted counter $counter, $count tokens, $(wc -l < "$v/persisted") attempted tokens present"
+    missing="$(sort -u "$v/acked" "$v/unknown" | comm -13 - "$v/persisted" | tr '\n' ' ')"
+    [[ -z "$missing" ]] || fail_run "$run" "persisted tokens no commit may have written: $missing"
+    echo "NOTE: $(basename "$run"): space.root holds counter $counter, every token $verifier read"
+}
+
+# cluster_check '<label>': the assertions of the check <label> passed. The label is the one
+# tests/unit/cluster_checklist.tsv names for a ported proto_db test (cluster_checklist.sh reads
+# the lines that are exactly cluster_check '<label>').
+cluster_check() { echo "NOTE: check passed: $1"; }

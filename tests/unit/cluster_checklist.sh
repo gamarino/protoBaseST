@@ -7,7 +7,12 @@
 #                                                                   the string of a `that: '...'` or a
 #                                                                   `check value: '...'` (outside the
 #                                                                   comments, '' read as '); never a
-#                                                                   prefix, never comment text
+#                                                                   prefix, never comment text. A .sh
+#                                                                   test (tests/cluster, real
+#                                                                   processes) names its check labels
+#                                                                   in lines `cluster_check '<label>'`
+#                                                                   (_cluster.sh), each run once the
+#                                                                   assertions of that check passed
 #   deferred  <task number, 19..28, or a lettered task of that range, such as 22b, that the cluster
 #              plan has as a '### Task <id>:' heading>  <reason>  Phase C ports it (the shell,
 #                                                                   transport, storage, processes)
@@ -86,6 +91,11 @@ def labels_of(text):
             i += 1
     return found
 
+def sh_labels_of(text):
+    """The check labels of a .sh test: the single-quoted text of each line that is exactly
+    `cluster_check '<label>'` (indentation allowed; no quote inside the label)."""
+    return {m.group(1) for m in re.finditer(r"^[ \t]*cluster_check '([^'\n]+)'[ \t]*$", text, re.M)}
+
 functions = [l.strip() for l in listing.splitlines() if l.strip()]
 errors = []
 seen_fn = set()
@@ -119,11 +129,12 @@ else:
             errors.append("%s: %s is not a test function of the tag" % (where, key))
         if status == "ported":
             path = os.path.join(repo, a)
-            if not a.endswith(".st") or not os.path.isfile(path):
+            if not (a.endswith(".st") or a.endswith(".sh")) or not os.path.isfile(path):
                 errors.append("%s: %s names a missing protoBaseST test file %s" % (where, key, a))
                 continue
             if path not in texts:
-                texts[path] = labels_of(open(path, encoding="utf-8").read())
+                text = open(path, encoding="utf-8").read()
+                texts[path] = sh_labels_of(text) if a.endswith(".sh") else labels_of(text)
             if b not in texts[path]:
                 errors.append("%s: %s: %r is not a check label of %s" % (where, key, b, a))
                 continue

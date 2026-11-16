@@ -81,7 +81,7 @@ kill_run() {
     # above the term the last killed owner served (terms only grow).
     local label top=0
     for id in "${others[@]}"; do
-        label="$(sed -n 's/.* committed_label \([0-9][0-9]*\)$/\1/p' "$run/out/$id.done")"
+        label="$(sed -n 's/.* committed_label \([0-9][0-9]*\)\( .*\)\{0,1\}$/\1/p' "$run/out/$id.done")"
         [[ -n "$label" ]] || fail_run "$run" "$id.done: $(cat "$run/out/$id.done")"
         (( label > top )) && top=$label
     done
