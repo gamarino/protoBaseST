@@ -15,17 +15,18 @@
      audit's derivation of the defaults is the product's; ownerIdleRelease at its 500 ms
      reference);
  (3) at factor 10, every row changes what AuditConfig answers (each row's knob is wired to a
-     timer the rules read; the row persist has no reader before the persister, Task 20, so its
-     runs equal the defaults' until then);
+     timer; the row persist is read only by the persister, a shell actor the simulator does not
+     run, so its runs equal the defaults', (7));
  (4) one run per mode of the row leaseDuration on 3 members, seed 1, passes the checker;
  (5) the product's derived timers are the rows' defaults: renewalLeft half the belief,
      permitFloor a quarter of it, renewBackoffFloor requestTimeout / 4 (at least 1 ms; Task 19b,
      R149a, its floors measured in Task 30), permissionDeadline: valid + requestTimeout;
  (6) the safety-only row-modes (AuditFamilies safetyOnly) are listed and real; their parts
      assert that they acknowledge nothing;
- (7) the rows not exercised yet (AuditFamilies notExercised: persist, until Task 20) have no
-     reader in the cluster's sources but config.st, and their runs equal the run at factor 1:
-     once a reader appears, the declaration fails here.
+ (7) the rows the simulator cannot exercise (AuditFamilies notExercised: persist, read only by
+     the persister, a shell actor) have no reader in the cluster's sources but config.st and the
+     shell sources the declaration names, no simulator helper names those shell classes, and
+     their runs equal the run at factor 1: once a core rule reads one, the declaration fails here.
  (8) AuditFamilies floors declares exactly the parts of floorKeys (none missing, extra,
      misspelt or twice), each with two integer counts; a count of 0 only on a part that
      AuditFamilies pendingFloors names with its reason (now the renewBackoff parts, measured in
@@ -37,7 +38,7 @@ Import from: 'protobase'.
 Import from: '_check'.
 Import from: '../audit/_audit'.
 
-| c peers config missing uncovered same changed runs product expected present sources stale equal declared wanted pending |
+| c peers config missing uncovered same changed runs product expected present sources helpers stale equal declared wanted pending |
 c := Check new.
 missing := OrderedCollection new.
 uncovered := OrderedCollection new.
@@ -89,20 +90,25 @@ c that: '(6) every safety-only declaration names a row and a mode'
     parts := k subStrings: ' '.
     (AuditConfig rows includes: parts first) and: [AuditFamilies modes includes: parts last asSymbol]]) asArray
   equals: #().
-"(7) the rows not exercised yet: no source of the cluster but config.st names their timers, and
- their runs equal the run at factor 1 (3 and 5 members, seed 1), at 1/10 and at 10 times."
+"(7) the rows the simulator cannot exercise: no source of the cluster but config.st and the
+ declared shell sources names their timers, no simulator helper (a tests/unit/_*.st that names
+ PBSim) names the declared shell classes, and their runs equal the run at factor 1 (3 and 5
+ members, seed 1), at 1/10 and at 10 times."
 sources := (FileReference path: '../../src/protobase/cluster') files select: [:f | f extension = 'st' and: [f basename ~= 'config.st']].
+helpers := ((FileReference path: '.') files select: [:f | f extension = 'st' and: [f basename first = $_ and: [f contents includesSubstring: 'PBSim']]]) asOrderedCollection.
 stale := OrderedCollection new.
 equal := OrderedCollection new.
 AuditFamilies notExercised do: [:e |
-  Transcript show: 'not exercised until ' , (e at: 2) , ': ' , e first; cr.
-  sources do: [:f | (e at: 3) do: [:name |
-    (f contents includesSubstring: name) ifTrue: [stale add: e first , ' (' , name , ' in ' , f basename , ')']]].
+  Transcript show: 'not exercised by the simulator (' , (e at: 2) , '): ' , e first; cr.
+  sources do: [:f | ((e at: 4) includes: f basename) ifFalse: [(e at: 3) do: [:name |
+    (f contents includesSubstring: name) ifTrue: [stale add: e first , ' (' , name , ' in ' , f basename , ')']]]].
+  helpers do: [:f | (e at: 5) do: [:name |
+    (f contents includesSubstring: name) ifTrue: [stale add: e first , ' (' , name , ' in the helper ' , f basename , ')']]].
   #(3 5) do: [:size | | one |
     one := AuditFamilies run: e first mode: #one size: size seed: 1.
     #(#tenth #tenfold) do: [:mode |
       (AuditFamilies run: e first mode: mode size: size seed: 1) = one ifFalse: [equal add: e first , ' ' , mode , ' ' , size printString]]]].
-c that: '(7) no cluster source but config.st reads a not-exercised row''s timer (else the declaration is stale)'
+c that: '(7) no cluster source but config.st and the declared shell sources reads a not-exercised row''s timer, no simulator helper names its shell classes (else the declaration is stale)'
   is: stale asArray equals: #().
 c that: '(7) a not-exercised row''s runs equal the run at factor 1' is: equal asArray equals: #().
 "(8) floors declares exactly one floor for every part of every row-mode but the safety-only

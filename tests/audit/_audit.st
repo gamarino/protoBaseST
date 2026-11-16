@@ -454,11 +454,16 @@ AuditFamilies class >> callFor: aRow mode: aMode part: i
 AuditFamilies class >> safetyOnly
   ^ #('driftMargin tenfold' 'permitFloor tenfold' 'sendReserve tenfold').
 
-"The rows no core rule reads yet: { row. the task that adds its reader }. Their runs equal the
- defaults' (sim_timer_audit.st asserts it, and that no source of the cluster but config.st names
- the timer), so the declaration fails once a reader appears."
+"The rows no core rule reads: { row. why. its timers. the shell sources that read them. the
+ classes those sources define }. The simulator runs the core rules only, so these rows' runs
+ equal the defaults' (sim_timer_audit.st asserts it, that no source of the cluster but config.st
+ and the named shell sources names the timers, and that no simulator helper names the shell
+ classes), and the declaration fails once a core rule reads one. persist: the persister (Tasks
+ 20 and 21) is a shell actor beside the coordinator, proto_db PlainTier.persist; its timers are
+ tested where it runs, cluster_persister.st and the real-process tests of tests/cluster."
 AuditFamilies class >> notExercised
-  ^ #(#('persist' 'Task 20' #('persistInterval' 'persistLag'))).
+  ^ #(#('persist' 'the persister, a shell actor the simulator does not run' #('persistInterval' 'persistLag')
+    #('persister.st') #('PBPersister'))).
 
 "The floors of part i of aRow under aMode: { runs that got the strict checks. commits
  acknowledged } (proto_db's min_acked: an empty run proves nothing). nil for a part of a
