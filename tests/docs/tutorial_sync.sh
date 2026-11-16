@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The tutorial and its test must agree: every non-blank line of every ```smalltalk block of
-# docs/tutorial.md must appear, in order, in tests/docs/tutorial_snippets.st (which adds its own
+# docs/tutorial/erp.md must appear, in order, in tests/docs/tutorial_snippets.st (which adds its own
 # assertion lines between them). A tutorial edited without the test, or the reverse, fails here.
 # Also: every "=> value" line must be followed in the test by an assertion that contains that value.
 # Scope: code blocks and their => lines only, not prose. docs/reference.md and the README's API
@@ -44,5 +44,5 @@ if bad:
 print("%s: %d lines in %d blocks are in the test, in order" % (doc.split("/")[-1], checked, len(blocks)))
 PY
 }
-check "$REPO/docs/tutorial.md" "$HERE/tutorial_snippets.st" || exit 1
+check "$REPO/docs/tutorial/erp.md" "$HERE/tutorial_snippets.st" || exit 1
 check "$REPO/README.md" "$HERE/readme_quickstart.st" || exit 1

@@ -42,6 +42,8 @@
 # paths) and the directories .venv, out and fixtures are never run as tests. So are the step
 # scripts of the ERP demo, examples/erp/{2_payments,3_tag,4_report}.st: they take the database
 # directory as an argument and run, in order, under examples/erp/run_demo.sh (which is the test).
+# The lessons of examples/tutorial are ordinary tests (each .st ends with '<lesson> ok (N checks)',
+# its EXPECT line); their helpers start with "_", and lesson 11 is a .sh test.
 set -u
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

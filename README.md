@@ -117,8 +117,21 @@ db history size.                               "=> 3"
 space close.
 ```
 
-A fuller walk-through, with the reasoning behind each design choice, is
-[docs/tutorial.md](docs/tutorial.md).
+
+## Tutorials
+
+Start here. Every chapter is short, explains why the design is what it is, and quotes a small
+program that checks its own results and is run by the tests.
+
+| Read | What you learn |
+|---|---|
+| [The tutorial, chapters 1-12](docs/tutorial/README.md) | A single process: first commit, values and versions, records, collections and queries, transactions and conflicts, blind writes, mutables and history, bytes, actors, crash recovery, Python interop, refusals. |
+| [Cluster mode, chapters 13-16](docs/tutorial/13-cluster-concepts.md) | Several processes sharing one database: [the ideas](docs/tutorial/13-cluster-concepts.md), [a three-node cluster](docs/tutorial/14-a-three-node-cluster.md), [failures and recovery](docs/tutorial/15-failures-and-recovery.md), [operating a cluster](docs/tutorial/16-operating-a-cluster.md). Blocks marked "Runs once Task N lands" describe API still being built. |
+| [A small ERP](docs/tutorial/erp.md) | A guided build of a real application, with the reasoning at each step. |
+| [Coming from GemStone/S](docs/tutorial/gemstone.md), [Coming from Soil](docs/tutorial/soil.md) | Orientation for readers who know those systems. |
+
+The programs are in [examples/tutorial/](examples/tutorial/README.md) and
+[examples/cluster/](examples/cluster/README.md).
 
 ## The API, mapped from `proto_db`
 
@@ -183,7 +196,10 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 
 | | |
 |---|---|
-| [docs/tutorial.md](docs/tutorial.md) | A guided build of a small ERP, with the reasoning at each step. Every snippet is run by the tests. |
+| [docs/tutorial/erp.md](docs/tutorial/erp.md) | A guided build of a small ERP, with the reasoning at each step. Every snippet is run by the tests. |
+| [docs/tutorial/](docs/tutorial/README.md) | The chaptered tutorial: chapters 1-12 on a single process, chapters 13-16 on cluster mode, each quoting a program of `examples/tutorial/` or `examples/cluster/`; and two orientation chapters, coming from GemStone/S and coming from Soil, with their sources. |
+| [examples/cluster/](examples/cluster/README.md) | The cluster chapters' programs, run by the tests; `pending/` holds those that need API still being built. |
+| [examples/tutorial/](examples/tutorial/README.md) | Twelve small programs, one concept each, each checking its own results; run by the tests. |
 | [docs/reference.md](docs/reference.md) | Every public class and message. |
 | [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from `proto_db`. |
 | [docs/not-done.md](docs/not-done.md) | What is not done, and what is not proven. |
@@ -219,7 +235,9 @@ The runner prints `PASS`, `FAIL` or `SKIP` per test and ends with `passed N, fai
 A `.st` test starts with an `"EXPECT: <last line>"` or `"EXPECT-ERROR: <text>"` directive; a
 `.sh` test passes with exit 0 and is skipped with exit 77. `PROTOBASE_REPO` (default `../ProtoBase`)
 names the protoBase checkout used by the two setup scripts. `tests/docs/` checks the snippets of
-the README and the tutorial against the code.
+the README and the tutorial against the code, the code quoted by the chapters of `docs/tutorial/`
+against the programs of `examples/tutorial/`, and the selectors the documents cite against
+`src/protobase`.
 
 ## License
 

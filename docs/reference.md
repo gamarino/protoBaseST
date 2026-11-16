@@ -44,7 +44,7 @@ Contents:
 | `Proto...Error` | `PB...Error` |
 
 Python keyword arguments become keyword parts (`with_(paid_on=d)` is `with: 'paidOn' value: d`).
-There is no `asOf:`: `proto_db` has none either (tutorial, section 12).
+There is no `asOf:`: `proto_db` has none either ([tutorial/erp.md](tutorial/erp.md), section 12).
 
 ## Space and databases
 

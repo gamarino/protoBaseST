@@ -34,7 +34,7 @@ Contents:
 | `Dictionary` iteration | A `PBDictionary` iterates in key order, a `PBHashDictionary` in hash order. | The format's order. | Insertion order is not kept; `PBFrozenDict` keeps it. |
 | Timeouts and backoffs | SmallInteger **milliseconds**, where Python uses float seconds (`lockTimeout`, `run:retries:backoff:`). | The protoST convention (STATUS D48). | A rounded delay: the jitter is rounded to whole milliseconds and never above the bound. |
 | Class names in some error texts | `PBList element`, `PBSet element` where `proto_db` says `List element`, `Set element`. | They are protoST's class names. | None; the tests pin both sides. |
-| No `asOf:` | None. | `proto_db` has none. As-of is a three-line helper (tutorial, section 12). | The helper is a block in a script. |
+| No `asOf:` | None. | `proto_db` has none. As-of is a three-line helper ([tutorial/erp.md](tutorial/erp.md), section 12). | The helper is a block in a script. |
 
 ## Values refused when written
 

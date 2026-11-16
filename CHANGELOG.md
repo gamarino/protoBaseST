@@ -55,6 +55,16 @@
   permission ends `#none`, the term kept, the read error or R212's conflict;
   `sim_round_rules.st` (25), (26)). `proto_db`'s I1 (`_BaseUnreachable`) needs a local-records
   tier and is Phase D (the checklist row is `n/a`).
+- Tutorial chapters on cluster mode, `docs/tutorial/13-16`: the ideas (why a storage lock is not
+  enough, terms as ballots, permissions, the commit point, fencing, the startup grace, rejoin by
+  ballot, the R149 renewal back-off), a three-node cluster in one process and over TCP, failures
+  and recovery mapped to the tests that check them, and operating a cluster (options, their
+  rules, the timer table, `stats`, what is not done or not tested yet). Their programs are
+  `examples/cluster/` (run by the tests); the programs that need cluster commits and reads
+  (Tasks 23-25) are in `examples/cluster/pending/` as `.st.pending` files, which the runner does
+  not run, and every chapter block taken from them is marked with the task it waits for.
+  `tests/docs/tutorial_chapters_sync.sh` now also checks the chapters against `examples/cluster/`.
+
 - Group commit on a standalone storage (Task 22, `proto_db` D52 and `_standalone_round`), with
   the shared round runner (`round.st`). Every commit and every new database is a
   `PBCommitEntry` (`transaction:willRetry:deadline:`, `createDatabase:deadline:`, `future`)
@@ -385,6 +395,23 @@
   prefix-checksum torn-tail search; the condition of ruling R14 (cluster storage enters scope) is
   met. The `log`-layer, `ranges_log`, `segments_log` and `roots_log_torn` vectors are verified by
   `tests/conformance/framing_logs.st` and no longer skipped.
+
+- A tutorial example suite, `examples/tutorial/`: twelve small protoST programs, one concept each
+  (a first commit, values and versions, records, collections and queries, transactions and
+  conflicts, blind-write merges, mutable cells and history, bytes, actors, crash recovery, sharing
+  a directory with Python's `proto_db`, the refusals). Each prints a line per check and ends with
+  `<lesson> ok (N checks)`; a failed check exits 1. They run with the other tests; lesson 11 is
+  skipped without the interop venv.
+- A chaptered tutorial, `docs/tutorial/`, one chapter per program, quoting it; and two orientation
+  chapters, "Coming from GemStone/S" and "Coming from Soil", which map each system's concepts to
+  protoBaseST's, cite GemTalk's programmer's guide, Soil's repository and Norbert Hartl's blog
+  series, and list what could not be verified.
+- The ERP walk-through moved from `docs/tutorial.md` to `docs/tutorial/erp.md` (content
+  unchanged apart from its relative links), so that the repository has one tutorial directory;
+  every link and `tests/docs/tutorial_sync.sh` follow it. `examples/erp/` is unchanged.
+- `tests/docs/tutorial_chapters_sync.sh` fails when a chapter's code differs from its program;
+  `tests/docs/reference_selectors.sh` now also checks the selectors cited by the chapters and by
+  `examples/tutorial/README.md` (GemStone and Soil selectors are allowed only in `docs/tutorial/`).
 
 ## 0.1.0 (2026-11-13)
 
