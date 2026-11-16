@@ -222,6 +222,11 @@ tests/run_tests.sh tests/audit                        # the cluster's timer audi
 tests/run_tests.sh --audit                            # the default set and the timer audit
 ```
 
+`tests/cluster/` runs cluster members as separate protost processes over TCP on 127.0.0.1
+(`_node.st`, driven by `_cluster.sh`): three members committing concurrently, and `kill -9` of the
+owner and of a voter while they commit. Each starts four to six processes; every one is killed and
+reaped when the test ends, on every exit path.
+
 `tests/audit/` holds the cluster's timer audit: every timer of the coordination at 1/10, 10 times
 and skewed per member, 3420 simulator runs, a run of its own. Only a path that names it, or
 `--audit`, runs it; its index `tests/unit/sim_timer_audit.st` stays in the default run (the audit's

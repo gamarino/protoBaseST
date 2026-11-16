@@ -2,6 +2,19 @@
 
 ## 0.2.0 (unreleased)
 
+- Real processes, part 1 (Task 27, `tests/cluster/`): each member is a protost process of its
+  own (`_node.st`: a `PBTcpTransport` on port 0, the port written to a marker file, the peers
+  read from one, lease 3000 ms, acquireTimeout 8000 ms; a learner verifier `v`), driven by
+  `_cluster.sh`, which records every PID from `$!`, kills only those and reaps them all in its
+  EXIT trap. `real_commits.sh`: three members commit 30 increments each; `real_kill_owner.sh`:
+  the member serving the term is killed with `kill -9` after its 10th acknowledgement, while it
+  commits, and the two others commit 10 more each under a term above it; then a voter of a
+  five-member run (three voters) is killed the same way and the other four finish. Each run is
+  verified through the learner after two barriers: every acknowledged token is present, the
+  counter equals the size of `tokens` and the acknowledged tokens plus the unknown tokens present
+  (a killed member's unresolved tokens counting as unknown). Every token's attempt and outcome is
+  appended and synced before the next step. No defect was found.
+
 - Format interop of cluster mode with `proto_db` v2.0.0rc4 (Task 26): `proto_db` reads a
   cluster space protoBaseST wrote with three nodes on one directory (its verifier accepts it,
   its dump equals protoBaseST's, and its `cluster_fields` and `cluster_previous` chain equal the
