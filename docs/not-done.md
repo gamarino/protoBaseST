@@ -10,16 +10,19 @@ design (spec section 2) or a cut made while building, with its reason.
 - Not a product, not production ready, and not fast.
 - What is shown: one directory, opened by Python and by protoST, gives the same answers in the
   scenarios tested (below). Nothing outside those scenarios is claimed.
-- No cluster: no framed logs, no wire protocol, no leases. Mixed Python/protoST clusters wait for
-  a protocol freeze.
+- Cluster mode (0.2.0, unreleased) runs over **one shared directory** only: no tiered storage
+  (Phase D), no pipelined permits (DEPTH 1), no mixed clusters with `proto_db` nodes (a
+  non-goal), no TLS (frames are plaintext; an optional HMAC authenticates them), no read-only
+  barrier, no notify. A three-member cluster commits about half as many small transactions per
+  second as one standalone process ([deviations.md](deviations.md#cluster-mode-commits-per-second)).
 - No cloud or tiered storage, no durability mode other than `fsync`, no Windows.
 - No writes to indexed collections, no merges onto them, no index queries, no vector-index
   writes or training.
 - No writes to `RepeatedKeysDictionary`.
 - No IANA time zones: no wall-clock conversion; a fixed pinned list of zone keys.
-- No per-database class registry and no symbol kind (`@sym`): both are additive format-5
-  features.
-- No group commit, no query planner or LINQ, no pagers, no `snapshot_ref` byte references, no
+- No runtime registry and no symbol kind (`@sym`): format 5 (`proto_db` 2.0.0rc4, D62) is
+  known, not adopted, and refused.
+- No query planner or LINQ, no pagers, no `snapshot_ref` byte references, no
   residency.
 - No rebuilding of format-3 indexes, no `validate()` or `rebuilt()` of misfiled format-3
   collections.
@@ -29,7 +32,8 @@ design (spec section 2) or a cut made while building, with its reason.
 
 ## What was tested, and what was not
 
-Tested, with the `proto_db` at `v2.0.0rc2` reference:
+Tested, with the `proto_db` at `v2.0.0rc2` reference (re-run at `v2.0.0rc4`, at format 4, on the
+cluster branch):
 
 - the conformance vectors of the tag, for every layer protoBaseST implements (no vector is skipped;
   three differences are on purpose, see [deviations.md](deviations.md));
@@ -63,8 +67,18 @@ Not tested, or not proven:
   they were measured, are in [deviations.md](deviations.md#performance); they are indicative only.
 - **Memory and long runs.** A segment rolls over at 256 MiB as `proto_db`'s does; nothing was run
   near that size.
-- **Heavy contention.** The lock backoff blocks the caller's worker, see
-  [deviations.md](deviations.md).
+- **Heavy contention.** The lock backoff no longer blocks the caller's worker (CC10); the
+  caller's single wait on its commit's `Future` still does, while the worker serves other actors
+  (K23 in [deviations.md](deviations.md#known-protost-limits)). Hot keys were measured with four
+  writers per process and at most three processes, nothing heavier.
+- **Cluster mode, not yet proven.** The timer audit (every timer at a tenth, ten times and
+  skewed, 3420 simulator runs) and the long soak (5000 seeds per family, `PBST_SIM_SEEDS`) run
+  only in the final verification (Task 30); until then the claim that timers decide liveness
+  only rests on the default seeds and the audit's earlier per-part runs. The real-process tests
+  (Tasks 27 and 28: `kill -9` of the owner, of a voter, of a holder at three points of its
+  round, of the whole cluster, and a lost log) ran three times each with drawn seeds: strong
+  evidence, not a proof. Nothing ran on several hosts, on a network file system, with more than
+  five members, or for hours. The cluster measurements are one machine's, indicative only.
 - **The whole thing is one implementer's work, reviewed task by task.** It has not had outside
   review. That is what the workshop is for.
 
@@ -77,7 +91,13 @@ Not tested, or not proven:
 | `asOf:` | Not added | `proto_db` has none. | A three-line helper in each program. |
 | Symbolic link to the acceptor log file | **Done** (cluster Task 4 follow-up, protoST 0.12.0) | `proto_db`'s `RootsLog` resolves the log path with `os.path.realpath` before it names `<path>.lock` (8.3d re-review 12, M3). Before the fix `PBAcceptorLog path:` named the lock after the path as given, and review reproduced two live handles on one log through a symbolic link (two lock files, promises 5, 3, 4 appended). `path:` now resolves `FileReference >> realPath` (protoST 0.12.0) before it names the lock and uses the real path as the log's path; `tests/unit/cluster_acceptor_log.st` case 11 is the reproduction, refused. The space's `space.lock` needs no resolution, as in `proto_db`'s `FileStorage`: it lives inside the space directory (`tests/unit/store_root_lock_alias.st`). | protoST 0.12.0 is now the floor. The in-process inode registry of `OwnerLock` (`track`) is not ported: within one process the OS lock on the one lock file already refuses a second open. |
 | Hard-link check of framed logs | **Done** in cluster Task 4 | `proto_db`'s `open_log` refuses a log file with more than one hard link (`ProtoLockingError`) before reading or repairing it (`logfile.py:283-290`), because the path-named `.lock` file only excludes a second opener when a log has exactly one name. protoST 0.11.0 added `BinaryFile >> linkCount`; `PBFramedLog openAppend:kind:` refuses such a file with `PBLockingError` at the same point, after `PBAcceptorLog` took its lock. | protoST 0.11.0 was the floor then (0.12.0 now). |
-| Cluster held retries | Not ported | No cluster mode. | |
+| Cluster held retries | **Done** (cluster Task 23) | Ported with the commit round. | |
+| Phase D: tiered storage and peer fetch | Not done | Shared storage first (Q1); `fetch`, `commit_query`, read capping (R212), `unknown` answers, the local-records rules (`await_records`, R133's `_BaseUnreachable`) and log kinds 5 and 6 belong to it. Its options are refused. | Multi-host needs a shared file system whose `flock` is reliable. |
+| Pipelined permits (DEPTH 1) | Not done | Q3: DEPTH 0 first, pipelining after measurement. The measurement now exists (deviations, Performance). | One permission at a time: adding members does not add throughput. |
+| Mixed clusters with `proto_db` nodes | Not a goal | Design spec section 4. The data is shared (Task 26); behaviour across implementations is not tested. | A cluster is all protoBaseST or all `proto_db`. |
+| TLS | Not done | protoST has no TLS server; the optional HMAC (CC4) authenticates, it does not encrypt. | Trusted networks only. |
+| Read-only barrier | Not done | `proto_db` has none either (CC9): a barrier is a commit that writes. | Every barrier is a version in `history`. |
+| Notify | Not done | `proto_db`'s notify is not ported. | Readers learn new commits by reading. |
 | Index maintenance | Not done | Out of scope (design 7.4). Refused explicitly rather than done partly. | A database with indexes can be read, not changed in its indexed collections. |
 
 ## What would come next, if the workshop wants it
@@ -89,4 +109,6 @@ In the order the cost of the omission is felt:
 2. The `@sym` kind, once format 5 defines it, with the explicit symbol wrapper in protoST.
 3. A time-zone database in protoST, so zoned datetimes have a wall clock.
 4. Speed of the record and node paths, which is protoST VM work more than library work.
-5. The cluster, after the protocol is frozen.
+5. For the cluster: Phase D (tiered storage), once Phases A-C are reviewed, and pipelined permits
+   if the measured throughput matters to someone.
+6. The runtime registry (format 5), in its own plan.

@@ -2,6 +2,28 @@
 
 ## 0.2.0 (unreleased)
 
+- Measurements and documentation of cluster mode (Task 29). `bench/run_cluster.sh` and
+  `bench/cluster_workload.st` measure commits per second in standalone mode and in clusters of 1
+  and 3 member processes on 127.0.0.1 (profiles tiny and conc-hot, `RUNS=5` interleaved, fsync),
+  with the split of design spec 7.2 per commit (root-independent save, build, replication; the
+  save timed by a benchmark-only subclass of the round, `BenchRound`). Each run self-reports: every
+  process writes the commits it made, a verifier recounts them through the cluster after a read
+  barrier, and the runner refuses a run whose counts or checksum differ. Indicative figures of
+  2026-11-16 (Ryzen 5 5500U, ZFS, protoST 0.12.0, protoBaseST `34e9aa5`): tiny 44.3 commits/s
+  standalone, 26.3 with 1 member, 23.8 with 3; conc-hot 50.2, 26.0 and 14.9
+  (`docs/deviations.md`, Performance). Documentation: a cluster status paragraph and a Benchmarks
+  section in the README; tutorial chapters 13-16 updated with the measured costs and the
+  real-process tests, their stale task markers removed; `docs/reference.md` names rc4 and gains
+  the timer table generated from `PBClusterConfig timerTable`, guarded by the new
+  `tests/docs/timer_table_sync.sh` (helper `_timer_table.st`); `docs/deviations.md` gains a
+  cluster-mode summary (shared storage only, `flock` on network file systems, DEPTH = 0, the group
+  bound, HMAC, CC5, CC6, CC7 as built, about 16 members, a plain `proto_db` writer on a cluster
+  space, mixed clusters) and the checklist at rc4 (298 rows: 223 ported, 75 n/a);
+  `docs/decisions.md` gains section 4 (Q1-Q8, CC1-CC25, the execution rulings, D62 known and not
+  adopted: format 5 refused) and the proposals to `proto_db` (ProtoDB#1 done as R149/R149a in rc4;
+  Q7(a), Q7(b) and CC6 open); `docs/not-done.md` states the cluster's cuts and what is unproven
+  (the full timer audit and the 5000-seed soak run only in Task 30). No change to `src/`.
+
 - Real processes, part 2 (Task 28, `tests/cluster/`): `_node_seams.st` holds a round of a worker's
   commit at one of three points (the root built, its replicate sent, the permission's done sent)
   and names the token in flight in a marker file. `real_kill_holder.sh`: the holder is killed with

@@ -1,7 +1,7 @@
 # Reference
 
 Every public class and message of protoBaseST, grouped as the design spec groups them (section
-5.1). The names are `proto_db`'s (`proto_db` at `v2.0.0rc2`) with the prefix `PB` and Smalltalk
+5.1). The names are `proto_db`'s (`proto_db` at `v2.0.0rc4`, at format 4) with the prefix `PB` and Smalltalk
 camelCase; the first table says which is which. This file lists what exists in `src/protobase/`;
 a message that is not here is not public. Names that start with an underscore (`_saveInto:`,
 `_currentRoot`) are the implementation's, used by the tests, and may change.
@@ -356,7 +356,8 @@ For tests, tools and readers of the format. An application does not need them.
   `PBMapKeyIndex` are its value types.
 - **Framing** (`framing.st`): `PBSegmentHeader`, `PBRecordHeader`, `PBRootRecord`,
   `PBAtomEnvelope`: `decode:` and `encode` for the byte frames. Integers are little-endian;
-  every checksum is CRC-32. Readers accept format versions 2, 3 and 4; writers write 4.
+  every checksum is CRC-32. Readers accept format versions 2, 3 and 4; writers write 4. Format 5 (`proto_db` 2.0.0rc4's runtime
+  registry, D62) is refused with `PBNotSupportedError` ([deviations.md](deviations.md#reading)).
 - **Framed logs** (`cluster/log.st`): `PBFramedLog`, the append-only log file of `proto_db`'s
   `logfile.py`. Class side: `header:` (kinds `'ROOT'`, `'RANG'`, `'SEGS'`), `frame:`,
   `scan:kind:path:`, `read:kind:` (never writes; a missing file is an empty log),
@@ -392,6 +393,36 @@ For tests, tools and readers of the format. An application does not need them.
   quarter of it), `renewBackoffFloor` (`requestTimeout // 4`, at least 1 ms: the least back-off after a renewal
   round neither won nor fenced, R149a) and `permissionDeadline:`. `PBClusterConfig timerTable` answers the timers that apply at depth 0 as
   rows `{ name. default. what it drives }`.
+
+  The timers that apply at DEPTH 0 over shared storage, generated from `PBClusterConfig timerTable`
+  (`tests/docs/timer_table_sync.sh` keeps this table equal to it). None of them decides an
+  acceptance, an acknowledgement or the truth of an outcome; the rulings named are `proto_db`'s.
+  How to choose the durations is in [tutorial chapter 16](tutorial/16-operating-a-cluster.md#choosing-the-durations).
+
+<!-- timer-table: begin -->
+| Timer | Default | Drives (liveness only) |
+|---|---|---|
+| leaseDuration | 2000 ms | How long a grant blocks other holders on the granter's timer. |
+| driftMargin | ceiling(2/3 x leaseDuration), the minimum | The holder's belief is leaseDuration - driftMargin: a third of the promise (R78b). |
+| renewal | at half the belief left | When the owner renews while it has demand; a failed renewal ends the term only when a majority fenced it (R149). |
+| permitFloor | a quarter of the belief left | No permission is issued with less left; the owner renews first. |
+| renewBackoff | requestTimeout / 4, at least 1 ms | After a renewal round neither won nor fenced, no renewal before the refusals' remaining, at least this, within the lease (R149a). |
+| idleEnd | leaseDuration / 4 without demand | When an owner releases its term. |
+| ownerIdleRelease | nil (off) | Ends a term whose own threads stopped asking (R80). |
+| requestTimeout | 250 ms | How long an attempt, a renewal, a recovery round or a query waits; shorter than the belief. |
+| sendReserve | min(requestTimeout, belief // 4) | Least validity left before anything acceptable is sent; less gives a truthful retryable conflict (R121). |
+| permissionDeadline | valid + requestTimeout | An owner without a done by then abandons the term (O6). |
+| startupGrace | leaseDuration + driftMargin | Grants refused after a start (efficiency). |
+| backoff | #(1 50) ms | Jittered delay between lost attempts. |
+| wakeSpread | 3 ms | Random spread after a release wakes a requester. |
+| straggle | 5 ms, factor 4 | Once a majority answered an undecided attempt, how long the rest are awaited (R39). |
+| turnSilence | 50 ms, capped by requestTimeout | How long a member defers to the member a release named. |
+| acquireTimeout | 30000 ms | When a permit request gives up with a timeout. |
+| gatherAttempts | 3 | How many times a rejoin round asks a silent member again. |
+| persist | persistInterval 50 ms, persistLag 1000 ms | Persister passes; when any node persists another's commits. |
+| retryHold | hold 100 ms, wait 5 ms, 3 retries | Held retries under a permission. |
+<!-- timer-table: end -->
+
 - **Lease values** (`cluster/lease.st`): `proto_db`'s `lease.py` as immutable values; time is
   the argument `now:` in microseconds and nothing reads a clock. `PBGrantState initial:now:`
   builds the state of a peer that refuses every request until `now + startupGrace`. A state

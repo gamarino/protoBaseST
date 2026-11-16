@@ -4,11 +4,12 @@
 Program: [examples/cluster/13_terms_and_majorities.st](../../examples/cluster/13_terms_and_majorities.st).
 Previous: [12. What is refused, and why](12-refusals.md). Next: [14. A three-node cluster](14-a-three-node-cluster.md).
 
-> **Status.** Cluster mode belongs to protoBaseST 0.2.0, which is not released. The protocol core,
-> the simulator that tests it, the transports, the coordinator shell, the shared tier, commits
-> and reads through the coordinator and the persister (Tasks 23 to 25 of the
-> [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md)) are built. This chapter
-> explains the design; chapters 14 to 16 run it.
+> **Status.** Cluster mode belongs to protoBaseST 0.2.0, which is not released. It is built and
+> tested: the protocol core, the simulator that tests it, the transports, the coordinator shell,
+> the shared tier, commits, reads and the persister, real processes killed with `kill -9`, and a
+> first measurement (chapter 16). The final verification of the
+> [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md) (Task 30: the full timer audit
+> and the long soak) has not run yet. This chapter explains the design; chapters 14 to 16 run it.
 
 This chapter has no new API to learn. It is the reasoning that the next three chapters assume.
 Every rule here is `proto_db`'s: protoBaseST follows its cluster protocol rule by rule, including
@@ -67,8 +68,10 @@ written off the commit path.
 > `cluster/<id>.roots` inside it. That protects commits from the failure of *processes*, and it is
 > the whole coordination protocol; it does not protect you from losing the directory itself.
 > Separate disks per member with an object store (tiered storage) are `proto_db`'s and are not
-> ported (chapter 16). On one machine, today, the standalone lock is simpler, and expected to be
-> faster (no cluster figure exists yet, chapter 16).
+> ported (chapter 16). On one machine the standalone lock is simpler, and faster: in a first,
+> indicative measurement a standalone process committed about 44 small transactions per second
+> where three member processes together committed about 24 (chapter 16). A cluster buys
+> survival of a process's failure, not speed.
 
 ## Members, voters and majorities
 
@@ -202,7 +205,10 @@ machine (figures measured by `proto_db`, not by this port). The fix splits the w
 
 A permission carries the base root to build on and how long it is valid; the holder measures that
 validity from the send of its request, as for the lease. protoBaseST issues one permission at a
-time (DEPTH 0); `proto_db` pipelines one more (DEPTH 1), which is not ported (chapter 16).
+time (DEPTH 0); `proto_db` pipelines one more (DEPTH 1), which is not ported (chapter 16). One
+consequence is measured: adding members does not add throughput. Three members writing disjoint
+roots committed about 0.9 times as many transactions per second as one member alone, because
+every commit of the cluster waits for the one permission (chapter 16, *What a commit costs*).
 
 Inside its permission the holder builds each queued transaction on the root the previous one
 produced: validation, merge and path copies are the same code as standalone mode (chapters 5 and

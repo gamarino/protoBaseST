@@ -5,15 +5,15 @@ Program: [examples/cluster/16_configuration.st](../../examples/cluster/16_config
 Previous: [15. Failures and recovery](15-failures-and-recovery.md).
 
 This chapter is the reference an operator needs: the options and the rules among them, the timers,
-what `stats` reports, how to choose the durations, and an honest account of what the port does not
-do and what is not tested yet. The full API is in [reference.md](../reference.md), and every
+what a commit costs, how to choose the durations, what `stats` reports, and an honest account of
+what the port does not do and what is not proven yet. The full API is in [reference.md](../reference.md), and every
 difference from `proto_db` is in [deviations.md](../deviations.md#cluster-mode).
 
 ## The options
 
 `PBClusterCoordinator nodeId:peers:options:` takes a `Dictionary` of options, named as
 `proto_db`'s keyword arguments in camelCase, with two exceptions: `#authKey` is a protoBaseST
-addition (a keyed cluster is not protocol 13 and cannot mix with `proto_db` nodes), and `#seed`
+addition (a keyed cluster is not protocol 14 and cannot mix with `proto_db` nodes), and `#seed`
 seeds the node's incarnation rather than `proto_db`'s back-off jitter. A configuration is validated
 when it is built: a bad value, a rule broken or an unknown name is refused then, except the
 startup grace over a used log, which is checked when the space attaches (rule 5 below).
@@ -103,7 +103,9 @@ its name, its default and what it drives. None of them decides an acceptance, an
 the truth of an outcome. Each one, when it fires, can only cause a conservative failure: a timeout,
 an abandoned term, a retried commit, an unknown outcome. The column "Set by" says whether you can
 change it: an option, a value derived from options, or a fixed constant of the protocol. The fixed
-ones are internal: you cannot set them and need not.
+ones are internal: you cannot set them and need not. The same table, generated from
+`PBClusterConfig timerTable` and checked against it by the tests, is in
+[reference.md](../reference.md).
 
 | Timer | Set by | Default | Drives (liveness only) |
 |---|---|---|---|
@@ -143,18 +145,56 @@ safety checker must pass every one. Its state today, honestly:
 What the default test run does check is the audit's configuration: every row has its files, and
 each row's knob changes what the rules read (`sim_timer_audit.st`).
 
+## What a commit costs
+
+The obvious way to make a database faster is to add machines. A cluster that shares one database
+cannot do that for writes, and the reason is in chapter 13: commits are ordered by one permission
+at a time, across the whole cluster. The measurement below shows the price and where it goes.
+
+It was taken with `bench/run_cluster.sh` on one machine, so read it as **indicative only**: an
+AMD Ryzen 5 5500U (6 cores), Linux, a ZFS disk with real `fsync`, protoST 0.12.0, protoBaseST at
+`34e9aa5` with the benchmark of the commit that added it, 2026-11-16, five interleaved runs of 120
+transactions each, every cluster member a protost process of its own on 127.0.0.1 with the
+default options. Every run counted its commits and had a verifier count them again; a run whose
+counts differed would have been refused. The full table and its caveats are in
+[deviations.md](../deviations.md#cluster-mode-commits-per-second).
+
+| Workload | Standalone | 1 member | 3 members |
+|---|---|---|---|
+| *tiny*: one writer per process, each on its own root | 44 commits/s | 26 commits/s | 24 commits/s |
+| *conc-hot*: four writers per process, one shared key | 50 commits/s | 26 commits/s | 15 commits/s |
+
+Three things to read in it:
+
+- **A one-member cluster already pays most of the price** (0.59 of standalone on *tiny*): each
+  commit adds a synced append to the acceptor log and a message round to the same segment `fsync`.
+- **Two more members cost little, and add nothing**: three members on disjoint roots make 0.9
+  times the commits of one. Each commit waits for the one permission.
+- **Where the time goes**, per commit at three members (medians): about 7 ms saving the
+  transaction's records before asking (no permission held), about 20 ms building under the
+  permission (13 ms on the hot key), about 12 ms replicating to a majority. The build at three
+  members is more than twice the build at one (7.5 ms); the likely cause, not established, is that
+  a member builds on roots other members wrote, whose records it must read from disk.
+
+Contention costs more in a cluster: the hot key needed 407 to 467 retries per 120 commits at three
+members, against 72 to 97 standalone, and 67 rounds in 600 commits were refused by the send
+reserve (retryable, nothing sent, retried by `run:`). No `proto_db` figure is shown: its cluster was
+not run on this workload, and figures from other workloads do not compare.
+
 ## Choosing the durations
 
-- **Start with `proto_db`'s defaults.** The maintainer chose to keep them, configurable; this port
-  has no measurement of its own to tune them by yet.
+- **Start with `proto_db`'s defaults.** The maintainer chose to keep them, configurable. The
+  measurement above used them; no study of other values has been made.
 - **The belief must hold a whole round.** With a 2 s lease the belief is about 667 ms and the send
-  reserve 167 ms. A round builds every queued commit of its node inside that window, and
-  protoBaseST's build is slow (a design estimate of 50 to 70 ms per commit, not a measurement of
-  the cluster). A round of one commit fits; a round of ten does not. The port stops adding commits
+  reserve 167 ms. A round builds every queued commit of its node inside that window. Measured
+  above, a build takes about 8 to 20 ms per small commit, so a round of a few tens of small commits
+  fits; a round of large transactions may not, and under contention some rounds already miss (the
+  reserve refusals above). The port stops adding commits
   to a round when the time left falls below the reserve plus the longest build measured in the
   round (a liveness-only addition to `proto_db`); the rest wait for the next permission. If a
   single transaction's build exceeds the belief, every round is refused, and the conflict says so,
-  naming the build time and `leaseDuration`: lengthen the lease.
+  naming the build time and `leaseDuration`: lengthen the lease. On a loaded machine the example
+  programs use 3000 ms for that reason.
 - **A longer lease costs failover time.** When an owner dies, nothing is issued until its grant
   expires on the voters' clocks: about one `leaseDuration`.
 - **Short leases cost renewals and grace.** Every term renews at half its belief; every restart
@@ -214,18 +254,18 @@ The counters start at zero. The ones to watch:
 
 ## What the port does not do
 
-- **Commits and reads through the coordinator, and the persister** are Tasks 23 to 25: until they
-  land, a cluster forms, elects owners and issues permissions, but cannot commit a database.
-  Chapters 14 and 15 mark every block that waits for them.
 - **Tiered storage** (`proto_db`'s per-node local logs plus an object store, bounded replication,
   `'fetch'`, `'warm'`, the kind-5 and kind-6 log entries) is Phase D, not approved yet. Every member
   shares one directory; its options are refused, and a log written by a tiered node is refused.
   Multi-host deployments need a shared file system whose `flock` is reliable.
-- **Pipelined permissions** (`proto_db`'s DEPTH 1) are not ported: one permission at a time.
-- **The runtime registry and format 5** of `proto_db` 2.0.0rc4 come later; the cluster writes
-  format 4, which rc4 still reads.
+- **Pipelined permissions** (`proto_db`'s DEPTH 1) are not ported: one permission at a time, the
+  limit measured above.
+- **The runtime registry and format 5** of `proto_db` 2.0.0rc4 (its decision D62) are known and
+  not adopted: protoBaseST writes format 4, which rc4 still reads and writes for data without the
+  feature, and **refuses format 5** with `PBNotSupportedError` rather than misread it. The registry
+  gets its own plan after the cluster work merges.
 - **Mixed clusters** of protoBaseST and `proto_db` nodes are a non-goal (maintainer ruling): the
-  on-disk format and the protocol-13 frames are shared, the behaviour is not tested across
+  on-disk format and the protocol-14 frames are shared, the behaviour is not tested across
   implementations, and a cluster with `#authKey` cannot mix at all.
 - **No encryption.** Frames are plaintext; `#authKey` authenticates them. Run on a trusted network.
 - **Static membership**, at most 4096 members, and in practice about 16 (a planning estimate, not
@@ -235,21 +275,24 @@ The counters start at zero. The ones to watch:
   `FileStorage` without a coordinator does not, and a root it published outside the cluster would be
   replaced by the next persisted cluster root, its write silently lost.
 
-## What is not tested yet
+## What is not proven yet
 
 Be as sceptical as the design is:
 
-- The protocol has been tested in the **simulator** and through the **coordinator shell in one
-  process**, not yet with real processes killed with `kill -9` (Tasks 27 and 28), and not with the
-  commit path, which does not exist yet.
-- `proto_db`'s 261 cluster tests are checked off one by one in `tests/unit/cluster_checklist.tsv`;
-  the rows that need Tasks 23 to 28 are still marked deferred.
-- The full timer audit runs in the final verification phase (Task 30), which also measures the
-  *renewBackoff* floors (above).
-- **No throughput or latency figure exists** for a protoBaseST cluster (Task 29). Expect it to be
-  slower than standalone mode, with more syncs per commit. With one permission at a time across the
-  whole cluster, its throughput is at most one round per permission round trip plus the round's
-  builds, whatever the number of members.
+- The protocol is tested in the **simulator**, through the **coordinator shell in one process**,
+  and with **real processes** killed with `kill -9` (chapter 15). The real-process tests ran three
+  times each, with drawn seeds: evidence, not proof. Nothing ran on several hosts, on a network
+  file system, with more than five members, or for hours.
+- `proto_db`'s 298 cluster tests at `v2.0.0rc4` each have a row in
+  `tests/unit/cluster_checklist.tsv`: 223 ported, 75 not applicable (tiered storage, DEPTH 1, a
+  Python-only API), none deferred. A ported row is a check of the same property, not the same code.
+- **The full timer audit and the long soak run only in the final verification (Task 30)**, which
+  also measures the *renewBackoff* floors (above); the soak raises every simulator family to 5000
+  seeds. Until then, "timers decide liveness only" rests on the default seeds and the audit's
+  earlier runs.
+- The figures above are one machine's, on one workload shape, with at most three members. Failover
+  time and latency per commit were not measured, and nothing heavier than four writers per
+  process was tried.
 - The work is one implementer's, reviewed task by task, against a reference implementation that
   itself is a release candidate.
 
@@ -261,5 +304,7 @@ Be as sceptical as the design is:
   Choose the durations for your build times and for how long a failover may take.
 - `stats` names health, leases, permissions, replication and misconfiguration as `proto_db` does,
   with a few counters of its own.
-- The port is the protocol over one shared directory; tiered storage, pipelining, format 5 and
-  measurements are still to come.
+- A cluster costs throughput (about half of standalone on one machine, measured) and buys survival
+  of a member's failure; more members add safety, not speed.
+- The port is the protocol over one shared directory; tiered storage and pipelining are still to
+  come, and format 5 is refused.

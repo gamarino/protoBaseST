@@ -13,8 +13,9 @@ what is guaranteed, and which test checks it. The programs show the failures tha
 show; the commit-level guarantees are tested by the simulator (`tests/unit/sim_*.st`), which runs
 the same rules under seeded faults in virtual time, and by the coordinator's own tests
 (`tests/unit/cluster_coordinator_*.st`). Seeded runs and planted defects are strong evidence, not
-proofs. The real-process tests, with `kill -9`, are Tasks 27 and 28 of the
-[cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md) and do not exist yet.
+proofs. The real-process tests (`tests/cluster/real_*.sh`, Tasks 27 and 28 of the
+[cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md)) run every member as a protost
+process of its own and kill members with `kill -9`; each run is verified by the token rule below.
 
 In these programs **stopping a coordinator is a crash**: its endpoint stops, so the member neither
 sends nor receives, and its disk stays as it was. A wait is always a condition with a deadline.
@@ -41,8 +42,8 @@ does yet, it says so.
 | A majority of logs is lost | outside the model: the operator decides with `forceRejoin` | `sim_rejoin.st` (6); `15_majority_loss.st` |
 | An internal error | the node fences itself for the life of its process | `cluster_coordinator_shell.st` (5); `cluster_coordinator_faults.st` (1), (6) |
 | A failed write | the node refuses everything until reopened | `cluster_coordinator_shell.st` (6), (10) |
-| A second open of a live member's log | refused at the log's lock | `15_wiped_disk.st`, `cluster_tier.st` (2), both in one process; from another process: not yet tested, planned in Tasks 27 and 28 |
-| A killed process (`kill -9`) | as a crash above | not yet tested with real processes; planned in Tasks 27 and 28 |
+| A second open of a live member's log | refused at the log's lock | `15_wiped_disk.st`, `cluster_tier.st` (2), both in one process; from another process: not tested |
+| A killed process (`kill -9`) | as a crash above | `tests/cluster/real_kill_owner.sh` (the owner; a voter; two successive owners of five voters), `real_kill_holder.sh` (a holder at three points of its round, each restarted on its disk; then the whole cluster before anything was persisted), `real_restart_rejoin.sh` (a voter whose log is lost rejoins by ballot) |
 
 ## A voter dies
 
@@ -127,9 +128,11 @@ shorter than the default (chapter 16 shows the refusal).
 
 ## A holder dies in the middle of a round
 
-This one cannot be shown by a program yet (the commit path is Task 23, the real `kill -9` tests
-Task 28), so here is what the rules guarantee and where the simulator tests it. A holder can die at three
-moments:
+A short program cannot show this one, because it needs a process killed at a precise point of its
+round. `tests/cluster/real_kill_holder.sh` does it with real processes: a test-only subclass of the
+round holds the holder at one of three points, the test kills it with `kill -9`, and restarts it
+on its disk. Here is what the rules guarantee at each point, and what that test and the
+simulator check. A holder can die at three moments:
 
 - **before anything acceptable left it**: nothing happened; the owner gets no `'done'`, abandons the
   term at `valid + requestTimeout`, and its commits are simply lost with the process, as a
@@ -145,7 +148,15 @@ from any member's chain (S4), every unknown commit present on all members or on 
 of one label and epoch, no fork (`sim_base_seeds_a.st` and `_b.st`, 200 seeds with drops,
 duplicates, delays, reordering, clocks 10 % fast and slow, and a member crashing).
 `cluster_coordinator_shell.st` (9) checks the shell's half: a coordinator stopped with a
-replication in flight answers it `#unknown`, never `#none`.
+replication in flight answers it `#unknown`, never `#none`. With real processes,
+`real_kill_holder.sh` finds the token killed before the send absent on every member, the one
+killed after the `'done'` present on every member, and the one killed after the send the same on
+every member.
+
+How long the others wait was not measured. By design, when the dead holder also owned the term,
+nothing is issued until its grant expires on the voters' clocks, about one `leaseDuration` (2 s by default), and a restarted
+member refuses grants for its startup grace (`leaseDuration + driftMargin`) before it takes part
+again.
 
 ## Outcome unknown, and what `run:` does with it
 

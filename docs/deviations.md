@@ -1,8 +1,10 @@
 # Deviations and refusals
 
-Where protoBaseST differs from `proto_db` at `v2.0.0rc2`, and everything it refuses. The cluster
-branch follows `proto_db` at `v2.0.0rc4` at format 4 (protocol 14, format 5 refused; see
-[Reading](#reading)).
+Where protoBaseST differs from `proto_db` at `v2.0.0rc4`, and everything it refuses. protoBaseST
+follows rc4 at format 4 and protocol 14; rc4's format 5 (the runtime registry, decision D62) is
+known and not adopted: it is refused (see [Reading](#reading)). Entries first written against an
+earlier release candidate (`v2.0.0rc2` for the single process, `v2.0.0rc3` for parts of the
+cluster) say so where the release matters.
 The rule behind the whole list is the design spec's: **refuse, never diverge**. A value, type,
 version or operation the prototype cannot handle exactly signals an explicit error naming it. It
 never stores something else in its place, and it never replaces where `proto_db` would merge.
@@ -134,9 +136,9 @@ explicit.
   directory with `cluster/`, and a space without a coordinator a SpaceRoot that carries a
   `cluster_term` (`PBNotSupportedError`); a cluster node opens its directory with
   `PBFileStorage clusterPath:` and `PBObjectSpace storage:coordinator:` (see Cluster mode, the
-  shared tier). `proto_db`'s "held retries" (an immediate retry without
-  backoff, `permit_held`) are not ported. Mixed Python/protoST clusters are outside
-  acceptance until a protocol freeze.
+  shared tier). `proto_db`'s "held retries" (an immediate retry without backoff under a kept
+  permission, `permit_held`) are ported with the cluster round (Task 23). Mixed clusters of
+  `proto_db` and protoBaseST nodes are a non-goal (see [Cluster mode](#cluster-mode)).
 - **Framed log files** (the `log` and `roots_log` layers) are read and written by the cluster
   modules (`PBFramedLog`, `PBAcceptorLog`); a space uses the acceptor log only through a
   coordinator (`PBSharedTier`). The acceptor log writes
@@ -163,7 +165,7 @@ explicit.
   actors. *Cost:* a commit queued while a retry timer is pending starts at that timer (at most
   50 ms later), where `proto_db` would join the round after the one waiting for the lock.
 - **Group commit** (`proto_db` D52, ruling R71) is implemented, as `_standalone_round` at
-  v2.0.0rc3 (cluster plan Task 22): one round takes every queued commit, saves each one's written
+  v2.0.0rc3, which rc4 changes only in the root version, nothing at format 4 (cluster plan Task 22): one round takes every queued commit, saves each one's written
   atoms (a failure is that commit's alone, as each `proto_db` thread saves its own before it
   joins the group), holds the root lock once, reads the root once, builds each commit on the root
   the previous build saved (a build error is that commit's alone), and makes the last root
@@ -299,6 +301,61 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
 `PBValidationError` when it is built, not a failure of `encode` or a form only a reader takes.
 
 ## Cluster mode
+
+**In brief.** The entries after this list are the detail, rule by rule. What an operator must know
+first:
+
+- **Shared storage only (Phases A-C, design spec 8.4 Q1).** Every member opens the same
+  `PBFileStorage` directory with `clusterPath:`, and keeps its acceptor log in
+  `cluster/<id>.roots` inside it. `proto_db`'s tiered storage (local logs per node plus an object
+  store, peer fetch, `warm`, log kinds 5 and 6) is Phase D, not ported: its options are refused
+  (`PBNotSupportedError`, CC8) and so is a log written by a tiered node (CC15). The cluster
+  protects commits from the failure of processes, not from the loss of the directory.
+- **`flock` on network file systems.** The root lock (`space.lock`) and each acceptor log's lock
+  are `flock`s, as `proto_db`'s. Members on several hosts need a shared file system whose `flock`
+  is reliable across hosts; on one that silently grants a lock to two hosts, two processes can
+  serve one acceptor log, which breaks the protocol's assumptions. Nothing here detects that.
+  Members on one host are the tested deployment.
+- **DEPTH = 0 (Q3).** One write permission at a time across the cluster. `proto_db`'s pipelined
+  permits (DEPTH 1, D55, rules H1-H7) are not ported; a received permit naming a proposal
+  (`after`) is held as uncertain (below). Throughput is bounded by one permission round trip plus
+  the round's builds, whatever the number of members ([Performance](#cluster-mode-commits-per-second)).
+- **The group bound (Q4, CC11, liveness only).** A round stops adding commits when the
+  permission's time left falls below `sendReserve` plus the longest build of the round; the rest
+  wait for the next permission. `proto_db` builds the whole batch and refuses it whole when the
+  last build crosses the reserve.
+- **HMAC frame authentication (Q5, CC4).** Optional (`#authKey`); with it the frames are not
+  protocol 14 and cannot mix with `proto_db` nodes. Without it the bytes are protocol 14. Either
+  way the transport is plaintext: run on a trusted network (entries below).
+- **Each valid frame is delivered as it is read (CC5).** `proto_db` loses, with a bad frame, the
+  other messages decoded from the same 64 KiB read; protoBaseST delivers them. The connection is
+  dropped at the first invalid frame in both.
+- **No node-id binding in the acceptor log (CC6).** Lesson L27 proposed recording the node id in
+  the log; it needs a new entry kind, which would change the shared format, so it is not added.
+  Over shared storage the file name `cluster/<name>.roots` binds the id. Copying one member's
+  directory or log onto another member is forbidden, as in `proto_db`, and is not detected.
+  Recorded as a proposal for `proto_db` ([decisions.md](decisions.md#proposals-to-proto_db)).
+- **Message types never sent at DEPTH 0 (CC7).** `records`, `warm`, `store`, `propose`, `fetch`,
+  `fetched`, `commit_query` and `commit_info` are decoded and validated like every type (an
+  invalid one drops the connection), then ignored. *As built:* they are ignored without a count;
+  the plan's counter for them (`ignored_messages`) was not built. `'messages_ignored'` counts only
+  messages whose sender is not another member.
+- **About 16 members in practice.** Membership is static; `PBMembership` accepts at most 4096
+  members (the rank's 12 bits). Every connection has its own reader actor and every peer its own
+  sender actor, so a member of an N-member cluster runs about 2(N - 1) transport actors. "About
+  16" is a planning estimate, **not measured**: the benchmark below runs 1 and 3 members.
+- **A plain `proto_db` writer on a cluster space.** protoBaseST refuses to open a cluster
+  directory without a coordinator (`PBFileStorage path:` refuses `cluster/`). `proto_db`'s
+  `FileStorage` does not refuse it: a `proto_db` process that opens a member's directory without
+  a coordinator can publish a root outside the cluster's order, which the next persisted cluster
+  root replaces: its write is silently lost. Do not do it. Proposal Q7(a) asks `proto_db` to
+  refuse it ([decisions.md](decisions.md#proposals-to-proto_db)).
+- **Mixed clusters** of protoBaseST and `proto_db` nodes are a non-goal (design spec section 4).
+  The on-disk format and, without a key, the frames are shared; behaviour across implementations
+  is not tested. What is tested across implementations is the data: `proto_db` reads a space
+  a protoBaseST cluster wrote, and the acceptor logs round-trip both ways (Task 26).
+
+The detail:
 
 - **Frame authentication (divergence, design spec 8.4 Q5, CC4).** `proto_db`'s cluster has no
   authentication: a frame is a 4-byte length and a msgpack map. protoBaseST offers optional HMAC
@@ -450,8 +507,8 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   (`PBAttempt isTermFenced`, `cluster/lease.st`; `_ownLoop:now:effects:` and
   `_closeRenewal:now:effects:`, `cluster/proposer.st`; `receivedPermitReq:in:now:`,
   `cluster/owner.st`; `PBClusterConfig renewBackoffFloor`, the timer row `renewBackoff`). It is
-  not a deviation from `proto_db` at `88ca21d`; it is ahead of the Task 18 checklist, which stays
-  pinned to `v2.0.0rc3`. The rejoin families' workarounds for the storm are gone: the `r78a`
+  not a deviation from `proto_db` at `88ca21d`, and rc4 (`v2.0.0rc4`) ships it unchanged; the
+  checklist is pinned to rc4 since Task 22a, its seven renewal back-off rows ported. The rejoin families' workarounds for the storm are gone: the `r78a`
   schedule no longer cuts the holder off before its timer resumes, and `lagged:` (1 ms links)
   is no longer applied (`tests/unit/_rejoin.st`); the acceptance families' guard that skipped a
   wrong rule's continuation is gone too. `AcceptFamilies idle:` (`tests/unit/_accept.st`) is
@@ -529,17 +586,16 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   keeps the CC18 text (`proto_db` raises "lease expired") and, as `proto_db`, is not counted.
   *Cost:* none on the wire; a round under the group bound commits fewer entries per permission
   than its batch.
-- **proto_db's cluster tests, ported or justified (Task 18).** `tests/unit/cluster_checklist.tsv`
-  gives each of the 261 test functions of `proto_db` v2.0.0rc3's `tests/unit/test_cluster_*.py`
-  a row: ported (the protoBaseST file and the family that checks it), deferred to the Phase C
-  task that builds what it needs (the threaded shell, the transport, the file-backed log,
-  transactions, persistence, the end-to-end and soak tests), or not applicable (tiered storage,
-  DEPTH = 1, or a Python-only API such as `FencingToken`, which the port does not have: the
-  fencing token is the term). `tests/unit/cluster_checklist.sh` checks the table against the
-  tag. Until those tasks land, a deferred row is a `proto_db` test without a protoBaseST
-  counterpart: each of Tasks 19-28 turns its rows into ported ones (or re-justifies one as n/a
-  in its review), and the final gate runs the checker with `CHECKLIST_FINAL=1`, which fails on
-  any deferred row. *Cost:* none in the code; the deferred rows are open work, tracked.
+- **proto_db's cluster tests, ported or justified (Task 18, re-pinned to rc4 in Task 22a).**
+  `tests/unit/cluster_checklist.tsv` gives each of the 298 test functions of `proto_db`
+  `v2.0.0rc4`'s `tests/unit/test_cluster_*.py` a row: ported (the protoBaseST file and the
+  check that covers it) or not applicable (33 tiered storage, 32 DEPTH = 1, 10 a Python-only API
+  such as `FencingToken`, which the port does not have: the fencing token is the term). After
+  Task 28, 223 rows are ported, 75 are n/a and none is deferred. `tests/unit/cluster_checklist.sh`
+  checks the table against the tag (it needs the protoBase checkout, `PROTOBASE_REPO`); the final
+  gate (Task 30) runs it with `CHECKLIST_FINAL=1`, which fails on any deferred row. *Cost:* none
+  in the code. A ported row means a protoBaseST check of the same property, not the same test
+  code: the port's checks are its own.
 - **The transports are actors (representation and timing, `cluster/transport.st`, Task 19).**
   `proto_db`'s `TcpTransport` has one listener thread multiplexing every accepted connection with
   a selector and one sender thread per peer; protoST has no `select`, so `PBTcpTransport` has
@@ -819,11 +875,13 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
 
 ## Performance
 
-The prototype need not be fast, and it is not. This is the only place in the documentation that
-states figures; the other documents link here.
+The prototype need not be fast, and it is not. This is where the figures are recorded,
+with how they were measured; the documents that quote one (the tutorial's cluster chapters) link
+here.
 
-All figures below were measured 2026-11-13 on the same machine, at a load average of about 9 to 14
-(other work was running), so they are indicative only; instruction counts hold better than wall
+The single-process figures below ([AVL operations](#avl-operations),
+[Commits per second](#commits-per-second)) were measured 2026-11-13 on the same machine, at a load
+average of about 9 to 14 (other work was running), so they are indicative only; instruction counts hold better than wall
 time on a busy machine. The binary is protoST 0.10.0 built at `build_rel0100` (protoST with S37 to
 S40 merged), the same binary for every column, against `proto_db` `v2.0.0rc2` on Python 3.14.6.
 Re-run the scripts on your binary before quoting any figure. No claim of speed is made.
@@ -873,6 +931,64 @@ User-space instructions per committed transaction (`bench/run_tx_instr.sh`): tin
 and 61 M. The I/O is the same on both sides (about 2.4 KB and three `fsync` per small commit), so
 the remaining gap is CPU: protoST's interpreter, node building and record encoding. A batch commit
 is dominated by the 100 in-memory tree inserts, which this work did not change.
+
+### Cluster mode: commits per second
+
+`bench/run_cluster.sh` (`RUNS=5`, interleaved, `CLUSTER_SCALE=1`: 120 transactions per run, split
+evenly over the members). **Indicative only.** Measured 2026-11-16 on an AMD Ryzen 5 5500U (6
+cores, 12 threads, Linux 7.0.0), protoST 0.12.0 (`build_rel0100`, used as built), protoBaseST at
+`34e9aa5` with the benchmark files of the commit that added them (cluster plan Task 29); the run
+directories on ZFS (`sync=standard`, lz4), `fsync` durability. The machine ran nothing else heavy;
+the desktop's own load average was 3.1 before and 4.8 after. Each member is a protost process of
+its own on 127.0.0.1 with `proto_db`'s default options (a 2000 ms lease: belief 667 ms, send
+reserve 167 ms). Every run self-reports: each process writes the transactions it committed, a
+verifier reads the space afterwards (in a cluster: member n0, after a read barrier, through the
+cluster) and compares a checksum, and the runner refuses a run whose counts differ, or whose
+coordinators counted another number of commits (`critical_commits`). All 30 runs passed.
+
+- **tiny**: one writer per process; each member writes its own root, one new key per transaction.
+  No two transactions conflict, but every one needs a write permission.
+- **conc-hot**: four writers (actors) per process, every writer of every member incrementing one
+  key of one shared root: read-modify-write, conflicts retried by `run:`.
+
+Commits per second from the minimum / median wall time (the first process's start to the last
+one's end); per commit, the medians of the runs, in milliseconds: *save*, the root-independent
+work (the commit's atoms saved before the permission is asked, design spec 7.2); *build*, the
+root-dependent work under the permission (validation, merge, path copy, the new root saved);
+*replication*, from the replicate's send to the commit settled (the acceptors' synced appends and
+the acknowledgements):
+
+| Profile | Mode | Commits/s | Retries (min-max) | Save | Build | Replication | Reserve refusals (5 runs) |
+|---|---|---|---|---|---|---|---|
+| tiny | standalone | 44.3 / 43.0 | 0 | | | | |
+| tiny | 1 member | 26.3 / 26.0 | 0 | 7.3 | 7.5 | 9.1 | 0 |
+| tiny | 3 members | 23.8 / 22.7 | 0 | 7.0 | 19.8 | 11.9 | 0 |
+| conc-hot | standalone | 50.2 / 45.5 | 72-97 | | | | |
+| conc-hot | 1 member | 26.0 / 24.3 | 195-232 | 5.7 | 9.2 | 9.9 | 2 |
+| conc-hot | 3 members | 14.9 / 13.7 | 407-467 | 10.1 | 13.2 | 13.0 | 67 |
+
+What the figures say, and what they do not:
+
+- **A cluster costs throughput; it buys survival of a member's failure.** Three members commit
+  about half as many tiny transactions per second as one standalone process (0.54x) and about
+  a third as many hot ones (0.30x). A one-member cluster already pays most of it (0.59x on
+  tiny): the acceptor log's synced appends and the round's messages come on top of the same
+  segment `fsync`.
+- **Adding members does not add throughput.** One permission at a time across the cluster
+  (DEPTH 0): three members on disjoint roots reach 0.90x of one member, not 3x.
+- **The build under the permission is the cluster's critical section** (spec 7.2). At three
+  members it is 13 to 20 ms per commit, against 7.5 to 9 ms at one. Why the tiny build more than
+  doubles is **not established**; the likely cause, unmeasured, is that a member builds on roots
+  other members wrote, whose records are not in its atom cache and are decoded from the segment.
+- **Hot keys hurt more in a cluster.** Retries rise from 72-97 (standalone) to 407-467 per 120
+  commits at three members, and a few rounds are refused by the send reserve (67 in 600
+  commits): retryable conflicts, nothing sent, retried by `run:`. The reserve refusals show
+  rounds whose builds did not fit the 667 ms belief under contention.
+- The *save* and *replication* columns are measured on each member's monotonic clock and summed
+  over the members, so they include waiting in the members' actor mailboxes; they are costs per
+  committed transaction, not latencies.
+- **No `proto_db` figure is shown**: `proto_db`'s cluster was not run on this workload shape, so
+  no ratio to it is claimed. Memory was not measured.
 
 ## Known protoST limits
 

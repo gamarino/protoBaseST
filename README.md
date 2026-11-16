@@ -5,7 +5,8 @@ A perennial object database for protoST, in the tradition GemStone opened.
 protoBaseST is a Smalltalk implementation, on protoST, of the Python object database `proto_db`
 (developed in the [protoBase repository](https://github.com/gamarino/ProtoDB)). It reads and
 writes the **same on-disk format** (format 4, frozen at `v2.0.0rc1`, with the value nesting limit
-of `v2.0.0rc2`), so one database directory can be shared
+of `v2.0.0rc2`; the reference is now `proto_db` `v2.0.0rc4` at format 4, whose format 5 is
+refused), so one database directory can be shared
 by Python and Smalltalk programs. It has `proto_db`'s API translated to Smalltalk, and `proto_db`'s
 transaction semantics: snapshot isolation, read sets checked at commit, merges of blind writes,
 mutable cells, retries.
@@ -17,11 +18,24 @@ It is shown to start a conversation and to collect criticism. It is small and me
 it is not fast and not complete. Read [docs/not-done.md](docs/not-done.md) first: it states what
 is missing and what has not been proven.
 
-What was checked, against `proto_db` at `v2.0.0rc2`: the conformance vectors, a round trip in both
+What was checked, against `proto_db` at `v2.0.0rc2` and, since the cluster branch, `v2.0.0rc4` (its vectors and its interop venv): the conformance vectors, a round trip in both
 directions (a space written by `proto_db` is dumped identically by protoBaseST, and a space
 written by protoBaseST passes the `proto_db` verifier with an identical dump), the shapes of AVL trees node by node, 27 concurrent-commit scenarios with both
 languages as first and second committer, and a small ERP demo. What was not: anything outside
 those scenarios, speed, long runs, and review by anyone but the people who wrote it.
+
+**Cluster mode (0.2.0, unreleased).** Several protoBaseST processes can share one database
+directory as a cluster: `proto_db`'s protocol, rule by rule (a majority lease with numbered
+terms, write permissions, a commit point of a majority of synced acceptances), at `v2.0.0rc4`,
+protocol 14. It runs over one shared directory only, one permission at a time, on a trusted
+network. It is tested in a seeded simulator with planted defects, in one process, and with real
+processes killed with `kill -9`; `proto_db`'s 298 cluster tests are each ported or justified
+(`tests/unit/cluster_checklist.tsv`). The full timer audit and the long soak run only in the final
+verification, so those claims are not yet proven. Measured on one machine, indicatively: three
+members commit about half as many small transactions per second as one standalone process
+([docs/deviations.md](docs/deviations.md#cluster-mode-commits-per-second)). Start with
+[chapter 13](docs/tutorial/13-cluster-concepts.md); what it does not do is in
+[docs/not-done.md](docs/not-done.md).
 
 ## What it shows
 
@@ -126,7 +140,7 @@ program that checks its own results and is run by the tests.
 | Read | What you learn |
 |---|---|
 | [The tutorial, chapters 1-12](docs/tutorial/README.md) | A single process: first commit, values and versions, records, collections and queries, transactions and conflicts, blind writes, mutables and history, bytes, actors, crash recovery, Python interop, refusals. |
-| [Cluster mode, chapters 13-16](docs/tutorial/13-cluster-concepts.md) | Several processes sharing one database: [the ideas](docs/tutorial/13-cluster-concepts.md), [a three-node cluster](docs/tutorial/14-a-three-node-cluster.md), [failures and recovery](docs/tutorial/15-failures-and-recovery.md), [operating a cluster](docs/tutorial/16-operating-a-cluster.md). Blocks marked "Runs once Task N lands" describe API still being built. |
+| [Cluster mode, chapters 13-16](docs/tutorial/13-cluster-concepts.md) | Several processes sharing one database: [the ideas](docs/tutorial/13-cluster-concepts.md), [a three-node cluster](docs/tutorial/14-a-three-node-cluster.md), [failures and recovery](docs/tutorial/15-failures-and-recovery.md), [operating a cluster](docs/tutorial/16-operating-a-cluster.md). |
 | [A small ERP](docs/tutorial/erp.md) | A guided build of a real application, with the reasoning at each step. |
 | [Coming from GemStone/S](docs/tutorial/gemstone.md), [Coming from Soil](docs/tutorial/soil.md) | Orientation for readers who know those systems. |
 
@@ -135,7 +149,7 @@ The programs are in [examples/tutorial/](examples/tutorial/README.md) and
 
 ## The API, mapped from `proto_db`
 
-Names are `proto_db`'s public names at `v2.0.0rc2`, prefixed `PB` in place of a namespace, in
+Names are `proto_db`'s public names at `v2.0.0rc4`, prefixed `PB` in place of a namespace, in
 Smalltalk camelCase. Python keyword arguments become keyword parts. Timeouts and backoffs are
 SmallInteger milliseconds, not float seconds.
 
@@ -245,8 +259,16 @@ A `.st` test starts with an `"EXPECT: <last line>"` or `"EXPECT-ERROR: <text>"` 
 `.sh` test passes with exit 0 and is skipped with exit 77. `PROTOBASE_REPO` (default `../ProtoBase`)
 names the protoBase checkout used by the two setup scripts. `tests/docs/` checks the snippets of
 the README and the tutorial against the code, the code quoted by the chapters of `docs/tutorial/`
-against the programs of `examples/tutorial/`, and the selectors the documents cite against
-`src/protobase`.
+against the programs of `examples/tutorial/` and `examples/cluster/`, the selectors the documents
+cite against `src/protobase`, and the reference's timer table against `PBClusterConfig timerTable`.
+
+## Benchmarks
+
+`bench/` holds the measurements; none runs in the test suite. `run_avl.sh` and `run_tx.sh` compare
+the single process with `proto_db`; `run_cluster.sh` measures standalone mode and clusters of one
+and three member processes on one machine. Each run reports the work it did and a verifier's
+count, and the runner refuses a run whose counts differ. The dated figures, with the machine and
+the commit, are in [docs/deviations.md](docs/deviations.md#performance): indicative only.
 
 ## License
 

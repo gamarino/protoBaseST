@@ -460,7 +460,8 @@ and renames a customer, a blind write from each language merges, and both print 
 report. See [examples/erp/README.md](../../examples/erp/README.md).
 
 Not proven: anything outside those scenarios, any `proto_db` release other than `v2.0.0rc2` (the cluster
-branch moves the venv to `v2.0.0rc4`; its full interop re-run is cluster Task 26), and
+branch moves the venv to `v2.0.0rc4`; the cluster's data interop is tested at rc4, and the whole
+interop suite runs against it in the final verification, cluster Task 30), and
 behaviour under load (the AVL structures are many times slower than `proto_db`'s; the dated figures
 are in [deviations.md](../deviations.md#performance)).
 

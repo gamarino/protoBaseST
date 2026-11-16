@@ -47,13 +47,13 @@ code you read here runs. The prose is not checked by a machine.
 | 11 | [One directory, two languages](11-python-interop.md) | `11_python_interop.sh` |
 | 12 | [What is refused, and why](12-refusals.md) | `12_refusals.st` |
 
-### Cluster mode (0.2.0, unreleased, in progress)
+### Cluster mode (0.2.0, unreleased)
 
 Several protoST processes sharing one database directory: a peer lease elects an owner, the owner
 issues write permissions, commits are acknowledged by a majority, faulty nodes are fenced, and a
 node that lost its disk rejoins by a ballot, and each node's persister writes the committed root
 to `space.root` afterwards (`sync:` waits for it). Chapter 13 needs no code; every program of
-chapters 14 to 16 runs.
+chapters 14 to 16 runs. What a cluster costs, measured on one machine, is in chapter 16.
 
 | # | Chapter | Programs (in `examples/cluster/`) |
 |---|---|---|

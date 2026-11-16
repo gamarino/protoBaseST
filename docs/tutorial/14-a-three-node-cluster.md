@@ -9,11 +9,10 @@ process), [14_three_nodes_tcp.st](../../examples/cluster/14_three_nodes_tcp.st) 
 durability).
 Previous: [13. The ideas behind cluster mode](13-cluster-concepts.md). Next: [15. Failures and recovery](15-failures-and-recovery.md).
 
-> **What runs today.** Starting members, the transports, attaching the shared directory, the
-> cluster forming, permissions and `stats` run, and the first two programs show it. Committing,
-> reading through the coordinator and the persister with `sync:` run too (Tasks 23 to 25 of the
-> [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md)), and the third program shows
-> them.
+> **What the programs show.** The first two programs start members, form a cluster and watch
+> its permissions and `stats`; the third commits, reads and waits for durability with `sync:`.
+> All three run in one process, for brevity. The same API with every member in a process of its
+> own, killed with `kill -9`, is exercised by `tests/cluster/real_*.sh` (chapter 15).
 
 ## A member
 
@@ -128,9 +127,9 @@ A member's `stats` is a `Dictionary` with `proto_db`'s names: the health keys (`
 
 ## A write permission, by hand
 
-Commits will ask for permissions themselves (Task 23). To watch the owner at work today, the lesson
-sends the message the commit path will send, `_permit`. The underscore marks it private: you will
-not send it once commits exist.
+Commits ask for permissions themselves (see *Committing*). To watch the owner at work, the lesson
+sends the message the commit path sends, `_permit`. The underscore marks it private: an
+application never sends it.
 
 ```smalltalk
 permit := nodes first _permit waitWithin: 60000.
@@ -178,8 +177,8 @@ nodes := (1 to: 3) collect: [:i |
     yourself)].
 ```
 
-Everything else is the first program. Frames are a 4-byte length and a msgpack map, protocol 13
-of `proto_db`, byte for byte. Connections are one-way: a member writes only on the connections it
+Everything else is the first program. Frames are a 4-byte length and a msgpack map, protocol 14
+of `proto_db` (`v2.0.0rc4`), byte for byte. Connections are one-way: a member writes only on the connections it
 opened and reads only from those it accepted, with one sender actor per peer, so a dead peer
 delays nobody else. The transport counts its frames:
 
@@ -222,6 +221,13 @@ chapter 13:
 
 Your code waits only on the commit itself.
 
+Those steps are not free, and it helps to know where the time goes. In a first, indicative
+measurement (chapter 16 has the conditions and the table), a small commit on three member
+processes cost about 7 ms in step 1, which needs no permission, about 20 ms in step 3, the build
+under the permission, and about 12 ms in steps 4 to 6. Steps 3 to 6 run under the cluster's one
+permission, so they bound how many commits the whole cluster makes per second; step 1 does not,
+which is why the commit path saves the records *before* asking.
+
 A commit now has **three** outcomes, so a careful workload writes a value unique to each commit,
 a token, and keeps the unknown ones apart:
 
@@ -247,8 +253,8 @@ retry builds on the root just committed instead of losing the next turn (held re
 
 ## Reading
 
-> The barriers below are commits (Task 23); the reads through the coordinator are Task 24
-> (`tests/unit/cluster_reads.st`, `cluster_reads_restarts.st`, `cluster_reads_majority.st`).
+> Reads through the coordinator are tested by `tests/unit/cluster_reads.st`,
+> `cluster_reads_restarts.st` and `cluster_reads_majority.st`.
 
 A read in cluster mode takes the newest root **its node knows committed**. It sends nothing and
 never waits, apart from two cases (below): the confirmation after an attach, or after
@@ -302,8 +308,8 @@ epoch of the newest root the node knows committed. It never goes down, except af
 
 ## Durability: the persister
 
-> The persister and `sync:` are Task 25 (`tests/unit/cluster_persister.st`,
-> `cluster_persister_recovery.st`).
+> The persister and `sync:` are tested by `tests/unit/cluster_persister.st` and
+> `cluster_persister_recovery.st`.
 
 `space.root` is written by each node's persister, after the commit, under the storage's root
 lock, never backwards. The commit point does not need it: acknowledged commits are durable in

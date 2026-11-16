@@ -1,17 +1,21 @@
 # Decisions
 
 Every call that shaped protoBaseST, with what was decided, why, and what it costs if it is wrong.
-Three kinds, in this order:
+Three kinds, in this order, for the single-process prototype and then for cluster mode:
 
 1. [The maintainer's decisions](#1-the-maintainers-decisions) of the design review (2026-11-10).
 2. [The planner's calls, C1 to C19](#2-the-planners-calls-c1-to-c19), made unattended when the plan
    was written and reviewed at the end.
-3. [Execution rulings](#3-execution-rulings), made while the tasks ran, numbered R1 to R22 where
+3. [Execution rulings](#3-execution-rulings), made while the tasks ran, numbered R1 to R29 where
    they were numbered.
+4. [Cluster mode](#4-cluster-mode): the maintainer's answers Q1 to Q8, the planner's calls CC1 to
+   CC25, and the rulings taken while the cluster tasks ran; then
+   [the proposals to `proto_db`](#proposals-to-proto_db).
 
 The first two kinds are quoted as decided; where a later ruling superseded one, it says so in the
-entry. The rule that governs them all is the maintainer's: **when in doubt, `proto_db`
-`v2.0.0rc1` (later `v2.0.0rc2`) is the reference.** This file is the place to overrule any of
+entry. The rule that governs them all is the maintainer's: **when in doubt, `proto_db` is the
+reference**: `v2.0.0rc1`, then `v2.0.0rc2` for the single process, and `v2.0.0rc4` (at format 4)
+since the cluster branch adopted it. This file is the place to overrule any of
 them; the cost column says what that would take.
 
 ## 1. The maintainer's decisions
@@ -132,6 +136,142 @@ Unnumbered rulings, in task order:
 | 22 | `_withChanges:log:complete:` refuses a field the class does not persist. | A misspelled field was silently dropped. | None. |
 | 23 | The ERP demo's moments are `committedAt` values of chosen history entries, and the reports refuse to run on equal or out-of-order moments. | Determinism (C19), and a report that blurs two versions is wrong. | None. |
 | 24 | The tutorial is checked by `tests/docs/tutorial_snippets.st`, and `tests/docs/tutorial_sync.sh` fails when a tutorial block is not in that test, in order. | A tutorial edited without its test goes stale silently. | A tutorial block cannot be freely reformatted without updating the test. |
+
+## 4. Cluster mode
+
+The design is `docs/superpowers/specs/2026-11-13-cluster-design.md`, the plan
+`docs/superpowers/plans/2026-11-13-cluster-mode.md`, and the move from `proto_db` rc3 to rc4
+`docs/superpowers/specs/2026-11-15-rc4-delta.md`. What the port does differently is in
+[deviations.md](deviations.md#cluster-mode).
+
+### The maintainer's answers (2026-11-13)
+
+The maintainer accepted the design's recommendation on every question (design spec 8.3 and 8.4):
+
+| # | Question | Answer | Cost if wrong |
+|---|---|---|---|
+| Q1 | Scope | Phases A-C over a shared `PBFileStorage` first; Phase D (tiered storage) decided after C is measured. | Multi-host deployments need a shared file system with reliable `flock`, or wait for Phase D. |
+| Q2 | Wire protocol | Keep `proto_db`'s bytes, so its message vectors are the tests; protoBaseST does not promise to track later protocol versions. (It did track rc4's protocol 14, ruling below.) | A protocol change upstream is work here, or a fork of the wire. |
+| Q3 | Pipelined permits | Ship `DEPTH = 0`; add pipelining only after measurement. | Lower throughput under load (measured in [deviations.md](deviations.md#cluster-mode-commits-per-second)). |
+| Q4 | Group-size bound | Accepted, a liveness-only departure (CC11). | A round commits fewer entries per permission than its batch. |
+| Q5 | Security | Optional HMAC frame authentication with a shared key from the start (CC4); the trusted-network assumption stated in either case. | A keyed cluster cannot mix with `proto_db` nodes; no encryption. |
+| Q6 | Timer defaults | `proto_db`'s (a 2000 ms lease), all configurable. | Builds that do not fit the belief; the reserve refusal says so (CC18). |
+| Q7 | Upstream proposals | Yes, both go to `proto_db` (the maintainer owns that repository). | See [the proposals](#proposals-to-proto_db). |
+| Q8 | Standalone group commit (D52) | Built together with the round runner (CC10, CC22). | None found. |
+
+### The planner's calls, CC1 to CC25
+
+Made unattended when the plan was written; entries marked **(maintainer)** were confirmed by the
+maintainer. Quoted from the plan as decided; the notes after the table say where the build
+differs.
+
+| # | Call | Why |
+|---|---|---|
+| CC1 | The node's own vote and own acceptance are local events to its own acceptor (`PBToAcceptor`), decided by the same rule methods as a peer's request, never through the transport | One decision path; spec 5.4 leaves the dispatcher/acceptor mapping as a Phase B review point |
+| CC2 | `PBGrantState` lives inside `PBAcceptorState`: promises are durable acceptor state. The dispatcher reads the acceptor's published snapshot (an `Atom`) for hints only and never decides a grant or an acceptance from it | Atomic acceptor steps (R55, R81, R81b) |
+| CC3 | The core counts integer microseconds; options are milliseconds. Defaults: `driftMargin` = ⌈2D/3⌉, belief = D − margin, `sendReserve` = min(`requestTimeout`, belief // 4), `startupGrace` = D + margin, idle end D // 4 | No rounding of `proto_db`'s float seconds can make the margin fall below 2/3 D (R78b) |
+| CC4 | **(maintainer)** HMAC frame authentication layout: the frame body is the msgpack map followed by a 32-byte tag, HMAC-SHA-256(key, UTF-8(receiver id) ‖ 0x00 ‖ msgpack bytes); the 4-byte length covers both; `MAX_FRAME_BYTES` unchanged; a key is a `ByteArray` of at least 32 bytes; a missing or wrong tag drops the connection like an invalid message; the tag is compared over all 32 bytes without an early exit. Replay needs no counter: duplication and reordering are inside the failure model (P5), and the receiver id in the tag stops delivery to another member. Disabled, the bytes are protocol 14 (13 before Task 22a) | Q5 asks for optional HMAC "from the start" but fixes no layout |
+| CC5 | The reader delivers each valid frame as it is read. `proto_db`'s "messages decoded from the same 64 KiB read as a bad frame are lost with it" is a property of its reads, not reproduced | Delivery and loss are both inside the failure model; the connection is still dropped at the first invalid frame |
+| CC6 | **(maintainer)** The node-id binding of the acceptor log proposed in lesson L27 is **not** added in Phases A-C: it needs a new entry kind, which would change the shared format. In shared storage the file name `cluster/<name>.roots` binds the id. Kept as a proposal to `proto_db` for Phase D | "Same bytes" outranks a cheap addition |
+| CC7 | Message types never sent at `DEPTH = 0` over shared storage (`records warm store propose fetch fetched commit_query commit_info`) are decoded and validated (an invalid one drops the connection), then ignored and counted in `stats` (`ignored_messages`) | All 22 types must be validated (spec 3.3 item 4); answering them would be code for Phase D |
+| CC8 | `#fetchTimeout` and every tier option are refused (`PBNotSupportedError` naming Phase D), not accepted silently | No uncalled code; refuse, never diverge |
+| CC9 | The barrier commit is a documented pattern (a `run:` that writes a root), not an API, as in `proto_db` (CP 1.12; the read-only barrier is not implemented there either) | No invented API |
+| CC10 | **(maintainer)** Standalone group commit (D52, Q8): the round runner retries a busy root lock with `Future after:` timers and never waits; each queued commit keeps its own `lockTimeout` deadline from the moment it was queued; the caller waits only on its commit's Future. This supersedes the "caller owns the backoff" half of R19 (the "never waits" half stays) and removes the deviation "the lock backoff blocks the caller's worker" | The runner owns the queue, so it owns the retry; one place instead of every caller |
+| CC11 | Group-size bound (Q4): the first queued commit of a round is always built; before building commit k+1, the runner continues only if the permission's time left is at least `sendReserve` + the longest build measured in this round. The rest go back to the head of the queue, not counted as attempts | Spec 5.6 states the bound, not the formula |
+| CC12 | Test layout: cluster unit and simulator tests live flat in `tests/unit/` (`cluster_*.st`, `sim_*.st`, helpers `_sim.st`, `_plants.st`), because the runner sets the working directory to the test's directory and `_check.st` lives there; real-process tests live in `tests/cluster/` | Spec 5.2 named `tests/cluster/sim/`; the runner's import rule decides |
+| CC13 | The simulator takes the rules object as a parameter (`rules:`); plants override one method of `PBCoordinatorCore` | C17 precedent: no product flags |
+| CC14 | Each scenario family runs a fixed list of seeds in the default suite (sized to fit `RUN_TIMEOUT`); `PBST_SIM_SEEDS=n` raises it for the soak run of Task 30. A failure prints the seed and the event trace | "Seeded runs at volume" without a slow default suite |
+| CC15 | Acceptor-log kinds 5 and 6 are decoded on load (the format says a reader takes them) and never written; `PBSharedTier` refuses a log holding one (`PBNotSupportedError`: a tiered node's log) | A shared-storage node never writes them |
+| CC16 | `ranges.log` and `segments.log` are verified at the framed-log layer (header, frame count, payload bytes); their entry decoders are Phase D | No uncalled decoders |
+| CC17 | Wire roots: `[0, nil, nil, label]` is the known empty space; the 3-item form is decoded with label 0 and never written | FS-wire field types |
+| CC18 | A reserve refusal is `PBConflictError` whose text names the longest build of the round, the time the permission had left, `sendReserve` and `leaseDuration` | Review Focus 2 |
+| CC19 | The persister writes `space.root` with `tryLockRoot`, `readRoot`, root-order check, then `replaceRoot:` (epoch + 1 is the CAS); a busy lock reschedules it after `persistInterval` | Port of `PlainTier.persist`; the persister never waits |
+| CC20 | `PBFileStorage class >> clusterPath:` opens a storage that may write a cluster space; `PBObjectSpace storage:coordinator:` requires one, `PBObjectSpace storage:` refuses one. `PBFileStorage path:` keeps refusing cluster spaces | Spec 5.2 "a coordinator-owned handle"; no mode flag on an open storage |
+| CC21 | A node id that is not `[A-Za-z0-9._-]{1,64}` is not refused: its log is `cluster/<hex of the UTF-8 bytes>.roots`, `proto_db`'s `_node_log` rule | Same file name as `proto_db` would pick |
+| CC22 | `PBRoundRunner` is shared by both modes and lives in `src/protobase/round.st`; the cluster round's shell is `PBClusterRound` in `src/protobase/cluster/round.st`. `PBPublisher` stays as the standalone strategy (one group per call) | Q8: one mechanism for both modes |
+| CC23 | Membership values (`PBPeer`, `PBMembership`: ranks, ballots, voters, fingerprint) get their own module `cluster/members.st` | One responsibility per file; spec 5.2 spread them over `protocol.st` and `lease.st` |
+| CC24 | `coordinator stats` answers a `Dictionary` keyed by `proto_db`'s stat names (snake_case Strings) for the counters protoBaseST has | One vocabulary in both projects' docs |
+| CC25 | Release number: 0.2.0, `## 0.2.0 (unreleased)` in the CHANGELOG | Spec header: "the release after the first public protoBaseST (0.1.0)" |
+
+As built:
+
+- **CC7**: the eight types are decoded, validated and ignored, but **not counted**: the counter
+  the call names was not built (`PBCoordinatorCore >> dispatchReceived:in:now:` ignores a type no
+  module handles). Recorded in [deviations.md](deviations.md#cluster-mode) by Task 29, which
+  changes no code; whether to add the counter is for Task 30's review of these calls.
+- **CC10** supersedes the "caller owns the backoff" half of R19; the "never waits" half stands.
+- **CC4** and **CC2**: protocol 14 since Task 22a (13 before), with the same layout.
+
+### Rulings taken during execution
+
+| Task | What was decided | Why | Cost if wrong |
+|---|---|---|---|
+| 2, 4 | `proto_db`'s refusal of a log file with two hard links, and its lock named after the real path, are ported with new protoST primitives (`BinaryFile >> linkCount` in protoST 0.11.0, `FileReference >> realPath` in protoIO 0.7.0 and protoST 0.12.0), never with a stopgap lock. | Review reproduced two live handles on one log through a symbolic link; a workaround would be debt. | protoST 0.12.0 is the floor. |
+| 5 | Map keys and the version field follow `proto_db`'s code, not its format spec's wording (bin keys admitted as `strict_map_key` admits them; `v` 13.0 equals 13, now 14.0 equals 14). | A peer is judged by the bytes `proto_db` accepts. | Hostile-input handling differs only on garbage. |
+| 7 | An option key that is not a String is refused; a String key is honoured as its Symbol. | protoST finds either spelling in a Dictionary. | None found. |
+| 8 | Where a task's brief and `proto_db` disagree on an interface, `proto_db` wins; the plan is updated. | The spec binds behaviour to `proto_db`. | Signature churn in later tasks. |
+| 9 | The startup grace and the log restore belong to the acceptor state, once, at node start; a re-attach reuses them. | One owner for the grace. | Grace semantics on re-attach; tested in Task 10. |
+| 16 | The rejoin state is reset at detach in the core, as `proto_db`'s `detach` clears `_rejoin_forced`. | Not a plan note: the core must not carry a detached log's rejoin. | None found. |
+| 17 | The timer audit's floors are measured per part; the full audit, the default suite and integration run **once**, in the final verification (Task 30), each task running only its own tests (maintainer, 2026-11-15). | Deterministic runs; a full audit takes hours. | A regression between tasks is found only at Task 30. |
+| 18 | The checklist has a third status, `deferred` (to a named task), for tests that need Phase C; the final gate refuses any. | Phase B had no shell, transport or storage. | Rows relabelled at Task 30 (none is left after Task 28). |
+| 19 | A failed write on a connection follows rc3: reconnect and write once more at once; back off only after a failed connect. | The brief's drop-and-back-off lost frames `proto_db` keeps. | None found. |
+| 19b | The renewal back-off and the fenced term (gamarino/ProtoDB#1) are ported from `proto_db` `88ca21d`, adopted upstream as R149/R149a and shipped in rc4. | The issue was filed from this port and fixed upstream. | None: it is `proto_db`'s rule. |
+| 20 | Every guard and failure mode of the coordinator shell follows `proto_db` (fence on unexpected errors only, a dropped message on a rule's `PBDBError`, attach of the same storage a no-op); one fix after the review breaker tripped, adjudicated and closed. | Five review rounds narrowed the differences to timing. | None open. |
+| 21 | Persister writes go through the round runner, with the commit round's writes (no root lock held forever); `persist:` refuses a label or epoch that is not the SpaceRoot's (protoBaseST addition). | Review found two failure modes of concurrent writes. | A persist waits behind queued commit work. |
+| 22a | **rc4 adopted at its minimum** (maintainer, 2026-11-15): protocol 14, acceptor log format 3 refused, rc4's cluster rules (R148, R149, R212/R231/R233, the D46 amendment); keep writing format 4; refuse format 5 with `PBNotSupportedError`. | rc4 was released mid-branch; a format-4 writer stays valid indefinitely. | The runtime registry waits for its own plan (below). |
+| 22b | The R133 gap (an unreadable base that must be committed first) follows rc4 exactly: nothing sent, the term kept. | No technical debt; `proto_db` is the reference. | None. |
+| docs | The tutorial is chaptered (13-16) with checked programs in `examples/cluster/`, written before release (maintainer: tutorials are how enthusiasts arrive). | Documentation teaches the reasoning. | Chapters to keep in sync (`tests/docs/tutorial_chapters_sync.sh`). |
+| 29 | The cluster benchmark runs each member as a process of its own on loopback, beside a standalone run of the same workload; the root-independent split is measured by a benchmark-only subclass of the round (`BenchRound`), not by a new product statistic; no `proto_db` figure is shown, since `proto_db`'s cluster was not run on the same shape. | Compare like with like; a measurement task changes no product code. | A `proto_db` comparison needs its own driver. |
+| 29 | The timer table of the reference is generated from `PBClusterConfig timerTable` and guarded (`tests/docs/timer_table_sync.sh`). | A copied table goes stale. | None. |
+
+### Known, not adopted: `proto_db` D62 (the runtime registry, format 5)
+
+`proto_db` `v2.0.0rc4` added format 5: the features `parents` (an envelope key `p`) and
+`registry` (the types `ModuleList` and `Catalog`, aliases 22 and 23), with `__currentModules` and
+`__catalog`, C3 resolution and their merge rules (D62). protoBaseST knows it and does not adopt
+it: it reads formats 2 to 4, writes 4, and refuses format 5 with `PBNotSupportedError` (segment
+headers, root records, acceptor log format 3; [deviations.md](deviations.md#reading)). A space any
+rc4 writer opened with a feature is refused at open, never misread. Why: rc4 allows a writer to
+stay at format 4 for data without a feature, and the registry is mostly semantics (load order,
+C3 with oid identity, catalog replacement), about the size of the cluster plan itself. Per the
+maintainer, the full registry gets its own plan after the cluster branch merges
+(`2026-11-15-rc4-delta.md`, section 3b). *Cost:* protoBaseST cannot open a space whose `proto_db`
+writers use the registry.
+
+## Proposals to `proto_db`
+
+Text for the maintainer to file in the protoBase repository. Done first:
+
+- **Done: the renewal back-off (gamarino/ProtoDB#1).** An owner whose renewal a majority refused
+  renewed again once per round trip until its lease ended. Filed 2026-11-14 from this port;
+  adopted upstream as rulings R149 and R149a (merge `88ca21d`), released in `v2.0.0rc4`. The port
+  follows it ([deviations.md](deviations.md#cluster-mode)).
+
+Still open (checked against `v2.0.0rc4`):
+
+- **Q7(a): refuse a cluster space without a coordinator.** *Proposal:* `FileStorage` (and every
+  storage that can hold a cluster space) should refuse to publish a root into a space whose
+  SpaceRoot carries `cluster_term`, or whose directory holds `cluster/`, unless the write comes
+  through a coordinator, as the external-writer rule already refuses other unsafe writers.
+  *Why:* today a plain `proto_db` process that opens a member's directory publishes a root outside
+  the cluster's order; the next persisted cluster root replaces it, and the write is lost without
+  an error. *Precedent:* protoBaseST refuses it (`PBFileStorage path:` refuses `cluster/`;
+  `replaceRoot:` of a plain storage refuses a cluster SpaceRoot).
+- **Q7(b): state the trusted-network assumption.** *Proposal:* the coordinator protocol and the
+  cluster guide should say that the transport is plaintext and unauthenticated: anyone who can
+  reach a member's port can send it any message, so a cluster must run on a trusted network.
+  *Why:* the assumption is real and unstated; operators read the guide, not the code.
+  *Precedent:* protoBaseST states it, and offers optional HMAC authentication (CC4).
+- **CC6: bind the node id in the acceptor log (lesson L27), for Phase D.** *Proposal:* record the
+  node id in the acceptor log (a new entry kind, or a header field at the next log format), and
+  refuse to open a log whose id is not the node's. *Why:* over shared storage the file name
+  `cluster/<name>.roots` binds the id, but with per-node disks a log copied onto another member is
+  indistinguishable from its own, and two members voting from one history break the majority
+  argument. It changes the shared format, so protoBaseST does not add it alone.
+
+A note, not a proposal: `proto_db`'s format spec says a non-string map key drops the connection,
+while `protocol.py` admits bin keys (`strict_map_key=True`); the two should say the same thing
+([deviations.md](deviations.md#cluster-wire-messages)).
 
 ## What is still open
 
