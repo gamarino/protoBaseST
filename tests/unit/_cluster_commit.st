@@ -21,9 +21,14 @@
   SeamSpace     a PBObjectSpace whose cluster round is a SeamRound.
   Worker        an actor client: once:block:retries: answers { #ok. value } or { #error. class
                 name. text }; increments:... runs a counter workload with a token per commit.
+  SeamSpace     also notes, in SeamSpace notes, each confirmation it starts ('<id> confirm') and
+                each warning it writes ('<id> warn <text>'), for the cluster read tests.
   CommitKit     a cluster of coordinators over one PBInProcessNetwork and one space directory
                 each node opens with its own TraceStorage; waits are conditions with a
-                deadline of 60 s (waitUntil:, settle:), never a duration asserted."
+                deadline of 60 s (waitUntil:, settle:), never a duration asserted. restart:
+                closes a node's space, stops it and starts a new coordinator of that id (a new
+                incarnation) over the same acceptor log, then reopens its space. Seams of a
+                subclass: endpointFor: (the transport of a node) and acceptorClass."
 Import from: 'protobase'.
 
 PBFileStorage subclass: #TraceStorage instanceVariableNames: 'trace poison'.
@@ -48,6 +53,10 @@ TraceStorage >> flushSegment
 TraceStorage >> replaceRoot: aRecord
   self note: 'publish'.
   ^ super replaceRoot: aRecord.
+
+TraceStorage >> readRoot
+  self note: 'read root'.
+  ^ super readRoot.
 
 TraceStorage >> _newSegmentWriter: aByteArray
   poison == true ifTrue: [^ FileSystemError signal: 'injected failure: the disk is gone'].
@@ -209,10 +218,30 @@ SeamRound >> applySettle: aSettle
 
 SeamRound setUp.
 
-PBObjectSpace subclass: #SeamSpace.
+PBObjectSpace subclass: #SeamSpace instanceVariableNames: '' classVariableNames: 'Notes'.
+
+SeamSpace class >> setUp
+  Notes := Atom on: #().
+
+SeamSpace class >> note: aString
+  Notes swap: [:old | old copyWith: aString].
+
+"Every note so far, in order."
+SeamSpace class >> notes
+  ^ Notes value.
 
 SeamSpace >> _newClusterRound: aPublisher proxy: aCell
   ^ SeamRound space: self publisher: aPublisher proxy: aCell.
+
+SeamSpace >> _confirm
+  SeamSpace note: self coordinator nodeId , ' confirm'.
+  ^ super _confirm.
+
+SeamSpace >> _warn: aString
+  SeamSpace note: self coordinator nodeId , ' warn ' , aString.
+  ^ super _warn: aString.
+
+SeamSpace setUp.
 
 Object subclass: #Worker.
 
@@ -245,7 +274,7 @@ Worker >> increments: aDatabase count: n prefix: aPrefix retries: r
 Worker >> close: aSpace
   ^ [aSpace close. true] on: Error do: [:e | e return: e class name].
 
-Object subclass: #CommitKit instanceVariableNames: 'ids dir network nodes spaces options storages'.
+Object subclass: #CommitKit instanceVariableNames: 'ids dir network nodes spaces options storages peers restarts'.
 
 "The nodes anArray over the space directory aDirectory, with extra options."
 CommitKit class >> ids: anArray dir: aDirectory options: aDictionary
@@ -256,22 +285,67 @@ CommitKit >> setIds: anArray dir: aDirectory options: aDictionary
   dir := aDirectory.
   options := aDictionary.
   storages := Dictionary new.
+  restarts := Dictionary new.
   self start.
 
 "New coordinators (a new network), started, nothing attached."
 CommitKit >> start
-  | peers |
   network := PBInProcessNetwork new.
   peers := (1 to: ids size) asArray collect: [:i | PBPeer nodeId: (ids at: i) host: '127.0.0.1' port: 7300 + i].
-  nodes := ids collect: [:id | | o |
-    o := Dictionary new
-      at: #leaseDuration put: 600; at: #driftMargin put: 400; at: #requestTimeout put: 100;
-      at: #seed put: (ids indexOf: id) + 11; yourself.
-    options keysAndValuesDo: [:k :v | o at: k put: v].
-    o at: #transport put: network endpoint.
-    PBClusterCoordinator nodeId: id peers: peers options: o].
+  nodes := ids collect: [:id | self newNode: id].
   nodes do: [:n | n start].
   spaces := Array new: ids size.
+
+"A new, unstarted coordinator anId on the kit's network; each one draws its own incarnation."
+CommitKit >> newNode: anId
+  | o n |
+  n := restarts at: anId ifAbsent: [0].
+  restarts at: anId put: n + 1.
+  o := Dictionary new
+    at: #leaseDuration put: 600; at: #driftMargin put: 400; at: #requestTimeout put: 100;
+    at: #seed put: (ids indexOf: anId) + 11 + (100 * n); yourself.
+  options keysAndValuesDo: [:k :v | o at: k put: v].
+  o at: #transport put: (self endpointFor: anId).
+  ^ PBClusterCoordinator nodeId: anId peers: peers options: o rules: PBCoordinatorCore new acceptorClass: self acceptorClass.
+
+"The transport of the node anId (a seam)."
+CommitKit >> endpointFor: anId
+  ^ network endpoint.
+
+"The acceptor class of every node (a seam)."
+CommitKit >> acceptorClass
+  ^ _PBAcceptor.
+
+CommitKit >> network ^ network.
+
+"anId restarted: its space closed, its node stopped, a new coordinator of that id started over
+ the same acceptor log, and its space opened again (answered)."
+CommitKit >> restart: anId
+  | i |
+  i := ids indexOf: anId.
+  (spaces at: i) isNil ifFalse: [[(spaces at: i) close] on: Error do: [:e | e return: nil]].
+  (nodes at: i) stop waitWithin: 60000.
+  nodes at: i put: (self newNode: anId).
+  (nodes at: i) start.
+  ^ self open: anId.
+
+"anId's space closed and its node stopped (its log kept)."
+CommitKit >> down: anId
+  | i |
+  i := ids indexOf: anId.
+  (spaces at: i) isNil ifFalse: [[(spaces at: i) close] on: Error do: [:e | e return: nil]].
+  spaces at: i put: nil.
+  (nodes at: i) stop waitWithin: 60000.
+
+"A new coordinator of anId started (after down:), nothing attached."
+CommitKit >> up: anId
+  | i |
+  i := ids indexOf: anId.
+  nodes at: i put: (self newNode: anId).
+  (nodes at: i) start.
+  ^ nodes at: i.
+
+CommitKit >> dir ^ dir.
 
 CommitKit >> ids ^ ids.
 CommitKit >> nodes ^ nodes.

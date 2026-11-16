@@ -602,14 +602,16 @@ PBCoordinatorCore >> dispatchRejoinWanted: anEvent in: s now: t
 
 "proto_db force_rejoin on a survivor (loaded and rejoined): a committed root that orders above
  every root it accepted names a commit lost with the other logs; it is forgotten (memory only:
- it was learnt from an answer, never logged), and the node confirms again (L18)."
+ it was learnt from an answer, never logged), the readers' committed root with it (PBPublishCommitted
+ root: nil, review I2: proto_db's readers read _committed itself), and the node confirms again
+ (L18)."
 PBCoordinatorCore >> acceptForceRejoin: anEvent in: s now: t
   | state |
   (s fenced notNil or: [s isRejoined not]) ifTrue: [^ self _unchangedAcceptor: s].
   (s committed notNil and: [s accepted isNil or: [(PBRootOrder compare: s committed with: s accepted) > 0]]) ifFalse: [
     ^ self _unchangedAcceptor: s].
   state := s with: { #committed -> nil. #confirmed -> false }.
-  ^ PBAcceptorStep state: state appends: #() reply: { PBPublishAcceptor state: state }.
+  ^ PBAcceptorStep state: state appends: #() reply: { PBPublishAcceptor state: state. PBPublishCommitted root: nil }.
 
 "The space starts the confirmation round of this attach: its acceptor records it."
 PBCoordinatorCore >> dispatchConfirmed: anEvent in: s now: t

@@ -32,7 +32,9 @@ to the core after the step's other effects, never inside them):
   PBAskBase     _baseFor:; PBBaseDecided.
   PBBuild       synchronous, on the runner: the entry's build on the base's record with the
                 stamp { term. epoch } (PBTransaction >> _buildOn:stamp:, PBPublisher >>
-                _newDatabase:on:stamp:), or, for a base that needs a commit first (no entry),
+                _newDatabase:on:stamp:), nothing for a confirmation (PBCommitEntry
+                confirmationDeadline:, Task 24: its PBBuilt has no root, and it settles once its
+                round's base is committed), or, for a base that needs a commit first (no entry),
                 the base's databases unchanged (proto_db _commit_base); the root saved in the
                 storage (PBSpaceRoot databases:term:epoch:previous:), labelled with the term
                 (PBLabeledRoot). The build's microseconds (Time microsecondClockValue) go into
@@ -179,14 +181,15 @@ PBClusterRound >> _handle: anEvent
     ensure: [draining swap: [:old | false]].
 
 "One step of the core at the node's clock, then its effects in order. An answer to the
- replicate clears the note that it left; a #committed one teaches the space its root (the
- last-known root a new transaction may start from, space.st _snapshotRecord) before any commit
- of the round is settled."
+ replicate clears the note that it left; a #committed one publishes its root to the node's
+ readers (PBClusterCoordinator >> _publishCommitted:, what a snapshot starts from, space.st
+ _snapshotRecord) before any commit of the round is settled: a commit reads its own write, even
+ before the node's acceptor has learnt it (Task 24)."
 PBClusterRound >> _step: anEvent
   | step |
   ((anEvent isKindOf: PBReplicated) or: [anEvent isKindOf: PBReplicateFailed]) ifTrue: [left swap: [:old | false]].
   ((anEvent isKindOf: PBReplicated) and: [anEvent outcome = #committed]) ifTrue: [
-    state value current isNil ifFalse: [space _learnCommitted: state value current]].
+    state value current isNil ifFalse: [coordinator _publishCommitted: state value current]].
   step := [coordinator _rules round: anEvent in: (state value withRejoinBallot: self _rejoinBallot) now: coordinator _now]
     on: Error do: [:e | self _abandon: e. e return: nil].
   step isNil ifTrue: [^ self].
@@ -292,9 +295,11 @@ PBClusterRound >> _askPermit
 PBClusterRound >> _askBase: aPermission
   ^ coordinator _baseFor: aPermission.
 
-"The root of aBuild, saved and labelled: a PBLabeledRoot."
+"The root of aBuild, saved and labelled: a PBLabeledRoot; nil for a confirmation (proto_db
+ _confirm_build: nothing to publish)."
 PBClusterRound >> _build: aBuild
   | stamp root pointer |
+  (aBuild entry notNil and: [aBuild entry token isConfirmation]) ifTrue: [^ nil].
   stamp := aBuild stamp.
   root := aBuild entry isNil
     ifTrue: [self _recommitRootOn: aBuild base record stamp: stamp]

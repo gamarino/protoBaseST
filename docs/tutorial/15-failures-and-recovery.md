@@ -2,10 +2,10 @@
 
 <!-- example: examples/cluster/15_losing_members.st -->
 <!-- example: examples/cluster/15_wiped_disk.st -->
-<!-- example: examples/cluster/pending/15_majority_loss.st.pending -->
+<!-- example: examples/cluster/15_majority_loss.st -->
 Programs: [examples/cluster/15_losing_members.st](../../examples/cluster/15_losing_members.st),
-[15_wiped_disk.st](../../examples/cluster/15_wiped_disk.st), and, pending,
-[pending/15_majority_loss.st.pending](../../examples/cluster/pending/15_majority_loss.st.pending).
+[15_wiped_disk.st](../../examples/cluster/15_wiped_disk.st) and
+[15_majority_loss.st](../../examples/cluster/15_majority_loss.st).
 Previous: [14. A three-node cluster](14-a-three-node-cluster.md). Next: [16. Operating a cluster](16-operating-a-cluster.md).
 
 A cluster exists for the bad days. This chapter takes the failures one at a time: what happens,
@@ -38,7 +38,7 @@ does yet, it says so.
 | | its accepted or committed root, if any, comes back | `sim_acceptance.st` (1) (accepted), (2) (committed) |
 | | grants wait for the startup grace | `sim_grants.st` (3); `sim_rejoin.st` (11) |
 | A member loses its disk | it rejoins by a ballot, never by a timer | `15_wiped_disk.st`; `sim_rejoin.st` (1), (2), (8); `cluster_coordinator_attach.st` (6) |
-| A majority of logs is lost | outside the model: the operator decides with `forceRejoin` | `sim_rejoin.st` (6); pending `15_majority_loss.st.pending` |
+| A majority of logs is lost | outside the model: the operator decides with `forceRejoin` | `sim_rejoin.st` (6); `15_majority_loss.st` |
 | An internal error | the node fences itself for the life of its process | `cluster_coordinator_shell.st` (5); `cluster_coordinator_faults.st` (1), (6) |
 | A failed write | the node refuses everything until reopened | `cluster_coordinator_shell.st` (6), (10) |
 | A second open of a live member's log | refused at the log's lock | `15_wiped_disk.st`, `cluster_tier.st` (2), both in one process; from another process: not yet tested, planned in Tasks 27 and 28 |
@@ -240,10 +240,13 @@ another member is the same mistake, and `proto_db` documents it as forbidden.)
 
 ## A majority of logs lost: `forceRejoin`
 
-> **Runs once Tasks 23 and 24 land.** The blocks come from
-> `examples/cluster/pending/15_majority_loss.st.pending`, which has never run. Today `forceRejoin`
-> exists and is tested by the simulator (`sim_rejoin.st` (6)) and by `cluster_rejoin_rules.st` (7)
-> and (14); the program needs commits to have something to lose.
+The blocks come from `examples/cluster/15_majority_loss.st`. `forceRejoin` is also tested by the
+simulator (`sim_rejoin.st` (6)), by `cluster_rejoin_rules.st` (7) and (14), and, with real
+coordinators and the read that follows it, by `cluster_reads.st` (8). The program uses a 3000 ms
+lease, so that a commit's build and replication fit within the belief on a loaded machine (with
+the 600 ms lease of the other programs the belief is 200 ms, which a build can exceed, CC18), and
+an `acquireTimeout` of 8 s, longer than the startup grace of that lease (5 s): a commit of the
+cluster's first start waits that grace out before any member grants.
 
 Losing the logs of a majority of voters is outside the failure model. In the program n0 survives,
 and n1 and n2 restart over empty logs. Each wiped member asks the other voters (a plain round):

@@ -25,7 +25,8 @@ clock, a socket or a file, sends, logs or waits.
     (a PBTimerFired token: event: after that many microseconds of the node's clock; the token
     names one timer and the rules ignore a fired timer whose token is no longer the current
     one, so a shell never cancels), PBSettle waiter: outcome:, PBPublishCommitted root: (the
-    committed root readers see), PBPublishAcceptor state: (the acceptor's snapshot, CC2),
+    committed root readers see: a newer one is adopted, an older one ignored; nil, which only
+    the acceptor publishes when it forgets its committed root, drops it), PBPublishAcceptor state: (the acceptor's snapshot, CC2),
     PBFence reason: (the node is fenced for the life of the process) and PBCount stat: (add one
     to the named counter of the node's stats, proto_db's snake_case name, CC24). An effect
     answers applyTo: aShell, which sends aShell the one message of its kind (applySend:,
@@ -634,19 +635,27 @@ PBSettle >> printOn: aStream
 
 "--- PBPublishCommitted ---"
 
-PBEffect subclass: #PBPublishCommitted instanceVariableNames: 'root'.
+PBEffect subclass: #PBPublishCommitted instanceVariableNames: 'root set'.
 
-"Publish aRoot (a PBLabeledRoot) as the committed root readers see."
+"Publish aRoot (a PBLabeledRoot) as the committed root readers see: the shell keeps the higher
+ of it and the one they see (PBRootOrder), so readers never go backwards. nil is the acceptor's
+ committed knowledge dropped (forceRejoin on a survivor, PBForceRejoin): the shell drops the
+ readers' root too (Task 24, review I2)."
 PBPublishCommitted class >> root: aRoot
-  (aRoot isKindOf: PBLabeledRoot) ifFalse: [
-    ^ PBValidationError signal: 'PBPublishCommitted: a root is a PBLabeledRoot, not ' , aRoot printString].
+  (aRoot isNil or: [aRoot isKindOf: PBLabeledRoot]) ifFalse: [
+    ^ PBValidationError signal: 'PBPublishCommitted: a root is a PBLabeledRoot or nil, not ' , aRoot printString].
   ^ self basicNew _setRoot: aRoot.
 
 PBPublishCommitted >> _setRoot: aRoot
   "Runs once, on a fresh instance."
-  root isNil ifFalse: [^ PBUserError signal: 'PBPublishCommitted is immutable'].
+  set == true ifTrue: [^ PBUserError signal: 'PBPublishCommitted is immutable'].
   root := aRoot.
+  set := true.
   ^ self.
+
+"Whether this publish drops the readers' committed root (nil)."
+PBPublishCommitted >> isDrop
+  ^ root isNil.
 
 PBPublishCommitted >> root
   ^ root.

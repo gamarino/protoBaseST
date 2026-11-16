@@ -11,9 +11,10 @@ Previous: [13. The ideas behind cluster mode](13-cluster-concepts.md). Next: [15
 
 > **What runs today.** Starting members, the transports, attaching the shared directory, the
 > cluster forming, permissions and `stats` run, and the first two programs show it. Committing
-> and reading through the coordinator do not exist yet: the blocks of those sections are marked
-> **Runs once Task N lands** and come from the pending program, which is written against the API of
-> the [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md) and has never run.
+> and reading through the coordinator run too (Tasks 23 and 24); the third program stays pending
+> only for its durability check, which needs the persister (`sync:`, Task 25 of the
+> [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md)): that section is marked
+> **Runs once Task 25 lands**.
 
 ## A member
 
@@ -196,9 +197,10 @@ authenticates, it does not encrypt.
 
 ## Committing
 
-> **Runs once Tasks 23 and 24 land.** Task 23 is the commit path, Task 24 brings `newDatabase:`
-> and `committedEpoch` to a cluster-mode space. The blocks of this section come from
-> `examples/cluster/pending/14_cluster_commits.st.pending`, which has never run.
+> The blocks of this section come from `examples/cluster/pending/14_cluster_commits.st.pending`;
+> everything in it but its last check (`sync:`, Task 25) runs. It uses a 3000 ms lease: a commit's
+> build and replication must fit within the belief, and the 200 ms belief of a 600 ms lease is
+> shorter than a build may take on a loaded machine (CC18, `PBConflictError` naming `sendReserve`).
 
 In cluster mode a commit looks exactly like a standalone one. `newDatabase:` is a commit too:
 
@@ -247,8 +249,8 @@ retry builds on the root just committed instead of losing the next turn (held re
 
 ## Reading
 
-> **Runs once Tasks 23 and 24 land.** The barriers below are commits (Task 23); the reads through
-> the coordinator are Task 24.
+> The barriers below are commits (Task 23); the reads through the coordinator are Task 24
+> (`tests/unit/cluster_reads.st`).
 
 A read in cluster mode takes the newest root **its node knows committed**. Apart from the
 confirmation after an attach (below), it sends nothing and never waits. The price: it may miss a commit another node acknowledged a moment ago, because the
@@ -258,9 +260,9 @@ promised. The snapshot is always a state that was committed, never a mixture.
 When a read must see every commit acknowledged before it started, make a commit first: any
 commit that writes something and returns normally is a **barrier**, because its permission round
 makes the node learn the newest root before it builds (a base below an acknowledged commit would
-lose it, which the protocol forbids). `newDatabase:` is expected to be one too: in `proto_db` it is
-a commit under a permission, so n1 creating a database of its own sees the one n0 created. The
-plan does not state it for the port; this check confirms it once Task 24 lands:
+lose it, which the protocol forbids). `newDatabase:` is one too: as in `proto_db` it is a commit
+under a permission, so n1 creating a database of its own sees the one n0 created, and this check
+confirms it:
 
 ```smalltalk
 (spaces at: 2) newDatabase: 'n1-scratch'.
@@ -299,8 +301,8 @@ never goes down, except after `forceRejoin` on a survivor, which is outside the 
 
 ## Durability: the persister
 
-> **Runs once Tasks 23 to 25 land.** It needs commits (Task 23), `committedEpoch` on the space
-> (Task 24), and the persister with `sync:` and the persisted epoch (Task 25).
+> **Runs once Task 25 lands.** It needs the persister with `sync:` and the persisted epoch (Task 25);
+> commits (Task 23) and `committedEpoch` on the space (Task 24) are there.
 
 `space.root` is written by each node's persister, after the commit, by compare-and-swap, never
 backwards. The commit point does not need it: acknowledged commits are durable in the voters'

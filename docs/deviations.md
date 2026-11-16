@@ -508,13 +508,9 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   not tier` in `_complete_rejoin`); the shell's attach and detach are Task 20's
   (carry-over (k)). On a survivor the acceptor forgets a committed root above its accepted
   root (memory only: such a root was learnt, never logged) and asks for a confirmation again;
-  a committed root already published to the space's readers is not withdrawn by the core
-  (`PBPublishCommitted` carries no nil). Task 24 (carried, review I2) makes the space check
-  `needsConfirmation` on every snapshot, as `proto_db`'s `_read_storage_root`, and its readers'
-  root follow the acceptor's drop. *Cost:* none under the failure model; outside it (a majority
-  of logs lost, the operator's recovery path), until Task 24 a space would keep starting
-  snapshots from the lost root, without bound; once Task 24 lands, only until the next
-  snapshot's confirmation.
+  the readers' root is dropped with it (`PBPublishCommitted root: nil`), and the space checks
+  `needsConfirmation` on every snapshot, as `proto_db`'s `_read_storage_root` (Task 24, review
+  I2), so the next snapshot confirms first and never starts from the lost root.
 - **The commit round is a state machine (representation and timing, CC2, CC10).** `proto_db`'s
   `_run_round` is a thread that blocks on the permit, the base, each build and the replication,
   and waits on a condition for held retries. protoBaseST's `round:in:now:` is pure: each answer
@@ -708,9 +704,27 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     once, while the coordinator's replication may still be running; rc4's closing thread never
     ends a permission a runner is still replicating under. The owner forgets the permit on the
     done and abandons the term (safe); the replication then ends as any other.
-  - Until Task 24, a transaction of a cluster space reads the newest committed root the node
-    knows (the coordinator's `committedRoot`, or the round's own last commit), with no confirmation
-    round and no fetch of records; Task 24 owns the cluster read path.
+  - Reads (Task 24, `space.st`). `proto_db`'s readers read the coordinator's `_committed`
+    under its lock, which the commit thread sets before `commit()` returns. protoBaseST's
+    committed knowledge is the acceptor's (an actor), so the readers' root is an Atom the
+    acceptor publishes to, and the commit round publishes its root there too, before the commit
+    settles (`_publishCommitted:`): the Atom keeps the higher root (`PBRootOrder`), so the
+    acceptor's later publish of an older root never lowers it, and only the acceptor's drop
+    (`forceRejoin` on a survivor) clears it. *Cost:* none; the readers see what `proto_db`'s do.
+  - When the node knows no committed root, `proto_db`'s `current_root` asks the peers
+    (`recover_root`) and reads the persisted root only when that fails; protoBaseST reads the
+    persisted root directly (and takes it as committed). This happens only on an empty cluster,
+    or after a confirmation failed (no permission within `acquireTimeout`, which a recovery round
+    would mostly fail too), or between a survivor's `forceRejoin` and its confirmation. *Cost:* in
+    those cases a read may start from an older committed root than a recovery would find: a
+    committed state still, never a wrong one, as `proto_db`'s own fallback.
+  - The confirmation's `_confirmed` is posted to the dispatcher, which hands it to the acceptor;
+    `proto_db`'s `confirmed()` clears the flag under the coordinator's lock. A snapshot that
+    starts before the acceptor took it confirms again. *Cost:* an extra empty round, never a
+    weaker read.
+  - The confirmation waits up to `acquireTimeout` for its permission (the cluster round's bound
+    for every commit, Task 23), not the space's `lockTimeout` as `proto_db`'s
+    `_commit_under_lease`; its failure is written to stderr, `proto_db`'s `logger.warning`.
 - **The shared tier and cluster storage mode (Task 21, `cluster/tier.st`, `proto_db`
   `PlainTier`).**
   - Cluster mode is chosen when the storage opens (`PBFileStorage clusterPath:`, CC20), not

@@ -13,12 +13,12 @@ check exits with status 1.
 | [14_three_nodes_tcp.st](14_three_nodes_tcp.st) | the same over TCP on localhost | [14](../../docs/tutorial/14-a-three-node-cluster.md) |
 | [15_losing_members.st](15_losing_members.st) | a voter dies, then the owner: the member left alone times out; a restart on an intact disk and its startup grace | [15](../../docs/tutorial/15-failures-and-recovery.md) |
 | [15_wiped_disk.st](15_wiped_disk.st) | a lost acceptor log and a rejoin by ballot; a double start refused | [15](../../docs/tutorial/15-failures-and-recovery.md) |
+| [15_majority_loss.st](15_majority_loss.st) | a minority times out; a majority of logs lost, stuck until `forceRejoin`; the cluster commits again | [15](../../docs/tutorial/15-failures-and-recovery.md) |
 | [16_configuration.st](16_configuration.st) | defaults, the rules among options, the timer table, `stats`, the startup grace over a used log | [16](../../docs/tutorial/16-operating-a-cluster.md) |
 
-[pending/](pending/README.md) holds the programs that need commits and reads in cluster mode:
-`14_cluster_commits.st.pending` needs Tasks 23 to 25 of the cluster plan,
-`15_majority_loss.st.pending` Tasks 23 and 24. They have never run; their `.st.pending` extension keeps
-them out of the test runner.
+[pending/](pending/README.md) holds the program that needs the persister:
+`14_cluster_commits.st.pending` needs Task 25 of the cluster plan (`sync:`, `persistedEpoch`); its
+`.st.pending` extension keeps it out of the test runner.
 
 ## Run them
 

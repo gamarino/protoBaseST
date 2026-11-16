@@ -2,17 +2,15 @@
 
 These programs are written against the API that the cluster plan
 ([docs/superpowers/plans/2026-11-13-cluster-mode.md](../../../docs/superpowers/plans/2026-11-13-cluster-mode.md))
-specifies for tasks that have not landed yet. They have never run. Their extension,
+specifies for tasks that have not landed yet. Their extension,
 `.st.pending`, keeps them out of `tests/run_tests.sh`, which runs only `*.st` and `*.sh` files.
 
 | Program | Chapter | Runs once |
 |---|---|---|
-| `14_cluster_commits.st.pending` | [14](../../../docs/tutorial/14-a-three-node-cluster.md) | Task 23 (cluster commits), Task 24 (`newDatabase:` and reads in cluster mode, `committedEpoch`), Task 25 (the persister, `sync:`, `persistedEpoch`) |
-| `15_majority_loss.st.pending` | [15](../../../docs/tutorial/15-failures-and-recovery.md) | Task 23 (cluster commits), Task 24 (`newDatabase:`, reads after a rejoin, `committedEpoch`) |
+| `14_cluster_commits.st.pending` | [14](../../../docs/tutorial/14-a-three-node-cluster.md) | Task 25 (the persister, `sync:`, `persistedEpoch`): its last check, the two lines that call them; the rest runs since Task 24 |
 
-The chapter sections that quote them carry the same markers: in chapter 14, *Committing* and
-*Reading* run once Tasks 23 and 24 land, *Durability* once Tasks 23 to 25 land; in chapter 15, the
-majority-loss section once Tasks 23 and 24 land.
+The chapter sections that quote them carry the same markers: in chapter 14, *Durability* runs once
+Task 25 lands. `15_majority_loss.st` left this directory with Task 24.
 
 When the tasks a program needs are merged: move it to `examples/cluster/` without the `.pending`
 suffix, update the `<!-- example: -->` line of its chapter, run it with

@@ -64,7 +64,7 @@ _PBNameCheck class >> check: aName what: aWhat
 
 "=== PBObjectSpace ============================================================"
 
-Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed runner coordinator tier known'.
+Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed runner coordinator tier'.
 
 PBObjectSpace class >> registerAtomClass: aClass
   ^ PBTypeRegistry register: aClass.
@@ -116,8 +116,6 @@ PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds coordinator: aC
   coordinator := aCoordinator.
   tier := aTier.
   closed := Atom on: false.
-  "TEMPORARY (Task 24): the last root the space's own cluster round committed (_learnCommitted:)."
-  known := Atom on: nil.
   runner := self _newRunner.
   ^ self.
 
@@ -136,12 +134,6 @@ PBObjectSpace >> _newClusterRound: aPublisher proxy: aCell
 "The node's tier (a PBSharedTier), nil without a coordinator."
 PBObjectSpace >> _tier
   ^ tier.
-
-"TEMPORARY (Task 24): the cluster round learnt that aLabeledRoot committed (its own commit): the
- last-known root (the known Atom), kept when it orders above the one known (PBRootOrder). It
- never drops a root; Task 24 removes it with the cluster read path (plan, Task 24 carry-over m3)."
-PBObjectSpace >> _learnCommitted: aLabeledRoot
-  known swap: [:old | PBRootOrder max: old with: aLabeledRoot].
 
 "Database.run's held retry for aCaller is not coming (cluster/round.st PBDropKept); nothing
  without a coordinator. Posted, never waited."
@@ -200,19 +192,65 @@ PBObjectSpace >> _checkOpen
 PBObjectSpace >> _currentSpaceRoot
   ^ self _spaceRootAt: self _snapshotRecord.
 
-"The storage's current root record (a PBRootRecord), or nil for an empty
- space: what a new transaction starts from (ProtoBase _snapshot_record). With
- a coordinator, the newest committed root this node knows: the coordinator's
- committedRoot or the last root the space's own round committed, whichever
- orders higher, else the storage's (persisted) root. This is the minimal read
- of a cluster space Task 23 needs; Task 24 owns the cluster read path."
+"The root record a new transaction starts from (a PBRootRecord), or nil for an
+ empty space (ProtoBase _snapshot_record, proto_db _read_storage_root). Without
+ a coordinator, the storage's current root. With one, the newest committed
+ root this node knows (the coordinator's committedRoot; the persisted root,
+ learnt as committed, when it knows none: _committedRecord), after a
+ confirmation when the node needs one: on the first snapshot after the attach,
+ and on any snapshot after forceRejoin on a survivor asked for one again, since
+ needsConfirmation is read on every snapshot (L18; Task 16, review I2)."
 PBObjectSpace >> _snapshotRecord
-  | root |
   self _checkOpen.
   coordinator isNil ifTrue: [^ storage readRoot].
-  root := PBRootOrder max: coordinator committedRoot with: known value.
-  (root isNil or: [root record isNil]) ifTrue: [^ storage readRoot].
+  coordinator needsConfirmation ifTrue: [self _confirm].
+  ^ self _committedRecord.
+
+"The confirmation (proto_db _read_storage_root): the coordinator records that it started
+ (_confirmed, one attempt per attach, as proto_db's confirmed() before the commit), then a commit
+ that writes nothing goes through the round runner (PBCommitEntry confirmationDeadline:): it
+ obtains a write permission and, when the base the lease names is not the committed root this
+ node knows, commits it first (proto_db _commit_base), so the node learns the newest root a
+ majority committed, also those made while it was down. A PBTimeoutError, PBConflictError or
+ PBOutcomeUnknownError of it is written to stderr (_warn:) and the read goes on from the committed
+ root this node knows: its logged one keeps reads from going backwards across a crash, and an
+ older committed root is still a committed state, never a wrong one. Any other error (the space
+ or the node closed, the node fenced) is signalled."
+PBObjectSpace >> _confirm
+  coordinator _confirmed wait.
+  [self _commitEntry: (PBCommitEntry confirmationDeadline: self _deadline)]
+    on: PBTimeoutError, PBConflictError, PBOutcomeUnknownError
+    do: [:e | self _warn: 'Confirming the committed root under the cluster lease failed: ' , e class name , ': '
+      , (e messageText ifNil: ['(no message)']). e return: nil].
+
+"The record of the newest committed root this node knows (proto_db current_root), nil for the
+ empty space. When the node knows none (a node that never learnt one, or one that forgot it, its
+ confirmation failed), the persisted root, which the coordinator then takes as committed
+ (_observePersisted:): only committed roots are persisted. proto_db asks the peers for their
+ roots (recover_root) before it reads the persisted one; protoBaseST reads the persisted one
+ directly (docs/deviations.md)."
+PBObjectSpace >> _committedRecord
+  | root |
+  root := coordinator committedRoot.
+  root isNil ifTrue: [
+    root := tier readPersisted.
+    coordinator _observePersisted: root].
+  root isNil ifTrue: [^ nil].
   ^ root record.
+
+"aString on stderr, prefixed with the space; never signals (proto_db logger.warning)."
+PBObjectSpace >> _warn: aString
+  [Stdio stderr nextPutAll: self printString , ': ' , aString; lf; flush] on: Error do: [:e | nil].
+
+"The epoch of the newest committed root this node knows (proto_db committed_epoch), 0 when none;
+ without a coordinator, the storage's root epoch (0 for an empty space). It never goes backwards,
+ forceRejoin on a survivor aside (PBClusterCoordinator >> committedRoot)."
+PBObjectSpace >> committedEpoch
+  | record |
+  self _checkOpen.
+  coordinator isNil ifFalse: [^ coordinator committedEpoch].
+  record := storage readRoot.
+  ^ record isNil ifTrue: [0] ifFalse: [record epoch].
 
 "The PBSpaceRoot aRootRecord points to, nil for nil. A space root committed by
  a cluster node is PBNotSupportedError, unless the space has a coordinator."

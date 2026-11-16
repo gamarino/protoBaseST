@@ -51,16 +51,16 @@ code you read here runs. The prose is not checked by a machine.
 
 Several protoST processes sharing one database directory: a peer lease elects an owner, the owner
 issues write permissions, commits are acknowledged by a majority, faulty nodes are fenced, and a
-node that lost its disk rejoins by a ballot. Chapter 13 needs no code; chapters 14 and 15 mark
-the blocks that wait for the commit and read path (Tasks 23 to 25 of the
-[cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md)), whose programs are in
-[examples/cluster/pending/](../../examples/cluster/pending/README.md) and are not run yet.
+node that lost its disk rejoins by a ballot. Chapter 13 needs no code; chapter 14 marks the
+block that waits for the persister (Task 25 of the
+[cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md)), whose program is in
+[examples/cluster/pending/](../../examples/cluster/pending/README.md) and is not run yet.
 
 | # | Chapter | Programs (in `examples/cluster/`) |
 |---|---|---|
 | 13 | [The ideas behind cluster mode](13-cluster-concepts.md) | `13_terms_and_majorities.st` |
 | 14 | [A three-node cluster](14-a-three-node-cluster.md) | `14_three_nodes.st`, `14_three_nodes_tcp.st`; pending `14_cluster_commits.st.pending` |
-| 15 | [Failures and recovery](15-failures-and-recovery.md) | `15_losing_members.st`, `15_wiped_disk.st`; pending `15_majority_loss.st.pending` |
+| 15 | [Failures and recovery](15-failures-and-recovery.md) | `15_losing_members.st`, `15_wiped_disk.st`, `15_majority_loss.st` |
 | 16 | [Operating a cluster](16-operating-a-cluster.md) | `16_configuration.st` |
 
 ## Running the programs

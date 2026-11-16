@@ -1,11 +1,5 @@
 "EXPECT: 15 majority loss ok (7 checks)"
-"PENDING: runs once Tasks 23 (cluster commits) and 24 (reads in cluster mode) of
- docs/superpowers/plans/2026-11-13-cluster-mode.md land. Written against the API that plan
- specifies; the test runner does not run it (the .st.pending extension). When both tasks are
- merged, rename it to examples/cluster/15_majority_loss.st, run it, and fix what the plan's API
- turned out to be.
-
- Cluster lesson 15, third program: a minority cannot commit, and a majority of lost logs needs
+"Cluster lesson 15, third program: a minority cannot commit, and a majority of lost logs needs
  an operator.
  Tutorial chapter: docs/tutorial/15-failures-and-recovery.md
 
@@ -48,9 +42,9 @@ ids := #('n0' 'n1' 'n2').
 peers := ids collect: [:id | PBPeer nodeId: id host: '127.0.0.1' port: 7400].
 network := PBInProcessNetwork new.
 make := [:id | PBClusterCoordinator nodeId: id peers: peers options: (Dictionary new
-  at: #leaseDuration put: 600;
+  at: #leaseDuration put: 3000;
   at: #requestTimeout put: 100;
-  at: #acquireTimeout put: 2000;
+  at: #acquireTimeout put: 8000;
   at: #transport put: network endpoint;
   yourself)].
 nodes := ids collect: [:id | make value: id].

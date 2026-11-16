@@ -68,6 +68,7 @@ no other lock exists in the protoST layer.
 | `newDatabase: aName` | Creates database `aName` (version 0, empty) and answers it. `PBValidationError` if it exists. |
 | `openDatabase: aName` | Answers the existing database. `PBValidationError` if absent. |
 | `close` | Ends the space; a later message to it or its databases is `PBClosedError`. |
+| `committedEpoch` | The epoch of the newest committed root the node knows (`proto_db`'s committed_epoch), `0` when none; without a coordinator, the storage's root epoch (`0` for an empty space). It never goes backwards, `forceRejoin` on a survivor aside. |
 | `isClosed`, `storage`, `lockTimeout`, `coordinator` | State (`coordinator` is `nil` without a cluster). |
 
 ### PBDatabase
@@ -899,10 +900,27 @@ For tests, tools and readers of the format. An application does not need them.
   backoff (it counts as an attempt), and tells the round when a held retry is not coming.
   `close` closes the round first: a commit in it whose root has not left the node is
   `PBClosedError`, one whose replicate left is `PBOutcomeUnknownError`. A cluster commit never
-  writes `space.root` (the persister's, Task 25). A new transaction starts from the newest
-  committed root the node knows (its `committedRoot`, or the space's own last commit). The
+  writes `space.root` (the persister's, Task 25). The
   coordinator's `stats` add `'critical_commits'` and `critical` (a Dictionary of summed seconds,
   `'build'` and `'replication'`).
+- **Reads in cluster mode** (`space.st`, Task 24; `proto_db`'s `_read_storage_root`,
+  current_root and committed_epoch): a snapshot (a new transaction, `listDatabases`,
+  `openDatabase:`) of a cluster space starts from the newest committed root its node knows, the
+  coordinator's `committedRoot`; when the node knows none, from the persisted root, which the
+  coordinator then takes as committed (counted `'storage_root_reads'`). Before it, while the
+  coordinator's `needsConfirmation` holds (after every attach, and again after `forceRejoin` on a
+  survivor), the space runs a confirmation: `_confirmed`, then a commit that writes nothing
+  (`PBCommitEntry confirmationDeadline:`) through the round runner, which obtains a write
+  permission and commits the base first when it needs a commit, so a restarted node reads at or
+  above every root a majority committed (L18). A `PBTimeoutError`, `PBConflictError` or
+  `PBOutcomeUnknownError` of the confirmation is written to stderr (`Confirming the committed
+  root under the cluster lease failed: ...`) and the read goes on from the root the node knows.
+  A commit publishes its root to the node's readers before it returns
+  (`PBClusterCoordinator >> _publishCommitted:`), so it reads its own write. The readers' root
+  keeps the higher of the roots published (`PBRootOrder`); `PBPublishCommitted root: nil`, which
+  the acceptor publishes when `forceRejoin` on a survivor drops its committed root, drops it.
+  A transaction that writes nothing asks for no permission and is no barrier; a commit that writes
+  something and returns normally is (`run:` writing `'_read_barrier'`, and `newDatabase:`).
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.
@@ -927,7 +945,8 @@ For tests, tools and readers of the format. An application does not need them.
   `PBUnexpectedError` naming the cause (`PBOutcomeUnknownError` unless the entry only found the
   root lock held), and a result that is not a decision is `PBOutcomeUnknownError`, never a
   success. **`PBCommitEntry`**: `transaction:willRetry:deadline:`,
-  `createDatabase:deadline:` (the deadline in monotonic microseconds), `future`, `transaction`,
+  `createDatabase:deadline:`, `confirmationDeadline:` (cluster mode, Task 24; `isConfirmation`)
+  (the deadline in monotonic microseconds), `future`, `transaction`,
   `databaseName`, `isCreateDatabase`, `willRetry`, `deadline`, `writtenAtoms`.
 
 ## The module and its files

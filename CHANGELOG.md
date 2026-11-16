@@ -2,6 +2,21 @@
 
 ## 0.2.0 (unreleased)
 
+- Reads in cluster mode (Task 24, `space.st`; `proto_db`'s `_read_storage_root`, `current_root`
+  and `committed_epoch`): a snapshot of a cluster space starts from the newest committed root its
+  node knows (`committedRoot`), or, when it knows none, from the persisted root, then taken as
+  committed (`'storage_root_reads'`). While `needsConfirmation` holds (after every attach, and
+  again after `forceRejoin` on a survivor: it is read on every snapshot, review I2), the snapshot
+  first runs a confirmation, a commit that writes nothing (`PBCommitEntry
+  confirmationDeadline:`) through the round runner, so a restarted node reads at or above every
+  root a majority committed (L18); its timeout, conflict or unknown outcome is written to stderr
+  and the read goes on from the root the node knows. A commit publishes its root to its node's
+  readers before it returns (`PBClusterCoordinator >> _publishCommitted:`), so it reads its own
+  write; the readers' root keeps the higher of the roots published, and `PBPublishCommitted root:
+  nil` (the acceptor's drop on `forceRejoin` of a survivor) clears it. `PBObjectSpace >>
+  committedEpoch`. Task 23's temporary read (the space's `known` root and `_learnCommitted:`) is
+  gone. Tests: `tests/unit/cluster_reads.st`; five checklist rows ported.
+
 - Cluster commits (Task 23, `cluster/round.st`): in a space opened with
   `PBObjectSpace storage:coordinator:`, `commit`, `newDatabase:` and `run:` go through the
   coordinator. `PBClusterRound` performs the core's commit round (`round:in:now:`) on the space's

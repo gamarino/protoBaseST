@@ -26,7 +26,7 @@ core decides (spec 5.4).
                         step's effects in order: PBSend through the transport, PBToAcceptor to
                         the acceptor actor, PBTimer as (Future after: ms) thenDo: sending the
                         PBTimerFired back, PBSettle on the Future of its waiter, PBPublishCommitted
-                        into the committed Atom, PBCount into the counters, PBFence, and the tier
+                        into the committed Atom (the higher root; nil drops it), PBCount into the counters, PBFence, and the tier
                         reads (PBReadPersisted, PBProbeRoot) to the acceptor, which owns the tier.
                         A message whose sender is not another member is dropped and counted
                         messages_ignored before the rules see it (Task 19 (b)). The transport's
@@ -215,6 +215,14 @@ _PBNodeCells >> fencedError
 _PBNodeCells >> closedError
   ^ PBClosedError new messageText: 'Node ' , config nodeId , ' is stopped (or not started)'; yourself.
 
+"The readers' committed root (the committed Atom) after aPublish (a PBPublishCommitted): the
+ higher of the two roots in the order of roots (PBRootOrder), so it never goes backwards when an
+ older root is published after a newer one (the acceptor's learning after the commit point's
+ publish, Task 24); nil drops it (the acceptor forgot its committed root, review I2)."
+_PBNodeCells >> publishCommitted: aPublish
+  aPublish isDrop ifTrue: [^ committed swap: [:old | nil]].
+  ^ committed swap: [:old | PBRootOrder max: old with: aPublish root].
+
 "aString on stderr, prefixed with the node; never signals."
 _PBNodeCells >> warn: aString
   [Stdio stderr nextPutAll: 'PBClusterCoordinator ' , config nodeId , ': ' , aString; lf; flush] on: Error do: [:e | nil].
@@ -394,7 +402,7 @@ _PBDispatcher >> applySettle: aSettle
   (w at: 2) resolve: outcome.
 
 _PBDispatcher >> applyPublishCommitted: aPublish
-  cells committed swap: [:old | aPublish root].
+  cells publishCommitted: aPublish.
 
 _PBDispatcher >> applyPublishAcceptor: aPublish
   ^ self.
@@ -606,7 +614,7 @@ _PBAcceptor >> applyCount: aCount
   cells count: aCount stat.
 
 _PBAcceptor >> applyPublishCommitted: aPublish
-  cells committed swap: [:old | aPublish root].
+  cells publishCommitted: aPublish.
 
 "The state is published before the reply (_step:)."
 _PBAcceptor >> applyPublishAcceptor: aPublish
@@ -833,9 +841,24 @@ PBClusterCoordinator >> _post: anEventBlock
 
 "--- what readers see ---"
 
-"The newest committed root this node knows (a PBLabeledRoot), nil when none."
+"The newest committed root this node knows (a PBLabeledRoot), nil when none: what a snapshot of
+ the node's space starts from (proto_db known_root). It never goes backwards, but for forceRejoin
+ on a survivor, which drops a root lost with the other logs (nil until the node learns another)."
 PBClusterCoordinator >> committedRoot
   ^ cells committed value.
+
+"The commit round's commit point (cluster/round.st): aLabeledRoot, just committed by this node,
+ is published to the readers before the commit settles, so a commit reads its own write; the
+ acceptor learns it later (PBLearnCommitted), and publishing it then changes nothing."
+PBClusterCoordinator >> _publishCommitted: aLabeledRoot
+  cells publishCommitted: (PBPublishCommitted root: aLabeledRoot).
+
+"The space read the persisted root aLabeledRoot because this node knows no committed root
+ (proto_db current_root's storage read): counted storage_root_reads, and published to the readers
+ as committed (it is: only committed roots are persisted), so later reads never go below it."
+PBClusterCoordinator >> _observePersisted: aLabeledRoot
+  cells count: 'storage_root_reads'.
+  aLabeledRoot isNil ifFalse: [self _publishCommitted: aLabeledRoot].
 
 "The epoch of committedRoot, 0 when none."
 PBClusterCoordinator >> committedEpoch

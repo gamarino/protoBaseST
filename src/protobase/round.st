@@ -21,6 +21,12 @@ runner; the caller waits only on the entry's Future.
                               without it the entry is its own caller
   PBCommitEntry createDatabase: aName deadline: us
                               version 0 of the database aName
+  PBCommitEntry confirmationDeadline: us
+                              a confirmation (cluster mode only, Task 24,
+                              proto_db _confirm_build): a commit that
+                              writes nothing; its round obtains a write
+                              permission and commits its base first when
+                              it needs a commit
   anEntry future              the Future the runner settles: true when
                               published, rejected with the commit's error
   PBRoundRunner space: aSpace the runner of aSpace, an actor of the medium
@@ -101,6 +107,11 @@ PBCommitEntry class >> createDatabase: aName deadline: microseconds
   aName isNil ifTrue: [^ PBValidationError signal: 'PBCommitEntry createDatabase: a database name was expected, not nil'].
   ^ self basicNew _setTransaction: nil name: aName willRetry: false caller: nil deadline: microseconds.
 
+"A confirmation of the committed root (space.st _confirm; proto_db _read_storage_root's empty
+ commit under the lease): no transaction, no database; the cluster round builds nothing for it."
+PBCommitEntry class >> confirmationDeadline: microseconds
+  ^ self basicNew _setTransaction: nil name: nil willRetry: false caller: nil deadline: microseconds.
+
 PBCommitEntry >> _setTransaction: aTransaction name: aName willRetry: aBoolean caller: anObject deadline: microseconds
   "Runs once, on a fresh instance."
   future isNil ifFalse: [^ PBUserError signal: 'PBCommitEntry is immutable'].
@@ -117,16 +128,20 @@ PBCommitEntry >> _setTransaction: aTransaction name: aName willRetry: aBoolean c
   future := Future new.
   ^ self.
 
-"The transaction committed, nil for a new database."
+"The transaction committed, nil for a new database or a confirmation."
 PBCommitEntry >> transaction
   ^ transaction.
 
-"The name of the database created, nil for a commit."
+"The name of the database created, nil for a commit or a confirmation."
 PBCommitEntry >> databaseName
   ^ databaseName.
 
 PBCommitEntry >> isCreateDatabase
-  ^ transaction isNil.
+  ^ transaction isNil and: [databaseName notNil].
+
+"Whether the entry is a confirmation (confirmationDeadline:)."
+PBCommitEntry >> isConfirmation
+  ^ transaction isNil and: [databaseName isNil].
 
 PBCommitEntry >> willRetry
   ^ willRetry.
@@ -151,9 +166,9 @@ PBCommitEntry >> writtenAtoms
 
 PBCommitEntry >> printOn: aStream
   aStream nextPutAll: 'PBCommitEntry('.
-  transaction isNil
-    ifTrue: [aStream nextPutAll: 'createDatabase '; print: databaseName]
-    ifFalse: [aStream print: transaction].
+  self isConfirmation ifTrue: [aStream nextPutAll: 'confirmation'].
+  self isCreateDatabase ifTrue: [aStream nextPutAll: 'createDatabase '; print: databaseName].
+  transaction isNil ifFalse: [aStream print: transaction].
   aStream nextPut: $).
 
 "=== PBRoundRunner ============================================================"
