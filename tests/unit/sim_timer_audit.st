@@ -29,8 +29,8 @@
      their runs equal the run at factor 1: once a core rule reads one, the declaration fails here.
  (8) AuditFamilies floors declares exactly the parts of floorKeys (none missing, extra,
      misspelt or twice), each with two integer counts; a count of 0 only on a part that
-     AuditFamilies pendingFloors names with its reason (now the renewBackoff parts, measured in
-     Task 30), each of those declared { 0. 0 }.
+     AuditFamilies pendingFloors names with its reason (none since Task 30 measured the
+     renewBackoff parts), each of those declared { 0. 0 }.
  Each part asserts its own coverage (AuditFamilies failuresOf:row:mode:part:): no violation,
  its own measured floors of strict runs and acknowledged commits, and the probe's bounds where
  the row has one."

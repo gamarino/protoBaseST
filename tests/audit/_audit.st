@@ -490,92 +490,94 @@ AuditFamilies class >> floorKeys
   ^ keys asArray.
 
 "{ 'row mode part'. strict runs. commits acknowledged } per part: that part's own measured
- counts (the runs are deterministic per seed). Measured serially in task-17-report.md: Fix
- round 1's data pass, and Fix round 2's re-measured parts for acquireTimeout (non-owner probe),
- retryHold (every attempt writing its token), leaseDuration tenfold and ownerIdleRelease skewed
- (re-split). A run that moves to checkSafe, or a commit no longer acknowledged, fails its part."
+ counts (the runs are deterministic per seed). First measured in Task 17 (task-17-report.md);
+ every part re-measured serially in Task 30 (task-30-report.md, the whole audit at HEAD), the
+ renewBackoff parts for the first time. Eleven parts dropped by 1 to 8 commits (two by one
+ strict run), bisected to two commits that change the core's schedules, never its safety (no
+ violation in any part at any of them): f38159e/62fb443 (R149/R149a, the renewal back-off and
+ the fenced term) and 4f9b095 (Task 22b: a re-commit's base is read by its build, no longer
+ probed, R233); Tasks 23 to 29 changed none of the counts. A run that moves to checkSafe, or a
+ commit no longer acknowledged, fails its part."
 AuditFamilies class >> floors
   ^ {
-    { 'acquireTimeout skewed 1'. 60. 517 }.
-    { 'acquireTimeout tenfold 1'. 60. 517 }.
-    { 'acquireTimeout tenth 1'. 60. 450 }.
-    { 'backoff skewed 1'. 60. 459 }.
-    { 'backoff tenfold 1'. 59. 457 }.
-    { 'backoff tenth 1'. 28. 216 }.
-    { 'backoff tenth 2'. 28. 206 }.
-    { 'driftMargin skewed 1'. 19. 206 }.
+    { 'acquireTimeout skewed 1'. 60. 523 }.
+    { 'acquireTimeout tenfold 1'. 60. 523 }.
+    { 'acquireTimeout tenth 1'. 60. 459 }.
+    { 'backoff skewed 1'. 60. 457 }.
+    { 'backoff tenfold 1'. 60. 461 }.
+    { 'backoff tenth 1'. 29. 218 }.
+    { 'backoff tenth 2'. 29. 215 }.
+    { 'driftMargin skewed 1'. 21. 221 }.
     { 'driftMargin skewed 2'. 22. 208 }.
-    { 'driftMargin tenth 1'. 29. 235 }.
-    { 'driftMargin tenth 2'. 28. 225 }.
-    { 'gatherAttempts skewed 1'. 60. 454 }.
-    { 'gatherAttempts tenfold 1'. 57. 451 }.
-    { 'gatherAttempts tenth 1'. 60. 453 }.
-    { 'idleEnd skewed 1'. 60. 456 }.
-    { 'idleEnd tenfold 1'. 60. 454 }.
-    { 'idleEnd tenth 1'. 60. 460 }.
-    { 'leaseDuration skewed 1'. 58. 449 }.
-    { 'leaseDuration tenfold 1'. 15. 138 }.
-    { 'leaseDuration tenfold 2'. 17. 142 }.
-    { 'leaseDuration tenfold 3'. 17. 142 }.
+    { 'driftMargin tenth 1'. 30. 242 }.
+    { 'driftMargin tenth 2'. 30. 233 }.
+    { 'gatherAttempts skewed 1'. 60. 461 }.
+    { 'gatherAttempts tenfold 1'. 60. 460 }.
+    { 'gatherAttempts tenth 1'. 60. 462 }.
+    { 'idleEnd skewed 1'. 60. 463 }.
+    { 'idleEnd tenfold 1'. 60. 462 }.
+    { 'idleEnd tenth 1'. 60. 465 }.
+    { 'leaseDuration skewed 1'. 60. 459 }.
+    { 'leaseDuration tenfold 1'. 20. 155 }.
+    { 'leaseDuration tenfold 2'. 19. 146 }.
+    { 'leaseDuration tenfold 3'. 19. 154 }.
     { 'leaseDuration tenth 1'. 60. 465 }.
-    { 'ownerIdleRelease skewed 1'. 30. 234 }.
-    { 'ownerIdleRelease skewed 2'. 30. 225 }.
-    { 'ownerIdleRelease tenfold 1'. 60. 454 }.
-    { 'ownerIdleRelease tenth 1'. 60. 468 }.
-    { 'permissionDeadline skewed 1'. 60. 454 }.
-    { 'permissionDeadline tenfold 1'. 25. 207 }.
-    { 'permissionDeadline tenfold 2'. 27. 206 }.
-    { 'permissionDeadline tenth 1'. 60. 472 }.
-    { 'permitFloor skewed 1'. 60. 454 }.
-    { 'permitFloor tenth 1'. 60. 454 }.
-    { 'persist skewed 1'. 60. 454 }.
-    { 'persist tenfold 1'. 60. 454 }.
-    { 'persist tenth 1'. 60. 454 }.
-    "renewBackoff (Task 19b, R149a): not measured yet (pendingFloors)."
-    { 'renewBackoff skewed 1'. 0. 0 }.
-    { 'renewBackoff tenfold 1'. 0. 0 }.
-    { 'renewBackoff tenth 1'. 0. 0 }.
-    { 'renewal skewed 1'. 17. 138 }.
-    { 'renewal skewed 2'. 16. 134 }.
-    { 'renewal skewed 3'. 17. 143 }.
-    { 'renewal tenfold 1'. 3. 42 }.
-    { 'renewal tenfold 2'. 3. 40 }.
-    { 'renewal tenfold 3'. 4. 45 }.
-    { 'renewal tenfold 4'. 4. 42 }.
-    { 'renewal tenfold 5'. 5. 45 }.
-    { 'renewal tenfold 6'. 5. 42 }.
-    { 'renewal tenfold 7'. 3. 47 }.
-    { 'renewal tenfold 8'. 3. 36 }.
-    { 'renewal tenth 1'. 60. 459 }.
-    { 'requestTimeout skewed 1'. 60. 457 }.
-    { 'requestTimeout tenfold 1'. 29. 230 }.
-    { 'requestTimeout tenfold 2'. 29. 236 }.
-    { 'requestTimeout tenth 1'. 60. 467 }.
-    { 'retryHold skewed 1'. 59. 464 }.
-    { 'retryHold tenfold 1'. 58. 467 }.
-    { 'retryHold tenth 1'. 59. 475 }.
-    { 'sendReserve skewed 1'. 60. 462 }.
-    { 'sendReserve tenth 1'. 60. 468 }.
-    { 'startupGrace skewed 1'. 60. 453 }.
-    { 'startupGrace tenfold 1'. 60. 454 }.
-    { 'startupGrace tenth 1'. 60. 451 }.
-    { 'straggle skewed 1'. 59. 444 }.
-    { 'straggle tenfold 1'. 60. 456 }.
-    { 'straggle tenth 1'. 60. 460 }.
-    { 'turnSilence skewed 1'. 60. 457 }.
-    { 'turnSilence tenfold 1'. 59. 451 }.
-    { 'turnSilence tenth 1'. 60. 453 }.
+    { 'ownerIdleRelease skewed 1'. 30. 239 }.
+    { 'ownerIdleRelease skewed 2'. 30. 227 }.
+    { 'ownerIdleRelease tenfold 1'. 60. 463 }.
+    { 'ownerIdleRelease tenth 1'. 60. 475 }.
+    { 'permissionDeadline skewed 1'. 60. 464 }.
+    { 'permissionDeadline tenfold 1'. 26. 217 }.
+    { 'permissionDeadline tenfold 2'. 26. 202 }.
+    { 'permissionDeadline tenth 1'. 60. 469 }.
+    { 'permitFloor skewed 1'. 60. 463 }.
+    { 'permitFloor tenth 1'. 60. 463 }.
+    { 'persist skewed 1'. 60. 463 }.
+    { 'persist tenfold 1'. 60. 463 }.
+    { 'persist tenth 1'. 60. 463 }.
+    { 'renewBackoff skewed 1'. 60. 463 }.
+    { 'renewBackoff tenfold 1'. 60. 462 }.
+    { 'renewBackoff tenth 1'. 60. 463 }.
+    { 'renewal skewed 1'. 18. 148 }.
+    { 'renewal skewed 2'. 20. 153 }.
+    { 'renewal skewed 3'. 19. 155 }.
+    { 'renewal tenfold 1'. 8. 65 }.
+    { 'renewal tenfold 2'. 4. 48 }.
+    { 'renewal tenfold 3'. 6. 59 }.
+    { 'renewal tenfold 4'. 6. 54 }.
+    { 'renewal tenfold 5'. 6. 49 }.
+    { 'renewal tenfold 6'. 5. 38 }.
+    { 'renewal tenfold 7'. 7. 58 }.
+    { 'renewal tenfold 8'. 5. 49 }.
+    { 'renewal tenth 1'. 60. 457 }.
+    { 'requestTimeout skewed 1'. 60. 468 }.
+    { 'requestTimeout tenfold 1'. 30. 237 }.
+    { 'requestTimeout tenfold 2'. 30. 240 }.
+    { 'requestTimeout tenth 1'. 60. 470 }.
+    { 'retryHold skewed 1'. 60. 468 }.
+    { 'retryHold tenfold 1'. 60. 466 }.
+    { 'retryHold tenth 1'. 60. 473 }.
+    { 'sendReserve skewed 1'. 60. 473 }.
+    { 'sendReserve tenth 1'. 60. 476 }.
+    { 'startupGrace skewed 1'. 60. 461 }.
+    { 'startupGrace tenfold 1'. 60. 463 }.
+    { 'startupGrace tenth 1'. 60. 460 }.
+    { 'straggle skewed 1'. 60. 466 }.
+    { 'straggle tenfold 1'. 60. 465 }.
+    { 'straggle tenth 1'. 60. 456 }.
+    { 'turnSilence skewed 1'. 60. 466 }.
+    { 'turnSilence tenfold 1'. 60. 461 }.
+    { 'turnSilence tenth 1'. 60. 463 }.
     { 'wakeSpread skewed 1'. 60. 450 }.
-    { 'wakeSpread tenfold 1'. 60. 458 }.
-    { 'wakeSpread tenth 1'. 60. 448 } }.
+    { 'wakeSpread tenfold 1'. 60. 457 }.
+    { 'wakeSpread tenth 1'. 60. 447 } }.
 
 "The parts whose floors are not measured yet: { 'row mode part'. why }. Each is declared in
  floors with { 0. 0 }; the index (sim_timer_audit.st check (8)) refuses a floor of 0 on any part
  not listed here, and every part listed here must be declared with a floor of 0 and a reason.
- Task 30 Step 1b measures them and empties the list."
+ Empty since Task 30, which measured the renewBackoff parts (Task 19b)."
 AuditFamilies class >> pendingFloors
-  ^ #(#('renewBackoff skewed 1' 'measured in Task 30') #('renewBackoff tenfold 1' 'measured in Task 30')
-    #('renewBackoff tenth 1' 'measured in Task 30')).
+  ^ #().
 
 "The bounds of the probe's count per run, { min. max } (nil: the row has no probe): the count
  shows the probe made the core read the timer, and that 1/10 and 10 times differ.
@@ -583,15 +585,18 @@ AuditFamilies class >> pendingFloors
  skewed (the last member at 1/2: 15 s) in none. gatherAttempts: at 1/10 (one attempt) the gather
  never asks again; at 10 times (30 attempts) it asks again through the 4 s; skewed: the last
  member at 1/2 (2 attempts). retryHold: at 1/10 (a 10 ms hold) holds run out before the held
- retry (20 ms) queues; at 10 times (1 s) and skewed (50 ms, 200 ms) none does. Measured over the
- 60 runs (Fix round 1): acquireTimeout 60, 0, 0; gatherAttempts 60, 1026, 120; retryHold 347, 0, 0
- (at 1/10, 10 times, skewed)."
+ retry (20 ms) queues; at 10 times (1 s) none does, skewed (50 ms, 200 ms) at most one per run.
+ Measured over the 60 runs (Fix round 1): acquireTimeout 60, 0, 0; gatherAttempts 60, 1026, 120;
+ retryHold 347, 0, 0 (at 1/10, 10 times, skewed). Re-measured in Task 30: acquireTimeout 60, 0,
+ 0; gatherAttempts 60, 1022, 120; retryHold 340, 0, 1. The skewed retryHold count of 1 (one hold
+ of 50 ms ran out in 60 runs) comes from 4f9b095 (Task 22b: a re-commit's base is read by its
+ build, so a held retry can queue later), bisected; its bound is { 0. 1 } per run."
 AuditFamilies class >> probeBounds: aRow mode: aMode
   | key |
   key := aRow , ' ' , aMode.
   #(#('acquireTimeout tenth' 1 1) #('acquireTimeout tenfold' 0 0) #('acquireTimeout skewed' 0 0)
     #('gatherAttempts tenth' 1 1) #('gatherAttempts tenfold' 4 30) #('gatherAttempts skewed' 2 2)
-    #('retryHold tenth' 1 1000) #('retryHold tenfold' 0 0) #('retryHold skewed' 0 0)) do: [:e |
+    #('retryHold tenth' 1 1000) #('retryHold tenfold' 0 0) #('retryHold skewed' 0 1)) do: [:e |
       e first = key ifTrue: [^ e allButFirst]].
   ^ nil.
 
