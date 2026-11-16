@@ -1,4 +1,4 @@
-"EXPECT: ok 7"
+"EXPECT: ok 8"
 "The base of a term's first root (cluster/holder.st, CP 1.6, proto_db _lease_base,
  _phase_1_floor, _commit_base) in the simulator (_sim.st), proto_db
  test_cluster_recovery_base and the strict form of test_cluster_permit_incarnations'
@@ -6,7 +6,8 @@
  the product rules choose every base. (1) The C1 schedule of CP 725-780 (a slow timer and a
  delayed message): an uncertain lease's recovery round ends at a majority of witnesses that
  have not accepted R'; the phase-1 floor makes R' the base; R' is acknowledged afterwards and
- stays in every committed chain. (2) Removed: I1 (proto_db _BaseUnreachable) arises only on a
+ stays in every committed chain; at seed 1, as the reviewer reproduced it, a re-commits R' first
+ (the soak, PBST_SIM_SEEDS, raises the seed-free part only). (2) Removed: I1 (proto_db _BaseUnreachable) arises only on a
  local-records tier (Phase D); over shared storage an unreadable base fails its re-commit build,
  nothing sent (rc4 R233, sim_round_rules.st (25), (26)). (3) M6: a
  recovery with every waits for the holder that knows the commit, and learns it. (4) Refound
@@ -21,17 +22,25 @@ Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_base'.
 
-| c out r1 slow |
+| c out r1 slow c1 onRp |
 c := Check new.
 r1 := BaseFamilies r1.
+c1 := BaseFamilies c1: BaseRules new seed: 1.
 
 "(1)"
-c that: 'C1: R'' is acknowledged and never dropped ({ violation. lease uncertain on R''. a base on R'' re-committed })'
+onRp := [:o :mustRecommit | (o at: 3) anySatisfy: [:d | (d isKindOf: PBBaseDecision) and: [d outcome = #ok
+  and: [(mustRecommit not or: [d needsCommit]) and: [d base key ~= r1 key]]]]].
+c that: 'C1: R'' is acknowledged and never dropped ({ violation. lease uncertain on R''. a base on R'' })'
   is: (PBSimSoak same: [:n | | o |
-    o := BaseFamilies c1: BaseRules new seed: n.
-    { o first. o at: 2.
-      ((o at: 3) anySatisfy: [:d | (d isKindOf: PBBaseDecision) and: [d outcome = #ok and: [d needsCommit and: [d base key ~= r1 key]]]]) }] over: #(1))
+    o := n = 1 ifTrue: [c1] ifFalse: [BaseFamilies c1: BaseRules new seed: n].
+    { o first. o at: 2. onRp value: o value: false }] over: #(1))
   equals: { nil. true. true }.
+"The reviewer's schedule as reproduced at seed 1: a's base on R' is a re-commit (R' not yet
+ learnt committed). Another seed may let a learn R' committed first and build on it directly
+ (seeds 8 and 10 of the Task 30 soak), so this one is not raised by the soak."
+c that: 'C1 at seed 1: a re-commits R'' before its commit'
+  is: (onRp value: c1 value: true)
+  equals: true.
 
 
 "(3)"
