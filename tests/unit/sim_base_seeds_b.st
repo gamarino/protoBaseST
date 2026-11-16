@@ -16,7 +16,7 @@ Import from: '_base'.
 
 | c out |
 c := Check new.
-out := BaseFamilies seeds: (101 to: 200) rules: [BaseRules new].
+out := BaseFamilies seeds: (PBSimSoak seeds: (101 to: 200)) rules: [BaseRules new].
 c that: 'seeds 101-200 under drops and clock skew ({ violations. recoveries ran. stale bases. re-commits. first violation })'
   is: { out first. (out at: 2) > 0. (out at: 3) > 0. (out at: 4) > 0. out at: 5 }
   equals: { 0. true. true. true. nil }.

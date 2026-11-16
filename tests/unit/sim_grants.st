@@ -84,9 +84,10 @@ grantTerms := [:rules :anId :aGranter | (((rules repliesAt: anId) select: [:m | 
 grace := 3333334.
 g := 4000000.
 "Runs aFamily (a block of a seed and a rules object answering nil or a failure text) over
- seeds 1-40 with rules of aClass; answers the failure texts (an error is one)."
+ seeds 1-40 with rules of aClass (the product's seeds through PBSimSoak, which the soak raises;
+ a plant's stay 1-40); answers the failure texts (an error is one)."
 failuresOf := [:aFamily :aClass |
-  ((1 to: 40) asArray collect: [:seed |
+  ((aClass == GrantRules ifTrue: [PBSimSoak seeds: (1 to: 40)] ifFalse: [(1 to: 40) asArray]) collect: [:seed |
     [aFamily value: seed value: aClass new] on: Error do: [:e | 'seed ' , seed printString , ': ' , e messageText]])
     reject: [:x | x isNil]].
 family := Dictionary new.

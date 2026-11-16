@@ -1,4 +1,4 @@
-"EXPECT: ok 7"
+"EXPECT: ok 8"
 "Acceptance, the commit point and committed knowledge (cluster/acceptor.st, cluster/holder.st)
  in the simulator (_sim.st), proto_db test_cluster_acceptor_writes, _acceptor_durability,
  _durability, _chain_rule, _voters and test_cluster_root_certainty. The scenario families, the
@@ -13,7 +13,10 @@
  root accepted after its restart, never acked it, and the commit completes without it.
  PlantAckBeforeSync is caught. (2) A power loss drops only unsynced #committed entries; a crash
  with the page cache written back restores the committed root; the chains converge.
- PlantCommittedUnlogged is caught. (3) A holder paused for 10 belief periods resumes and
+ PlantCommittedUnlogged is caught. (2b) The same power loss inside a term (no wait for idle: n2,
+ the term's owner, loses power at once after 'c'), then one more commit, 'd': its term settles
+ what the crash left and the chains converge with the strict rule (Task 30). PlantCommittedUnlogged
+ is caught. (3) A holder paused for 10 belief periods resumes and
  replicates under its old permission: nothing it sends is accepted (the ballot rule), its
  commit is not acknowledged; the newer owner commits. PlantNoBallotRule is caught. (4) Log
  matching: a root of the accepted term not built on the accepted root is refused until its
@@ -23,14 +26,15 @@
  helps a quorum: it drops the replicate (config_mismatches), its own requests get no grant.
  PlantNoFingerprint is caught. (7) The four certainty schedules of D45 amendment 6:
  release-carried certainty is never a commit point (L8). PlantReleaseTeachesAccepted is caught
- on the uncertain-release schedule."
+ on the uncertain-release schedule. The product's seeds come through PBSimSoak (CC14): the soak
+ raises them (PBST_SIM_SEEDS); a plant's stay fixed."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_accept'.
 
 | c seeds plantSeeds lost |
 c := Check new.
-seeds := (1 to: 8) asArray.
+seeds := PBSimSoak seeds: (1 to: 8).
 plantSeeds := #(1 2).
 
 c that: 'ack only after the synced append ({ problems under faults. crash schedule failures }, then plant caught)'
@@ -41,6 +45,11 @@ c that: 'ack only after the synced append ({ problems under faults. crash schedu
 c that: 'power loss drops only unsynced committed knowledge ({ failed. seeds that lost one }, plant)'
   is: { (lost := AcceptFamilies powerLoss: [AcceptRules new] seeds: seeds) first. lost last > 0.
     (AcceptFamilies powerLoss: [PlantCommittedUnlogged new] seeds: plantSeeds) first }
+  equals: { 0. true. plantSeeds size }.
+
+c that: 'a power loss inside a term, then one more commit: the new term settles what the crash left ({ failed. seeds that crashed inside a term })'
+  is: { (lost := AcceptFamilies powerLossInTerm: [AcceptRules new] seeds: seeds) first. lost last > 0.
+    (AcceptFamilies powerLossInTerm: [PlantCommittedUnlogged new] seeds: plantSeeds) first }
   equals: { 0. true. plantSeeds size }.
 
 c that: 'the old term''s roots are refused after a promise ({ failed. acknowledged }, plant)'
@@ -64,8 +73,8 @@ c that: 'a member of another voter set never helps a quorum ({ failed. helped },
   equals: { #(0 0). { plantSeeds size. plantSeeds size } }.
 
 c that: 'release-carried certainty is never a commit point (schedules failed per seed, plant)'
-  is: { #(1 2) collect: [:n | AcceptFamilies certainty: [AcceptRules new] schedules: #(1 2 3 4) seed: n].
+  is: { ((PBSimSoak seeds: #(1 2)) collect: [:n | AcceptFamilies certainty: [AcceptRules new] schedules: #(1 2 3 4) seed: n]) asSet asArray.
     plantSeeds collect: [:n | AcceptFamilies certainty: [PlantReleaseTeachesAccepted new] schedules: #(3) seed: n] }
-  equals: { #(0 0). #(1 1) }.
+  equals: { #(0). #(1 1) }.
 
 c report displayNl.

@@ -327,8 +327,8 @@ modes := [:mode :seed |
   s crash: 'n2' unsynced: mode.
   (s diskOf: 'n2') size].
 count := { modes value: #drop value: 11. modes value: #keep value: 11.
-  (1 to: 12) asArray collect: [:seed | modes value: #prefix value: seed].
-  (1 to: 12) asArray collect: [:seed | modes value: #any value: seed].
+  (PBSimSoak seeds: (1 to: 12)) collect: [:seed | modes value: #prefix value: seed].
+  (PBSimSoak seeds: (1 to: 12)) collect: [:seed | modes value: #any value: seed].
   modes value: #prefix value: 5. modes value: #prefix value: 5 }.
 planted := sim value: 11 value: EchoRules new.
 planted runUntil: [false] steps: 100.
@@ -356,7 +356,7 @@ c that: 'a crash after the sync and before the reply leaves the root accepted an
   equals: #(4097 0 2).
 
 "(9) The acceptor lane is serial; a concurrent lane is caught."
-a := (1 to: 12) asArray collect: [:seed |
+a := (PBSimSoak seeds: (1 to: 12)) collect: [:seed |
   | s tr |
   s := PBSim seed: seed ids: #('n0') rules: LaneRules new options: Dictionary new.
   s runUntil: [false] steps: 50.

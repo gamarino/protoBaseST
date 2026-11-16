@@ -28,20 +28,20 @@ Import from: '_permits'.
 | c |
 c := Check new.
 c that: 'first come first served, own threads included ({ failed. misordered. deferred not served })'
-  is: (PermitFamilies firstCome: PermitRules seeds: (1 to: 5)) equals: #(0 0 0).
+  is: (PermitFamilies firstCome: PermitRules seeds: (PBSimSoak seeds: (1 to: 5))) equals: #(0 0 0).
 c that: 'a restarted holder''s done never retires a permission it did not hold ({ failed. answered. kept. issued })'
-  is: (PermitFamilies restarted: PermitRules seeds: (1 to: 5)) equals: #(0 0 0 0).
+  is: (PermitFamilies restarted: PermitRules seeds: (PBSimSoak seeds: (1 to: 5))) equals: #(0 0 0 0).
 c that: 'a dead holder''s late done ({ failed. no abandon. certain. third or not refused. changed. expiry })'
-  is: (PermitFamilies lateDone: PermitRules seeds: (1 to: 3)) equals: #(0 0 0 0 0 0).
+  is: (PermitFamilies lateDone: PermitRules seeds: (PBSimSoak seeds: (1 to: 3))) equals: #(0 0 0 0 0 0).
 c that: 'minority side times out; owners are forgotten only for the term asked under'
-  is: (PermitFamilies minority: PermitRules seeds: (1 to: 3)) equals: #(0 0 0 0).
+  is: (PermitFamilies minority: PermitRules seeds: (PBSimSoak seeds: (1 to: 3))) equals: #(0 0 0 0).
 c that: 'a faulty owner issuing one base twice ({ product { violations. sibling roots }. plant { ... } })'
-  is: { PermitFamilies baseTwice: PermitRules seeds: (1 to: 5). PermitFamilies baseTwice: PlantBaseTwice seeds: (1 to: 5) }
+  is: { PermitFamilies baseTwice: PermitRules seeds: (PBSimSoak seeds: (1 to: 5)). PermitFamilies baseTwice: PlantBaseTwice seeds: (1 to: 5) }
   equals: #(#(0 0) #(5 5)).
 c that: 'the plant PlantSilenceForgets fails family 4'
   is: ((PermitFamilies minority: PlantSilenceForgets seeds: (1 to: 2)) at: 3) > 0 equals: true.
 c that: 'the plant PlantHintForgotten fails family 4'
   is: ((PermitFamilies minority: PlantHintForgotten seeds: (1 to: 2)) at: 2) > 0 equals: true.
 c that: 'a waiter queued at its own node''s ownership times out at its deadline ({ failed. late. issued })'
-  is: (PermitFamilies localTimeout: PermitRules seeds: (1 to: 3)) equals: #(0 0 0).
+  is: (PermitFamilies localTimeout: PermitRules seeds: (PBSimSoak seeds: (1 to: 3))) equals: #(0 0 0).
 c report displayNl.

@@ -24,19 +24,19 @@ Import from: '_check'.
 Import from: '_sim'.
 Import from: '_plants'.
 
-| c fair |
+| c fair seeds |
 c := Check new.
 c that: 'the lease runs from the send, not the win ({ seeds failed. seeds where both owned })'
-  is: (LeaseFamilies window: LeaseRules seeds: (1 to: 10)) equals: #(0 10).
+  is: (LeaseFamilies window: LeaseRules seeds: (seeds := PBSimSoak seeds: (1 to: 10))) equals: { 0. seeds size }.
 c that: 'clock rates 2/3 to 3/2 keep S1 ({ seeds failed. seeds where another member took over })'
-  is: (LeaseFamilies drift: LeaseRules seeds: (1 to: 6)) equals: #(0 6).
-fair := LeaseFamilies fairness: LeaseRules seed: 1 terms: 300.
+  is: (LeaseFamilies drift: LeaseRules seeds: (seeds := PBSimSoak seeds: (1 to: 6))) equals: { 0. seeds size }.
+fair := (PBSimSoak seeds: #(1)) collect: [:n | LeaseFamilies fairness: LeaseRules seed: n terms: 300].
 c that: 'releases name the longest waiter and the turns rotate'
-  is: { fair first <= 60. (fair at: 2) > 0. (fair at: 3) > 0 } equals: #(true true true).
+  is: (fair collect: [:f | { f first <= 60. (f at: 2) > 0. (f at: 3) > 0 }]) asSet asArray equals: #(#(true true true)).
 c that: 'a cancel does not end the back-off of a refused request'
-  is: (LeaseFamilies cancels: LeaseRules seeds: (1 to: 3)) <= 20 equals: true.
+  is: (LeaseFamilies cancels: LeaseRules seeds: (PBSimSoak seeds: (1 to: 3))) <= 20 equals: true.
 c that: 'replies of another incarnation are dropped ({ seeds owned. seeds uncounted })'
-  is: (LeaseFamilies incarnations: LeaseRules seeds: (1 to: 20)) equals: #(0 0).
+  is: (LeaseFamilies incarnations: LeaseRules seeds: (PBSimSoak seeds: (1 to: 20))) equals: #(0 0).
 c that: 'the plant PlantWindowFromWin fails family 3'
   is: (LeaseFamilies window: PlantWindowFromWin seeds: (1 to: 10)) first > 0 equals: true.
 c that: 'the plant PlantCancelWakes fails family 6'

@@ -224,7 +224,8 @@ AcceptFamilies class >> run: aSim until: anEnd
  releases it uncertain, which only makes the members suspect it (proto_db _on_release). With no
  later commit, no term runs again, and the chains at quiescence miss the acknowledged commit
  (S4 in converge:). powerLoss without this wait fails so on seeds 1-8 (Task 19b fix round 1);
- crashing inside a term needs a commit after the restarts, which a new term's phase 1 settles."
+ crashing inside a term needs a commit after the restarts, which a new term's phase 1 settles:
+ powerLossInTerm: (Task 30)."
 AcceptFamilies class >> idle: aSim
   aSim runUntil: [aSim ids allSatisfy: [:id | | node |
     node := aSim nodeAt: id. node isUp not or: [node state ownership isNil]]] steps: 1000000.
@@ -305,6 +306,36 @@ AcceptFamilies class >> powerLoss: aRulesBlock seeds: someSeeds
       sim converge: 300000.
       bad + sim problems size]) > 0 ifTrue: [1] ifFalse: [0])].
   ^ { failed. dropped }.
+
+"{ seeds failed. seeds where a crash fell inside a term }. The schedule of powerLoss:, with the
+ crashes inside a term (Task 30 Step 1b): no wait for idle: once 'c' is resolved, n2 (its holder,
+ the term's owner) loses power at once, maybe before its done is sent, and n1 crashes with its
+ page cache written back. Both restart; n1 holds the committed root it had published; then n0
+ commits 'd', and that term's phase 1 settles 'c' (the liveness property idle: names: committed
+ knowledge is learnt from a later term, never at quiescence), so the chains converge (S4) with
+ the strict rule. The kinds lost are not asserted here: inside a term an acceptance may still be
+ unsynced before its reply, which the reply rule covers (ackAfterSync:). Like proto_db
+ test_power_loss_of_every_role_under_load, where the load goes on after the revive."
+AcceptFamilies class >> powerLossInTerm: aRulesBlock seeds: someSeeds
+  | failed inTerm |
+  failed := 0.
+  inTerm := 0.
+  someSeeds do: [:n |
+    failed := failed + ((self problemsOf: [ | sim before bad |
+      bad := 0.
+      sim := self sim: aRulesBlock value seed: n ids: self three options: Dictionary new.
+      #('a' 'b' 'c') doWithIndex: [:token :i | self commit: token at: (self three at: i) in: sim].
+      (self three anySatisfy: [:id | (sim nodeAt: id) state ownership notNil]) ifTrue: [inTerm := inTerm + 1].
+      sim crash: 'n2' unsynced: #drop.
+      before := (sim nodeAt: 'n1') committed.
+      sim crash: 'n1' unsynced: #keep.
+      sim restart: 'n1'.
+      sim restart: 'n2'.
+      (self same: (sim nodeAt: 'n1') acceptor committed as: before) ifFalse: [bad := bad + 1].
+      (self commit: 'd' at: 'n0' in: sim) = #acknowledged ifFalse: [bad := bad + 1].
+      sim converge: 300000.
+      bad + sim problems size]) > 0 ifTrue: [1] ifFalse: [0])].
+  ^ { failed. inTerm }.
 
 "--- 3. the old term's roots are refused after a promise ---"
 

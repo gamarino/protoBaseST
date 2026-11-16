@@ -648,6 +648,60 @@ PBSimChecker >> checkSafe
           , ', which no acknowledged or unknown commit wrote']]].
   ^ behind.
 
+"=== PBSimSoak: the soak's seed count (CC14) ================================="
+
+"The seeds of a scenario family (CC14). Each family runs a fixed seed list in the default suite;
+ the environment variable PBST_SIM_SEEDS=n (a positive integer) raises it for the soak run of
+ the final verification:
+   PBSimSoak seeds: aList   aList unchanged without the variable; with it, n seeds: the list's
+                            block of n (the default list first..last of size k is block
+                            (first - 1) // k, so a family split over files, 1-100 and 101-200,
+                            stays split: 1..n and n+1..2n).
+                            A single-seed schedule is the list #(s): it runs over n seeds.
+   PBSimSoak same: aBlock over: aList
+                            aBlock's answer over those seeds, for a check whose answer does
+                            not depend on the seed (one answer, or the seeds that differ).
+   PBSimSoak count          nil without the variable, else n.
+ A value that is not a positive integer fails loudly (a soak that silently ran the defaults would
+ claim seeds it never ran). Only product-rule families take it; a plant's seeds stay fixed (a
+ plant must be caught, and is, on its own seeds)."
+Object subclass: #PBSimSoak instanceVariableNames: ''.
+
+PBSimSoak class >> count
+  | text n |
+  text := Smalltalk getenv: 'PBST_SIM_SEEDS'.
+  (text isNil or: [text isEmpty]) ifTrue: [^ nil].
+  n := (text allSatisfy: [:d | d isDigit]) ifTrue: [text asInteger] ifFalse: [nil].
+  (n notNil and: [n > 0]) ifFalse: [
+    ^ Error signal: 'PBST_SIM_SEEDS must be a positive integer, not ' , text printString].
+  ^ n.
+
+PBSimSoak class >> seeds: aList
+  | n list k block |
+  list := aList asArray.
+  n := self count.
+  n isNil ifTrue: [^ list].
+  k := list size.
+  (k > 0 and: [list = (list first to: list last) asArray]) ifFalse: [
+    ^ Error signal: 'PBSimSoak seeds: a contiguous seed list was expected, not ' , list printString].
+  block := list first - 1 // k.
+  ^ (block * n + 1 to: block * n + n) asArray.
+
+"What aBlock answers for each seed of seeds: aList, for a check whose expected answer does not
+ depend on the seed: the first seed's answer when every seed answers the same (so the default
+ run, one seed, answers exactly what the check always computed), else { #differs. the first
+ seed's answer. { seed. answer } of each seed that answers otherwise }, which fails the check
+ and prints the seeds."
+PBSimSoak class >> same: aBlock over: aList
+  | seeds first odd |
+  seeds := self seeds: aList.
+  first := aBlock value: seeds first.
+  odd := OrderedCollection new.
+  seeds allButFirst do: [:n | | v |
+    v := aBlock value: n.
+    v = first ifFalse: [odd add: { n. v }]].
+  ^ odd isEmpty ifTrue: [first] ifFalse: [{ #differs. first. odd asArray }].
+
 "=== PBSim ==================================================================="
 
 Object subclass: #PBSim instanceVariableNames: 'seed random rules ids nodes queue now faults groups links lines checker commits commitOrder commitRoots preds offsets current counts failing syncCost fixedLags peers persisted epochSteps writers published initialKeys recommitRoots foreignLinks failures'.

@@ -48,38 +48,37 @@ out := { RoundFamilies hotKey: RoundRules new seed: 1 clients: 1. RoundFamilies 
   , ', permits with two committed rounds ' , (out collect: [:o | o at: 3]) printString
   , ', re-commits ' , (out collect: [:o | o at: 4]) printString) displayNl.
 c that: 'hot-key read-modify-write on 3 nodes does not starve a member ({ one client. two clients }: fair, two rounds committed under one permission)'
-  is: { fair value: out first. fair value: out last. (out last at: 3) > 0 }
-  equals: { true. true. true }.
+  is: { PBSimSoak same: [:n | fair value: (n = 1 ifTrue: [out first] ifFalse: [RoundFamilies hotKey: RoundRules new seed: n clients: 1])] over: #(1).
+    PBSimSoak same: [:n | | o | o := n = 2 ifTrue: [out last] ifFalse: [RoundFamilies hotKey: RoundRules new seed: n clients: 2].
+      { fair value: o. (o at: 3) > 0 }] over: #(2) }
+  equals: { true. #(true true) }.
 
 "(2)"
-out := RoundFamilies reserve: RoundRules new seed: 1.
 c that: 'reserve refusal sends nothing and is retryable ({ outcome. conflict naming sendReserve. sends of the refused root. sends_refused_reserve. replications })'
-  is: out
+  is: (PBSimSoak same: [:n | RoundFamilies reserve: RoundRules new seed: n] over: #(1))
   equals: { #acknowledged. true. 0. 1. 1 }.
 
 "(3)"
-out := RoundFamilies buildLonger: RoundRules new seed: 1.
 c that: 'build longer than the belief ({ outcome. attempts. the CC18 text. replicates. refusals counted: none, the permission expired })'
-  is: out
+  is: (PBSimSoak same: [:n | RoundFamilies buildLonger: RoundRules new seed: n] over: #(1))
   equals: { #none. 5. true. 0. 0 }.
 
 "(4)"
 out := RoundFamilies groupBound: RoundRules new seed: 1.
 ('group bound: acknowledged per round ' , (out at: 3) printString) displayNl.
 c that: 'the group bound leaves the rest queued and they commit next round ({ outcomes. refusals. more than one round, the first partial. re-commit then build under one permission })'
-  is: { out first. out at: 2. (out at: 3) size > 1 and: [(out at: 3) first between: 1 and: 4]. out at: 4 }
+  is: (PBSimSoak same: [:n | | o | o := n = 1 ifTrue: [out] ifFalse: [RoundFamilies groupBound: RoundRules new seed: n].
+    { o first. o at: 2. (o at: 3) size > 1 and: [(o at: 3) first between: 1 and: 4]. o at: 4 }] over: #(1))
   equals: { #(#acknowledged #acknowledged #acknowledged #acknowledged #acknowledged). 0. true. true }.
 
 "(5)"
-out := RoundFamilies stale: RoundRules new seed: 1.
 c that: 'a stale base requeues and abandons the term ({ a. b. #stale at n1. reported unknown. attempts of a. a term abandoned })'
-  is: out
+  is: (PBSimSoak same: [:n | RoundFamilies stale: RoundRules new seed: n] over: #(1))
   equals: { #acknowledged. #acknowledged. true. true. 1. true }.
 
 "(6)"
-out := RoundFamilies unknown: RoundRules new seed: 1.
 c that: 'unknown is never retried ({ u. attempts. a permitHeld error. reported. v })'
-  is: out
+  is: (PBSimSoak same: [:n | RoundFamilies unknown: RoundRules new seed: n] over: #(1))
   equals: { #unknown. 1. false. #unknown. #acknowledged }.
 
 "(7)"
@@ -100,61 +99,61 @@ out := RoundFamilies hotKey: RoundRules new seed: 3 clients: 1 blind: 1 heldDela
 ('hot key beside blind writers: longest gaps ' , out first printString , ', acks ' , out second printString
   , ', permits with two committed rounds ' , (out at: 3) printString , ', lost ' , (out at: 5) printString) displayNl.
 c that: 'hot-key clients beside blind writers, held retries 2 ms late, do not starve a member'
-  is: (fair value: out)
+  is: (PBSimSoak same: [:n | fair value: (n = 3 ifTrue: [out] ifFalse: [RoundFamilies hotKey: RoundRules new seed: n clients: 1 blind: 1 heldDelay: 2000])] over: #(3))
   equals: true.
 
 "(10)"
 c that: 'a conflict in a round that ends unknown gets its own conflict ({ h. its error. a })'
-  is: (RoundFamilies conflictInUnknown: RoundRules new seed: 1)
+  is: (PBSimSoak same: [:n | RoundFamilies conflictInUnknown: RoundRules new seed: n] over: #(1))
   equals: { #none. true. #unknown }.
 
 "(11)"
 c that: 'a commit on a minority node ends PBTimeoutError ({ outcome. error })'
-  is: (RoundFamilies minority: RoundRules new seed: 1)
+  is: (PBSimSoak same: [:n | RoundFamilies minority: RoundRules new seed: n] over: #(1))
   equals: { #failed. true }.
 
 "(12) to (18): rc4 C3. { outcome. attempts. first error's class. it is the planted error itself.
  a retryable conflict caused by it with proto_db's text. replicates under the failed permission.
  its report }"
 U := [:text | PBUnexpectedError new messageText: text; yourself].
-expired := RoundFamilies baseRead: RoundRules new seed: 1 kind: #entry error: (U value: 'Reading segment x failed after 3 attempt(s): store unreachable') tierFailed: false late: true.
+expired := PBSimSoak same: [:n | RoundFamilies baseRead: RoundRules new seed: n kind: #entry error: (U value: 'Reading segment x failed after 3 attempt(s): store unreachable') tierFailed: false late: true] over: #(1).
 c that: 'a base read failing with exactly PBUnexpectedError after the permission expired is a retryable conflict, nothing sent ({ outcome. attempts. first error. the planted error. the conflict caused by it. replicates under the permission. its report })'
   is: expired
   equals: { #acknowledged. 2. PBConflictError. false. true. 0. #none }.
 
 "(13)"
-out := { RoundFamilies baseRead: RoundRules new seed: 1 kind: #entry error: (PBOutcomeUnknownError new messageText: 'planted outcome unknown'; yourself) tierFailed: false late: true.
-  RoundFamilies baseRead: RoundRules new seed: 1 kind: #entry error: (PlantedUnexpectedSubclass new messageText: 'planted subclass'; yourself) tierFailed: false late: true }.
+out := PBSimSoak same: [:n | { RoundFamilies baseRead: RoundRules new seed: n kind: #entry error: (PBOutcomeUnknownError new messageText: 'planted outcome unknown'; yourself) tierFailed: false late: true.
+  RoundFamilies baseRead: RoundRules new seed: n kind: #entry error: (PlantedUnexpectedSubclass new messageText: 'planted subclass'; yourself) tierFailed: false late: true }] over: #(1).
 c that: 'a subclass of PBUnexpectedError is never made retryable ({ PBOutcomeUnknownError. another subclass })'
   is: out
   equals: { { #unknown. 1. PBOutcomeUnknownError. true. false. 0. #none }. { #failed. 1. PlantedUnexpectedSubclass. true. false. 0. #none } }.
 
 "(14)"
-honest := RoundFamilies baseRead: RoundRules new seed: 1 kind: #entry error: (U value: 'store unreachable') tierFailed: false late: false.
+honest := PBSimSoak same: [:n | RoundFamilies baseRead: RoundRules new seed: n kind: #entry error: (U value: 'store unreachable') tierFailed: false late: false] over: #(1).
 c that: 'a base read failing under a valid permission stays an honest PBUnexpectedError ({ outcome. attempts. first error. the planted error. converted. replicates. report })'
   is: honest
   equals: { #failed. 1. PBUnexpectedError. true. false. 0. #none }.
 
 "(15)"
-poisoned := RoundFamilies baseRead: RoundRules new seed: 1 kind: #entry error: (U value: 'Writing manifest failed: disk full') tierFailed: true late: true.
+poisoned := PBSimSoak same: [:n | RoundFamilies baseRead: RoundRules new seed: n kind: #entry error: (U value: 'Writing manifest failed: disk full') tierFailed: true late: true] over: #(1).
 c that: 'a failed tier keeps its own error under an expired permission ({ outcome. attempts. first error. the planted error. converted. replicates. report })'
   is: poisoned
   equals: { #failed. 1. PBUnexpectedError. true. false. 0. #none }.
 
 "(16)"
-reread := RoundFamilies baseRead: RoundRules new seed: 1 kind: #recommit error: (U value: 'store unreachable') tierFailed: false late: false.
+reread := PBSimSoak same: [:n | RoundFamilies baseRead: RoundRules new seed: n kind: #recommit error: (U value: 'store unreachable') tierFailed: false late: false] over: #(1).
 c that: 'a base re-commit whose read fails sent nothing: the permission ends none, not unknown, and the error stands ({ outcome. attempts. first error. the planted error. converted. replicates. report })'
   is: reread
   equals: { #failed. 1. PBUnexpectedError. true. false. 0. #none }.
 
 "(17)"
-reexpired := RoundFamilies baseRead: RoundRules new seed: 1 kind: #recommit error: (U value: 'store unreachable') tierFailed: false late: true.
+reexpired := PBSimSoak same: [:n | RoundFamilies baseRead: RoundRules new seed: n kind: #recommit error: (U value: 'store unreachable') tierFailed: false late: true] over: #(1).
 c that: 'a base re-commit read failing after the permission expired is a retryable conflict, nothing sent ({ outcome. attempts. first error. the planted error. the conflict caused by it. replicates. report })'
   is: reexpired
   equals: { #acknowledged. 2. PBConflictError. false. true. 0. #none }.
 
 "(18)"
-resent := RoundFamilies recommitSent: RoundRules new seed: 1.
+resent := PBSimSoak same: [:n | RoundFamilies recommitSent: RoundRules new seed: n] over: #(1).
 c that: 'a base re-commit that sent its root is never a retryable conflict ({ outcome. one PBOutcomeUnknownError. the replication. it was the re-commit. report. reported after the permission ended })'
   is: resent
   equals: { #unknown. true. PBOutcomeUnknownError. true. #unknown. true }.
@@ -201,11 +200,11 @@ c that: 'PlantRecommitNeverSent is caught (a re-commit whose root was sent ended
 "(25), (26): { outcome. attempts. the read error itself. a retryable conflict caused by it.
  replicates under the permission. its report. terms abandoned at n0 }"
 c that: 'a base re-commit that cannot read its base sent nothing: none, the term kept, the read error ({ outcome. attempts. the read error. converted. replicates. report. terms abandoned })'
-  is: (RoundFamilies unreadableBase: RoundRules new seed: 1 late: false)
+  is: (PBSimSoak same: [:n | RoundFamilies unreadableBase: RoundRules new seed: n late: false] over: #(1))
   equals: { #failed. 1. true. false. 0. #none. 0 }.
 
 c that: 'a base re-commit whose read of its base outlives the permission is a retryable conflict, the term kept, and the retry commits ({ outcome. attempts. the read error. converted. replicates. report. terms abandoned })'
-  is: (RoundFamilies unreadableBase: RoundRules new seed: 1 late: true)
+  is: (PBSimSoak same: [:n | RoundFamilies unreadableBase: RoundRules new seed: n late: true] over: #(1))
   equals: { #acknowledged. 2. false. true. 0. #none. 0 }.
 
 c report.

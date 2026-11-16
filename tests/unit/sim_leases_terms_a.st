@@ -15,7 +15,7 @@ Import from: '_plants'.
 
 | c terms |
 c := Check new.
-terms := LeaseFamilies terms: LeaseRules seeds: (1 to: 100).
+terms := LeaseFamilies terms: LeaseRules seeds: (PBSimSoak seeds: (1 to: 100)).
 c that: 'one owner per term under drop/dup/reorder (seeds failed)' is: terms first equals: 0.
 c that: 'two proposers never share a ballot (seeds with a shared term)' is: (terms at: 2) equals: 0.
 c that: 'every seed owns four terms (seeds stalled)' is: terms last equals: 0.

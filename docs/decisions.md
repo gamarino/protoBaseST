@@ -202,6 +202,18 @@ As built:
   fix round 1, which added it with its tests (`cluster_ignored_types.st`).
 - **CC10** supersedes the "caller owns the backoff" half of R19; the "never waits" half stands.
 - **CC4** and **CC2**: protocol 14 since Task 22a (13 before), with the same layout.
+- **CC14**: the seed lists were built, the knob was not: nothing read `PBST_SIM_SEEDS` until
+  Task 30, which found it missing when it came to run the soak. Task 30 added it as
+  `PBSimSoak` (`tests/unit/_sim.st`): `PBSimSoak seeds: aList` raises a product-rule family's
+  list to n seeds, keeping a family split over two files split (1-100 and 101-200 become 1..n and
+  n+1..2n); a single-seed schedule whose expected answer does not depend on the seed runs through
+  `PBSimSoak same: aBlock over: #(s)`, which answers that one answer or names the seeds that
+  differ. Plants keep their own seeds. `tests/unit/sim_soak_seeds.sh` checks the knob and that
+  every `sim_*.st` file takes it or is listed exempt with its reason (the plant files, the lessons,
+  the timer audit's index).
+- **CC19**: as the call says, with Task 21's ruling on top: the persister's writes go through
+  the round runner (`PBSharedTier >> persist:` takes `tryLockRoot`, reads the root, checks the
+  order, then `replaceRoot:`).
 
 ### Rulings taken during execution
 

@@ -26,41 +26,41 @@ c := Check new.
 r1 := BaseFamilies r1.
 
 "(1)"
-out := BaseFamilies c1: BaseRules new seed: 1.
 c that: 'C1: R'' is acknowledged and never dropped ({ violation. lease uncertain on R''. a base on R'' re-committed })'
-  is: { out first. out at: 2.
-    ((out at: 3) anySatisfy: [:d | (d isKindOf: PBBaseDecision) and: [d outcome = #ok and: [d needsCommit and: [d base key ~= r1 key]]]]) }
+  is: (PBSimSoak same: [:n | | o |
+    o := BaseFamilies c1: BaseRules new seed: n.
+    { o first. o at: 2.
+      ((o at: 3) anySatisfy: [:d | (d isKindOf: PBBaseDecision) and: [d outcome = #ok and: [d needsCommit and: [d base key ~= r1 key]]]]) }] over: #(1))
   equals: { nil. true. true }.
 
 
 "(3)"
-out := BaseFamilies m6: BaseRules new seed: 1.
 c that: 'M6: every waits for the holder that knows the commit ({ known. c committed R })'
-  is: { out first notNil and: [out first first]. out last }
+  is: (PBSimSoak same: [:n | | o | o := BaseFamilies m6: BaseRules new seed: n. { o first notNil and: [o first first]. o last }] over: #(1))
   equals: { true. true }.
 
 "(4)"
-out := BaseFamilies refound: BaseRules new seed: 1.
 c that: 'refound only when nothing is known ({ fresh. known. persisted }: outcome, label above the step, stale, reads, on P)'
-  is: (out collect: [:run | { run first. (run at: 2) notNil and: [(run at: 2) >= PBMembership refoundStep]. run at: 3. (run at: 4) > 0. run at: 5 }])
+  is: (PBSimSoak same: [:n | (BaseFamilies refound: BaseRules new seed: n) collect: [:run |
+    { run first. (run at: 2) notNil and: [(run at: 2) >= PBMembership refoundStep]. run at: 3. (run at: 4) > 0. run at: 5 }]] over: #(1))
   equals: { { #acknowledged. true. 1. true. nil }. { #acknowledged. false. 0. false. nil }. { #acknowledged. true. 1. true. true } }.
 
 "(5)"
 c that: 'the strict R79/L28 form ({ product: violation, c, b2 }. { plant: S4 at convergence })'
-  is: { BaseFamilies baseTwice: BaseRules new seed: 1.
+  is: { PBSimSoak same: [:n | BaseFamilies baseTwice: BaseRules new seed: n] over: #(1).
     ((BaseFamilies baseTwice: PlantBaseTwice new seed: 1) first ifNil: ['']) includesSubstring: 'S4: the acknowledged commit ''c''' }
   equals: { { nil. #acknowledged. #acknowledged }. true }.
 
 "(6) A recovery round with a voter down ends at a majority of witnesses, at once."
-slow := [:rules | | sim d decided |
-  sim := BaseFamilies sim: rules seed: 1 ids: BaseFamilies three knowing: #('n0' 'n1') options: Dictionary new.
+slow := [:rules :seed | | sim d decided |
+  sim := BaseFamilies sim: rules seed: seed ids: BaseFamilies three knowing: #('n0' 'n1') options: Dictionary new.
   sim crash: 'n1' unsynced: #keep.
   BaseFamilies commit: 'a' at: 'n2' in: sim.
   decided := (sim decisions detect: [:e | e first = 'n2'] ifNone: [nil]).
   { sim outcomeOf: 'a'. sim countOf: 'recoveries' at: 'n2'.
     decided notNil and: [(decided at: 4) < (sim nodeAt: 'n2') config requestTimeout] }].
 c that: 'PlantRecoveryWaitsAll is caught ({ product: outcome, recoveries, decided before requestTimeout }. { plant })'
-  is: { slow value: BaseRules new. slow value: PlantRecoveryWaitsAll new }
+  is: { PBSimSoak same: [:n | slow value: BaseRules new value: n] over: #(1). slow value: PlantRecoveryWaitsAll new value: 1 }
   equals: { { #acknowledged. 1. true }. { #acknowledged. 1. false } }.
 
 "(7)"
