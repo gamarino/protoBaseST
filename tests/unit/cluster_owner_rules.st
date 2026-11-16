@@ -1,4 +1,4 @@
-"EXPECT: ok 18"
+"EXPECT: ok 20"
 "The owner's rules and the holder side of a permit request (cluster/owner.st, with the deadline
  caps of cluster/proposer.st) called directly, one guard per check (proto_db coordinator.py
  _dispatch, _on_permit_req, _permit_outcome, _abandon, _refuse_queue, _own_loop_body, release,
@@ -223,5 +223,30 @@ c that: 'a permit nobody waits for is handed back at once with done none'
   is: { (sendsOf value: fx value: 'done') collect: [:m | { m at: 'term'. m at: 'seq'. m at: 'inc'. m at: 'outcome'. m at: 'root' }].
     ((fx effects select: [:e | e isKindOf: PBSend]) collect: [:e | e to]) asArray. settled value: fx }
   equals: { { { 1. 4. 5. 'none'. nil } }. #('n1'). #() }.
+
+"(19) Task 24 fix round 2, n3: a local commit's own bound (PBPermitWanted waiter:timeout:, the
+ space's lockTimeout) on a waiter queued at this node's ownership: its deadline is that bound
+ from its dispatch, and its PBTimeoutError names it, not acquireTimeout."
+s := owner value: r value: true.
+s := s with: { #ownership -> (s ownership with: { #pipeline -> { PBIssued node: 'n2' seq: 1 inc: 3 rid: 7
+    deadline: t0 + belief permit: nil base: r } }) }.
+pair := core dispatch: (PBPermitWanted waiter: #w1 timeout: 300000) in: s now: t0.
+fx := core _step: [:effects | core _ownLoop: pair state now: t0 + 300000 effects: effects].
+c that: 'a local waiter queued at the ownership with its own bound times out at that bound, and the text names it'
+  is: { pair state holder deadlines. (pair state ownership queue collect: [:e | e at: 4]) asArray. settled value: pair.
+    (settled value: fx) collect: [:e | { e first. e last class name. e last messageText includesSubstring: 'within 300 ms' }].
+    fx state ownership queue }
+  equals: { { { #w1. t0 + 300000. 300000 } }. #(#w1). #(). #(#(#w1 #PBTimeoutError true)). #() }.
+
+"(20) n3, the ask path: a waiter with its own bound that asks the owner its hint names stops
+ waiting for the answer at that bound when it comes before leaseDuration (_ask:'s endAt)."
+holderState := (stateIn value: 'n0' value: { marker }) with: { #hints -> ((PBHints seed: 1) with: { #ownerTerm -> 1. #ownerNode -> 'n1' }) }.
+pair := core dispatch: (PBPermitWanted waiter: #w2 timeout: 300000) in: holderState now: t0.
+fx := core dispatch: (PBPermitWanted waiter: #w3) in: holderState now: t0.
+c that: 'a waiter with its own bound that asks the owner stops waiting for it at that bound'
+  is: { pair state holder asks collect: [:a | { a waiter. a endAt }]. pair state holder deadlines.
+    fx state holder asks collect: [:a | { a waiter. a endAt }] }
+  equals: { { { #w2. t0 + 300000 } }. { { #w2. t0 + 300000. 300000 } }.
+    { { #w3. t0 + holderState config leaseDuration } } }.
 
 c report displayNl.

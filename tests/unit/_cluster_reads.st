@@ -9,7 +9,9 @@
                 with the events behind it meanwhile, so a held learning never blocks another
                 commit's acceptance; a gate that expires is counted (timedOut), so a test that
                 never opens it fails instead of hanging. closeHearsay: defers, the same way, its
-                learning of committed roots it neither accepts nor logs (a recovery's answers).
+                learning of committed roots it neither accepts nor logs (a recovery's answers;
+                never the persisted root a space read, observePersisted:from:). A released
+                learning passes once; a later learning of the same root meets the gate again.
   DropEndpoint  a transport that, once armed, drops the first two 'answer' messages sent to n0.
   GateKit, DropKit  CommitKits whose nodes have a GateAcceptor, or a DropEndpoint.
   ReadWorker    an actor client: commits and reads off the test's thread, so a commit that does not
@@ -22,7 +24,7 @@ Import from: '_cluster_commit'.
 "=== seams ===================================================================="
 
 "Held counts the events held, Learnt the events it went on with, TimedOut the gates that expired."
-_PBAcceptor subclass: #GateAcceptor instanceVariableNames: '' classVariableNames: 'Gates Held Learnt TimedOut Hearsay Released'.
+_PBAcceptor subclass: #GateAcceptor instanceVariableNames: 'persisting' classVariableNames: 'Gates Held Learnt TimedOut Hearsay Released'.
 
 GateAcceptor class >> setUp
   Gates := Atom on: Dictionary new.
@@ -86,6 +88,12 @@ GateAcceptor >> _defer: anEvent until: aGate as: aKey
   (Future after: GateAcceptor gateLimit) thenDo: [:x | release value: true].
   ^ true.
 
+"The persisted root a space read is learnt at once, never deferred as hearsay: the space's
+ snapshot reads it right after this answers (PBClusterCoordinator >> _observePersisted:from:)."
+GateAcceptor >> observePersisted: aRoot from: aTier
+  persisting := true.
+  ^ [super observePersisted: aRoot from: aTier] ensure: [persisting := false].
+
 "What names a learning released once (the actor may hand back a copy of the event)."
 GateAcceptor >> _keyOf: aLearn
   ^ { cells config nodeId. aLearn isAccepted. aLearn root key }.
@@ -93,10 +101,13 @@ GateAcceptor >> _keyOf: aLearn
 GateAcceptor >> handle: anEvent
   | gate result |
   ((anEvent isKindOf: PBLearnCommitted) and: [Released value includes: (self _keyOf: anEvent)]) ifTrue: [
+    "Consumed: a later learning of the same root meets the gate again."
+    Released swap: [:old | old copyWithout: (self _keyOf: anEvent)].
     result := super handle: anEvent.
     anEvent isAccepted ifTrue: [GateAcceptor _bump: Learnt at: cells config nodeId].
     ^ result].
-  ((anEvent isKindOf: PBLearnCommitted) and: [anEvent isAccepted not and: [anEvent isLogged not]]) ifTrue: [
+  ((anEvent isKindOf: PBLearnCommitted) and: [anEvent isAccepted not and: [anEvent isLogged not
+    and: [persisting ~~ true]]]) ifTrue: [
     gate := Hearsay value at: cells config nodeId ifAbsent: [nil].
     gate isNil ifFalse: [^ self _defer: anEvent until: gate as: cells config nodeId , ' hearsay'].
     ^ super handle: anEvent].
