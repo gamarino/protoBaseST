@@ -517,7 +517,9 @@ The detail:
   kept, for another reason, a liveness property shared with `proto_db` (rc3 and `88ca21d`):
   committed knowledge of an acknowledged commit whose holder crashed before its done is learnt
   only by a later term's phase 1 or a recovery round a commit or a read asks for, never at
-  quiescence, so its crashes fall between terms. A local commit that asks while its own node's
+  quiescence, so its crashes fall between terms. Its companion `powerLossInTerm:` (Task 30)
+  crashes inside a term and then commits once more, so a new term settles what the crash left,
+  as `proto_db`'s power-loss tests keep their load running after the revive. A local commit that asks while its own node's
   term is fenced waits for that term to end, then acquires, and times out at its
   `acquireTimeout` deadline meanwhile, as `proto_db`'s `_become_owner` blocks on `_local`
   until `release()` with that timeout (the ownership loop arms the waiter's deadline). One
