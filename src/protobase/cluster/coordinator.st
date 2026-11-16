@@ -29,7 +29,8 @@ core decides (spec 5.4).
                         into the committed Atom (the higher root; nil drops it), PBCount into the counters, PBFence, and the tier
                         reads (PBReadPersisted, PBProbeRoot) to the acceptor, which owns the tier.
                         A message whose sender is not another member is dropped and counted
-                        messages_ignored before the rules see it (Task 19 (b)). The transport's
+                        messages_ignored before the rules see it (Task 19 (b)); a type never
+                        sent at DEPTH 0 is counted ignored_messages by the rules (CC7). The transport's
                         handler only forwards each message here, so it never signals and is safe
                         on several reader actors at once (Task 19 (a), (f)).
   _PBAcceptor           an actor of the high band holding the tier: runs accept:in:now: over
@@ -92,11 +93,12 @@ Import from: 'protobase/cluster/rejoin'.
 
 Object subclass: #_PBNodeCells instanceVariableNames: 'config node acceptorState committed counters fence stopped waiters dispatcher acceptor transport dispatchMax tokens critical own persistFailure'.
 
-"The names of the counters stats always reports (0 until counted): every PBCount of the rules,
- and messages_ignored, the shell's."
+"The names of the counters stats always reports (0 until counted): every PBCount of the rules
+ (ignored_messages among them: a type never sent at DEPTH 0, CC7), and messages_ignored, the
+ shell's (a sender that is not another member)."
 _PBNodeCells class >> statNames
   ^ #('accepted' 'acquired' 'attempts' 'config_mismatches' 'deferrals' 'deferral_timeouts' 'dispatch_slow' 'grants_given'
-      'grants_refused_no_storage' 'lost_attempts' 'messages_ignored' 'ownerships' 'permit_requests_retried'
+      'grants_refused_no_storage' 'ignored_messages' 'lost_attempts' 'messages_ignored' 'ownerships' 'permit_requests_retried'
       'permit_requests_sent' 'permits_foreign_dropped' 'permits_held' 'permits_issued' 'permits_refused'
       'recoveries' 'refused' 'rejoin_ballots' 'rejoins' 'renewal_failures' 'renewals' 'replication_failures'
       'replications' 'sends_refused_reserve' 'stale_replies' 'storage_root_reads' 'terms_abandoned'

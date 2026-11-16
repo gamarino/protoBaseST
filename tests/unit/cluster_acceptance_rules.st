@@ -37,7 +37,7 @@
  raises the hint. (23) A certain permit, remote or local, teaches its base committed (not
  logged); a grant's committed root is committed knowledge only. (24) A replicate notes the
  owner hint and goes to the acceptor lane; one of another voter set is dropped and counted; a
- store never reaches the acceptor (V1)."
+ store never reaches the acceptor (V1): it is ignored and counted ignored_messages (CC7)."
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -402,15 +402,16 @@ s2 := nodeOf value: 'n1' value: three.
 step := core dispatch: (repl value: 'n0' value: T value: r1 value: base value: #()) in: s2 now: 1000.
 done := [:outcome | ((core dispatch: (PBDoneReport permission: (perm value: 500000) outcome: outcome root: r1) in: (nodeOf value: 'n0' value: three) now: t0 + 2000)
   effects detect: [:e | (e isKindOf: PBSend) and: [e message type = 'done']]) message at: 'copies'].
-c that: 'a replicate notes the owner and goes to the acceptor; another voter set is dropped and counted; a store never is accepted; a committed done names the holder in copies'
+c that: 'a replicate notes the owner and goes to the acceptor; another voter set is dropped and counted; a store is ignored and counted, never accepted; a committed done names the holder in copies'
   is: { step state hints ownerTerm. step state hints ownerNode. eff value: step.
     eff value: (core dispatch: (repl value: 'n0' value: T value: r1 value: base value: { 'vs' -> (vs + 1) }) in: s2 now: 1000).
     (stats := (core dispatch: (repl value: 'n0' value: T value: r1 value: base value: { 'vs' -> (vs + 1) }) in: s2 now: 1000) effects first stat).
-    eff value: (core dispatch: (msg value: 'store' value: 'n0' value: { 'term' -> T. 'rid' -> 7. 'inc' -> 3. 'root' -> (PBClusterMessage rootValue: r1).
-      'records' -> #(). 'chunks' -> 0. 'ranges' -> nil. 'copies' -> #('n0'). 'vs' -> vs }) in: s2 now: 1000).
+    (core dispatch: (msg value: 'store' value: 'n0' value: { 'term' -> T. 'rid' -> 7. 'inc' -> 3. 'root' -> (PBClusterMessage rootValue: r1).
+      'records' -> #(). 'chunks' -> 0. 'ranges' -> nil. 'copies' -> #('n0'). 'vs' -> vs }) in: s2 now: 1000) effects
+      collect: [:e | { e class name. e stat }].
     (core accept: (msg value: 'store' value: 'n0' value: { 'term' -> T. 'rid' -> 7. 'inc' -> 3. 'root' -> (PBClusterMessage rootValue: r1).
       'records' -> #(). 'chunks' -> 0. 'ranges' -> nil. 'copies' -> #('n0'). 'vs' -> vs }) in: (acceptorOf value: 'n1' value: three value: { marker }) now: 1000) appends size.
     done value: #committed. done value: #unknown }
-  equals: { T. 'n0'. #(#PBToAcceptor). #(#PBCount). 'config_mismatches'. #(). 0. #('n0'). #() }.
+  equals: { T. 'n0'. #(#PBToAcceptor). #(#PBCount). 'config_mismatches'. #(#(#PBCount 'ignored_messages')). 0. #('n0'). #() }.
 
 c report displayNl.

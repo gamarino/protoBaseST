@@ -22,7 +22,8 @@
  <out>/created; every other member waits for it and passes a barrier (newDatabase:) so that it
  knows 'bench'. Each writes <out>/<id>.ready, waits for <out>/go, and runs its transactions: that
  is the only timed part. It then writes <out>/<id>.result, one line of 'key=value' pairs:
-   commits      the transactions it committed (run: returned)
+   commits      the transactions it committed, counted: one per run: that returned normally
+                (never the number it was asked to make)
    attempts     the block runs (attempts - commits = retries)
    t0, t1       Time utcMicroseconds at the start and at the end of its transactions (one clock
                 for every process of the machine)
@@ -89,18 +90,21 @@ PBObjectSpace subclass: #BenchSpace instanceVariableNames: ''.
 BenchSpace >> _newClusterRound: aPublisher proxy: aCell
   ^ BenchRound space: self publisher: aPublisher proxy: aCell.
 
-"One writer, driven as an actor: answers its block runs."
-Object subclass: #BenchWriter instanceVariableNames: 'attempts'.
+"One writer, driven as an actor: answers { block runs. commits }, a commit counted when run:
+ returns normally."
+Object subclass: #BenchWriter instanceVariableNames: 'attempts commits'.
 
 BenchWriter >> hot: each db: aDb
   attempts := 0.
+  commits := 0.
   each timesRepeat: [
     aDb run: [:tr | | d |
       attempts := attempts + 1.
       d := tr getRootObject: 'hot'.
       tr setRootObject: 'hot' value: (d setAt: 0 value: (d getAt: 0) + 1)]
-      retries: 1000].
-  ^ attempts.
+      retries: 1000.
+    commits := commits + 1].
+  ^ { attempts. commits }.
 
 | args role id out spaceDir profile nodes scale total each writers fail say writeFile until
   waitFor ids peers rank listener transport node space db options stats0 stats1 t0 t1 attempts
@@ -155,20 +159,22 @@ checksumOf := [:tr |
         (tr getRootObject: 'kv-' , j printString) keysAndValuesDo: [:k :v | c := c + 1. s := s + (k * v)]].
       { c. c printString , ':' , s printString }]
     ifFalse: [| n | n := (tr getRootObject: 'hot') getAt: 0. { n. '1:' , n printString }]].
-"The member's transactions; answers the block runs."
-tinyRun := [:aDb :j | | runs |
-  runs := 0.
+"The member's transactions; answer { block runs. commits }, a commit counted when run: returns
+ normally (never the number planned: the runner checks the sum against the run's total)."
+tinyRun := [:aDb :j | | runs done |
+  runs := 0. done := 0.
   1 to: each do: [:i | | k |
     k := j * each + i.
     aDb run: [:tr | | d |
       runs := runs + 1.
       d := tr getRootObject: 'kv-' , j printString.
-      tr setRootObject: 'kv-' , j printString value: (d setAt: k value: k \\ 1000)]].
-  runs].
+      tr setRootObject: 'kv-' , j printString value: (d setAt: k value: k \\ 1000)].
+    done := done + 1].
+  { runs. done }].
 hotRun := [:aDb | | actors futures |
   actors := (1 to: writers) collect: [:w | BenchWriter new asActor].
   futures := actors collect: [:a | a hot: each // writers db: aDb].
-  futures inject: 0 into: [:acc :f | acc + f wait]].
+  futures inject: #(0 0) into: [:acc :f | | r | r := f wait. { (acc at: 1) + (r at: 1). (acc at: 2) + (r at: 2) }]].
 "The database's roots, set by one untimed transaction."
 setupRoots := [:aDb |
   aDb run: [:tr |
@@ -184,13 +190,15 @@ role = 'standalone' ifTrue: [
    t0 := Time utcMicroseconds.
    attempts := profile = 'tiny' ifTrue: [tinyRun value: db value: 0] ifFalse: [hotRun value: db].
    t1 := Time utcMicroseconds.
+   commits := attempts at: 2.
+   attempts := attempts at: 1.
    space close.
    space := PBObjectSpace storage: (PBFileStorage path: spaceDir).
    line := checksumOf value: (space openDatabase: 'bench') newTransaction.
    space close]
     on: Error do: [:e | fail value: e class name , ': ' , e messageText printString].
   (line at: 2) = expected ifFalse: [fail value: 'checksum ' , (line at: 2) , ', expected ' , expected].
-  writeFile value: id , '.result' value: 'commits=' , total printString , ' attempts=' , attempts printString
+  writeFile value: id , '.result' value: 'commits=' , commits printString , ' attempts=' , attempts printString
     , ' t0=' , t0 printString , ' t1=' , t1 printString.
   writeFile value: 'verify.result' value: 'count=' , (line at: 1) printString , ' checksum=' , (line at: 2)
     , ' expected=' , expected.
@@ -233,7 +241,8 @@ attempts := [profile = 'tiny' ifTrue: [tinyRun value: db value: rank] ifFalse: [
   on: Error do: [:e | fail value: 'commit: ' , e class name , ': ' , e messageText printString].
 t1 := Time utcMicroseconds.
 stats1 := node stats.
-commits := each.
+commits := attempts at: 2.
+attempts := attempts at: 1.
 delta := [:k | (stats1 at: k) - (stats0 at: k)].
 crit := [:k | ((((stats1 at: 'critical') at: k) - ((stats0 at: 'critical') at: k)) * 1000000.0) rounded].
 writeFile value: id , '.result' value: 'commits=' , commits printString , ' attempts=' , attempts printString

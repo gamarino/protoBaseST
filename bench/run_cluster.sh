@@ -15,7 +15,7 @@
 # the run ends unless KEEP_TMP=1. The protost binary is used as it is: nothing is built here.
 #
 # Self-reporting (nothing is trusted that was not counted): every process writes the transactions
-# it committed, and a verifier reads the space after the run (cluster: n0, after a read barrier,
+# it committed, counted as each run: returns (never the number it was asked for), and a verifier reads the space after the run (cluster: n0, after a read barrier,
 # through the cluster; standalone: a new space over the closed directory) and writes the
 # transactions it found and a checksum it compares with the expected one. A run is refused (exit 1,
 # with the log of the process at fault) when a process fails or exits early, when the commits of
@@ -155,7 +155,7 @@ if [[ "$fstype" == zfs ]] && command -v zfs > /dev/null; then
     zfs_props=" ($(zfs get -H -o property,value sync,compression,recordsize "$source_dev" 2>/dev/null | tr '\t\n' '= ' | sed 's/ $//'))"
 fi
 commit="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo '?')"
-git -C "$REPO" diff --quiet HEAD -- src bench 2>/dev/null || commit="$commit (src or bench modified)"
+[[ -z "$(git -C "$REPO" status --porcelain -- src bench 2>/dev/null)" ]] || commit="$commit (src or bench modified or untracked)"
 echo
 echo "$(date -u +%Y-%m-%dT%H:%MZ); protoBaseST $commit; $("$PROTOST" --version 2>&1 | head -n 1) at $PROTOST"
 echo "Machine: $(lscpu | sed -n 's/^\(Model name\|Nombre del modelo\): *//p' | head -n 1), $(nproc) CPUs, Linux $(uname -r)"

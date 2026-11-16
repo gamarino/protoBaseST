@@ -1,4 +1,4 @@
-"EXPECT: ok 9"
+"EXPECT: ok 10"
 "The coordinator shell's attach, detach and routing contracts (cluster/coordinator.st; Task 20
  carry-overs (a), (b), (h), (k), N4, m10 and Task 19 (b)), over PBInProcessNetwork and
  MemoryTier (_cluster_shell.st). Every wait is a condition with a deadline of 60 s.
@@ -6,8 +6,10 @@
  refused no_storage (counted grants_refused_no_storage) and a plain query answered unknown,
  while the two attached nodes commit (proto_db
  test_a_node_without_a_tier_neither_grants_nor_counts, test_x2_an_unattached_coordinator_is_never_a_rejoin_witness).
- (2) A message whose sender is not another member (an unknown id, or the node itself) is
- dropped and counted messages_ignored. (3) A re-attach keeps the lease activity and takes the
+ (2, two checks) A message whose sender is not another member (an unknown id, or the node itself) is
+ dropped and counted messages_ignored; a valid warm from another member (a type never sent at
+ DEPTH 0, CC7) is counted ignored_messages, 0 until then, and changes nothing else (healthy,
+ not fenced, messages_ignored unchanged). (3) A re-attach keeps the lease activity and takes the
  new log: the terms seen are kept, the log is the new one, and the next promise is written to
  the new log (carry-over (b)); while a tier is attached, attaching it again is a no-op answering
  true and attaching another is refused with PBValidationError (proto_db _attach_locked). (4) A done and a permit asked in that order are performed in
@@ -101,6 +103,12 @@ c that: 'a message from a sender that is not another member is dropped and count
   is: { kit waitUntil: [(nodes first stats at: 'messages_ignored') = 2].
     kit trace value anySatisfy: [:l | (l beginsWith: 'n0 send answer to zz') or: [l beginsWith: 'n0 send answer to n0']] }
   equals: { true. false }.
+a := nodes first stats at: 'ignored_messages' ifAbsent: [#absent].
+(nodes at: 2) config transport send: (PBClusterMessage type: 'warm' from: 'n1' fields: { 'term' -> 4096. 'records' -> #() }) to: 'n0'.
+c that: 'a valid warm from a member is counted ignored_messages, from 0, and changes nothing else'
+  is: { a. kit waitUntil: [(nodes first stats at: 'ignored_messages' ifAbsent: [0]) = 1].
+    nodes first stats at: 'healthy'. nodes first isFenced. nodes first stats at: 'messages_ignored' }
+  equals: { 0. true. true. false. 2 }.
 
 "(3) Attach n0, take part, then re-attach it over a new log."
 t1 := MemoryTier served: 'n0' trace: kit trace.

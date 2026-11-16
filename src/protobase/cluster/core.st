@@ -1158,6 +1158,13 @@ PBCoordinatorCore >> _unchangedAcceptor: anAcceptorState
 
 "--- the dispatcher's rule methods, one per event (the rules of each concern override them) ---"
 
+"The message types a node never sends at DEPTH 0 over shared storage (cluster plan CC7): decoded
+ and validated like every type (an invalid one drops the connection), then ignored by
+ dispatchReceived:in:now: and counted ignored_messages. They belong to tiered storage and
+ pipelining (Phase D, DEPTH 1)."
+PBCoordinatorCore class >> ignoredTypes
+  ^ #('records' 'warm' 'store' 'propose' 'fetch' 'fetched' 'commit_query' 'commit_info').
+
 "The types whose vs must be this node's voter-set fingerprint (proto_db _FINGERPRINTED)."
 PBCoordinatorCore class >> fingerprintedTypes
   ^ #('request' 'renew' 'query' 'replicate' 'store').
@@ -1185,9 +1192,10 @@ PBCoordinatorCore >> _fromMember: aMessage in: aConfig
   ^ aConfig membership ids includes: aMessage from.
 
 "A message of a peer (coordinator.py _route): a sender that is not another member is dropped; a
- fingerprinted type of another voter set is dropped and counted (config_mismatches, D54); the
- rest goes to the handler of its type (received<Type>:in:now:, defined by the module of its
- concern), and a type no module handles is ignored."
+ fingerprinted type of another voter set is dropped and counted (config_mismatches, D54); a type
+ never sent at DEPTH 0 over shared storage (ignoredTypes, CC7) is ignored and counted
+ (ignored_messages); the rest goes to the handler of its type (received<Type>:in:now:, defined by
+ the module of its concern), and a type no module handles is ignored."
 PBCoordinatorCore >> dispatchReceived: anEvent in: aNodeState now: t
   | m handler |
   m := anEvent message.
@@ -1196,6 +1204,10 @@ PBCoordinatorCore >> dispatchReceived: anEvent in: aNodeState now: t
     "Configured with another voter set (D54): two sets could form two disjoint majorities, so
      nothing it asks for is granted, answered or accepted here."
     ^ PBStep state: aNodeState effects: { PBCount stat: 'config_mismatches' }].
+  "CC7: an explicit list, not 'no handler', so a Phase D handler cannot silently change what is
+   counted."
+  (self class ignoredTypes includes: m type) ifTrue: [
+    ^ PBStep state: aNodeState effects: { PBCount stat: 'ignored_messages' }].
   handler := self class handlerFor: m type prefix: 'received'.
   (self respondsTo: handler) ifFalse: [^ self _unchanged: aNodeState].
   ^ self perform: handler with: anEvent with: aNodeState with: t.
