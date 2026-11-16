@@ -772,7 +772,7 @@ For tests, tools and readers of the format. An application does not need them.
   root of a format version is refused: `readableRootVersions` is `#(2 3 4)`),
   `rangesFrom:` / `rangesValue:` (`nil` or `{ segment bytes. start. end }` triples, start <=
   end) and `afterFrom:` (`nil` or `{ seq. holder }`). A message answers `type`, `from`, `at:`
-  (a fresh copy of a field's wire value; the optional `unknown` of `fetched` and `commit_info`
+  (a fresh copy of a field's wire value; the optional `'unknown'` of `'fetched'` and `'commit_info'`
   reads `false` when absent), `includesField:` (whether an optional field is carried) and
   `encode` (the msgpack map `v type from`, the fields in table order, then the optional fields
   carried). `type:from:fields:` takes the optional fields too. `decode:` signals `PBClusterProtocolError` (a `PBCorruptionError`) for

@@ -16,7 +16,7 @@ Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_cluster_commit'.
 
-| c base kit db seam w out r closing replications where |
+| c base kit db seam w out r closing replications where last before |
 c := Check new.
 base := FileSystem temp / ('pbst-cluster-close-' , Smalltalk pid printString).
 base deleteAll.
@@ -39,6 +39,7 @@ closing := [:aToken :aSetUp :aNote | | s result closed |
   closed := kit settle: (Worker new asActor close: (kit space: 'n0')).
   result := kit settle: out.
   kit open: 'n0'.
+  last := result.
   { result first. result at: 2. closed }].
 
 "(1)"
@@ -51,10 +52,18 @@ c that: 'closed after the build, before the send: PBClosedError'
   is: (closing value: 'after-build' value: [:s | s holdSend swap: [:x | true]] value: 'send held')
   equals: { #error. #PBClosedError. true }.
 
-"(3)"
+"(3) also, as rc4's racing-close test: the text says it may or may not take effect, n1 accepted
+ the root (its acceptor's accepted root holds the token), and n0 is not wedged by the early
+ #unknown done: its replication was counted and it is healthy, not fenced."
+before := (kit node: 'n0') stats at: 'replications'.
+r := closing value: 'left' value: [:s | s holdAnswer swap: [:x | true]] value: 'answer held'.
 c that: 'closed once the replicate left: PBOutcomeUnknownError'
-  is: (closing value: 'left' value: [:s | s holdAnswer swap: [:x | true]] value: 'answer held')
-  equals: { #error. #PBOutcomeUnknownError. true }.
+  is: { r. ((last at: 3) includesSubstring: 'may or may not take effect').
+    kit waitUntil: [| a | a := (kit node: 'n1') acceptorState accepted.
+      (a notNil and: [a record notNil]) and: [(kit root: 'tokens' of: 'db' in: ((kit space: 'n1') _spaceRootAt: a record)) has: 'left']].
+    kit waitUntil: [((kit node: 'n0') stats at: 'replications') > before].
+    (kit node: 'n0') isFenced. (kit node: 'n0') stats at: 'healthy' }
+  equals: { { #error. #PBOutcomeUnknownError. true }. true. true. true. false. true }.
 
 "(4)"
 replications := (kit node: 'n0') stats at: 'replications'.

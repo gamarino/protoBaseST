@@ -1450,6 +1450,14 @@ first and fail first. Tests: `sim_round_rules.st` families and the new checks on
   when it drops one: `PBPublishCommitted` cannot carry nil, so either the publish carries the
   acceptor's committed knowledge (nil included) or the space reads the coordinator's current
   root, as `proto_db`'s `current_root()`.
+- **Carry-over from Task 23 review (m3): remove the temporary `_snapshotRecord` read.** Task 23
+  made `_snapshotRecord` of a cluster space read `PBRootOrder max:` of the coordinator's
+  `committedRoot` and the space's own last commit (the `known` Atom, set by
+  `PBObjectSpace >> _learnCommitted:` from `PBClusterRound >> _step:`). `known` never drops a
+  root, so it breaks the I2 rule above. Remove `known` and `_learnCommitted:` (and the
+  `_learnCommitted:` send in `cluster/round.st`), or fold them into the committed-root publish:
+  the dispatcher's `PBPublishCommitted` must happen before the commit's waiter settles, so a
+  commit still reads its own write.
 - Test: `tests/unit/cluster_reads.st`.
 
 **Interfaces:**

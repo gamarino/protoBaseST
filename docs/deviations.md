@@ -691,6 +691,23 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     error sent nothing; any other error, a failed flush included, leaves the outcome unknown.
   - A permission that arrives after the round closed is ended `#none` at once; `proto_db`'s
     closing thread never asked for one.
+  - rc4's R148 texts ('its kept permission is still being ended', '... s of it spent waiting
+    for its kept permission to be ended') and its misuse error ('already holds a write
+    permission') have no counterpart: the done of a permission and the next permit request are
+    posted in that order into the one dispatcher mailbox, so a commit never meets a permission
+    still being ended. Its wait counts inside the permit's own `acquireTimeout`, and the
+    `PBTimeoutError` names the configured bound in milliseconds ('within 8000 ms'), never what
+    is left of it (rc4 C1).
+  - `'replication'` in `stats` `'critical'` runs from the send of the replicate to the settle of
+    the commit on the runner (it includes the time the answer waits in the runner's mailbox);
+    rc4 times the `replicate` call.
+  - Whether an attempt of `run:` will retry is the attempt transaction's own (its commit entry);
+    a commit made by another transaction inside the block does not inherit it, as every commit
+    inside `fn` inherits rc4's thread-local `retry_left`.
+  - A space closed while its replicate is in flight posts the permission's done `#unknown` at
+    once, while the coordinator's replication may still be running; rc4's closing thread never
+    ends a permission a runner is still replicating under. The owner forgets the permit on the
+    done and abandons the term (safe); the replication then ends as any other.
   - Until Task 24, a transaction of a cluster space reads the newest committed root the node
     knows (the coordinator's `committedRoot`, or the round's own last commit), with no confirmation
     round and no fetch of records; Task 24 owns the cluster read path.

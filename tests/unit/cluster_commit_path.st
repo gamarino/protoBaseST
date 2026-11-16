@@ -26,14 +26,15 @@
  permission, #none, a retryable conflict, nothing committed
  (transactions::test_a_holder_paused_past_its_lease_never_replicates). (10) The commit point is
  the majority acknowledgement: with one node stopped a commit still commits (two of three), and
- with two stopped a commit ends in PBTimeoutError naming acquireTimeout's bound
+ with two stopped a first commit ends unknown or in PBTimeoutError, and the next in PBTimeoutError naming
+ acquireTimeout's bound, with no sleep
  (transactions::test_the_commit_point_is_the_majority_acknowledgement; rc4 R148's text)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_cluster_commit'.
 
 | c base kit one space db r st seam tr rec1 rec2 sr ptr workers results w1 w2 counters tokens out before
-  prefixes cm |
+  prefixes cm first |
 c := Check new.
 base := FileSystem temp / ('pbst-cluster-commit-' , Smalltalk pid printString).
 base deleteAll.
@@ -181,12 +182,14 @@ r := kit settle: (w1 once: db block: (CommitKit incr: 'two-of-three' tag: 'm') r
 cm := r first.
 (kit space: 'n1') close.
 (kit node: 'n1') stop waitWithin: 60000.
-"Liveness only: the term n0 may own ends within its lease once no peer renews it."
-(Future after: 3500) wait.
-r := kit settle: (w1 once: db block: (CommitKit incr: 'one-of-three' tag: 'm') retries: 0).
+"rc4's shape: the first one-of-three attempt may still find n0's term owned, replicate and find
+ no majority (PBOutcomeUnknownError), or time out; the second, the term ended, times out."
+r := kit settle: (w1 once: db block: (CommitKit incr: 'one-of-three-a' tag: 'm') retries: 0).
+first := { r first. #(#PBOutcomeUnknownError #PBTimeoutError) includes: (r at: 2) asSymbol }.
+r := kit settle: (w1 once: db block: (CommitKit incr: 'one-of-three-b' tag: 'm') retries: 0).
 c that: 'the commit point is a majority: two of three commit; one of three ends in PBTimeoutError naming acquireTimeout'
-  is: { cm. r first. r at: 2. ((r at: 3) includesSubstring: 'within 8000 ms') }
-  equals: { #ok. #error. #PBTimeoutError. true }.
+  is: { cm. first. r first. r at: 2. ((r at: 3) includesSubstring: 'within 8000 ms') }
+  equals: { #ok. { #error. true }. #error. #PBTimeoutError. true }.
 
 kit shutdown.
 base deleteAll.

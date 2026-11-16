@@ -116,6 +116,7 @@ PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds coordinator: aC
   coordinator := aCoordinator.
   tier := aTier.
   closed := Atom on: false.
+  "TEMPORARY (Task 24): the last root the space's own cluster round committed (_learnCommitted:)."
   known := Atom on: nil.
   runner := self _newRunner.
   ^ self.
@@ -136,8 +137,9 @@ PBObjectSpace >> _newClusterRound: aPublisher proxy: aCell
 PBObjectSpace >> _tier
   ^ tier.
 
-"The cluster round learnt that aLabeledRoot committed (its own commit): the last-known root,
- kept when it orders above the one known (PBRootOrder)."
+"TEMPORARY (Task 24): the cluster round learnt that aLabeledRoot committed (its own commit): the
+ last-known root (the known Atom), kept when it orders above the one known (PBRootOrder). It
+ never drops a root; Task 24 removes it with the cluster read path (plan, Task 24 carry-over m3)."
 PBObjectSpace >> _learnCommitted: aLabeledRoot
   known swap: [:old | PBRootOrder max: old with: aLabeledRoot].
 
