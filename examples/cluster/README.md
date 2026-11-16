@@ -19,7 +19,7 @@ check exits with status 1.
 | [16_configuration.st](16_configuration.st) | defaults, the rules among options, the timer table, `stats`, the startup grace over a used log | [16](../../docs/tutorial/16-operating-a-cluster.md) |
 
 [pending/](pending/README.md) is for programs written ahead of the API they need; none is
-pending today.
+pending today, and its README says why the directory is kept.
 
 ## Run them
 

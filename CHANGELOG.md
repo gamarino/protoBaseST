@@ -2,537 +2,63 @@
 
 ## 0.2.0 (unreleased)
 
-- Measurements and documentation of cluster mode (Task 29). `bench/run_cluster.sh` and
-  `bench/cluster_workload.st` measure commits per second in standalone mode and in clusters of 1
-  and 3 member processes on 127.0.0.1 (profiles tiny and conc-hot, `RUNS=5` interleaved, fsync),
-  with the split of design spec 7.2 per commit (root-independent save, build, replication; the
-  save timed by a benchmark-only subclass of the round, `BenchRound`). Each run self-reports: every
-  process writes the commits it made, a verifier recounts them through the cluster after a read
-  barrier, and the runner refuses a run whose counts or checksum differ. Indicative figures of
-  2026-11-16 (Ryzen 5 5500U, ZFS, protoST 0.12.0, protoBaseST `f5ec4b2`, after fix round 1): tiny
-  46.3 commits/s standalone, 27.8 with 1 member, 25.9 with 3; conc-hot 51.3, 29.9 and 17.1
-  (`docs/deviations.md`, Performance). Documentation: a cluster status paragraph and a Benchmarks
-  section in the README; tutorial chapters 13-16 updated with the measured costs and the
-  real-process tests, their stale task markers removed; `docs/reference.md` names rc4 and gains
-  the timer table generated from `PBClusterConfig timerTable`, guarded by the new
-  `tests/docs/timer_table_sync.sh` (helper `_timer_table.st`); `docs/deviations.md` gains a
-  cluster-mode summary (shared storage only, `flock` on network file systems, DEPTH = 0, the group
-  bound, HMAC, CC5, CC6, CC7, about 16 members, a plain `proto_db` writer on a cluster
-  space, mixed clusters) and the checklist at rc4 (298 rows: 223 ported, 75 n/a);
-  `docs/decisions.md` gains section 4 (Q1-Q8, CC1-CC25, the execution rulings, D62 known and not
-  adopted: format 5 refused) and the proposals to `proto_db` (gamarino/ProtoDB#1, the protoBase repository's issue 1, done as R149/R149a in rc4;
-  Q7(a), Q7(b) and CC6 open); `docs/not-done.md` states the cluster's cuts and what is unproven
+The detailed, task-by-task log of this release is
+[docs/changelog-0.2.0-development.md](docs/changelog-0.2.0-development.md).
+
+### Cluster mode (new)
+
+protoBaseST members can now share one database as a cluster, following `proto_db` 2.0.0rc4's
+cluster protocol 14 at storage format 4. A commit is acknowledged once a majority of the voters
+accepted it, so a cluster of three survives the loss of any one member. See tutorial chapters
+13-16 and `examples/cluster/`.
+
+- **Starting a member:** `PBClusterCoordinator nodeId:peers:options:` (options in milliseconds,
+  validated at construction: `PBClusterConfig`), then `PBObjectSpace storage: (PBFileStorage
+  clusterPath: dir) coordinator: aCoordinator`. Members talk over TCP (`PBTcpTransport`), or over
+  `PBInProcessNetwork` in tests. The optional `#authKey` authenticates every frame with HMAC; the
+  transport is not encrypted.
+- **Committing and reading** work as in standalone mode: `run:`, `commit`, `listDatabases` and
+  `openDatabase:`. A commit may end in `PBOutcomeUnknownError` when its root left the node and its
+  fate could not be learnt; `run:` never retries it. A member left in a minority gets
+  `PBTimeoutError`.
+- **Durability and state:** `committedEpoch`, `persistedEpoch`, `sync:` (a durability barrier) and
+  `persisterStats` on the space. On the coordinator: `stats`, `isHealthy`, `owner`,
+  `clusterSize`, `voters`, `isVoter`, `majority`, and `forceRejoin` for the operator's decision
+  when a majority of acceptor logs is lost.
+- **Failures:** a member restarted on its disk keeps its promises and waits out its startup grace.
+  A member whose acceptor log was lost rejoins by a ballot. An internal error fences the member
+  until its process restarts. A failed start leaves the coordinator stopped and signals the
+  cause.
+- **An existing standalone database can be brought into a cluster** by opening its directory with
+  `clusterPath:`. The move is one way: `PBFileStorage path:` refuses the directory afterwards
+  (chapter 16).
+- **Interoperability:** `proto_db` reads a space a protoBaseST cluster wrote, and the acceptor
+  logs round-trip both ways. Mixed clusters of protoBaseST and `proto_db` members are not a goal.
+- **Not included:** tiered storage (its options are refused), pipelined permissions (one
+  permission at a time across the cluster), dynamic membership, and storage format 5, which is
+  refused with `PBNotSupportedError`. Every difference from `proto_db` is in
+  `docs/deviations.md`, and `docs/not-done.md` states the cluster's cuts and what is unproven
   (the full timer audit and the 5000-seed soak run only in Task 30).
-  Fix round 1: each benchmark process counts the commits it made (one per `run:` that returned
-  normally) instead of writing the number planned, so the runner's check of the run's total can
-  fail (two hand mutants refused: a commit left uncounted, a commit skipped); the figures were
-  measured again. The runner's dirty check sees untracked files. The message types never sent at
-  DEPTH 0 (`records`, `warm`, `store`, `propose`, `fetch`, `fetched`, `commit_query`,
-  `commit_info`) are now counted in `stats` as `'ignored_messages'`, as cluster plan CC7 states
-  (`PBCoordinatorCore class >> ignoredTypes`, after the voter-set check; tests
-  `cluster_ignored_types.st`, `cluster_acceptance_rules.st` (24), `cluster_coordinator_attach.st`
-  (2)). Chapter 16's timer table is checked against `PBClusterConfig timerTable` too. The text of
-  the measurements was corrected: which steps the replication column covers, what the columns
-  are (costs per commit, not latencies), and that the cause of the reserve refusals was not
-  measured.
+- **Costs:** on one machine, a cluster commits at about half the standalone rate for small commits
+  on disjoint roots, and a third on a hot key (`bench/run_cluster.sh`; indicative figures in
+  `docs/deviations.md`, Performance).
 
-- Real processes, part 2 (Task 28, `tests/cluster/`): `_node_seams.st` holds a round of a worker's
-  commit at one of three points (the root built, its replicate sent, the permission's done sent)
-  and names the token in flight in a marker file. `real_kill_holder.sh`: the holder is killed with
-  `kill -9` at each point in turn and restarted on its disk (same node id, port and acceptor log,
-  the default 5 s startup grace) as a new incarnation; the token killed at "built" is absent
-  everywhere, the one killed at "done" (acknowledged by the cluster, not recorded by the worker)
-  present everywhere, the one killed at "replicate" the same on every node; each member is killed
-  once. Once done, the whole cluster is killed before any persistence (every worker's persister
-  switched off) and restarted on its disks: every member reads the same tokens, and space.root,
-  read with no node after `sync:`, holds them. `real_restart_rejoin.sh`, persisters off: a voter
-  killed with `kill -9`, its `cluster/<id>.roots` renamed aside, restarted: it rejoins by ballot
-  (`rejoin_ballots` >= 1; a restart on a kept log reports 0) and the workload loses nothing. The
-  four checklist rows deferred to Task 28 are ported. A harness defect was fixed: `_cluster.sh`
-  now runs under `LC_ALL=C`, since a `sort` and a `comm` of different collations reported a
-  present token missing once tokens carried an incarnation's dot (a `verify_rules.sh` case covers
-  it). No defect was found in `src/`.
+### Standalone mode
 
-- Real processes, part 1 (Task 27, `tests/cluster/`): each member is a protost process of its
-  own (`_node.st`: a `PBTcpTransport` on port 0, the port written to a marker file, the peers
-  read from one, lease 3000 ms, acquireTimeout 8000 ms), driven by `_cluster.sh`, which records
-  every PID from `$!`, signals only its own living children and reaps them all in its EXIT trap.
-  `real_commits.sh`: three members commit 30 increments each. `real_kill_owner.sh`, with kill
-  thresholds drawn from a printed seed (`KILL_SEED`): the member serving the term is killed with
-  `kill -9` while it commits, and the two others commit on under a higher term; a voter that does
-  not serve the term is killed in a five-member run (three voters); in a five-voter run the owner
-  is killed, then the owner of the new term, leaving exactly three of five, which finish. Each
-  run is verified by a learner that joins only after the workload, behind two barriers: every
-  acknowledged token is present, the counter equals the size of `tokens` and the acknowledged
-  tokens plus the unknown tokens present (a killed member's one unresolved token counting as
-  unknown). `verify_rules.sh` checks those rules on synthetic outcome files, with an unknown
-  token present in the passing case and one failing case per rule. No defect was found.
+- **Group commit:** the commits queued on one space are published together, with one root lock,
+  one flush and one publish per round (`proto_db` D52). A single commit runs the same protocol as
+  before.
+- **Format:** follows `proto_db` 2.0.0rc4 at format 4. Format 5 segments, roots and logs are
+  refused with `PBNotSupportedError`.
 
-- Format interop of cluster mode with `proto_db` v2.0.0rc4 (Task 26): `proto_db` reads a
-  cluster space protoBaseST wrote with three nodes on one directory (its verifier accepts it,
-  its dump equals protoBaseST's, and its `cluster_fields` and `cluster_previous` chain equal the
-  SpaceRoot fields protoBaseST wrote: `tests/interop/cluster_space_to_py.sh`), and the acceptor
-  logs round-trip both ways: each `cluster/<n>.roots` the nodes wrote loads to the same values in
-  `proto_db`'s `RootsLog` (log format 2), a log `proto_db` writes loads to the same values in
-  `PBAcceptorLog`, the same entry sequence gives the same bytes on both sides, and `_node_log`
-  names the file `PBSharedTier logName:` names for the five ids of Review Focus 5
-  (`tests/interop/rootlog_both_ways.sh`, helpers `_st_cluster_space.st` and `py_rootlog.py`). No
-  format defect was found.
+### Documentation
 
-- The persister, `persistedEpoch` and `sync:` (Task 25, `cluster/persister.st`; `proto_db`'s
-  `Persister`, `persisted_epoch` and `sync` at v2.0.0rc4): each cluster space runs a
-  `PBPersister` on a low band actor, started after the attach and stopped by `close` before the
-  detach. Every `persistInterval` it writes the newest committed root its node knows to
-  `space.root` when its node committed it (`PBClusterCoordinator >> _committedHere:`), or when
-  the oldest unpersisted root has waited `persistLag` (a crashed or cut-off committer's commits
-  are persisted by another member); only the newest root is written, never backwards (CC19: a
-  refused write reads the persisted root again), and a `#busy` root lock is retried at the next
-  pass. The write is `PBRoundRunner >> persist:`, the tier's `persist:` made on the actor that
-  makes the commit round's writes, so the root lock never overlaps a `pushAtom:` or a
-  `flushSegment` of the same storage (Task 21 review I1). A pass behind that does not write
-  reads the persisted root back and teaches it to the coordinator (`_learnPersisted:from:`).
-  Errors of the storage are retried with a delay doubling up to 1 s; any other error stops
-  persisting on that node only (`_persistenceFailed:`: `stats` `'healthy'` and `'persisting'`
-  false, `'failure'` names it) and fails every `sync:` at once. `PBObjectSpace >>
-  persistedEpoch`, `sync: ms` (a durability barrier, not a visibility barrier; also `PBDatabase
-  >> sync:`). `PBSharedTier >> persist:` compares in rc4's shape (the version outside the order
-  of roots: the same root held at a lower version is published again) and `readPersisted` keeps
-  the version read. Tests: `tests/unit/cluster_persister.st`, `cluster_persister_recovery.st`;
-  the eight `deferred 25` checklist rows ported. `examples/cluster/14_cluster_commits.st` left
-  `pending/`.
-
-- Reads in cluster mode (Task 24, `space.st`; `proto_db`'s `_read_storage_root`, `current_root`
-  and `committed_epoch`): a snapshot of a cluster space starts from the newest committed root its
-  node knows (`committedRoot`); when it knows none, from the committed root a majority of its
-  peers reports (`PBClusterCoordinator >> _recover`, published to the readers before it answers),
-  and only when that recovery fails from the persisted root, then taken as committed
-  (`'storage_root_reads'`; the empty space too, so it is read once). While `needsConfirmation` holds (after every attach, and
-  again after `forceRejoin` on a survivor: it is read on every snapshot, review I2), the snapshot
-  first runs a confirmation, a commit that writes nothing (`PBCommitEntry
-  confirmationDeadline:`) through the round runner, so a restarted node reads at or above every
-  root a majority committed (L18); its timeout, conflict or unknown outcome is written to stderr
-  and the read goes on from the root the node knows. A commit publishes its root to its node's
-  readers before it returns (`PBClusterCoordinator >> _publishCommitted:`), so it reads its own
-  write; the readers' root keeps the higher of the roots published, and `PBPublishCommitted root:
-  nil` (the acceptor's drop on `forceRejoin` of a survivor) clears it, and an attach resets it to
-  the new log's committed root. A cluster commit, the confirmation among them, waits for its
-  permission up to the space's `lockTimeout` when one was given
-  (`storage:coordinator:lockTimeout:`), else up to `acquireTimeout`, and its `PBTimeoutError`
-  names that bound (`PBPermitWanted waiter:timeout:`, `PBClusterCoordinator >> _permitWithin:`).
-  `PBObjectSpace >> committedEpoch`. Task 23's temporary read (the space's `known` root and
-  `_learnCommitted:`) is gone. Tests: `tests/unit/cluster_reads.st`,
-  `cluster_reads_restarts.st`, `cluster_reads_majority.st`; five checklist rows ported.
-
-- Cluster commits (Task 23, `cluster/round.st`): in a space opened with
-  `PBObjectSpace storage:coordinator:`, `commit`, `newDatabase:` and `run:` go through the
-  coordinator. `PBClusterRound` performs the core's commit round (`round:in:now:`) on the space's
-  round runner: one write permission per round, the base (re-committed first when it needs a
-  commit), each build stamped `{ term. epoch }` and saved, the tier flushed before the replicate
-  (L11), the done before the next permit (R148), held retries (D-LIVE-2: `run:` retries a
-  `permitHeld` conflict at once, counted as an attempt, and drops the kept permission when no
-  retry comes). Closing the space settles every commit in flight: `PBClosedError` when nothing of
-  it left the node, `PBOutcomeUnknownError` once its replicate left. The core gains
-  `PBReplicateFailed` and `PBRoundClosed`; the coordinator `_replicateRound:under:`, `_rules`,
-  `_now`, `_count:`, `_recordCritical:replication:`, and `stats` `critical_commits` and
-  `critical` (`'build'`, `'replication'` seconds). `PBCommitEntry
-  transaction:willRetry:caller:deadline:`, `PBTransaction >> _buildOn:stamp:`, `PBPublisher >>
-  _build:on:stamp:` and `PBSpaceRoot databases:stamp:previous:`; the standalone path writes the
-  same bytes.
-- Follows `proto_db` 2.0.0rc4 at format 4 (cluster Task 22a; the delta is
-  `docs/superpowers/specs/2026-11-15-rc4-delta.md`). Cluster protocol 14
-  (`PBClusterMessage protocolVersion`): the optional `unknown` of `fetched` and `commit_info`
-  (checked when present, carried and re-encoded; `at:` reads `false` when absent,
-  `includesField:`), and the five-item root refused with `proto_db`'s two reasons
-  (`readableRootVersions` 2 to 4). Format 5 is refused with `PBNotSupportedError` (segments,
-  roots and log format 3, as before), and protoBaseST keeps writing format 4 and log format 2.
-  The built-in aliases 22 `proto_db.registry.ModuleList` and 23 `proto_db.registry.Catalog` are in
-  the table with no class (`builtinCount` 24); an application class declaring either name is
-  refused by `register:`, and a record of either is never written (`PBAtomEnvelope encode`,
-  `PBTypeRegistry registryAliases`). A change naming `parents` or `with_parents` is
-  `PBValidationError` (R157), while a stored field of either name still loads and is carried,
-  placed last as rc4's `with_` places it (pinned against rc4's bytes,
-  `tests/interop/py_legacy_with_bytes.py`). `removeRootObject:` refuses `__` names, as `setRootObject:` does. The
-  conformance vectors are re-vendored at rc4 (digest `37b286fd…`); `_vectors.st` reads the
-  `segments` list, and the new runner `tests/conformance/format5_refused.st` pins the format-5
-  vectors as expected `PBNotSupportedError` refusals and checks that a version-5 segment is
-  refused before any record is decoded. The checklist is pinned to rc4 (298 rows; a deferral may
-  name a lettered task such as `22b` when the cluster plan has its heading), and the interop venv
-  to rc4 (Python 3.12 or newer). **After merging, run `tests/interop/setup_venv.sh` in every
-  checkout:** a venv still holding rc2 (and every worktree linked to it) fails
-  `tests/interop/env.sh` (exit 1, FAIL, not SKIP) until it is rebuilt at rc4.
-- Cluster core, rc4 C3 (Task 22b; R212, R231, R233): in the commit round
-  (`roundBuildFailed:in:now:`), a build that failed with exactly `PBUnexpectedError` once the
-  write permission is no longer valid, the commit's tier not failed, is a retryable
-  `PBConflictError` ("the write permission expired before its base could be read; nothing was
-  sent", its `cause` the read error: `PBConflictError text:cause:`); a subclass, a failed tier
-  or a valid permission keeps the error. A failed re-commit build sent nothing whatever its
-  error, so its permission ends `#none`, not `#unknown`. `PBBuildFailed` is now
-  `entry:error:tierFailed:` (`isTierFailed`; no constructor without the flag), which the shell
-  fills in Task 23. The seven `test_cluster_lease_read.py` rows deferred to 22b are ported
-  (`sim_round_rules.st` (12) to (24), with the six rc4 plants and one of the port's).
-  The base choice no longer probes a base that must be committed first (`PBProbeRoot` is the
-  rejoin's only) and `#unreachable` is gone from `PBBaseDecision`: as in rc4 over shared
-  storage, the round's re-commit build reads the base, and a failed read sent nothing (the
-  permission ends `#none`, the term kept, the read error or R212's conflict;
-  `sim_round_rules.st` (25), (26)). `proto_db`'s I1 (`_BaseUnreachable`) needs a local-records
-  tier and is Phase D (the checklist row is `n/a`).
-- Tutorial chapters on cluster mode, `docs/tutorial/13-16`: the ideas (why a storage lock is not
-  enough, terms as ballots, permissions, the commit point, fencing, the startup grace, rejoin by
-  ballot, the R149 renewal back-off), a three-node cluster in one process and over TCP, failures
-  and recovery mapped to the tests that check them, and operating a cluster (options, their
-  rules, the timer table, `stats`, what is not done or not tested yet). Their programs are
-  `examples/cluster/` (run by the tests); the programs that need cluster commits and reads
-  (Tasks 23-25) are in `examples/cluster/pending/` as `.st.pending` files, which the runner does
-  not run, and every chapter block taken from them is marked with the task it waits for.
-  `tests/docs/tutorial_chapters_sync.sh` now also checks the chapters against `examples/cluster/`.
-
-- Group commit on a standalone storage (Task 22, `proto_db` D52 and `_standalone_round`), with
-  the shared round runner (`round.st`). Every commit and every new database is a
-  `PBCommitEntry` (`transaction:willRetry:deadline:`, `createDatabase:deadline:`, `future`)
-  queued on the space's `PBRoundRunner`, an actor that replaces the publisher proxy and
-  `PBObjectSpace >> _untilPublished:`; `commit` waits only on the entry's `Future`. A round takes
-  the whole queue and calls `PBPublisher >> publishGroup:` (which replaces `commit:` and
-  `createDatabase:`): each entry's atoms saved, one root lock, one root read, each entry built on
-  the root the previous build saved (a build error fails that entry alone), one flush, one
-  publish with the epoch plus one, the step-8 outcome applied to the round; a failure of the
-  lock, root read, flush or publish reaches every built entry. A lone entry runs exactly the
-  single-commit protocol (`bytes_pinned.st` unchanged). A held root lock is retried by the
-  runner with `Future after:` (1 ms doubling to 50 ms); each entry keeps the `lockTimeout`
-  deadline it was queued with and then ends in `PBTimeoutError` (the same message). The runner
-  never waits (CC10). A result that is not a decision is `PBOutcomeUnknownError`, never a
-  success. Every entry a round takes is settled, as `_standalone_round`'s `except BaseException`:
-  an error while settling one entry ends that entry alone, and any other error of the round
-  after the batch was taken ends every entry not settled yet (taken out of the queue) in
-  `PBUnexpectedError` naming the cause (`PBOutcomeUnknownError` unless the entry only found the
-  lock held). `closeStorage`'s round never starts a second retry chain. Seams:
-  `PBRoundRunner class >> space:publisher:`, `PBObjectSpace >> _newRunner`. Tests:
-  `tests/unit/round_group_commit.st`, `tests/unit/round_lock_retry.st` (a peer process holds
-  `space.lock`: `tests/unit/_hold_lock.st`; the deadline's scale), `tests/unit/round_settlement.st`.
-  `tests/run_tests.sh` records `PROTOBASE_REPO_EXPLICIT` (whether the caller set
-  `PROTOBASE_REPO`), and `tests/unit/cluster_checklist.sh` skips (exit 77) without a checkout at
-  the default path when none was named, and fails for a named checkout that is missing or lacks
-  the tag. Deviations: [deviations.md](docs/deviations.md).
-
-- The shared tier and the cluster storage mode (Task 21, `cluster/tier.st`, `proto_db`'s
-  `PlainTier` and `_node_log`). `PBFileStorage clusterPath:` (and `clusterPath:segmentMaxBytes:`,
-  `isClusterMode`) opens the storage of a cluster node: `cluster/` and cluster roots are
-  accepted, and `replaceRoot:` publishes only a SpaceRoot with a `cluster_term`
-  (`PBValidationError`); `path:` keeps refusing a node's directory (CC20).
-  `PBSharedTier storage:nodeId:` opens the node's acceptor log at `cluster/<logName>.roots`
-  (`logName:`: the id, or the hex of its UTF-8 bytes outside `[A-Za-z0-9._-]{1,64}`, CC21); a
-  second open of a node's log is `PBUserError` naming `cluster/<name>.roots.lock` (Review Focus
-  3); a log with kind-5 or kind-6 entries is `PBNotSupportedError` (CC15). It answers the
-  coordinator's tier protocol (`storage`, `loadRoots`, `logAccepted:`, `logCommitted:`,
-  `logPromise:`, `logRejoined`, `readPersisted`, `canRead:`) and `flushLocal`, `persist:`
-  (`true`, `false` when the persisted root is that one or newer, `#busy` when the root lock is
-  held; never waits, CC19) and `close`. `PBObjectSpace storage:coordinator:` (and
-  `storage:coordinator:lockTimeout:`, `coordinator`) attaches the node's tier to a coordinator,
-  reads cluster roots, and detaches it on `close`; `storage:` refuses a cluster-mode storage.
-  The coordinator compares tiers by `storage` as `proto_db` `_attach_locked` (the same storage
-  is a no-op) and gains `_detach: aTier` (`proto_db` `detach(tier)`; on a stopping node it
-  settles once the stop has, so a space closed meanwhile closes its log after the acceptor's
-  step in progress). `persist:` refuses a label or epoch that is not its SpaceRoot's
-  (`PBValidationError`); `canRead:` signals `PBClosedError` on a closed storage. Test seam
-  `PBAcceptorLog class >> _syncDirectory:`. Tests: `tests/unit/cluster_tier.st`,
-  `tests/unit/store_cluster_refusal.st`; the 2 checklist rows deferred to Task 21 are ported.
-  Deviations: [deviations.md](docs/deviations.md#cluster-mode).
-
-- The coordinator shell (Task 20, `cluster/coordinator.st`, `proto_db`'s `ClusterCoordinator`):
-  `PBClusterCoordinator nodeId:peers:options:` runs a cluster node on two high-band actors, a
-  dispatcher (the core's `dispatch:in:now:`, timers by `Future after:`, waiters settled from
-  `PBSettle`) and an acceptor (the core's `accept:in:now:`: appends written through the tier,
-  then the state published, then the reply). `start`, `stop` (a `Future`; a replication in
-  flight settles `#unknown`, every other waiter `PBClosedError`), `stats` (every counter, the
-  health keys), `forceRejoin`, `committedRoot`, `committedEpoch`, `needsConfirmation`,
-  `isFenced`; the round runner's `_permit`, `_baseFor:`, `_replicate:under:`, `_done:outcome:`,
-  `_confirmed`; the tier's `_attach:` (a fresh `PBLoggedRoots` each time; a short
-  `#startupGrace` refused over a log that served before, L17, except for a one-member cluster;
-  the tier attached already is a no-op, another refused `PBValidationError`) and `_detach`. A
-  failed tier write fails the tier (R57); a `PBDBError` a rule's decision signals drops that message (and
-  rejects a local request with it, also an own request or replicate the acceptor decides,
-  `PBOwnStepFailed`, which closes the attempt; an own renewal's failure ends the ownership and
-  fences, as `proto_db`'s ownership thread) without fencing, as `proto_db`'s lanes; an error while a decided step's
-  effects are performed fences; any other error
-  escaping an actor fences the node, and the acceptor reads the fence before each step, so a
-  request queued before a dispatcher fence is never granted (review I1). A replication that
-  would commit a root clashing with the holder's accepted or committed root (a protocol
-  violation, x4) is rejected `PBCorruptionError`, never `#unknown`. `stats` gains
-  `dispatch_slow` (steps over 10 ms). The core gains the
-  detached acceptor (`PBAcceptorState config:detachedAt:`, `attached:`, `detached`,
-  `withFenced:`: `no_storage` refusals, `unknown` answers, the lease activity kept across a
-  re-attach) and `PBLogDetached log:` (review m10). Tests: `tests/unit/cluster_coordinator_shell.st`,
-  `tests/unit/cluster_coordinator_attach.st`, `tests/unit/cluster_coordinator_faults.st`,
-  `tests/unit/cluster_detached_rules.st`,
-  `tests/unit/cluster_rejoin_rules.st` check 24; the 22 checklist rows deferred to Task 20 are
-  ported (14) or `n/a` (8). Deviations: [deviations.md](docs/deviations.md#cluster-mode).
-
-- The cluster core follows `proto_db` `88ca21d` (post-rc3, gamarino/ProtoDB#1, rulings R149 and
-  R149a; Task 19b): an owner whose renewal a majority refused no longer renews again once per
-  round trip. When the permanent refusals (`stale_term`, `term_taken`, or a highest term above
-  its own) exceed `voters - needed` (`PBAttempt isTermFenced`), the term is fenced: no renewal,
-  no new permission, its queue refused `ending`, released once its outstanding permission ends
-  (stat `terms_fenced`; an O7 retry of that permission still gets it). Any other round that is
-  not won, one left pending included, backs off until the refusals' remaining, at least
-  `requestTimeout / 4` (`PBClusterConfig renewBackoffFloor`, the timer row `renewBackoff`: the
-  timer audit grows to 19 rows, 3420 runs, its floors measured in Task 30),
-  never past the lease. Tests: `tests/unit/cluster_renew_backoff_rules.st` (proto_db's
-  `test_cluster_renew_backoff.py`); the rejoin families no longer cut the holder off nor lag
-  every link to survive the renewal storm. Deviations: [deviations.md](docs/deviations.md#cluster-mode).
-
-- The cluster's transports (Task 19, `cluster/transport.st`, `proto_db`'s `transport.py`):
-  `PBInProcessNetwork` / `PBInProcessTransport` (every message framed and decoded with each
-  endpoint's key; drop and duplicate faults from a seeded generator, partitions, crashes) and
-  `PBTcpTransport` (`listenOn:host:`, `withListener:`, each with `requestTimeout:`): one listener
-  actor, one reader actor per accepted connection (the length checked before the body is read;
-  any `PBClusterProtocolError` closes the connection), one sender actor per peer with a queue
-  bounded at `maxFrameBytes` bytes (the oldest frames dropped first), a failed write retried at
-  once on a fresh connection and a jittered back-off after a failed connect, so a black-holed peer delays nobody else (L7). One protocol: `start:peers:key:handler:`,
-  `send:to:` (never blocks), `stop` (a `Future` that settles once nothing more is delivered) and
-  `stats` (`frames_sent`, `frames_dropped`, `frames_rejected`, `connections_dropped`). Tests:
-  `tests/unit/cluster_transport_inprocess.st`, `tests/unit/cluster_transport_tcp.st`; the 12
-  checklist rows deferred to Task 19 are ported (the in-process delays by a new seeded check of
-  `delay:reorder:` in `tests/unit/sim_harness.st`). `tests/unit/sim_harness.st`'s no-clock check
-  now covers the core files, not the transport shell, and checks that each exempt file exists. Deviations: [deviations.md](docs/deviations.md#cluster-mode).
-
-- The checklist of `proto_db`'s cluster tests (Task 18): `tests/unit/cluster_checklist.tsv`
-  gives each of the 261 test functions of `tests/unit/test_cluster_*.py` at v2.0.0rc3 a row,
-  ported (a whole check label of a protoBaseST test), deferred to a Phase C task or n/a;
-  `tests/unit/cluster_checklist.sh` checks it against the tag and, with `CHECKLIST_FINAL=1`,
-  fails on any deferred row. An unknown replication outcome now carries `proto_db`'s text for
-  its case (a majority counted only after the permission ended; refusals; too few
-  acknowledgements; a failed own append): its waiter is settled with that
-  `PBOutcomeUnknownError`, and `PBReplicated outcome:` takes it (a bare `#unknown` is refused).
-
-- The cluster's safety sweep (Task 17): the timer audit, `tests/audit/` (every row of
-  `PBClusterConfig timerTable` at 1/10, 10 times and skewed per member, 3 and 5 members, seeds
-  1-30: 3240 simulator runs with drops and a crash; helper `tests/audit/_audit.st`), a run of its
-  own: `tests/run_tests.sh tests/audit`, or `--audit` with the default set, which skips it; its
-  index `tests/unit/sim_timer_audit.st` stays in the default run (it fails on a missing, extra or
-  stale audit file). Each audit file asserts measured floors of strict runs and acknowledged
-  commits (every run strict where every measured run was) and,
-  for acquireTimeout, gatherAttempts and retryHold, a probe that shows the timer read (1/10 and
-  10 times differ); safety-only row-modes and persist (not exercised until Task 20) are declared.
-  The checker's self-tests (`tests/unit/sim_checker_plants.st`, eight planted histories, seven
-  simulator-level plants of the derived history, `checkSafe` and the audit's gate, and two of the
-  commit round: a conflicted attempt's root that took effect, a commit applied twice) and one planted defect per
-  applicable lesson (`tests/unit/sim_lessons.st`, twelve; L29's plant `PlantLateDoneAsNone` in
-  `tests/unit/_plants.st`). The simulator checks every converged run against the history rules
-  of `proto_db`'s `assert_outcomes_resolved` (`PBSimHistory`, `PBSimChecker >> checkHistory:`:
-  S4, unknown alike, H7, no commit applied more than once, no stray write, nothing shown lost,
-  the counter; every attempt's built root writes its token, a re-commit of an unchanged base
-  credits its token nothing) and, when the members
-  have not caught up, `checkSafe`; each node's configuration can be its own
-  (`PBSim seed:ids:rules:configs:logs:`). `PBClusterConfig` reads its derived timers through
-  `renewalLeft`, `permitFloor` and `permissionDeadline:` (same values), and the owner's late
-  permission (O6) is the rule method `PBCoordinatorCore >> _permissionLate:in:now:effects:`.
-- The rejoin of an empty acceptor log (`src/protobase/cluster/rejoin.st`, CP 'A node that lost
-  its disk', R51, R78a, L13, L14, L18): `proto_db`'s `_rejoin`, `_rejoin_round`, `_gather`,
-  `_rejoin_decision`, `_complete_rejoin`, `_on_ballot_query` and `force_rejoin` as rule methods
-  of `PBCoordinatorCore` over the values `PBRejoin` (kept in `PBNodeState rejoin`) and
-  `PBRejoinAnswer`. A voter whose log lacks the rejoined marker starts a rejoin from its start
-  step: a plain gather (re-asked up to `gatherAttempts`), then the decision `new` (complete at
-  once, termsSeen left 0), `rootless` or `witnesses`, which take a ballot round above everything
-  reported, counted only from answers that echo the ballot; an unreadable adopted root blocks
-  the rejoin (`rejoinBlockedIn:`) and it retries; the acceptor event `PBRejoinLearnt` appends the
-  promise, the accepted root and the marker, in that order, and sets `rejoinBallot` (closing the
-  L14 interim: the ballot now comes from a real rejoin). A ballot query to an 'ok' acceptor is a
-  durable promise answered echoing the ballot. `PBRejoinWanted` (forceRejoin) completes a rejoin
-  on majority - 1 loaded answers and, on a survivor (`PBForceRejoin`), forgets a committed root
-  above the accepted one. `PBAcceptorState needsConfirmation` is true at every attach, cleared by
-  `PBConfirmed`; `with:` also takes `#rejoinBallot` and `#confirmed`. `PBLogDetached` (and a
-  report over another log) drops a rejoin and its forced flag, as `proto_db`'s detach; an
-  adoption carries its log and an acceptor over another log refuses it. Tested by
-  `tests/unit/sim_rejoin.st` (the R78a schedule at three wiped-timer rates, the holder's timer
-  running or stalled, with `PlantRejoinByWaiting` caught; first and late first start; L14 with
-  `PlantReplicateBelowBallot` caught; a majority log loss detected by the guard naming
-  forceRejoin; families and plants in `tests/unit/_rejoin.st`) and
-  `tests/unit/cluster_rejoin_rules.st` (one guard per check).
-- The commit round (`src/protobase/cluster/holder.st`, spec 5.6): `proto_db`'s `_run_round`,
-  `_permit_round`, `_keep`, `_take_kept` and `_await_retries` as a pure state machine,
-  `PBCoordinatorCore >> round:in:now:` over a `PBRoundState` of `PBRoundEntry` commits, with the
-  events `PBRoundEnqueued`, `PBPermitted`, `PBBaseDecided`, `PBBuilt`, `PBBuildConflict`,
-  `PBBuildFailed`, `PBReplicated`, `PBHoldExpired`, `PBDropKept` and the effects `PBAskPermit`,
-  `PBAskBase`, `PBBuild`, `PBReplicate`, `PBReportDone`. One round at a time takes the whole queue;
-  a base that needs a commit is re-committed first; conflicts fail alone; the group bound (CC11)
-  leaves the rest queued for the next round; the reserve check (R121, with the CC18 text naming
-  `sendReserve`, the longest build and `leaseDuration`) and the rejoin ballot (L14) refuse a send
-  with a retryable conflict and nothing sent; outcomes follow H7 (`#unknown` is a
-  `PBOutcomeUnknownError`, never retried). Held retries (D-LIVE-2): a conflicted commit whose
-  caller retries at once gets `PBConflictError` with `permitHeld` true (new `PBConflictError
-  held:`), and the permission is kept for min(`retryHold`, the time left) so its retry runs the
-  next round under it; the round awaits every held caller (`PBRoundEntry caller`,
-  `PBDropKept caller:`). After `termRetries` (5) stale bases in a row the queued commits fail with
-  a conflict (`proto_db` `_TERM_RETRIES`). `dispatchReplicateWanted:` also refuses a term below
-  the acceptor's rejoin ballot at the send. `PBStep` also carries a `PBRoundState`. Tested by
-  `tests/unit/sim_round_rules.st` (hot key on three nodes without starvation, reserve refusal,
-  a build longer than the belief, the group bound, a stale base, unknown never retried, hot-key
-  clients beside blind writers, every commit getting an outcome, and the plants `PlantNoReserve`
-  and `PlantNoKeep`; the round's simulator shell in
-  `tests/unit/_round.st`) and `tests/unit/cluster_round_rules.st` (one guard per check).
-- The base choice (`src/protobase/cluster/holder.st`, CP 1.6): `proto_db`'s `_lease_base`,
-  `recover_root`, `_phase_1_floor`, `_base_needs_commit`, the refound and the hard guard, as rule
-  methods of `PBCoordinatorCore` (`leaseBase:waiter:in:now:`, the default rule of
-  `PBBaseWanted`). A certain permit's root is the base; an uncertain one runs a recovery round
-  (ballot 0) that ends at a majority of witnesses, or waits for every voter when asked
-  (`PBRecoverWanted every:waiter:`); the phase-1 floor (R127) raises the base to the
-  permission's root; with nothing known the persisted root is read and the cluster refounds
-  (terms raised by `refoundStep`); a base superseded by a committed root is `#stale`; a base
-  below the committed root this node knows is a `PBCorruptionError` naming the operator's
-  remedy, unless the persisted root lets it refound; a base that is not the committed root must
-  be committed first (R50; never the empty space), and one whose SpaceRoot the shared storage
-  cannot read is `#unreachable` (R133: a retryable conflict, the term abandoned). The decision is a
-  `PBBaseDecision`; new events `PBRecoverWanted`, `PBStorageRead`, `PBRootProbed`, the acceptor
-  event `PBRecovered`, the effects `PBReadPersisted` and `PBProbeRoot`, and `PBHolder` gains
-  `choices` and `permits`. The holder now keeps the base bound (re-bound to each root committed
-  under the permission, as `bind_root`) and the root last sent under each permission and refuses a `PBReplicateWanted` whose pred is not `proto_db`'s `lease.sent` rule
-  (`predFor:in:`). The simulator gains the persisted root, an unreadable-root disk fault, an
-  epoch step per node and the commit path's base, re-commit and replicate stages. Tested by
-  `tests/unit/sim_base_choice.st` (the C1, I1, M6 and refound schedules, the strict R79/L28 form
-  and four plants; families in `tests/unit/_base.st`), `tests/unit/sim_base_seeds_a.st` and
-  `tests/unit/sim_base_seeds_b.st` (200 seeds under drops and clock skew) and
-  `tests/unit/cluster_base_rules.st` (one guard per check).
-- Acceptance, the commit point and committed knowledge (`src/protobase/cluster/acceptor.st`, the
-  new `src/protobase/cluster/holder.st`): `proto_db`'s `_may_accept`, `_apply_replicate` over a
-  shared storage, `_on_done`, `_observe_accepted`, `_observe_committed`, `_learn_label`,
-  `replicate` and `_on_answer` for acks, as rule methods of `PBCoordinatorCore`. An acceptor
-  takes a root under the ballot rule and the chain rule (V2', log matching on roots), appends
-  one synced `#accepted` entry and only then acks; a holder sends nothing past its permission
-  or under `sendReserve` (`#none`), and a commit is `#committed` exactly when a majority of the
-  voters acked within the permission, else `#unknown` (suspect). Committed knowledge (dones,
-  held releases, certain permits, grants, the replicate's committed root) is learnt in
-  `proto_db`'s order and appended `#committed` without a sync; a learnt label clears a
-  suspicion at or below it. `PBReplicateWanted` is now `permission:root:pred:waiter:`,
-  `PBAcceptorStep` gains `learnt`, the new acceptor event `PBLearnCommitted`, `PBHolder` gains
-  `replications`, a restored acceptor accepts the higher of its logged accepted and committed
-  roots and publishes its committed root at start. The simulator gains `pause:`/`resume:` (a
-  paused process) and `reconfigure:options:`. Tested by `tests/unit/sim_acceptance.st`
-  (families, checks and plants in `tests/unit/_accept.st`) and
-  `tests/unit/cluster_acceptance_rules.st` (one guard per check, the chain-rule tests).
-- The owner's rules O1-O8 at DEPTH 0 and abandoned terms (`src/protobase/cluster/owner.st`):
-  `proto_db`'s `_dispatch`, `_on_permit_req`, `_permit_outcome`, `_abandon`, `_refuse_queue`,
-  `_on_done_owner` and `finish`, and the holder side of a permit request
-  (`_permission_from_owner`, `_on_permit_reply`), as rule methods of `PBCoordinatorCore` over the
-  immutable values `PBIssued`, `PBPermitAsk` and `PBHolder`. An owner issues one permission at a
-  time in arrival order, its own commits among the members'; a committed done retires it, a
-  'none' from the only entry removes it, anything else (an unknown outcome, a done of another
-  incarnation, no done by valid + `requestTimeout`, the lease expiring with a permission out)
-  abandons the term: suspect, the queue refused 'abandoned', an uncertain release. A waiter has
-  a deadline of `acquireTimeout` and ends in `PBTimeoutError`, also while queued at its own
-  node's ownership; a refusal or a silence forgets an
-  owner only for the term asked under. `PBOwnership` is now `lease:base:committed:now:` with a
-  queue of requests and a pipeline; `PBNodeState` gains `holder`; `PBDoneReport` gains `root`
-  (`permission:outcome:root:`). Tested by `tests/unit/sim_permits.st` (scenarios and plants in
-  `tests/unit/_permits.st`) and `tests/unit/cluster_owner_rules.st` (one guard per check); `tests/unit/cluster_proposer_rules.st` now sees the first
-  permission issued at once.
-- The proposer's rules (`src/protobase/cluster/proposer.st`): acquiring, owning, renewing,
-  releasing and the fairness hints of `proto_db`'s coordinator (`permit`, `_become_owner`,
-  `_open_attempt`, `_on_reply`, `_close_attempt`, `_back_off`, `_own_loop_body`, `_renew`,
-  `release`) as rule methods of `PBCoordinatorCore`, over the immutable values `PBHints`,
-  `PBProposer` and `PBOwnership`. A lease is valid from the send of its request plus the belief
-  (L5); replies of another incarnation are dropped (`stale_replies`); a lost attempt cancels and
-  backs off, and only a held release or a newly learnt owner ends the back-off itself; a release
-  names the member seen waiting longest and the others defer to it. The node's own vote now
-  travels in the acceptor step (`PBAcceptorStep vote`), `acceptReceived:in:now:` takes the
-  node's own messages, and `PBAcceptorDiscarded` reports a discarded step to the dispatcher.
-  The owner's permissions follow in Task 12. The simulator gains a sync cost, fixed link delays,
-  scheduled commits and the L5 lease check (`watchLeases`). Tested by `tests/unit/sim_leases.st`,
-  `tests/unit/sim_leases_terms_a.st`, `tests/unit/sim_leases_terms_b.st`, `tests/unit/sim_leases_plants.st` (the planted rules of `tests/unit/_plants.st`) and
-  `tests/unit/cluster_proposer_rules.st`. `tests/run_tests.sh`'s default `RUN_TIMEOUT` is now 600 s.
-- The acceptor's phase-1 rules (`src/protobase/cluster/acceptor.st`), `proto_db`'s `_route`,
-  `_on_request`, `_decide`, `_refusal`, `_on_release` and plain query as rule methods of
-  `PBCoordinatorCore`: the dispatcher drops messages of non-members and counts voter-set
-  mismatches (`config_mismatches`); `acceptRequest:in:now:` and `acceptRenew:in:now:` refuse
-  (`fenced`, `learner`, `tier_failed`, `rejoining`, then the grant rules' reasons) or grant,
-  appending a synced promise only above the one already logged, so a renewal writes nothing;
-  `acceptRelease:in:now:`, `acceptQuery:in:now:` (promised = max(terms seen, accepted label)),
-  `acceptStart:in:now:` (the rejoined marker of a learner or a lone voter),
-  `acceptSuspect:in:now:` (`PBSuspect`) and `acceptAppendFailed:in:now:` (`PBAppendFailed`: the
-  tier fails, the unsynced grant is never replied). A reject's `remaining` is wire seconds
-  (`wireSeconds:`). `core.st` gains the `PBCount` effect and `PBAcceptorState loggedPromise`;
-  the simulator gains injected messages, pre-formed logs, append failures and counters.
-  The dispatcher's checks of `_route` live in `core.st`, which then calls the handler of the
-  message's type (`received<Type>:in:now:`, `accept<Type>:in:now:`); the start reaches the
-  acceptor; a fenced node sends nothing; every grant counts `grants_given`; `loggedPromise`
-  belongs to the log it was written to (`PBAcceptorState >> log`), and a step whose append fails
-  is discarded. A plain query is answered by the acceptor (`docs/deviations.md`).
-  Tested by `tests/unit/sim_grants.st` (seeds 1-40, empty-log starts, plant `PlantRenewStale`)
-  and `tests/unit/cluster_acceptor_rules.st`.
-- The coordinator core's vocabulary (`src/protobase/cluster/core.st`): `PBCoordinatorCore`
-  (`dispatch:in:now:` answering a `PBStep`, `accept:in:now:` answering a `PBAcceptorStep`, one
-  rule method per event chosen by double dispatch), the events (`PBReceived`, `PBTimerFired`,
-  `PBStartNode`, `PBStopNode`, `PBPermitWanted`, `PBBaseWanted`, `PBReplicateWanted`,
-  `PBDoneReport`, `PBRejoinWanted`, `PBAcceptorDecided`), the effects (`PBSend`, `PBToAcceptor`,
-  `PBLogAppend`, `PBTimer`, `PBSettle`, `PBPublishCommitted`, `PBPublishAcceptor`, `PBFence`) and
-  the state values `PBNodeState` and `PBAcceptorState`, immutable, with time passed in
-  microseconds. The protocol rules follow in later modules. The tests gain a seeded,
-  virtual-time simulator (`tests/unit/_sim.st`: fake clocks with per-node rates, a faulty
-  network with partitions, simulated acceptor-log disks with crashes and torn tails, synthetic
-  commits, and an invariant checker), exercised by `tests/unit/sim_harness.st`.
-- Lease values (`src/protobase/cluster/lease.st`): `PBGrantState` (the grant rules of
-  `proto_db`'s `PeerGrants` with the ballot check of `_decide`), `PBGrantDecision`,
-  `PBActiveGrant`, `PBAttempt`, `PBLease` and `PBPermission`, immutable, with time passed in
-  microseconds. A lease is measured from the send of its request (L5).
-- Cluster configuration (`src/protobase/cluster/config.st`): `PBClusterConfig` validates a member's options with
-  `proto_db`'s defaults and refusal rules (drift margin at least 2/3 of the lease, request timeout below the belief,
-  send reserve at most a quarter of it), takes milliseconds and answers microseconds, and `timerTable` lists the timers
-  that apply at depth 0. `#fetchTimeout` is refused as Phase D.
-- Cluster frames (`src/protobase/cluster/protocol.st`): `PBClusterFrame`, the 4-byte big-endian
-  length and the 64 MiB limit of `proto_db`'s `encode_frame`/`FrameDecoder` (`encode:to:key:`,
-  `lengthFrom:`, `decodeBody:to:key:`, `decode:to:key:`), with optional HMAC-SHA-256 frame
-  authentication bound to the receiver (CC4): without a key the frames are protocol 13 byte for
-  byte, with one they diverge (`docs/deviations.md`, "Cluster mode", which also states the
-  trusted-network assumption). The invalid `message-oversized` vector is verified by
-  `tests/conformance/cluster.st`, which no longer skips anything.
-- The acceptor log (`src/protobase/cluster/rootlog.st`): `PBAcceptorLog`, `proto_db`'s
-  `RootsLog`, with `PBLoggedRoots` and `PBLogEntry`. It writes entry kinds 1 to 4 (promise,
-  accepted, committed synced or not as `proto_db`, rejoined marker) and reads kinds 1 to 6, holds
-  `<path>.lock` while open (a held lock is `PBUserError` naming it) and refuses every write after
-  a failed one. `roots.log` and the invalid `roots_log` vectors are verified by
-  `tests/conformance/rootlog.st` and no longer skipped.
-- `PBFramedLog openAppend:kind:` refuses a log file with more than one hard link
-  (`PBLockingError`), before reading or repairing it, as `proto_db`'s `open_log`; `PBFramedLog >>
-  sync`. protoBaseST now needs **protoST 0.12.0** (`BinaryFile >> linkCount`, `FileReference >>
-  realPath`), built on protoIO 0.7.0.
-- `PBAcceptorLog path:` resolves the real path before it names `<path>.lock`, as `proto_db`'s
-  `RootsLog`: a symbolic link to a log no longer opens a second handle on it (the ship-blocking
-  item of review is closed). A symbolic link loop is `PBUnexpectedError`.
-
-- The wire messages of cluster protocol 13 (`src/protobase/cluster/protocol.st`):
-  `PBClusterMessage`, the 22 types of `proto_db`'s `protocol.py` with its field table and
-  validation (`decode:`, `encode`, `type:from:fields:`), the wire roots of CC17 (`rootFrom:`,
-  `rootValue:`), `rangesFrom:`/`rangesValue:` and `afterFrom:`; `PBClusterProtocolError`, a
-  `PBCorruptionError`. The 23 message frames and the invalid `message` vectors are verified by
-  `tests/conformance/messages.st` and no longer skipped, except `message-oversized` (the frame
-  layer, cluster Task 6).
-- Cluster membership values (`src/protobase/cluster/members.st`): `PBPeer` and `PBMembership`
-  (ranks in code point order, the voter set of `proto_db`'s `_voter_set`, `majority`, the
-  voter-set fingerprint, `ballotAfter:rank:`); the root order (`src/protobase/cluster/rootlog.st`):
-  `PBLabeledRoot` and `PBRootOrder`, the order of `proto_db`'s `root_key`/`compare_roots`; and
-  `PBSpaceRoot databases:term:epoch:previous:`, which writes the cluster fields. The cluster
-  segment vector is verified by `tests/conformance/cluster_segment.st` (writing and reading) and
-  no longer skipped.
-- `PBFramedLog` (`src/protobase/cluster/log.st`): the framed append-only log of `proto_db`'s
-  `logfile.py` (headers, frames, `openAppend:kind:`, `read:kind:`), re-ported with the linear
-  prefix-checksum torn-tail search; the condition of ruling R14 (cluster storage enters scope) is
-  met. The `log`-layer, `ranges_log`, `segments_log` and `roots_log_torn` vectors are verified by
-  `tests/conformance/framing_logs.st` and no longer skipped.
-
-- A tutorial example suite, `examples/tutorial/`: twelve small protoST programs, one concept each
-  (a first commit, values and versions, records, collections and queries, transactions and
-  conflicts, blind-write merges, mutable cells and history, bytes, actors, crash recovery, sharing
-  a directory with Python's `proto_db`, the refusals). Each prints a line per check and ends with
-  `<lesson> ok (N checks)`; a failed check exits 1. They run with the other tests; lesson 11 is
-  skipped without the interop venv.
-- A chaptered tutorial, `docs/tutorial/`, one chapter per program, quoting it; and two orientation
-  chapters, "Coming from GemStone/S" and "Coming from Soil", which map each system's concepts to
-  protoBaseST's, cite GemTalk's programmer's guide, Soil's repository and Norbert Hartl's blog
-  series, and list what could not be verified.
-- The ERP walk-through moved from `docs/tutorial.md` to `docs/tutorial/erp.md` (content
-  unchanged apart from its relative links), so that the repository has one tutorial directory;
-  every link and `tests/docs/tutorial_sync.sh` follow it. `examples/erp/` is unchanged.
-- `tests/docs/tutorial_chapters_sync.sh` fails when a chapter's code differs from its program;
-  `tests/docs/reference_selectors.sh` now also checks the selectors cited by the chapters and by
-  `examples/tutorial/README.md` (GemStone and Soil selectors are allowed only in `docs/tutorial/`).
+- A tutorial suite: twelve small programs in `examples/tutorial/`, each with a chapter in
+  `docs/tutorial/`, plus "Coming from GemStone/S" and "Coming from Soil". The ERP walk-through
+  moved to `docs/tutorial/erp.md`.
+- Cluster chapters 13-16 and their programs in `examples/cluster/`.
+- `docs/reference.md` covers the cluster API and its timer table. The documentation tests check
+  that the chapters quote their programs exactly and that every selector they cite exists.
 
 ## 0.1.0 (2026-11-13)
 

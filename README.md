@@ -220,7 +220,7 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 | [docs/decisions.md](docs/decisions.md) | The choices, with what each costs if it is wrong. |
 | [examples/erp/](examples/erp/README.md) | A demo in which Python and protoST work on one directory. |
 | [docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md](docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md) | The design. |
-| [CHANGELOG.md](CHANGELOG.md) | What changed, task by task. |
+| [CHANGELOG.md](CHANGELOG.md) | What changed, release by release; the detailed log of 0.2.0 is [docs/changelog-0.2.0-development.md](docs/changelog-0.2.0-development.md). |
 
 ## Running the tests
 
