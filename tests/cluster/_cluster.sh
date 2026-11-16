@@ -27,16 +27,31 @@ declare -A RUN_OF=()      # pid -> "<run>/<id>"
 LIVE=()                   # pids expected to be running
 ALL=()                    # every pid started
 
+# Whether <pid> is still a child of this shell: a PID already reaped may belong to another
+# process by now, so nothing is signalled without this check.
+_is_child() {
+    [[ "$(ps -o ppid= -p "$1" 2>/dev/null | tr -d ' ')" == "$$" ]]
+}
+
+# Drops <pid> from LIVE and ALL once it has been waited for (it is never signalled again).
+_forget() {
+    local pid="$1" p keep=()
+    for p in "${LIVE[@]}"; do [[ "$p" == "$pid" ]] || keep+=("$p"); done
+    LIVE=("${keep[@]}")
+    keep=()
+    for p in "${ALL[@]}"; do [[ "$p" == "$pid" ]] || keep+=("$p"); done
+    ALL=("${keep[@]}")
+}
+
 cluster_cleanup() {
     local pid
     for pid in "${ALL[@]}"; do
-        if kill -0 "$pid" 2>/dev/null; then
-            kill -9 "$pid" 2>/dev/null
-        fi
+        _is_child "$pid" && kill -9 "$pid" 2>/dev/null
     done
     for pid in "${ALL[@]}"; do
         wait "$pid" 2>/dev/null
     done
+    ALL=(); LIVE=()
     if [[ "${KEEP_TMP:-}" == 1 ]]; then
         echo "NOTE: kept $TMP"
     else
@@ -77,7 +92,7 @@ _start() {
     ALL+=("$pid")
 }
 
-# cluster_worker <run> <id> <n> <after> <mark>; cluster_verifier <run> <id>.
+# cluster_worker <run> <id> <n> <after> <marks> (as _node.st takes them); cluster_verifier <run> <id>.
 cluster_worker() { _start "$1" "$2" worker "$2" "$1/out" "$1/space" "$3" "$4" "$5"; }
 cluster_verifier() { _start "$1" "$2" verifier "$2" "$1/out" "$1/space"; }
 
@@ -85,8 +100,9 @@ cluster_verifier() { _start "$1" "$2" verifier "$2" "$1/out" "$1/space"; }
 _check_live() {
     local run="$1" pid
     for pid in "${LIVE[@]}"; do
-        if ! kill -0 "$pid" 2>/dev/null; then
+        if ! _is_child "$pid" || [[ "$(ps -o stat= -p "$pid" 2>/dev/null)" == Z* ]]; then
             wait "$pid"; local rc=$?
+            _forget "$pid"
             fail_run "$run" "process ${RUN_OF[$pid]#"$run"/} (pid $pid) exited $rc before its time"
         fi
     done
@@ -126,35 +142,43 @@ cluster_peers() {
     mv "$run/out/peers.tmp" "$run/out/peers"
 }
 
-# cluster_kill <run> <id>: kill -9 of that member's recorded PID, reaped; then <run>/out/killed.
+# cluster_kill <run> <id> <killed file>: kill -9 of that member's recorded PID (checked to be
+# this shell's running child), reaped; then <run>/out/<killed file> names it.
 cluster_kill() {
-    local run="$1" id="$2" pid keep=() p
+    local run="$1" id="$2" file="$3" pid
     pid="${PID_OF["$run/$id"]:-}"
     [[ -n "$pid" ]] || fail_run "$run" "no process for $id"
-    kill -0 "$pid" 2>/dev/null || fail_run "$run" "$id (pid $pid) is not running when it should be killed"
+    _is_child "$pid" || fail_run "$run" "$id (pid $pid) is not running when it should be killed"
     kill -9 "$pid"
     wait "$pid" 2>/dev/null
-    for p in "${LIVE[@]}"; do [[ "$p" == "$pid" ]] || keep+=("$p"); done
-    LIVE=("${keep[@]}")
-    echo "$id" > "$run/out/killed"
+    _forget "$pid"
+    echo "$id" > "$run/out/$file"
 }
 
-# cluster_finish <run> <verifier>: once every worker is done, the verifier reads the space
-# (<run>/out/verify), then every member stops (<run>/out/stop); each must exit 0.
+# cluster_finish <run> <verifier>: once every worker is done, the verifier joins and reads the
+# space (<run>/out/verify), then every member stops (<run>/out/stop); each must exit 0 within
+# WAIT_SECONDS, or the test fails naming the member that hung.
 cluster_finish() {
-    local run="$1" verifier="$2" pid rc
+    local run="$1" verifier="$2" pid rc deadline
     : > "$run/out/verify"
     cluster_wait "$run" "$verifier.result"
     : > "$run/out/stop"
+    deadline=$((SECONDS + WAIT_SECONDS))
     for pid in "${LIVE[@]}"; do
+        while _is_child "$pid" && [[ "$(ps -o stat= -p "$pid" 2>/dev/null)" != Z* ]]; do
+            (( SECONDS > deadline )) \
+                && fail_run "$run" "${RUN_OF[$pid]#"$run"/} (pid $pid) did not exit within $WAIT_SECONDS s of stop"
+            sleep 0.1
+        done
         wait "$pid"; rc=$?
+        _forget "$pid"
         [[ $rc -eq 0 ]] || fail_run "$run" "${RUN_OF[$pid]#"$run"/} exited $rc"
     done
-    LIVE=()
 }
 
 # cluster_verify <run> <verifier> <worker>...: the correctness rules over the tokens. A worker
-# named in <run>/out/killed may have left tokens attempted and never resolved: they count as
+# named in a <run>/out/killed* file may have left a token attempted and never resolved, at most
+# one (a worker commits one token at a time; proto_db asserts len(in_flight) <= 1): it counts as
 # unknown. Any other worker resolved every token it attempted. Then: no token is both acked and
 # unknown, and none is attempted twice; every acknowledged token is present; the counter equals
 # the size of 'tokens' (no commit applied twice) and equals the acknowledged tokens plus the
@@ -162,7 +186,11 @@ cluster_finish() {
 cluster_verify() {
     local run="$1" verifier="$2"; shift 2
     local o="$run/out" killed="" id counter count acked unknown present unk_present
-    [[ -e "$o/killed" ]] && killed="$(tr -d '[:space:]' < "$o/killed")"
+    local kf
+    for kf in "$o"/killed*; do
+        [[ -e "$kf" ]] && killed+=" $(tr -d '[:space:]' < "$kf")"
+    done
+    killed="${killed# }"
     local v="$o/.verify"; mkdir -p "$v"
     : > "$v/attempt"; : > "$v/acked"; : > "$v/unknown"
     for id in "$@"; do
@@ -170,12 +198,14 @@ cluster_verify() {
         [[ -e "$a" ]] || fail_run "$run" "$id attempted no commit"
         touch "$k" "$u"
         cat "$a" >> "$v/attempt"; cat "$k" >> "$v/acked"
-        sort "$k" "$u" > "$v/resolved.$id"
+        sort -u "$k" "$u" > "$v/resolved.$id"
         sort "$a" > "$v/attempt.$id"
         comm -13 "$v/attempt.$id" "$v/resolved.$id" | grep -q . \
             && fail_run "$run" "$id resolved a token it never attempted"
-        if [[ "$id" == "$killed" ]]; then
+        if [[ " $killed " == *" $id "* ]]; then
             cat "$u" >> "$v/unknown"
+            (( $(comm -23 "$v/attempt.$id" "$v/resolved.$id" | wc -l) <= 1 )) \
+                || fail_run "$run" "$id, killed, left more than one token unresolved: $(comm -23 "$v/attempt.$id" "$v/resolved.$id" | tr '\n' ' ')"
             comm -23 "$v/attempt.$id" "$v/resolved.$id" >> "$v/unknown"
         else
             cat "$u" >> "$v/unknown"

@@ -4,16 +4,18 @@
 
 - Real processes, part 1 (Task 27, `tests/cluster/`): each member is a protost process of its
   own (`_node.st`: a `PBTcpTransport` on port 0, the port written to a marker file, the peers
-  read from one, lease 3000 ms, acquireTimeout 8000 ms; a learner verifier `v`), driven by
-  `_cluster.sh`, which records every PID from `$!`, kills only those and reaps them all in its
-  EXIT trap. `real_commits.sh`: three members commit 30 increments each; `real_kill_owner.sh`:
-  the member serving the term is killed with `kill -9` after its 10th acknowledgement, while it
-  commits, and the two others commit 10 more each under a term above it; then a voter of a
-  five-member run (three voters) is killed the same way and the other four finish. Each run is
-  verified through the learner after two barriers: every acknowledged token is present, the
-  counter equals the size of `tokens` and the acknowledged tokens plus the unknown tokens present
-  (a killed member's unresolved tokens counting as unknown). Every token's attempt and outcome is
-  appended and synced before the next step. No defect was found.
+  read from one, lease 3000 ms, acquireTimeout 8000 ms), driven by `_cluster.sh`, which records
+  every PID from `$!`, signals only its own living children and reaps them all in its EXIT trap.
+  `real_commits.sh`: three members commit 30 increments each. `real_kill_owner.sh`, with kill
+  thresholds drawn from a printed seed (`KILL_SEED`): the member serving the term is killed with
+  `kill -9` while it commits, and the two others commit on under a higher term; a voter that does
+  not serve the term is killed in a five-member run (three voters); in a five-voter run the owner
+  is killed, then the owner of the new term, leaving exactly three of five, which finish. Each
+  run is verified by a learner that joins only after the workload, behind two barriers: every
+  acknowledged token is present, the counter equals the size of `tokens` and the acknowledged
+  tokens plus the unknown tokens present (a killed member's one unresolved token counting as
+  unknown). `verify_rules.sh` checks those rules on synthetic outcome files, with an unknown
+  token present in the passing case and one failing case per rule. No defect was found.
 
 - Format interop of cluster mode with `proto_db` v2.0.0rc4 (Task 26): `proto_db` reads a
   cluster space protoBaseST wrote with three nodes on one directory (its verifier accepts it,
