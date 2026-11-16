@@ -209,13 +209,19 @@ PBClusterRound >> _rejoinBallot
 "The last resort (proto_db _run_round's except BaseException): every commit the round holds is
  settled, PBUnexpectedError when nothing of it was built (queued, asking for a permission or not
  built yet), PBOutcomeUnknownError when it was built or building (its root may have left); a
- permission held ends #unknown; the round starts again, idle, in a new generation."
+ permission held ends #unknown; the round starts again, idle, in a new generation, keeping no
+ build time or send time of the commits it settled."
 PBClusterRound >> _abandon: anError
   | s cause unbuilt unknown |
   s := state value.
   generation swap: [:g | g + 1].
   inbox swap: [:q | #()].
   left swap: [:old | false].
+  "The settled commits leave nothing behind: builds is keyed by each PBCommitEntry, which holds
+   its transaction (only applySettle: removes an entry, and the last resort rejects through
+   _reject:with:), review M4."
+  builds swap: [:d | Dictionary new].
+  sentAt swap: [:old | nil].
   state swap: [:old | (PBRoundState config: coordinator config) with: { #nextToken -> s nextToken }].
   cause := anError class name , ': ' , (anError messageText ifNil: ['(no message)']).
   unbuilt := PBUnexpectedError new messageText: 'The cluster commit round failed (' , cause
