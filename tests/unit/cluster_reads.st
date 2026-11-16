@@ -21,7 +21,9 @@
  over the commits. (4) CC9: newDatabase: on one node is visible on another after that node's own
  barrier commit (newDatabase: itself, and a run: writing '_read_barrier'), with the done of the
  first lost to it and its acceptor held. (5) A node cut off reads its stale committed root, never
- an older storage root; after the heal the next commit's done reaches it
+ an older storage root (the persisters of the other nodes stopped first, so space.root cannot
+ carry a newer root to it through the shared directory); after the heal the next commit's done
+ reaches it
  (transactions::test_storage_root_reads_never_make_reads_go_backwards)."
 Import from: 'protobase'.
 Import from: '_check'.
@@ -122,6 +124,12 @@ Reads step: '(5)'.
 db0 run: Reads incr.
 v := Reads counter: db0.
 kit waitUntil: [(Reads counter: db1) = v].
+"The shared directory is a channel the partition does not cut: n1's persister, refreshing
+ space.root, would learn any root n0's persister wrote there meanwhile (a committed root, so a
+ correct read, but no longer the stale one this check is about). The persisters of n0 and n2 are
+ stopped first, so space.root stays at or below v, and n1's storage reads can only offer it a
+ root that is not newer than the one it knows."
+#('n0' 'n2') do: [:id | (kit space: id) _persister stop waitWithin: 60000].
 kit network partition: #(#('n0' 'n2') #('n1')).
 3 timesRepeat: [db0 run: Reads incr].
 stale := Reads counter: db1.
