@@ -872,9 +872,11 @@ For tests, tools and readers of the format. An application does not need them.
   `PBClusterCoordinator nodeId: anId peers: anArrayOfPBPeer options: aDictionary` (the options of
   `PBClusterConfig`; `#transport` is a test seam, an unstarted `PBClusterTransport`, else a
   `PBTcpTransport` listens on the member's port with `requestTimeout`). `start` opens the
-  transport and starts the node with no acceptor log; `_attach: aTier` (a `Future`) loads the
+  transport and starts the node with no acceptor log; a start whose transport fails (a port in
+  use) leaves the node stopped, as `proto_db`'s does, and signals the transport's error; a
+  coordinator is started once (`PBUserError` for a second `start`); `_attach: aTier` (a `Future`) loads the
   tier's roots into a fresh `PBLoggedRoots` and attaches the acceptor, refusing with
-  `PBValidationError` a `#startupGrace` below `leaseDuration + driftMargin` over a log that is not
+  `PBValidationError` a `#startupGrace` below `leaseDuration + driftMargin` over a log that is
   not empty in a cluster of more than one member (L17); it answers `true` at once for the tier
   attached already, or for a tier over the same `storage` object, and refuses another with
   `PBValidationError`; `_detach: aTier` detaches only that tier (or one over its storage), and

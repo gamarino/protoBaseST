@@ -707,11 +707,35 @@ PBClusterCoordinator >> _drawInc
   ^ n bitAnd: (1 bitShift: 62) - 1.
 
 "Starts the node (proto_db start): the actors, the transport, the node with no acceptor log.
- Answers self. PBUserError when started before or stopped."
+ Answers self. PBUserError when started before or stopped. A start whose transport fails (a port
+ in use, say) leaves the node stopped, as proto_db's: the transport stopped if it was made, the
+ actors stopped, and the transport's error signalled (review M6)."
 PBClusterCoordinator >> start
-  | dispatcher acceptor transport now proxy |
+  | current |
   (run value: #starting ifCurrent: nil) ifFalse: [
-    ^ PBUserError signal: 'Node ' , config nodeId , ' was started before (a stopped coordinator is not restarted)'].
+    current := run value.
+    (current isKindOf: Future) ifTrue: [
+      ^ PBUserError signal: 'Node ' , config nodeId , ' is stopped; a stopped coordinator is not restarted (make a new one)'].
+    ^ PBUserError signal: 'Node ' , config nodeId , ' was started before'].
+  [self _start] on: Error do: [:e | self _failedStart. e pass].
+  ^ self.
+
+"A start that failed: the node stopped (run a resolved Future, as after stop), every waiter
+ settled, the acceptor finished and the transport, if it was made, stopped (waited, 60 s at
+ most); never signals."
+PBClusterCoordinator >> _failedStart
+  | stopped |
+  stopped := Future new.
+  run swap: [:old | stopped].
+  cells stopped swap: [:old | true].
+  [cells dispatcher value ifNotNil: [:d | d stopNode]] on: Error do: [:e | e return: nil].
+  [cells acceptor value ifNotNil: [:a | a finish]] on: Error do: [:e | e return: nil].
+  [cells transport value ifNotNil: [:t | (PBClusterTransport _settled: t stop) waitWithin: 60000]] on: Error do: [:e | e return: nil].
+  stopped resolve: true.
+
+"start's steps once run is #starting."
+PBClusterCoordinator >> _start
+  | dispatcher acceptor transport now proxy |
   now := cells now.
   cells node swap: [:old | PBNodeState config: config inc: self _drawInc].
   cells acceptorState swap: [:old | PBAcceptorState config: config detachedAt: now].
