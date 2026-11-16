@@ -4,7 +4,7 @@ fields parents and with_parents (R157). Prints the state order, then the payload
 oid replaced by 00 01 .. 0f (re-packing is checked to keep the bytes).
 
 Not a test (tests/run_tests.sh runs no .py file). It needs the rc4 venv's proto_db and
-ProtoBase's tests/support helpers (DirectContext), which the venv does not hold:
+protoBase's tests/support helpers (DirectContext), which the venv does not hold:
   mkdir <dir> && git -C "$PROTOBASE_REPO" archive v2.0.0rc4 tests/__init__.py tests/support | tar -x -C <dir>
   PYTHONPATH=tests/interop/.venv/protobase:<dir> tests/interop/.venv/bin/python tests/interop/py_legacy_with_bytes.py
 """

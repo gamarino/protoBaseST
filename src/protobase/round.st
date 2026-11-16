@@ -75,7 +75,7 @@ PBTimeoutError, with the text lockTimeout always had ('Could not acquire the
 root lock within <lockTimeout> ms (held by another process or storage)');
 the others go back to the head of the queue, and the next round is scheduled
 with Future after: d, d from firstLockDelay (1 ms) doubling up to
-longestLockDelay (50 ms), never past the nearest deadline (ProtoBase
+longestLockDelay (50 ms), never past the nearest deadline (proto_db
 FileStorage._acquire_process_lock's 0.001 s doubling up to 0.05 s). A round
 that takes the lock resets d. Each entry keeps the deadline it was queued
 with.
@@ -180,7 +180,7 @@ PBCommitEntry >> printOn: aStream
 Object subclass: #PBRoundRunner instanceVariableNames: 'space publisher queue scheduled delay proxy cluster'.
 
 "The first retry delay after a #locked round, and the longest, in
- milliseconds (ProtoBase FileStorage._acquire_process_lock: 0.001 s doubling
+ milliseconds (proto_db FileStorage._acquire_process_lock: 0.001 s doubling
  up to 0.05 s)."
 PBRoundRunner class >> firstLockDelay
   ^ 1.

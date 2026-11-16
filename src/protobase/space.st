@@ -209,7 +209,7 @@ PBObjectSpace >> isClosed
 
 "The first wait between two attempts to take the root lock, and the longest,
  in milliseconds: the round runner's (PBRoundRunner firstLockDelay and
- longestLockDelay; ProtoBase FileStorage._acquire_process_lock: 0.001 s
+ longestLockDelay; proto_db FileStorage._acquire_process_lock: 0.001 s
  doubling up to 0.05 s)."
 PBObjectSpace class >> firstLockDelay
   ^ PBRoundRunner firstLockDelay.
@@ -244,7 +244,7 @@ PBObjectSpace >> _currentSpaceRoot
   ^ self _spaceRootAt: self _snapshotRecord.
 
 "The root record a new transaction starts from (a PBRootRecord), or nil for an
- empty space (ProtoBase _snapshot_record, proto_db _read_storage_root). Without
+ empty space (proto_db _snapshot_record and _read_storage_root). Without
  a coordinator, the storage's current root. With one, the newest committed
  root this node knows (the coordinator's committedRoot; when it knows none,
  the peers' recovered root, else the persisted root: _committedRecord), after a

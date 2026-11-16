@@ -26,7 +26,7 @@ deadlock (review C1 of Task 18).
 
 A round runs these steps in order:
   0. for each entry, it saves the atoms the transaction wrote (dependents
-     first), before the root lock, as ProtoBase's _commit saves them before
+     first), before the root lock, as proto_db's _commit saves them before
      _commit_root; a failure is that entry's alone; a save is idempotent, so a
      later attempt writes them no more;
   1. it tries the root lock once (PBFileStorage tryLockRoot): #locked for
@@ -35,7 +35,7 @@ A round runs these steps in order:
      checked);
   3. and 4. for each entry in queue order, the builder validates against the
      root the previous build produced (the root of step 2 for the first) and
-     builds the new SpaceRoot on it (PBTransaction >> _buildOn:, ProtoBase
+     builds the new SpaceRoot on it (PBTransaction >> _buildOn:, proto_db
      _build_root), and saves it; the record of that saved root, with the
      epoch of step 2 plus one, is the next build's root. A build error (a
      conflict, a failed merge, even an unexpected error) is that entry's
@@ -50,12 +50,12 @@ A round runs these steps in order:
      chain;
   7. after success it marks every collection each built transaction wrote as
      consumed (D33). The spec also names a last-known root updated here; it
-     has no reader (ProtoBase reads one only in a cluster), so none is kept;
+     has no reader (proto_db reads one only in a cluster), so none is kept;
   8. when the publish fails, it reads space.root again, still under the lock:
      the round's own root means the round succeeded; the root it was built on
      (same epoch) proves that nothing was published, and the original error
      is the outcome; another root (another epoch, which only a writer ignoring
-     the lock can publish) is PBConflictError, as ProtoBase's _publish; a root
+     the lock can publish) is PBConflictError, as proto_db's _publish; a root
      that cannot be read leaves the outcome unknown: PBOutcomeUnknownError,
      never a guess. That outcome is every built entry's.
 A failure of the lock, of the root read, of the flush or of the publish
@@ -65,7 +65,7 @@ it writes the same bytes as before group commit (tests/unit/bytes_pinned.st).
 The root lock is released after every round, failed or not, best effort
 (unlockRoot never signals). The epoch is the one of the root read under the
 lock in step 2, which is the root the validation of step 3 compared the first
-entry's reads with, as in ProtoBase's _standalone_round: a root that moved
+entry's reads with, as in proto_db's _standalone_round: a root that moved
 since the transaction started is validated, not overwritten.
 
 The publisher runs no application code: the builder is the library's
@@ -183,9 +183,9 @@ PBPublisher >> _build: anEntry on: aRecord stamp: aStampOrNil
   ^ anEntry transaction _buildOn: aRecord stamp: aStampOrNil.
 
 "The SpaceRoot of aRecord with the database aName added at version 0
- (ProtoBase ObjectSpace.new_database): empty objects and mutables, no
+ (proto_db ObjectSpace.new_database): empty objects and mutables, no
  previous version, committedAt now in UTC and a new origin, the database's
- identity: the 16 bytes of a version-4 UUID, as ProtoBase's
+ identity: the 16 bytes of a version-4 UUID, as proto_db's
  uuid.uuid4().bytes. An existing name is PBValidationError."
 PBPublisher >> _newDatabase: aName on: aRecord
   ^ self _newDatabase: aName on: aRecord stamp: nil.

@@ -22,7 +22,7 @@
 # row for a function the tag does not have, a duplicate row, a malformed row, a missing file or a
 # family that is not a whole check label of its file, and prints the counts, then the deferred
 # rows grouped by task. With CHECKLIST_FINAL=1 (the final gate, plan Task 30) every deferred row
-# is an error too. The functions are listed from the tag with git show (the ProtoBase checkout is
+# is an error too. The functions are listed from the tag with git show (the protoBase checkout is
 # only read). Without a checkout at the default path, and none named, it is skipped (exit 77); a
 # checkout named explicitly (PROTOBASE_REPO set by the caller: PROTOBASE_REPO_EXPLICIT=1 under
 # tests/run_tests.sh, which always exports PROTOBASE_REPO, or PROTOBASE_REPO set when run directly)
@@ -35,11 +35,11 @@ PB="${PROTOBASE_REPO:-$REPO/../ProtoBase}"
 TAG=v2.0.0rc4
 explicit="${PROTOBASE_REPO_EXPLICIT-${PROTOBASE_REPO:+1}}"
 if [[ -z "$explicit" && ! -e "$PB" ]]; then
-    echo "SKIP: no ProtoBase checkout"
+    echo "SKIP: no protoBase checkout"
     exit 77
 fi
 if ! git -C "$PB" rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
-    echo "FAIL: $PB is not a ProtoBase checkout holding the tag $TAG"
+    echo "FAIL: $PB is not a protoBase checkout holding the tag $TAG"
     exit 1
 fi
 command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found, the checklist cannot run"; exit 1; }

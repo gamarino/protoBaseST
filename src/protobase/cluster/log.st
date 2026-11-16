@@ -1,6 +1,6 @@
 "-- cluster/log.st: framed append-only logs with the linear torn-tail search --
 
-The log file format of ProtoBase proto_db/storage/logfile.py (format version 2), byte for
+The log file format of proto_db/storage/logfile.py (format version 2), byte for
 byte: the conformance vectors under tests/conformance/vectors/cluster and invalid/log-* are
 the oracle. A cluster node keeps three of them (ROOT, RANG, SEGS).
 

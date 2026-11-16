@@ -49,12 +49,12 @@ PBSpaceRoot class >> databases: aDictionary
     ^ PBValidationError signal: 'PBSpaceRoot databases: a PBDictionary was expected, not ' , aDictionary printString].
   ^ self _unsavedWithState: (PBFrozenDict withAssociations: { 'databases' -> aDictionary }).
 
-"A new, unsaved space root committed under a cluster lease, as ProtoBase's
+"A new, unsaved space root committed under a cluster lease, as proto_db's
  SpaceRoot(databases=..., cluster=stamp, previous=...): the state keys in the
  order databases, cluster_term, cluster_epoch, cluster_previous (the order the
  cluster segment vector shows). anInteger term and epoch are Integers >= 0;
  aSpaceRootOrNil is the space root it was built on, or nil (written as nil, as
- ProtoBase writes a None history link)."
+ proto_db writes a None history link)."
 PBSpaceRoot class >> databases: aDictionary term: aTerm epoch: anEpoch previous: aSpaceRootOrNil
   (aDictionary isKindOf: PBDictionary) ifFalse: [
     ^ PBValidationError signal: 'PBSpaceRoot databases: a PBDictionary was expected, not ' , aDictionary printString].

@@ -1,6 +1,6 @@
 "-- cluster/members.st: the static membership of a cluster, its ranks, voters and ballots --
 
-The values every member computes like the others (ProtoBase format spec, 'Values a member must
+The values every member computes like the others (proto_db format spec, 'Values a member must
 compute'; proto_db cluster/coordinator.py Peer, _voter_set, ballot_after, the voter-set
 fingerprint), so that two members configured alike agree on them byte for byte.
 

@@ -467,7 +467,7 @@ PBTransaction >> setRootObject: aName value: aValue replace: aBoolean
   bookkeeping swap: [:st | st checkActive withWrite: aName value: value replace: aBoolean].
 
 "Removes the root aName at commit (a no-op if it is absent then); a later set
- of the name in this transaction replaces (ProtoBase remove_root_object). As in
+ of the name in this transaction replaces (proto_db remove_root_object). As in
  proto_db 2.0.0rc4, the name is checked, then the '__' prefix the format
  reserves, then the state."
 PBTransaction >> removeRootObject: aName
@@ -580,7 +580,7 @@ PBTransaction >> abort
  changed, or a merge conflicts; PBTimeoutError when the root lock is not
  taken within the space's lockTimeout; PBOutcomeUnknownError when the
  publish failed and its outcome could not be decided. The transaction ends
- either way: committed, or aborted after a failure (ProtoBase commit)."
+ either way: committed, or aborted after a failure (proto_db commit)."
 PBTransaction >> commit
   | st committed space |
   bookkeeping swap: [:current | st := current checkActive. current withState: #committing].

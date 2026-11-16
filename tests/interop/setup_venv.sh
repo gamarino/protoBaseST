@@ -8,7 +8,7 @@
 # v2.0.0rc4 (as since v2.0.0rc2) needs msgpack >= 1.2.0 (its packer writes the 1024 containers of a record holding a
 # value of MAX_VALUE_DEPTH; format spec, 'Value nesting depth') and runs with msgpack's C
 # extension (its pure-Python fallback recurses per container). That is the only use of the
-# network. ProtoBase v2.0.0rc4 requires Python 3.12 or newer. Environment: PYTHON (default
+# network. proto_db v2.0.0rc4 requires Python 3.12 or newer. Environment: PYTHON (default
 # python3), PROTOBASE_REPO (default ../ProtoBase).
 set -euo pipefail
 
