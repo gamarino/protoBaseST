@@ -303,7 +303,8 @@ cluster_verify_same() {
 # _verify, its reader): every acknowledged token and every token the verifier read is persisted;
 # the counter equals the size of 'tokens' and the number of attempted tokens present (applied
 # whole, none twice, no token no commit wrote); every token persisted was acknowledged or has an
-# unknown outcome.
+# unknown outcome. Then space.root equals the read: the same tokens and counter (the verifiers
+# commit their barriers before any reads, so no commit of a token takes effect after the read).
 cluster_verify_persisted() {
     local run="$1" id="$2" verifier="$3"
     local o="$run/out" v="$run/out/.verify" counter count missing
@@ -319,7 +320,11 @@ cluster_verify_persisted() {
         || fail_run "$run" "persisted counter $counter, $count tokens, $(wc -l < "$v/persisted") attempted tokens present"
     missing="$(sort -u "$v/acked" "$v/unknown" | comm -13 - "$v/persisted" | tr '\n' ' ')"
     [[ -z "$missing" ]] || fail_run "$run" "persisted tokens no commit may have written: $missing"
-    echo "NOTE: $(basename "$run"): space.root holds counter $counter, every token $verifier read"
+    cmp -s "$v/present" "$v/persisted" \
+        || fail_run "$run" "space.root holds tokens $verifier did not read: $(comm -13 "$v/present" "$v/persisted" | tr '\n' ' ')"
+    [[ "$(cat "$o/$id.result")" == "$(cat "$o/$verifier.result")" ]] \
+        || fail_run "$run" "space.root holds [$(cat "$o/$id.result")], $verifier read [$(cat "$o/$verifier.result")]"
+    echo "NOTE: $(basename "$run"): space.root holds counter $counter, exactly the tokens $verifier read"
 }
 
 # cluster_check '<label>': the assertions of the check <label> passed. The label is the one

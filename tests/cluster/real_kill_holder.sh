@@ -14,11 +14,15 @@
 # restarts the member on its disk: the same node id, acceptor log and port, the default startup
 # grace (5 s at a 3000 ms lease; L17 refuses a shorter one over a log that is not empty), a new
 # incarnation '<id>.<k>' (_cluster.sh) with tokens of its own, which commits 10 and takes part in
-# the later stages. The holder may be any worker, the owner of the term included.
+# the later stages without arming a seam: each stage kills a member never killed before, so n0,
+# n1 and n2 are each killed and restarted once (rc4's node restart restarts every node in turn).
+# The holder may be the owner of the term. A restart keeps its log, so it never rejoins: each
+# restarted incarnation reports rejoin_ballots 0 (the control of real_restart_rejoin.sh's >= 1).
 #
-# The persister makes one pass per process start and none after (NODE_PERSIST_MS=600000): once
-# every worker is done, the whole cluster is killed with kill -9, its commits mostly unpersisted
-# (space.root, read with no node, holds a counter below the final one, or nothing). Then the three
+# Every worker runs with its persister off (NODE_PERSISTER=off: never started, so space.root is
+# never written, however long the run; rc4's store outage): once every worker is done, the whole
+# cluster is killed with kill -9, every commit unpersisted (space.root, read with no node, holds
+# no 'shop'), held only in the acceptor logs. Then the three
 # members restart on their disks (proto_db test_cluster_crash.py _verify, and the whole-cluster
 # restart of test_cluster_persistence.py), as verifiers with the default persister, beside the
 # learner v; each commits its barriers, then reads 'shop' and syncs it (_cluster.sh
@@ -28,8 +32,8 @@
 #     token in flight counting as unknown);
 #   cluster_verify_same: the four members read the same tokens and counter (a token whose outcome
 #     is unknown is present on every node or on none);
-#   cluster_verify_persisted: space.root, read with no node after sync:, holds every token read
-#     and every acknowledged one, applied whole, none twice, none no commit may have written;
+#   cluster_verify_persisted: space.root, read with no node after sync:, holds exactly the tokens
+#     and the counter read (every acknowledged one among them), applied whole, none twice;
 #   per stage: the 'built' token is absent; every token the 'done' mark names is present (its
 #     in-flight one is unknown and present: the unknown arm of the rule runs in every run); the
 #     'replicate' token is present or absent, the same on every node.
@@ -52,7 +56,7 @@ IDS=(n0 n1 n2)
 
 run="$(cluster_run kill-holder)"; [[ -n "$run" ]] || fail "no run directory"
 o="$run/out"
-export NODE_PERSIST_MS=600000
+export NODE_PERSISTER=off
 declare -A CUR=() INC=()
 LOGS=()
 for id in "${IDS[@]}"; do
@@ -100,13 +104,23 @@ dones=()
 for id in "${IDS[@]}"; do dones+=("${CUR[$id]}.done"); done
 cluster_wait "$run" "${dones[@]}"
 
-# The whole cluster crashes, its commits mostly unpersisted.
+# Each member was killed once, at its own stage; each restart kept its log and never rejoined.
+victims="$(for s in 1 2 3; do cut -d. -f1 < "$o/killed$s"; done | sort -u | tr '\n' ' ')"
+[[ "$victims" == "n0 n1 n2 " ]] || fail_run "$run" "the stages killed [$(cat "$o"/killed* | tr '\n' ' ')], not each member once"
+for id in "${IDS[@]}"; do
+    ballots="$(sed -n 's/.* rejoin_ballots \([0-9][0-9]*\)$/\1/p' "$o/${CUR[$id]}.done")"
+    [[ "$ballots" == 0 ]] || fail_run "$run" "${CUR[$id]}, restarted on its log, reports rejoin_ballots [$ballots]"
+done
+echo "NOTE: kill-holder: each of $victims killed once; ${CUR[n0]} ${CUR[n1]} ${CUR[n2]} report rejoin_ballots 0"
+
+# The whole cluster crashes, every commit unpersisted.
 cluster_crash "$run" "${CUR[n0]}" "${CUR[n1]}" "${CUR[n2]}" v
 cluster_persisted "$run" crashed
 before="$(cat "$o/crashed.result")"
+[[ "$before" == none ]] || fail_run "$run" "space.root holds [$before] with every worker's persister off"
 
 # Restarted on its disks, every member reads; then space.root is read with no node.
-unset NODE_PERSIST_MS
+unset NODE_PERSISTER
 readers=()
 for id in "${IDS[@]}"; do cluster_verifier "$run" "$id" "$id.r"; readers+=("$id.r"); done
 cluster_verifier "$run" v v.r
@@ -117,10 +131,6 @@ cluster_persisted "$run" persisted
 cluster_verify_persisted "$run" persisted v.r
 
 read -r _ counter _ < "$o/v.r.result"
-if [[ "$before" != none ]]; then
-    read -r _ p _ <<< "$before"
-    (( p < counter )) || fail_run "$run" "space.root held counter $p at the crash, the restarted cluster $counter: nothing was left to recover"
-fi
 echo "NOTE: kill-holder: space.root at the crash: $before; after the restart: counter $counter"
 
 v="$o/.verify"

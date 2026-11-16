@@ -1,7 +1,13 @@
 "_node_seams.st: the seams of the commit round that _node.st arms to kill a permission holder
  mid-round (plan Task 28; a helper, never run as a test).
 
-  NodeSeamSpace      a PBObjectSpace whose cluster round is a NodeSeamRound
+  NodeSpace          a PBObjectSpace whose persister can be switched off (NodeSpace
+                     persisterOff: true, before the space opens): it is then never started
+                     (PBObjectSpace >> _startPersister, the seam the unit tests' SeamSpace
+                     quietPersisters: uses), so the node never writes space.root, however long
+                     the run (proto_db's store outage, set_outage(True), and its persister that
+                     never writes)
+  NodeSeamSpace      a NodeSpace whose cluster round is a NodeSeamRound
                      (PBObjectSpace >> _newClusterRound:proxy:, the space's seam)
   NodeSeamRound      a PBClusterRound that reaches three points of a round of the worker's own
                      commit (an entry that is not a confirmation, built under the round's
@@ -29,8 +35,9 @@
                      has handled the done of the permission that committed aToken (the core
                      settles the commits of a round, then reports its done in the same step,
                      so the done may come before or after run: returns). When that done took
-                     the mark, which then names aToken last, the thread holds too; else (the
-                     mark lost to another process) it goes on. So a kill at 'done' always finds
+                     the mark, which then names aToken last, the thread holds too; when it
+                     lost the mark to another process, it goes on. No such done within 60 s is
+                     a failure: <out>/<log>.error names the token and the process exits 1. So a kill at 'done' always finds
                      aToken acknowledged by the cluster and not recorded by the worker: its
                      outcome unknown, the token present on every node.
 
@@ -43,7 +50,7 @@
  confirmation, builds no entry of the worker and is never held."
 Import from: 'protobase'.
 
-Object subclass: #NodeSeams instanceVariableNames: '' classVariableNames: 'Armed Current DoneArmed DoneOf Fired'.
+Object subclass: #NodeSeams instanceVariableNames: '' classVariableNames: 'Armed Current DoneArmed DoneOf Fired Where'.
 
 "Armed: the arming a round claims (nil once claimed or disarmed). DoneArmed: armed for 'done',
  kept while the round claims (only the main thread clears it). DoneOf: the last token of the
@@ -54,8 +61,10 @@ NodeSeams class >> setUp
   DoneArmed := Atom on: false.
   DoneOf := Atom on: nil.
   Fired := Atom on: false.
+  Where := Atom on: nil.
 
 NodeSeams class >> arm: aKind stage: s out: aDirectory log: aLog
+  Where swap: [:old | { aDirectory. aLog }].
   DoneArmed swap: [:old | aKind = 'done'].
   Armed swap: [:old | { aKind. s. aDirectory. aLog }].
 
@@ -87,9 +96,12 @@ NodeSeams class >> acknowledged: aToken
   Fired value ifTrue: [
     "The mark is taken: the runner holds until the kill; so does this thread."
     [true] whileTrue: [(Future after: 1000) wait]].
-  DoneOf value = aToken ifFalse: [
-    Stdio stderr nextPutAll: 'seam: no done of ' , aToken , ' within 60 s; disarmed'; lf; flush.
-    self disarm].
+  DoneOf value = aToken ifFalse: [ | text |
+    text := 'the done seam handled no done of ' , aToken , ' within 60 s'.
+    Stdio stderr nextPutAll: (Where value at: 2) , ': FAILED: ' , text; lf; flush.
+    [((Where value at: 1) / ((Where value at: 2) , '.error')) contents: text , (String with: Character lf)]
+      on: Error do: [:e | e return: nil].
+    Smalltalk exit: 1].
 
 "Called by a round at aKind with the tokens its commit carries (the one in flight last): the
  armed round takes the mark, or loses it and goes on. The winner holds the runner: answers only
@@ -127,7 +139,8 @@ NodeSeamRound >> _build: aBuild
   | root |
   root := super _build: aBuild.
   (root notNil and: [aBuild entry notNil and: [NodeSeams current notNil]]) ifTrue: [
-    built := self builtTokens copyWith: NodeSeams current.
+    (self builtTokens isEmpty or: [self builtTokens last ~= NodeSeams current]) ifTrue: [
+      built := self builtTokens copyWith: NodeSeams current].
     NodeSeams reach: 'built' tokens: { NodeSeams current }].
   ^ root.
 
@@ -146,7 +159,16 @@ NodeSeamRound >> applyReportDone: anEffect
     NodeSeams reach: 'done' tokens: tokens].
   tokens isEmpty ifFalse: [NodeSeams doneOf: tokens last].
 
-PBObjectSpace subclass: #NodeSeamSpace instanceVariableNames: ''.
+PBObjectSpace subclass: #NodeSpace instanceVariableNames: '' classVariableNames: 'PersisterOff'.
+
+NodeSpace class >> persisterOff: aBoolean
+  PersisterOff := aBoolean.
+
+NodeSpace >> _startPersister
+  PersisterOff == true ifTrue: [^ self].
+  ^ super _startPersister.
+
+NodeSpace subclass: #NodeSeamSpace instanceVariableNames: ''.
 
 NodeSeamSpace >> _newClusterRound: aPublisher proxy: aCell
   ^ NodeSeamRound space: self publisher: aPublisher proxy: aCell.

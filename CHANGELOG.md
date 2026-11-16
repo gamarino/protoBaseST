@@ -2,21 +2,22 @@
 
 ## 0.2.0 (unreleased)
 
-- Real processes, part 2 (Task 28, `tests/cluster/`): `_node_seams.st` holds a round of a
-  worker's commit at one of three points (the root built, its replicate sent, the permission's
-  done sent) and names the token in flight in a marker file. `real_kill_holder.sh`: the holder
-  is killed with `kill -9` at each point in turn and restarted on its disk (same node id, port
-  and acceptor log, the default 5 s startup grace) as a new incarnation; the token killed at
-  "built" is absent everywhere, the one killed at "done" (acknowledged by the cluster, not
-  recorded by the worker) present everywhere, the one killed at "replicate" the same on every
-  node. Once done, the whole cluster is killed before any persistence (the persister makes one
-  pass per start) and restarted on its disks: every member reads the same tokens, and space.root,
-  read with no node after `sync:`, holds them. `real_restart_rejoin.sh`: a voter stopped, its
-  `cluster/<id>.roots` renamed aside, restarted: it rejoins by ballot (`rejoin_ballots` >= 1) and
-  the workload loses nothing. The four checklist rows deferred to Task 28 are ported. A harness
-  defect was fixed: `_cluster.sh` now runs under `LC_ALL=C`, since a `sort` and a `comm` of
-  different collations reported a present token missing once tokens carried an incarnation's dot
-  (a `verify_rules.sh` case covers it). No defect was found in `src/`.
+- Real processes, part 2 (Task 28, `tests/cluster/`): `_node_seams.st` holds a round of a worker's
+  commit at one of three points (the root built, its replicate sent, the permission's done sent)
+  and names the token in flight in a marker file. `real_kill_holder.sh`: the holder is killed with
+  `kill -9` at each point in turn and restarted on its disk (same node id, port and acceptor log,
+  the default 5 s startup grace) as a new incarnation; the token killed at "built" is absent
+  everywhere, the one killed at "done" (acknowledged by the cluster, not recorded by the worker)
+  present everywhere, the one killed at "replicate" the same on every node; each member is killed
+  once. Once done, the whole cluster is killed before any persistence (every worker's persister
+  switched off) and restarted on its disks: every member reads the same tokens, and space.root,
+  read with no node after `sync:`, holds them. `real_restart_rejoin.sh`, persisters off: a voter
+  killed with `kill -9`, its `cluster/<id>.roots` renamed aside, restarted: it rejoins by ballot
+  (`rejoin_ballots` >= 1; a restart on a kept log reports 0) and the workload loses nothing. The
+  four checklist rows deferred to Task 28 are ported. A harness defect was fixed: `_cluster.sh`
+  now runs under `LC_ALL=C`, since a `sort` and a `comm` of different collations reported a
+  present token missing once tokens carried an incarnation's dot (a `verify_rules.sh` case covers
+  it). No defect was found in `src/`.
 
 - Real processes, part 1 (Task 27, `tests/cluster/`): each member is a protost process of its
   own (`_node.st`: a `PBTcpTransport` on port 0, the port written to a marker file, the peers

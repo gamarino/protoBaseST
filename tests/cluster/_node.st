@@ -20,10 +20,10 @@
  option values of examples/cluster/14_cluster_commits.st: a lease of 3000 ms, the default drift
  margin, a requestTimeout of 100 ms, and an acquireTimeout of 8000 ms; the startup grace is the
  default, leaseDuration + driftMargin = 5 s (the only one L17 accepts over a log that is not
- empty). With NODE_PERSIST_MS set in the environment, persistInterval and persistLag are that
- many milliseconds (a value far above the run, 600000, means the persister of the node makes
- one pass, at its start, and none after: a crash finds the commits unpersisted), and a worker
- commits only after that first pass. Its space is PBFileStorage clusterPath: <space>, the
+ empty). With NODE_PERSISTER=off in the environment, a worker's persister is never started
+ (_node_seams.st NodeSpace persisterOff:): the node never writes space.root, however long the
+ run lasts (proto_db's store outage), so a crash finds every commit unpersisted, held only in the
+ acceptor logs; a verifier always persists. Its space is PBFileStorage clusterPath: <space>, the
  directory every member shares.
 
  A worker commits, with run:, increments of the root 'counter' of the database 'shop', each one
@@ -57,17 +57,16 @@
                       round of one of its commits that reaches that point takes <out>/mark<s>
                       (or loses it to another process and goes on), writes
                       '<log> <mode> <token>...' there and holds; the driver kills the holder
-                      with kill -9 mid-round.
+                      with kill -9 mid-round. Only a member's first incarnation (<log> = <id>)
+                      arms a seam: each stage kills a member never killed before.
  With <after> > 0, after its <n> commits a worker takes each stage in turn: it waits for
  <out>/killed<s>, commits <after> more (commits made after that death), and, while a later
  stage's mark does not exist yet, goes on committing, so that a worker of the next stage reaches
- its K acknowledgements whatever the order of events. Before each commit it looks for
- <out>/<log>.halt: when it exists, the worker stops committing at once (a clean stop: every token
- it attempted is resolved). It then writes <out>/<log>.done ('acked A unknown U conflicts C
- timeouts T committed_label L rejoin_ballots R halted H', L the label, the term, of the newest
- root its node knows committed, R the node's stats rejoin_ballots, H true when halted). A halted
- worker then closes its space, stops its node and exits 0; any other waits for <out>/stop first
- (it stays a member until every worker is done: a majority of voters must stay up).
+ its K acknowledgements whatever the order of events. It then writes <out>/<log>.done ('acked A
+ unknown U conflicts C timeouts T committed_label L rejoin_ballots R', L the label, the term, of
+ the newest root its node knows committed, R the node's stats rejoin_ballots, counted by this
+ process only) and waits for <out>/stop (it stays a member until every worker is done: a
+ majority of voters must stay up).
 
  The verifier reads the space through the cluster. Restarted on a member's disk, it is that
  member (a voter when the voters line names it); else a learner (not in the voters line), which
@@ -94,8 +93,8 @@ Import from: '_node_seams'.
 
 | args role id log out spaceDir n after stages fail say waitFor writeFile appendTo files
   peerLines voters peers transport node space db acked unknown conflicts timeouts retrying
-  commit held tried seenAt tryMarks i until next runCount join persistMs portFile listener
-  options halted spaceClass presentOf seamModes |
+  commit held tried seenAt tryMarks i until next runCount join quiet portFile listener
+  options spaceClass presentOf seamModes |
 args := Smalltalk arguments.
 args size < 4 ifTrue: [
   'usage: _node.st worker <id> <out> <space> <n> <after> <marks> [<log>] | verifier <id> <out> <space> [<log>] | persisted <id> <out> <space>' displayNl.
@@ -209,22 +208,19 @@ options := Dictionary new
   at: #voters put: voters;
   at: #transport put: transport;
   yourself.
-persistMs := (Smalltalk getenv: 'NODE_PERSIST_MS') ifNotNil: [:v | v asInteger].
-persistMs isNil ifFalse: [
-  options at: #persistInterval put: persistMs; at: #persistLag put: persistMs].
 node := PBClusterCoordinator nodeId: id peers: peers options: options.
-"The space class: a worker with a stage of a seam mode runs its rounds through the seams."
+"The space class: a worker with a stage of a seam mode runs its rounds through the seams; a
+ worker under NODE_PERSISTER=off never starts its persister."
+quiet := role = 'worker' and: [(Smalltalk getenv: 'NODE_PERSISTER') = 'off'].
+NodeSpace persisterOff: quiet.
 spaceClass := (role = 'worker' and: [stages anySatisfy: [:st | seamModes includes: st first]])
   ifTrue: [NodeSeamSpace]
-  ifFalse: [PBObjectSpace].
+  ifFalse: [quiet ifTrue: [NodeSpace] ifFalse: [PBObjectSpace]].
 join := [
   node start.
   space := spaceClass storage: (PBFileStorage clusterPath: spaceDir) coordinator: node.
   (until value: [(node stats at: 'rejoining') not] value: 300) ifFalse: [
     fail value: 'the node did not finish joining within 300 s'].
-  persistMs isNil ifFalse: [
-    (until value: [(space _persister stats at: 'cycles') >= 1] value: 300) ifFalse: [
-      fail value: 'the persister made no pass within 300 s']].
   say value: 'joined'].
 
 acked := 0. unknown := 0. conflicts := 0. timeouts := 0.
@@ -299,7 +295,6 @@ role = 'worker' ifTrue: [
       ifFalse: [unknown := unknown + 1. appendTo value: log , '.unknown' value: aToken]].
 
   held := 0.
-  halted := false.
   "Per stage: tried (once), and the acknowledgements counted when killed<s-1> was first seen."
   tried := stages collect: [:st | false].
   seenAt := stages collect: [:st | nil].
@@ -319,9 +314,9 @@ role = 'worker' ifTrue: [
         (seamModes includes: mode)
           ifTrue: [
             tried at: s put: true.
-            NodeSeams arm: mode stage: s out: out log: log.
-            say value: 'armed mark' , s printString , ' (' , mode , ') after '
-              , (acked - (seenAt at: s)) printString , ' acknowledgements']
+            log = id ifTrue: [NodeSeams arm: mode stage: s out: out log: log].
+            log = id ifTrue: [say value: 'armed mark' , s printString , ' (' , mode , ') after '
+              , (acked - (seenAt at: s)) printString , ' acknowledgements']]
           ifFalse: [
             ownership := node nodeState ownership.
             serving := ownership notNil and: [ownership isServingAt: Time microsecondClockValue].
@@ -340,15 +335,10 @@ role = 'worker' ifTrue: [
                   , (acked - (seenAt at: s)) printString , ' acknowledgements']]]]]].
 
   i := 0.
-  "One commit, unless <out>/<log>.halt exists (then halted, and nothing more is committed)."
   next := [
-    halted ifFalse: [
-      (out / (log , '.halt')) exists
-        ifTrue: [halted := true. say value: 'halted']
-        ifFalse: [
-          i := i + 1.
-          commit value: log , '-' , i printString.
-          tryMarks value]]].
+    i := i + 1.
+    commit value: log , '-' , i printString.
+    tryMarks value].
   "aCount commits; a mark holder then goes on until its killed file exists (it never returns)."
   runCount := [:aCount |
     aCount timesRepeat: [next value].
@@ -356,14 +346,14 @@ role = 'worker' ifTrue: [
       [(out / ('killed' , held printString)) exists] whileFalse: [next value].
       fail value: 'the holder of mark' , held printString , ' was not killed']].
   runCount value: n.
-  (after > 0 and: [halted not]) ifTrue: [
+  after > 0 ifTrue: [
     1 to: stages size do: [:s |
       waitFor value: 'killed' , s printString value: 300.
       tryMarks value.
       runCount value: after.
       s < stages size ifTrue: [ | extra |
         extra := 0.
-        [(out / ('mark' , (s + 1) printString)) exists or: [halted]] whileFalse: [
+        [(out / ('mark' , (s + 1) printString)) exists] whileFalse: [
           extra := extra + 1.
           extra > 2000 ifTrue: [fail value: 'no mark' , (s + 1) printString , ' after 2000 more commits'].
           next value].
@@ -373,10 +363,10 @@ role = 'worker' ifTrue: [
     , ' conflicts ' , conflicts printString , ' timeouts ' , timeouts printString
     , ' committed_label ' , node committedRoot label printString
     , ' rejoin_ballots ' , (node stats at: 'rejoin_ballots' ifAbsent: [0]) printString
-    , ' halted ' , halted printString , (String with: Character lf).
+    , (String with: Character lf).
   say value: 'done: acked ' , acked printString , ', unknown ' , unknown printString].
 
-halted == true ifFalse: [waitFor value: 'stop' value: 540].
+waitFor value: 'stop' value: 540.
 files do: [:f | f close].
 space close.
 (node stop waitWithin: 60000).
