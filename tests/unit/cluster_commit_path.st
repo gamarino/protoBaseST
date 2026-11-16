@@ -183,13 +183,18 @@ cm := r first.
 (kit space: 'n1') close.
 (kit node: 'n1') stop waitWithin: 60000.
 "rc4's shape: the first one-of-three attempt may still find n0's term owned, replicate and find
- no majority (PBOutcomeUnknownError), or time out; the second, the term ended, times out."
+ no majority (PBOutcomeUnknownError), time out, or start with less than the send reserve left
+ (or as the permission ends), so nothing is sent and, at retries: 0, a PBConflictError surfaces
+ (re-review N1). Whatever it answers, it never reaches n0's committed root. The second, the term
+ ended, times out."
 r := kit settle: (w1 once: db block: (CommitKit incr: 'one-of-three-a' tag: 'm') retries: 0).
-first := { r first. #(#PBOutcomeUnknownError #PBTimeoutError) includes: (r at: 2) asSymbol }.
+first := { r first.
+  #(#PBOutcomeUnknownError #PBTimeoutError #PBConflictError) includes: (r at: 2) asSymbol.
+  ((db newTransaction getRootObject: 'tokens') has: 'one-of-three-a') }.
 r := kit settle: (w1 once: db block: (CommitKit incr: 'one-of-three-b' tag: 'm') retries: 0).
 c that: 'the commit point is a majority: two of three commit; one of three ends in PBTimeoutError naming acquireTimeout'
   is: { cm. first. r first. r at: 2. ((r at: 3) includesSubstring: 'within 8000 ms') }
-  equals: { #ok. { #error. true }. #error. #PBTimeoutError. true }.
+  equals: { #ok. { #error. true. false }. #error. #PBTimeoutError. true }.
 
 kit shutdown.
 base deleteAll.
