@@ -1,22 +1,22 @@
-"EXPECT: ok 9"
+"EXPECT: ok 7"
 "The base of a term's first root (cluster/holder.st, CP 1.6, proto_db _lease_base,
- _phase_1_floor, _commit_base, _BaseUnreachable) in the simulator (_sim.st), proto_db
+ _phase_1_floor, _commit_base) in the simulator (_sim.st), proto_db
  test_cluster_recovery_base and the strict form of test_cluster_permit_incarnations'
  R79 boundary. The families, the hooked simulator and the planted wrong rules are in _base.st;
  the product rules choose every base. (1) The C1 schedule of CP 725-780 (a slow timer and a
  delayed message): an uncertain lease's recovery round ends at a majority of witnesses that
  have not accepted R'; the phase-1 floor makes R' the base; R' is acknowledged afterwards and
- stays in every committed chain. (2) I1: a floor base whose SpaceRoot the shared storage cannot
- read gives a retryable conflict and abandons the term; the next term builds on r1. (3) M6: a
+ stays in every committed chain. (2) Removed: I1 (proto_db _BaseUnreachable) arises only on a
+ local-records tier (Phase D); over shared storage an unreadable base fails its re-commit build,
+ nothing sent (rc4 R233, sim_round_rules.st (25), (26)). (3) M6: a
  recovery with every waits for the holder that knows the commit, and learns it. (4) Refound
  only when nothing is known: a fresh cluster refounds once (stale, terms raised by refoundStep),
  a cluster where some member knows r1 recovers it without reading the storage, and a cluster
  whose logs know nothing refounds from the persisted root. (5) The strict R79/L28 form: with
  PlantBaseTwice phase 1 ranks the uncommitted higher-epoch sibling above the commit and the run
- fails S4 at convergence; the product does not. (6)-(9) PlantRecoveryWaitsAll (a recovery with a
- voter down lasts requestTimeout), PlantRecoveryEveryIgnored (M6 misses the commit),
- PlantC1NoFloor (C1 drops R': S4) and PlantUnreachableBaseNone (I1 stalls the term) are each
- caught by their schedule. The seeds family is in sim_base_seeds_a.st and sim_base_seeds_b.st."
+ fails S4 at convergence; the product does not. (6)-(8) PlantRecoveryWaitsAll (a recovery with
+ a voter down lasts requestTimeout), PlantRecoveryEveryIgnored (M6 misses the commit) and
+ PlantC1NoFloor (C1 drops R': S4) are each caught by their schedule. The seeds family is in sim_base_seeds_a.st and sim_base_seeds_b.st."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_base'.
@@ -32,12 +32,6 @@ c that: 'C1: R'' is acknowledged and never dropped ({ violation. lease uncertain
     ((out at: 3) anySatisfy: [:d | (d isKindOf: PBBaseDecision) and: [d outcome = #ok and: [d needsCommit and: [d base key ~= r1 key]]]]) }
   equals: { nil. true. true }.
 
-"(2)"
-out := BaseFamilies i1: BaseRules new seed: 1.
-c that: 'I1: an unreachable floor base abandons the term ({ x1. x2. terms abandoned. an #unreachable decision })'
-  is: { out first. out at: 2. (out at: 3) > 0.
-    ((out at: 4) anySatisfy: [:d | (d isKindOf: PBBaseDecision) and: [d outcome = #unreachable]]) }
-  equals: { #none. #acknowledged. true. true }.
 
 "(3)"
 out := BaseFamilies m6: BaseRules new seed: 1.
@@ -80,11 +74,5 @@ out := BaseFamilies c1: PlantC1NoFloor new seed: 1.
 c that: 'PlantC1NoFloor is caught (S4 at convergence: R'' dropped)'
   is: ((out first ifNil: ['']) includesSubstring: 'S4: the acknowledged commit ''rp''')
   equals: true.
-
-"(9)"
-out := BaseFamilies i1: PlantUnreachableBaseNone new seed: 1.
-c that: 'PlantUnreachableBaseNone is caught (the term stalls: x2 not acknowledged, no term abandoned)'
-  is: { out at: 2. out at: 3 }
-  equals: { #none. 0 }.
 
 c report.

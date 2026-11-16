@@ -407,8 +407,8 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   on the storage read. protoBaseST's `leaseBase:waiter:in:now:` (`cluster/holder.st`) records a
   `PBBaseChoice` in the holder and goes on at each answer (`receivedAnswer:in:now:`), at the
   recovery timer (`requestTimeout`), at the persisted-root read (`PBReadPersisted`, answered by
-  `PBStorageRead`) and at the probe of the base (`PBProbeRoot`, answered by `PBRootProbed`); the
-  waiter is settled with a `PBBaseDecision` (`#ok`, `#stale`, `#unreachable`) or with an error
+  `PBStorageRead`); the
+  waiter is settled with a `PBBaseDecision` (`#ok`, `#stale`) or with an error
   value: the `PBConflictError` of a recovery that no majority of witnesses answered (retryable:
   the permission ends `none`, as `proto_db`'s raising), the hard guard's `PBCorruptionError`, or
   the failure of a refound read. This node's own accepted and committed roots and its witness
@@ -422,29 +422,12 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   acceptor's by `PBRecovered`, which keeps a higher one raised meanwhile (`proto_db`'s single
   variable has the same rule: cleared only when at most the one held at the send). *Cost:* the
   lag only; no safety rule reads a value the acceptor has not made durable.
-- **An unreachable base is probed on shared storage (client outcome, R133).** In `proto_db`
-  `_BaseUnreachable` (a retryable conflict, the term abandoned) arises only on a local-records
-  tier, whose `commit_records` answers that the base's records are not readable. On shared
-  storage `commit_records` answers "persisted" and `_commit_base` goes on to `_load_space`: an
-  unreadable SpaceRoot raises there. At `v2.0.0rc3` that was after the permission was marked
-  sent, so it ended `unknown`; since `v2.0.0rc4` (R233) the round counts as sent only just
-  before the re-proposal's replicate, so the permission ends `none` (the owner keeps its term)
-  and the commits fail with the storage's read error (a retryable conflict when it is exactly
-  `ProtoUnexpectedError` after the permission expired, R212).
-  protoBaseST probes the SpaceRoot of a base that must be committed first (`PBProbeRoot`) before
-  sending anything, and an unreadable one is `#unreachable`: the permission ends `unknown`, as
-  `proto_db`'s `_BaseUnreachable` of a local-records tier does, and the commits get a retryable
-  conflict instead of the read error. A read failure that the probe does not see (the build of
-  the unchanged root, `PBBuildFailed entry: nil`) follows rc4: `none`, the read error or R212's
-  conflict.
-  (`await_records` serves only local tiers, and protoBaseST has none, so it is not ported.)
-  Under the failure model the case does not arise: records are synced to the shared storage
-  before a round replicates (L11), so an accepted root's SpaceRoot is readable; it means a lost
-  or damaged storage object. *Cost:* such storage damage is reported as a retryable conflict,
-  not as the read error, and when live members hold the unreadable root accepted, every new
-  term's floor reports it again, so commits keep getting retryable conflicts where `proto_db`
-  surfaces the storage error each time, and the owner abandons its term where rc4 keeps it; one
-  storage probe per base that needs a commit first.
+- **`proto_db`'s I1 rule (`_BaseUnreachable`, R133) is Phase D.** It arises only on a
+  local-records tier (`commit_records` answering that the base's records are on no reachable
+  peer). Over shared storage the port follows rc4: a base that must be committed first is read
+  by the round's re-commit build (`_commit_base`'s `_load_space`), and a failed read there sent
+  nothing (R233): the permission ends `none`, the owner keeps its term, and the commits get the
+  read error, or R212's retryable conflict once the permission expired.
 - **A base read failing after the permission expired (rc4 C3: R212, R231, R233; representation
   only).** `proto_db`'s `_check_expired_read` reads the tier's `failure` and raises
   `ProtoConflictError(...) from error`. The core reads no tier: `PBBuildFailed
@@ -730,9 +713,9 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
   - The log name follows `proto_db` `_node_log` (CC21): an id outside `[A-Za-z0-9._-]{1,64}`
     is not refused, its file is `cluster/<lowercase hex of its UTF-8 bytes>.roots`. A storage
     without a directory (`proto_db`'s in-memory logs over `MemoryStorage`) does not exist here.
-  - `canRead:` (the probe of a base, R133) answers whether the storage can load the SpaceRoot
+  - `canRead:` (the rejoin's probe of its adopted root) answers whether the storage can load the SpaceRoot
     record (a closed storage is `PBClosedError`, not false); `proto_db`'s `PlainTier` has no such method (the probe is a protoBaseST addition,
-    see the rejoin and base entries above).
+    see the rejoin entry above).
   - The ported power-loss check (`test_a_new_acceptor_log_and_its_directories_survive_a_power_loss`,
     kind `plain`) observes the directory syncs through the `PBAcceptorLog _syncDirectory:` seam
     and reloads the log; protoST cannot simulate a power loss. The `tiered` kind is not ported

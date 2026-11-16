@@ -13,9 +13,6 @@
   PlantRecoveryEveryIgnored  every = true ends at a majority too (recovery_every_ignored, M6).
   PlantC1NoFloor             the recovery result alone is the base of an uncertain lease
                              (c1_no_floor, re-review 2 C1, R127).
-  PlantUnreachableBaseNone   an unreachable base ends with a retryable conflict (the permission
-                             'none'): rule O5 issues it again and the term stalls
-                             (unreachable_base_none, re-review 3 I1, R133).
   PlantBaseTwice             the owner issues while a permission is outstanding (O1's pipeline
                              check dropped): one base issued twice (R79, L28), over the real
                              replication and base choice."
@@ -41,11 +38,6 @@ BaseRules subclass: #PlantC1NoFloor.
 
 PlantC1NoFloor >> phase1Floor: aRoot
   ^ false.
-
-BaseRules subclass: #PlantUnreachableBaseNone.
-
-PlantUnreachableBaseNone >> _unreachable: aChoice in: s effects: fx
-  ^ self _settle: aChoice waiter with: (PBConflictError new messageText: 'the base is unreachable'; yourself) in: s effects: fx.
 
 BaseRules subclass: #PlantBaseTwice.
 
@@ -222,35 +214,6 @@ BaseFamilies class >> c1: aRules seed: n
     ((sim outcomeOf: 'rp') = #acknowledged and: [(sim outcomeOf: 'x') = #acknowledged]) ifFalse: [
       sim fail: 'C1 schedule: rp ' , (sim outcomeOf: 'rp') , ', x ' , (sim outcomeOf: 'x')]]).
   out at: 2 put: leaseOk.
-  ^ out.
-
-"--- 2. I1: an unreachable floor abandons the term ---"
-
-"{ outcome of x1. outcome of x2. terms abandoned at n0. decisions at n0 }: re-review 3, I1. Five
- voters hold r1. e (n4) owns T' from b and c and replicates R' to b only (unknown); the promises
- lapse. a (n0) owns T from b and d (c cut off): phase 1 reports R'. b and e are then down, and
- a cannot read R''s SpaceRoot. a's recovery (c, d) reports r1; the floor makes R' the base, not
- known committed, so it must be re-committed, and it is unreachable: x1 gets a retryable
- conflict (#none), the permission ends unknown and a abandons T (O6, R133). x2 then gets a
- fresh term, whose phase 1 on the live members builds on r1."
-BaseFamilies class >> i1: aRules seed: n
-  | sim d out |
-  sim := self sim: aRules seed: n ids: self five knowing: self five options: self fiveVoters.
-  d := (sim nodeAt: 'n0') config leaseDuration.
-  sim partition: #(#('n4' 'n1' 'n2') #('n0' 'n3')).
-  sim on: 'base' at: 'n4' do: [:decision | sim partition: #(#('n4' 'n1') #('n0' 'n2' 'n3'))].
-  self commit: 'rp' at: 'n4' in: sim.
-  sim crash: 'n4' unsynced: #keep.
-  (sim diskOf: 'n0') unreadable: (sim rootOf: 'rp').
-  sim partition: #(#('n0' 'n1' 'n3') #('n2') #('n4')).
-  self run: sim until: sim now + d + 100000.
-  sim on: 'permit' at: 'n0' do: [:permission |
-    sim crash: 'n1' unsynced: #keep.
-    sim heal].
-  self commit: 'x1' at: 'n0' in: sim.
-  self commit: 'x2' at: 'n0' in: sim.
-  out := { sim outcomeOf: 'x1'. sim outcomeOf: 'x2'. sim countOf: 'terms_abandoned' at: 'n0'. self decisionsAt: 'n0' in: sim }.
-  sim converge: 2000000.
   ^ out.
 
 "--- 3. M6: every waits for the holder that knows the commit ---"

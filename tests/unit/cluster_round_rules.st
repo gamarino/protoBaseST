@@ -22,8 +22,8 @@
  is ignored; its own ends the permission. (16) With two held retries the next round waits for
  both (or a PBDropKept). (17) Enqueued under a kept permission that is no longer valid: the
  permission ends, the queue asks again. (18) #stale requeues, nothing settled, the permission
- ends #unknown; after a committed round, #committed. (19) #unreachable: a retryable conflict,
- #unknown. (20) needsCommit: the base is re-committed first (its replicate's pred the base),
+ ends #unknown; after a committed round, #committed. (19) Removed: #unreachable is no longer
+ a base decision (rc4 R233: a re-commit whose read fails is (21)). (20) needsCommit: the base is re-committed first (its replicate's pred the base),
  then the entries build on the re-commit. (21) A failed re-commit sent nothing (R233): #none for
  a conflict and for any other error. (22) #unknown: the replication's PBOutcomeUnknownError (its text
  proto_db's, an unknown outcome without it refused) for every built entry, a
@@ -38,7 +38,8 @@
  other error ends the round. (31) With no held caller, a kept permission waits for as many
  commits as the round had conflicts. (32) The stale limit fails every queued commit, those
  queued after the round's too. (33) PBBuildFailed carries whether the tier failed, a Boolean
- (R231). Also: an expired permission's refusal is not counted (7); a held
+ (R231). (34) A build that failed with exactly PBUnexpectedError after the permission expired
+ joins the round's conflicts (proto_db conflicted.append), not settled at once (R212). Also: an expired permission's refusal is not counted (7); a held
  hold is at least retryWait (11); rounds 2 to permitRetries hold, the next does not (13); a
  stale round's commits go back to the head of the queue (18); a PBDropKept of a caller not
  awaited changes nothing (12, 16)."
@@ -233,13 +234,6 @@ c that: '#stale requeues at the head and ends #unknown; after a committed round,
   is: { settles value: x last. reportOf value: x last. x first phase. x first batch collect: [:q | q token]. reportOf value: st last }
   equals: { #(). #(#unknown). #permit. #('a' 'z'). #(#committed) }.
 
-"(19)"
-x := go value: core value: (go value: core value: fresh value: { permitted. { PBPermitted permission: perm. 0 } }) first
-  value: { { PBBaseDecided decision: (PBBaseDecision base: r1 needsCommit: true outcome: #unreachable). 1000 } }.
-c that: '#unreachable: a retryable conflict, #unknown'
-  is: { ((firstErr value: x last) isKindOf: PBConflictError). reportOf value: x last }
-  equals: { true. #(#unknown) }.
-
 "(20)"
 st := go value: core value: (go value: core value: fresh value: { permitted. { PBPermitted permission: perm. 0 } }) first
   value: { { PBBaseDecided decision: (PBBaseDecision base: r1 needsCommit: true outcome: #ok). 1000 } }.
@@ -385,5 +379,15 @@ c that: 'PBBuildFailed carries whether the tier failed, a Boolean, and has no co
     err value: [PBBuildFailed entry: nil error: Error new tierFailed: nil].
     PBBuildFailed class includesSelector: #entry:error: }
   equals: { true. false. PBValidationError. false }.
+
+"(34) m2: a converted build joins the conflicts. HaltAfterBuild stops the round after the
+ answer, so the state shows where the entry went."
+x := PBUnexpectedError new messageText: 'store unreachable'; yourself.
+st := go value: HaltAfterBuild new value: (rule value: core value: false) first value: {
+  { PBBuildFailed entry: (e value: 'a' value: false) error: x tierFailed: false. 700000 } }.
+c that: 'a build failing with exactly PBUnexpectedError after the permission expired joins the conflicts, its conflict caused by the error, not settled at once'
+  is: { st first conflicted collect: [:q | q first token]. (st first conflicted collect: [:q | q last cause == x]) asArray.
+    (st first conflicted collect: [:q | q last class]) asArray. (settles value: st last) size }
+  equals: { #('a'). { true }. { PBConflictError }. 0 }.
 
 c report.

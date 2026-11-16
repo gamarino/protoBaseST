@@ -613,8 +613,8 @@ For tests, tools and readers of the format. An application does not need them.
   failure being the reason of the `PBAcceptorDiscarded`.
 - **Base choice** (`cluster/holder.st`, CP 1.6): `proto_db`'s `_lease_base`, `recover_root`,
   `_phase_1_floor`, `_base_needs_commit` and the refound and hard guard, as rules over the values
-  `PBBaseDecision base:needsCommit:outcome:` (`base`, `needsCommit`, `outcome`: `#ok`, `#stale` or
-  `#unreachable`, `isOk`) and `PBBaseChoice` (a choice or a recovery round in progress: `waiter`,
+  `PBBaseDecision base:needsCommit:outcome:` (`base`, `needsCommit`, `outcome`: `#ok` or `#stale`,
+  `isOk`) and `PBBaseChoice` (a choice or a recovery round in progress: `waiter`,
   `permission`, `every`, `phase`, `rid`, `token`, `suspected`, `answers`, `learnt`, `current`,
   `answered:accepted:committed:state:`), kept in `PBHolder choices`. `dispatchBaseWanted:in:now:`
   is `leaseBase:waiter:in:now:`: a certain permit or a base already bound under the permission
@@ -637,9 +637,10 @@ For tests, tools and readers of the format. An application does not need them.
   a base below the committed root this node knows reads the persisted root: none, one below it
   or a failed read settles the `PBCorruptionError` that names the operator's remedy (D46), one at
   or above it refounds from it. A base labelled above the term is `#stale`. `needsCommit` is true
-  when the base is neither the empty space nor the committed root this node knows (R50); such a
-  base is probed (`PBProbeRoot root:token:`, answered by `PBRootProbed token:readable:`,
-  `isReadable`) and an unreadable one is `#unreachable` (R133). An `#ok` base is bound to the
+  when the base is neither the empty space nor the committed root this node knows (R50); the
+  dispatcher reads no base: the round's re-commit build reads its SpaceRoot, and a read that fails
+  there sent nothing (R233). (`PBProbeRoot root:token:`, answered by `PBRootProbed
+  token:readable:`, `isReadable`, is the rejoin's probe of its adopted root.) An `#ok` base is bound to the
   permission (the next choice under it is certain; `predFor:in:`), and so is each root committed
   under it (`proto_db`'s `bind_root`): a later round under the permission builds on the last
   committed root, which counts as committed knowledge. `PBRecoverWanted every:waiter:`
@@ -688,8 +689,7 @@ For tests, tools and readers of the format. An application does not need them.
   says why), never retried. A `#stale` base requeues the
   round at the head of the queue and ends the permission `#unknown` (unless a round under it
   committed); after `termRetries` (5) stale permissions in a row the queued commits fail with a
-  `PBConflictError`; `#unreachable`
-  is a retryable conflict ending it `#unknown`. A conflicted entry that will retry, while the
+  `PBConflictError`. A conflicted entry that will retry, while the
   permission is valid and at most `permitRetries` rounds ran, gets a `PBConflictError` with
   `permitHeld` true (`PBConflictError held:`), and the permission is kept for
   max(min(`retryHold`, the time left), `retryWait`) (`retryWait` when no retry is held); once

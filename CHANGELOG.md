@@ -34,6 +34,12 @@
   `entry:error:tierFailed:` (`isTierFailed`; no constructor without the flag), which the shell
   fills in Task 23. The seven `test_cluster_lease_read.py` rows deferred to 22b are ported
   (`sim_round_rules.st` (12) to (24), with the six rc4 plants and one of the port's).
+  The base choice no longer probes a base that must be committed first (`PBProbeRoot` is the
+  rejoin's only) and `#unreachable` is gone from `PBBaseDecision`: as in rc4 over shared
+  storage, the round's re-commit build reads the base, and a failed read sent nothing (the
+  permission ends `#none`, the term kept, the read error or R212's conflict;
+  `sim_round_rules.st` (25), (26)). `proto_db`'s I1 (`_BaseUnreachable`) needs a local-records
+  tier and is Phase D (the checklist row is `n/a`).
 - Group commit on a standalone storage (Task 22, `proto_db` D52 and `_standalone_round`), with
   the shared round runner (`round.st`). Every commit and every new database is a
   `PBCommitEntry` (`transaction:willRetry:deadline:`, `createDatabase:deadline:`, `future`)

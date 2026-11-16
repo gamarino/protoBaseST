@@ -1,4 +1,4 @@
-"EXPECT: lessons ok 12"
+"EXPECT: lessons ok 11"
 "The lessons of the design (spec section 2.4, L1-L32) that have a protocol counterpart here, one
  schedule each: its planted wrong rule fails it, by the rule the lesson names (the
  violation's or the problem's text where the run reports one), and the product rules pass it. The plants and the
@@ -14,8 +14,6 @@
         1.3x fast, holder stalled: S4).
    L14  no replication below the rejoin ballot (PlantReplicateBelowBallot sends below it).
    L15  the phase-1 floor (PlantC1NoFloor: the C1 schedule drops R', S4).
-   L16  a floor base whose records are unreachable abandons the term (PlantUnreachableBaseNone:
-        the term stalls).
    L22  the send reserve (PlantNoReserve: the refused root is replicated).
    L24  proposer-qualified ballots (PlantSharedBallot: two members ask one term).
    L25  the voter-set fingerprint (PlantNoFingerprint: a member of another voter set helps a
@@ -70,11 +68,6 @@ lessons add: { 'L15'. (BaseFamilies c1: BaseRules new seed: 1) first isNil.
   has value: out first value: 'S4: the acknowledged commit ''rp'''.
   (out first ifNil: ['no violation']) lines first }.
 
-out := BaseFamilies i1: PlantUnreachableBaseNone new seed: 1.
-lessons add: { 'L16'. [:r | (r at: 2) = #acknowledged and: [(r at: 3) > 0]] value: (BaseFamilies i1: BaseRules new seed: 1).
-  (out at: 2) = #none and: [(out at: 3) = 0].
-  'I1 { x2. terms abandoned } ' , { out at: 2. out at: 3 } printString }.
-
 out := RoundFamilies reserve: PlantNoReserve new seed: 1.
 lessons add: { 'L22'. (RoundFamilies reserve: RoundRules new seed: 1) = { #acknowledged. true. 0. 1. 1 }.
   (out at: 2) not and: [(out at: 3) > 0 and: [(out at: 4) = 0]].
@@ -119,6 +112,7 @@ Transcript show: 'lessons covered here: ' , text contents; cr.
   'L9 root order (label, epoch, segment, offset): cluster_root_order.st, the sibling-roots rule'
   'L10 acceptor log synced in every mode: cluster_acceptor_log.st, sync before reply (sim_acceptance.st)'
   'L11 records durable before the acceptance (Phase C, Task 20)'
+  'L16 an unreachable floor base abandons the term: proto_db _BaseUnreachable arises only on a local-records tier (Phase D); over shared storage a base whose SpaceRoot cannot be read fails its re-commit build, nothing sent, rc4 R233 (sim_round_rules.st (25), (26))'
   'L17 promise restored from the log, grace for efficiency: sim_grants.st, cluster_acceptance_rules.st'
   'L18 confirmation commit after attach (Task 20/24, the space; needsConfirmation: cluster_rejoin_rules.st)'
   'L19 fair turns (D-LIVE-1): sim_leases.st family 5'

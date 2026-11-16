@@ -53,15 +53,16 @@ applyTo:).
                  a PBDoneReport (with the built root when #committed). A decision that needs a
                  commit first replicates an unchanged root on the base (label the term, epoch the
                  base's + 1, proto_db _commit_base) and, once it is #committed, builds the
-                 commit's root on it; any other outcome of it is the commit's. A #stale decision
+                 commit's root on it; any other outcome of it is the commit's. The re-commit
+                 first reads the base's SpaceRoot (proto_db _commit_base's _load_space): a node
+                 whose PBSimDisk was told it cannot read it (unreadable:) reports #none and ends
+                 the commit #failed with the read error (nothing sent, R233). A #stale decision
                  reports #unknown and asks for a permission again (the round requeues, D50); an
-                 #unreachable one reports #unknown and ends the commit #none (a retryable
-                 conflict, nothing sent, R133); an error reports #none and ends the commit #none
-                 (a PBConflictError) or #failed.
+                 error reports #none and ends the commit #none (a PBConflictError) or #failed.
   PBReadPersisted is answered at once with PBStorageRead token: root: (the persisted root of the
                  shared storage, persist:, nil until one is set) failure: nil.
-  PBProbeRoot    is answered at once with PBRootProbed token: readable: (false for a root the
-                 node's PBSimDisk was told it cannot read, unreadable:).
+  PBProbeRoot    (the rejoin's) is answered at once with PBRootProbed token: readable: (false
+                 for a root the node's PBSimDisk was told it cannot read, unreadable:).
   PBPublishCommitted sets the root the node's readers see; PBPublishAcceptor and PBFence are
                  recorded by their trace lines; PBCount adds one to the node's counter
                  (countOf:at:).
@@ -206,6 +207,10 @@ PBSimDisk >> setName: aName
  cannot be read from now on (it survives crashes and a lost disk: it is not the log's)."
 PBSimDisk >> unreadable: aRoot
   unreadable add: aRoot key.
+
+"The fault of unreadable: is repaired: the SpaceRoot of aRoot can be read again."
+PBSimDisk >> readable: aRoot
+  unreadable := unreadable reject: [:k | k = aRoot key].
 
 "Whether this node can read the SpaceRoot of aRoot."
 PBSimDisk >> canRead: aRoot
@@ -1277,11 +1282,14 @@ PBSim >> _based: aToken decision: anOutcome permission: aPermission at: aNode
     self _trace: aNode id , ' requeues ' , aToken printString , ' (stale base)'.
     self _report: aPermission outcome: #unknown root: nil at: aNode.
     ^ self _schedule: #dispatch node: aNode payload: (PBPermitWanted waiter: { 'permit'. aToken }) at: now].
-  anOutcome outcome = #unreachable ifTrue: [
-    self _end: aToken as: #none.
-    ^ self _report: aPermission outcome: #unknown root: nil at: aNode].
   base := anOutcome base.
   anOutcome needsCommit ifFalse: [^ self _build: aToken on: base permission: aPermission step: nil at: aNode].
+  (aNode disk canRead: base) ifFalse: [
+    "R233: the re-commit's read of the base fails before its replicate: nothing sent, none."
+    failures at: aToken put: (PBUnexpectedError new messageText: 'Reading the SpaceRoot of ' , (PBCoreValue textOf: base)
+      , ' failed (injected)'; yourself).
+    self _end: aToken as: #failed.
+    ^ self _report: aPermission outcome: #none root: nil at: aNode].
   "proto_db _commit_base: an unchanged root on the base, labelled with the term, epoch + 1."
   root := self _newRoot: aPermission on: base step: 1 at: aNode.
   "No writer: the unchanged root holds none of aToken's effect; aToken's own root is built on it."

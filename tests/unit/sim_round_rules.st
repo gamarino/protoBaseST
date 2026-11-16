@@ -1,4 +1,4 @@
-"EXPECT: ok 24"
+"EXPECT: ok 26"
 "The commit round as a pure state machine (cluster/holder.st, PBCoordinatorCore round:in:now:;
  proto_db transactions.py _run_round, _permit_round, _keep, _take_kept, _await_retries; spec 5.6,
  D-LIVE-2, CC11, CC18, R121, H7) in the simulator: every node commits through its PBRoundState,
@@ -25,7 +25,10 @@
  own error; (16) a base re-commit whose read fails sent nothing (none, not unknown); (17) the
  same after the permission expired is a retryable conflict; (18) a re-commit whose root was
  sent is never a retryable conflict (unknown). (19) to (24): the plants of those rules are
- caught."
+ caught. (25) A base re-commit that cannot read its base's SpaceRoot on shared storage (rc4:
+ proto_db _commit_base's _load_space before its replicate) sent nothing: the permission ends
+ none, the term is kept, and the commit ends with the read error; (26) the same read
+ outliving the permission is a retryable conflict, and the retry commits."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_round'.
@@ -194,5 +197,15 @@ out := RoundFamilies recommitSent: PlantRecommitNeverSent new seed: 1.
 c that: 'PlantRecommitNeverSent is caught (a re-commit whose root was sent ended its permission none)'
   is: (out at: 5)
   equals: #none.
+
+"(25), (26): { outcome. attempts. the read error itself. a retryable conflict caused by it.
+ replicates under the permission. its report. terms abandoned at n0 }"
+c that: 'a base re-commit that cannot read its base sent nothing: none, the term kept, the read error ({ outcome. attempts. the read error. converted. replicates. report. terms abandoned })'
+  is: (RoundFamilies unreadableBase: RoundRules new seed: 1 late: false)
+  equals: { #failed. 1. true. false. 0. #none. 0 }.
+
+c that: 'a base re-commit whose read of its base outlives the permission is a retryable conflict, the term kept, and the retry commits ({ outcome. attempts. the read error. converted. replicates. report. terms abandoned })'
+  is: (RoundFamilies unreadableBase: RoundRules new seed: 1 late: true)
+  equals: { #acknowledged. 2. false. true. 0. #none. 0 }.
 
 c report.

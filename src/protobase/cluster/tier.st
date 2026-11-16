@@ -187,8 +187,8 @@ PBSharedTier >> _checkFieldsOf: aLabeledRoot
     , ' with epoch ' , aLabeledRoot epoch printString , ', but its SpaceRoot at ' , aLabeledRoot record pointer printString
     , ' carries cluster_term ' , term printString , ' and cluster_epoch ' , epoch printString.
 
-"Whether the shared storage can read the SpaceRoot of aLabeledRoot (the probe of a base,
- PBProbeRoot): true for the empty space; false when its record is missing, damaged or not a
+"Whether the shared storage can read the SpaceRoot of aLabeledRoot (the rejoin's probe of its
+ adopted root, PBProbeRoot): true for the empty space; false when its record is missing, damaged or not a
  SpaceRoot (a PBDBError) or the file system fails. A closed storage is PBClosedError: the
  probe has no tier to ask."
 PBSharedTier >> canRead: aLabeledRoot

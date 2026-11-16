@@ -46,7 +46,7 @@ no proposal). Nothing here reads a clock: t is the node's clock (CC3).
   The base choice (CP 1.6, proto_db transactions.py _lease_base, _phase_1_floor,
     _base_needs_commit, refound, _guard_error, and coordinator.py recover_root with the answer
     branch of _on_answer): leaseBase:waiter:in:now: (the rule of PBBaseWanted) settles the waiter
-    with a PBBaseDecision (#ok, #stale or #unreachable) or an error value. A certain permit, or a
+    with a PBBaseDecision (#ok or #stale) or an error value. A certain permit, or a
     base already bound under the permission, is the base. Otherwise a recovery round (query,
     ballot 0, to the other voters, for requestTimeout at most; recoveryDone:in:) ends at a
     majority of witnesses, this node counted when it is one, or waits for every other voter when
@@ -61,7 +61,8 @@ no proposal). Nothing here reads a clock: t is the node's clock (CC3).
     this node knows reads the persisted root for the hard guard (PBCorruptionError naming the
     operator's remedy, or a refound from it). A base labelled above the term is #stale. A base
     other than the empty space that is not the committed root this node knows needs a commit
-    first (R50) and is probed (PBProbeRoot); an unreadable one is #unreachable (R133). An #ok
+    first (R50): the round's re-commit build reads it, and a failed read sent nothing (R233).
+    proto_db's _BaseUnreachable (I1) arises only on a local-records tier (Phase D). An #ok
     base is bound to its permission, and so is each root committed under it (proto_db
     bind_root), so a later round under the permission builds on the last committed root.
   The pred (proto_db replicate: lease.sent, else the lease root, which bind_root sets to the
@@ -435,18 +436,17 @@ PBCoordinatorCore >> receivedReplicate: anEvent in: s now: t
 Object subclass: #PBBaseDecision instanceVariableNames: 'base needsCommit outcome'.
 
 "The base of a commit round under a permission (CP 1.6, proto_db _lease_base and the start of
- _permit_round): aRoot, the PBLabeledRoot the round builds on (for #stale or #unreachable the
- base that was found, or nil); aBoolean, whether it must be committed first (R50, proto_db
+ _permit_round): aRoot, the PBLabeledRoot the round builds on (for #stale the base that was
+ found, or nil); aBoolean, whether it must be committed first (R50, proto_db
  _base_needs_commit and _commit_base: it is not the committed root this node knows, so the
  round replicates an unchanged root on it before building); anOutcome, #ok (build on it),
  #stale (the base orders at or above the permission's term, or a committed root of this term or
  a later one supersedes it: nothing is sent, the round requeues its commits and the permission
- ends unknown, D50) or #unreachable (it must be committed first and the shared storage cannot
- read its SpaceRoot: nothing is sent, the commits get a retryable conflict and the permission
- ends unknown, so its owner abandons the term, R133)."
+ ends unknown, D50). (proto_db's _BaseUnreachable, a base whose records are on no reachable
+ peer, arises only on a local-records tier: Phase D.)"
 PBBaseDecision class >> base: aRoot needsCommit: aBoolean outcome: anOutcome
-  (#(#ok #stale #unreachable) includes: anOutcome) ifFalse: [
-    ^ PBValidationError signal: 'PBBaseDecision: an outcome is #ok, #stale or #unreachable, not ' , anOutcome printString].
+  (#(#ok #stale) includes: anOutcome) ifFalse: [
+    ^ PBValidationError signal: 'PBBaseDecision: an outcome is #ok or #stale, not ' , anOutcome printString].
   (aRoot isNil or: [aRoot isClassObject not and: [aRoot class == PBLabeledRoot]]) ifFalse: [
     ^ PBValidationError signal: 'PBBaseDecision: a base is a PBLabeledRoot or nil, not ' , aRoot printString].
   (anOutcome = #ok and: [aRoot isNil]) ifTrue: [^ PBValidationError signal: 'PBBaseDecision: an #ok decision names its base'].
@@ -484,7 +484,7 @@ PBBaseDecision >> printOn: aStream
  wait on a thread; here a value of the holder): the waiter; the permission (nil for a recovery
  asked by PBRecoverWanted); every (wait for every other voter); the phase (#recovery: its query
  is out; #refound or #guard: the persisted root is being read for a refound or for the hard
- guard; #probe: the base's SpaceRoot is being probed); the request id of its query; the token
+ guard); the request id of its query; the token
  of its timer or storage read; the suspicion the node held when the query was sent; the
  answers ({ sender. accepted root. committed root. state } each, the roots PBLabeledRoots or
  nil); the committed roots learnt so far (their highest, nil when none: proto_db's _committed
@@ -872,8 +872,7 @@ PBCoordinatorCore >> phase1Floor: aRoot
  it: #stale; (6) the hard guard: never below the committed root this node knows (else refound
  from a persisted root at or above it, or PBCorruptionError naming forceRejoin); a base labelled
  above the term is #stale; (7) needsCommit when the base is not the committed root this node
- knows (R50); (8) such a base whose SpaceRoot the shared storage cannot read (PBProbeRoot) is
- #unreachable (R133). An #ok base is bound to the permission (predFor:in:)."
+ knows (R50; the round's re-commit build reads it, R233). An #ok base is bound to the permission (predFor:in:)."
 PBCoordinatorCore >> leaseBase: aPermission waiter: aWaiter in: s now: t
   ^ self _step: [:fx | | choice |
     "A root committed under the permission is committed knowledge already (proto_db's shared
@@ -1076,8 +1075,9 @@ PBCoordinatorCore >> _committedChecks: aChoice in: s now: t effects: fx
 
 "The last checks (proto_db _lease_base and _base_needs_commit): a base labelled above the term is
  #stale (the acquisition learnt the label; the next term is above it); a base other than the
- empty space that is not the committed root this node knows needs a commit first (R50), and its
- SpaceRoot is probed first (R133)."
+ empty space that is not the committed root this node knows needs a commit first (R50): the
+ round's re-commit build reads its SpaceRoot (proto_db _commit_base's _load_space), and a read
+ that fails there sent nothing (R233, roundBuildFailed:in:now:)."
 PBCoordinatorCore >> _finishBase: aChoice in: s now: t effects: fx
   | base committed needs |
   base := aChoice current.
@@ -1086,7 +1086,6 @@ PBCoordinatorCore >> _finishBase: aChoice in: s now: t effects: fx
   "proto_db _permit_round: 'if current is not None and _base_needs_commit(...)': the empty space
    is never re-committed."
   needs := base record notNil and: [self _needsCommit: base committed: committed].
-  needs ifTrue: [^ self _probe: aChoice in: s effects: fx].
   ^ self _decide: (PBBaseDecision base: base needsCommit: needs outcome: #ok) for: aChoice in: s effects: fx.
 
 "proto_db _base_needs_commit at DEPTH 0: aBase is not the committed root this node knows
@@ -1094,32 +1093,10 @@ PBCoordinatorCore >> _finishBase: aChoice in: s now: t effects: fx
 PBCoordinatorCore >> _needsCommit: aBase committed: aCommitted
   ^ (aCommitted notNil and: [self _sameRecord: aCommitted record as: aBase record]) not.
 
-"aChoice waits for the probe of its base's SpaceRoot (PBProbeRoot)."
-PBCoordinatorCore >> _probe: aChoice in: s effects: fx
-  | pair |
-  pair := self _token: #base in: s.
-  fx add: (PBProbeRoot root: aChoice current token: pair last).
-  ^ self _replaceChoice: (aChoice with: { #phase -> #probe. #token -> pair last }) in: pair first.
-
-"The shell probed a base that needs a commit first: readable, it is the base; else #unreachable."
+"The shell probed a root: only the rejoin probes one (rejoinProbed:in:now:effects:); any other
+ answer is stale and changes nothing."
 PBCoordinatorCore >> dispatchRootProbed: anEvent in: s now: t
-  ^ self _step: [:fx | | choice state |
-    (self rejoinProbed: anEvent in: s now: t effects: fx) ifNil: [
-    choice := self _choiceWithToken: anEvent token phases: #(#probe) in: s.
-    choice isNil
-      ifTrue: [s]
-      ifFalse: [
-        state := self _removeChoice: choice in: s.
-        anEvent isReadable
-          ifTrue: [self _decide: (PBBaseDecision base: choice current needsCommit: true outcome: #ok) for: choice in: state effects: fx]
-          ifFalse: [self _unreachable: choice in: state effects: fx]]]].
-
-"R133 (proto_db _BaseUnreachable, re-review 3 of 8.3n, I1): a base that must be committed first and
- cannot be read is #unreachable: nothing is sent, the commits get a retryable conflict and the
- permission ends unknown, so the owner abandons the term (O6) instead of issuing the same base
- again (O5) and stalling every round of the term; a fresh phase 1 on the live members decides."
-PBCoordinatorCore >> _unreachable: aChoice in: s effects: fx
-  ^ self _decide: (PBBaseDecision base: aChoice current needsCommit: true outcome: #unreachable) for: aChoice in: s effects: fx.
+  ^ self _step: [:fx | (self rejoinProbed: anEvent in: s now: t effects: fx) ifNil: [s]].
 
 "aChoice ends #stale (proto_db _lease_base answering None)."
 PBCoordinatorCore >> _stale: aChoice in: s effects: fx
@@ -1853,8 +1830,7 @@ PBCoordinatorCore >> _startRound: s now: t effects: fx
 "--- the base ---"
 
 "The base of the round (proto_db _permit_round after _lease_base): an error ends the round with
- it, nothing sent; #stale requeues; #unreachable is a retryable conflict that abandons the term;
- #ok builds on it, after re-committing it when it needs a commit first."
+ it, nothing sent; #stale requeues; #ok builds on it, after re-committing it when it needs a commit first."
 PBCoordinatorCore >> roundBaseDecided: anEvent in: s now: t
   ^ self _step: [:fx | | d |
     self _expect: #base in: s for: anEvent.
@@ -1864,10 +1840,7 @@ PBCoordinatorCore >> roundBaseDecided: anEvent in: s now: t
       ifTrue: [
         d outcome = #stale
           ifTrue: [self _staleBase: s now: t effects: fx]
-          ifFalse: [
-            d outcome = #unreachable
-              ifTrue: [self _unreachableBase: s decision: d now: t effects: fx]
-              ifFalse: [self _based: s on: d now: t effects: fx]]]].
+          ifFalse: [self _based: s on: d now: t effects: fx]]].
 
 "proto_db _permit_round, base None: nothing was sent; the commits go back to the head of the
  queue (not as attempts) and the permission ends with an outcome its owner cannot take for
@@ -1890,15 +1863,6 @@ PBCoordinatorCore >> _staleBase: s now: t effects: fx
  commits fail."
 PBCoordinatorCore >> termRetries
   ^ 5.
-
-"proto_db _BaseUnreachable (R133): nothing was sent, the commits get a retryable conflict, and
- the permission ends 'unknown' so its owner abandons the term instead of issuing the base again."
-PBCoordinatorCore >> _unreachableBase: s decision: aDecision now: t effects: fx
-  ^ self _failRound: (s with: { #outcome -> #unknown })
-    with: (PBConflictError new messageText: 'Node ' , s config nodeId , ': the base root (label ' , aDecision base label printString
-      , ', epoch ' , aDecision base epoch printString , ') cannot be re-committed now: the shared storage cannot read its '
-      , 'SpaceRoot; nothing was replicated'; yourself)
-    sent: false now: t effects: fx.
 
 "An #ok base: bound by the core already. One that needs a commit first is re-committed before any
  entry (proto_db _commit_base: an unchanged root on top, labelled with the term, epoch + 1)."

@@ -1365,7 +1365,16 @@ first and fail first. Tests: `sim_round_rules.st` families and the new checks on
 
 - Done (`task-22b-report.md`): the shell builds `PBBuildFailed entry:error:tierFailed:` (no
   constructor without the flag) with `PBFileStorage isFailed`; the rule is
-  `_expiredRead:in:now:` and `_recommitFailed:in:now:effects:`.
+  `_expiredRead:in:now:` and `_recommitFailed:in:now:effects:`. The base choice no longer
+  probes a base that needs a commit: the shell's re-commit build reads it (`_commit_base`'s
+  `_load_space`) and answers `PBBuildFailed entry: nil` with the read error.
+- **Carry-over to Task 23 (review m1):** `PBClusterRound` builds `PBBuildFailed` at the node
+  clock when the failure is observed, reading `PBFileStorage isFailed` at that moment (rc4's
+  evaluation point for both `is_valid()` and `tier.failure`), and hands it to the round at
+  that time. Task 23 adds a shell plant that always passes `tierFailed: false`, caught by a
+  poisoned-tier case (a build whose write poisoned the tier, after the permission expired,
+  keeps its own `PBUnexpectedError`): the shell half of rc4's `lease_read_failure_hidden`,
+  which `HiddenTierFailure` covers only at the event.
 
 ### Task 23: Cluster commits
 

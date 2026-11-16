@@ -25,7 +25,9 @@
  reads the persisted root; none, one below or a failed read: PBCorruptionError naming
  forceRejoin; one at or above: refound from it. (23) A base labelled above the term is #stale.
  (24) needsCommit (R50): not for the committed root, yes otherwise; the empty space is never
- re-committed (proto_db: 'current is not None') nor probed. (25) An unreadable base is #unreachable and is not bound. (26) The pred obligation: a
+ re-committed (proto_db: 'current is not None') nor probed. (25) A base that needs a commit is
+ decided #ok at once and bound, whether its SpaceRoot is readable or not: the dispatcher reads
+ no base (no PBProbeRoot); the round's re-commit build reads it (rc4 R233). (26) The pred obligation: a
  PBReplicateWanted not built on the base, else on the root last sent, is refused
  (PBValidationError); the record is forgotten when the permission ends. (27) PBRecoverWanted
  settles { known. root }. (28) A root committed under a permission is bound (proto_db bind_root):
@@ -262,7 +264,7 @@ c that: 'a base labelled above the term is #stale'
   equals: #stale.
 
 "(24)"
-c that: 'needsCommit: not for the committed root; a base only accepted is probed and committed first; the empty space never re-committed nor probed'
+c that: 'needsCommit: not for the committed root; a base only accepted is committed first; the empty space never re-committed'
   is: { out value: (decision value: core value: (stateOf value: k) value: (perm value: r1 value: true) value: #() value: nil value: false).
     out value: (decision value: core value: (stateOf value: { marker. acc value: r1 }) value: (perm value: r1 value: true) value: #() value: nil value: true).
     [out value: (decision value: core value: (stateOf value: { marker }) value: (perm value: empty value: true) value: #() value: nil value: false)]
@@ -272,8 +274,9 @@ c that: 'needsCommit: not for the committed root; a base only accepted is probed
 "(25)"
 p := perm value: r1 value: true.
 s := decision value: core value: (stateOf value: { marker. acc value: r1 }) value: p value: #() value: nil value: false.
-c that: 'an unreadable base that needs a commit is #unreachable and is not bound'
-  is: { out value: s. core _permitRecord: p in: (s at: 3) } equals: { #(#unreachable true 4096 1). nil }.
+c that: 'a base that needs a commit is #ok at once and bound, readable or not: no PBProbeRoot (rc4 R233)'
+  is: { out value: s. (core _permitRecord: p in: (s at: 3)) notNil. ((s at: 2) select: [:e | e isKindOf: PBProbeRoot]) size }
+  equals: { #(#ok true 4096 1). true. 0 }.
 
 "(26) The pred obligation, under a permission whose base is r1."
 p := perm value: r1 value: true.

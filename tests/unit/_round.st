@@ -29,6 +29,7 @@
                   is a conflict, validation or user error, and it is never converted).
   PlantRecommitNeverSent  lease_read_commit_base_never_sent: a re-commit is never sent, so its
                   replication's unknown outcome ends the permission none.
+  HaltAfterBuild  not a plant: the round stops after a build's answer (a probe of its state).
   PlantedUnexpectedSubclass  a PBUnexpectedError subclass of the test (proto_db's second
                   parametrised error, ProtoWriteRefusedError, has no counterpart in the port).
   RoundSim        a PBSim whose nodes commit through the round state machine
@@ -150,6 +151,13 @@ PlantRecommitNeverSent >> _replicationFailed: s with: aReplicated now: t effects
     ^ self _failRound: s with: aReplicated error sent: false now: t effects: fx].
   ^ super _replicationFailed: s with: aReplicated now: t effects: fx.
 
+"Not a plant: a probe of the round's state (cluster_round_rules.st (34)). The round stops after a
+ build's answer, before its next build or its send, so where the entry went shows."
+RoundRules subclass: #HaltAfterBuild.
+
+HaltAfterBuild >> _buildNext: s now: t effects: fx
+  ^ s.
+
 PBBuildFailed subclass: #HiddenTierFailure.
 
 HiddenTierFailure >> isTierFailed
@@ -159,7 +167,7 @@ PBUnexpectedError subclass: #PlantedUnexpectedSubclass.
 
 "=== RoundSim ================================================================"
 
-PBSim subclass: #RoundSim instanceVariableNames: 'rounds txs inRound waiters known started acks baseDelays onReplicate replicates reports settles decisions stopped recommits heldDelay hotVersions expired buildFailures failedUnder failureClass'.
+PBSim subclass: #RoundSim instanceVariableNames: 'rounds txs inRound waiters known started acks baseDelays onReplicate replicates reports settles decisions stopped recommits heldDelay hotVersions expired buildFailures failedUnder failureClass slowReads readErrors'.
 
 RoundSim >> rounds
   rounds isNil ifTrue: [rounds := Dictionary new].
@@ -461,10 +469,36 @@ RoundSim >> hotVersionOf: aRoot
 RoundSim >> _after: someMicros at: aNode
   ^ aNode clock globalAt: (aNode clock localAt: now) + someMicros.
 
+"With isLate, a read of the shared storage that fails outlives the round's permission: its
+ failure reaches the round 1 ms (node clock) after the permission ends (unreadable:)."
+RoundSim >> readsOutlivePermission: isLate
+  slowReads := isLate.
+
+"The read errors of the re-commit builds that could not read their base, in order."
+RoundSim >> readErrors
+  readErrors isNil ifTrue: [readErrors := OrderedCollection new].
+  ^ readErrors.
+
+"proto_db _commit_base's _load_space: the re-commit's build reads the base's SpaceRoot; a node
+ whose disk cannot read it (PBSimDisk unreadable:) answers PBBuildFailed entry: nil with the
+ storage's read error, exactly PBUnexpectedError, the tier not failed."
+RoundSim >> _unreadableBase: aBuild
+  | error permission at |
+  error := PBUnexpectedError new messageText: 'Reading the SpaceRoot of ' , (PBCoreValue textOf: aBuild base) , ' failed (injected)'; yourself.
+  self readErrors add: error.
+  permission := (self roundOf: current id) permission.
+  failedUnder := permission.
+  at := slowReads == true
+    ifTrue: [(current clock globalAt: permission validUntil + 1000) max: now]
+    ifFalse: [now].
+  self _trace: current id , ' cannot read ' , (PBCoreValue textOf: aBuild base).
+  self _schedule: #round node: current payload: (self failureClass entry: nil error: error tierFailed: false) at: at.
+
 RoundSim >> applyBuild: aBuild
   | entry tx micros snapshot root token |
   (self _failBuild: aBuild) ifTrue: [^ self].
   entry := aBuild entry.
+  (entry isNil and: [(current disk canRead: aBuild base) not]) ifTrue: [^ self _unreadableBase: aBuild].
   entry isNil ifTrue: [
     "proto_db _commit_base: an unchanged root on the base."
     root := self _stamped: aBuild stamp on: aBuild base at: current.
@@ -859,3 +893,34 @@ RoundFamilies class >> recommitSent: aRules seed: n
     (rep notNil and: [sim recommits includes: (sim keyText: (rep at: 3))]).
     report isNil ifTrue: [nil] ifFalse: [report at: 3].
     report notNil and: [((sim nodeAt: 'n0') clock localAt: (report at: 4)) >= (rep at: 2) validUntil] }.
+
+"--- 9. a base re-commit that cannot read its base (rc4 R233, R212; was R133) ---"
+
+"{ outcome of a. attempts of a. a's first error is the read error itself. it is a retryable
+ conflict caused by the read error with proto_db's text, not held. PBReplicates under the
+ permission the read failed under. that permission's report. terms abandoned at n0 }: rc4 on
+ shared storage, proto_db _commit_base reading the base's SpaceRoot (_load_space) before its
+ replicate. The logs hold r1 accepted, not committed, and n0's disk cannot read r1's SpaceRoot:
+ the re-commit's build fails with the read error, nothing sent, so the permission ends none and
+ the owner keeps its term. With isLate the read outlives the permission (R212): a retryable
+ conflict. After that first report the fault is repaired, so a's retry (3 retries) commits."
+RoundFamilies class >> unreadableBase: aRules seed: n late: isLate
+  | sim first under report read |
+  sim := self sim: aRules seed: n committed: false options: Dictionary new.
+  sim readsOutlivePermission: isLate.
+  (sim diskOf: 'n0') unreadable: self r1.
+  sim run: 'a' at: 'n0' hot: false builds: #(1000) retries: 3.
+  sim runUntil: [sim reports notEmpty or: [(sim outcomeOf: 'a') ~= #pending]] steps: 2000000.
+  report := sim reports isEmpty ifTrue: [nil] ifFalse: [sim reports first].
+  (sim diskOf: 'n0') readable: self r1.
+  self resolve: #('a') in: sim.
+  first := (sim errorsOf: 'a') isEmpty ifTrue: [nil] ifFalse: [(sim errorsOf: 'a') first].
+  read := sim readErrors isEmpty ifTrue: [nil] ifFalse: [sim readErrors first].
+  under := report isNil ifTrue: [nil] ifFalse: [report at: 2].
+  sim converge: 2000000.
+  ^ { sim outcomeOf: 'a'. sim attemptsOf: 'a'. read notNil and: [first == read].
+    (read notNil and: [first isKindOf: PBConflictError]) and: [first permitHeld not and: [first cause == read
+      and: [(self textOf: first) includesSubstring: 'the write permission expired before its base could be read; nothing was sent']]].
+    under isNil ifTrue: [nil] ifFalse: [(sim replicates select: [:r | (r at: 2) == under]) size].
+    report isNil ifTrue: [nil] ifFalse: [report at: 3].
+    sim countOf: 'terms_abandoned' at: 'n0' }.

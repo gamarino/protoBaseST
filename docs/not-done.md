@@ -56,7 +56,9 @@ Not tested, or not proven:
   (`docs/superpowers/specs/2026-11-15-rc4-delta.md`, section 3b).
 - **Phase D of the cluster (peer fetch):** the fetch service, `commit_query`, their read capping
   after a lease expires (R212) and the `unknown` answers of a member that cannot tell (R240L,
-  R234L-R245L) are not ported; the port ignores `fetched` and `commit_info` at DEPTH = 0.
+  R234L-R245L) are not ported; the port ignores `fetched` and `commit_info` at DEPTH = 0. Nor
+  are the local-records tier's rules: `await_records`, and `_BaseUnreachable` (I1, R133: a base
+  whose records are on no reachable peer abandons the term).
 - **Speed.** The AVL workload is many times slower than `proto_db`'s. The dated figures, and how
   they were measured, are in [deviations.md](deviations.md#performance); they are indicative only.
 - **Memory and long runs.** A segment rolls over at 256 MiB as `proto_db`'s does; nothing was run
