@@ -158,6 +158,12 @@ PBObjectSpace >> _startPersister
 PBObjectSpace >> _persister
   ^ persister.
 
+"The persister's counters (proto_db coordinator.persister.stats()): a fresh Dictionary of
+ cycles, roots_written, roots_behind, roots_busy, errors, refreshes, persisted_epoch and
+ last_error; nil for a space without a coordinator, which has no persister (review M2)."
+PBObjectSpace >> persisterStats
+  ^ persister isNil ifTrue: [nil] ifFalse: [persister stats].
+
 "The space's round runner (an actor proxy), made once by the initialiser. A
  seam: a test subclass answers a runner over its own publisher
  (PBRoundRunner space:publisher:)."

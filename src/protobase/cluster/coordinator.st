@@ -984,6 +984,45 @@ PBClusterCoordinator >> needsConfirmation
 PBClusterCoordinator >> isFenced
   ^ cells isFenced.
 
+"--- the membership and the node's view (proto_db's public properties, review M2) ---"
+
+"The number of members, N (proto_db cluster_size)."
+PBClusterCoordinator >> clusterSize
+  ^ config membership ids size.
+
+"The voter ids in code point order (proto_db voters)."
+PBClusterCoordinator >> voters
+  ^ config membership voters.
+
+"Whether this node is a voter, false for a learner (proto_db is_voter)."
+PBClusterCoordinator >> isVoter
+  ^ config membership isVoter: config nodeId.
+
+"The votes a lease needs and the acknowledgements a commit needs: a majority of the voters,
+ V // 2 + 1 (proto_db majority)."
+PBClusterCoordinator >> majority
+  ^ config membership majority.
+
+"Whether the node is healthy (proto_db healthy): not fenced, its persister not stopped by a
+ failure, its tier not failed; stats at: 'healthy'."
+PBClusterCoordinator >> isHealthy
+  | v |
+  cells isFenced ifTrue: [^ false].
+  cells persistFailure value isNil ifFalse: [^ false].
+  v := cells acceptorState value.
+  ^ v isNil or: [v tierFailed isNil].
+
+"The node this node believes owns the current lease term, or nil (proto_db owner): itself while
+ its ownership is live, else the owner it learnt last (the hints' ownerNode)."
+PBClusterCoordinator >> owner
+  | s o h |
+  s := cells node value.
+  s isNil ifTrue: [^ nil].
+  o := s ownership.
+  (o notNil and: [o isLiveAt: cells now]) ifTrue: [^ config nodeId].
+  h := s hints.
+  ^ h isNil ifTrue: [nil] ifFalse: [h ownerNode].
+
 "The published acceptor state, nil before start (for tests and diagnostics)."
 PBClusterCoordinator >> acceptorState
   ^ cells acceptorState value.

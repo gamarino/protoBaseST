@@ -766,6 +766,20 @@ The detail:
     once, while the coordinator's replication may still be running; rc4's closing thread never
     ends a permission a runner is still replicating under. The owner forgets the permit on the
     done and abandons the term (safe); the replication then ends as any other.
+  - The public reads (final review M2). `proto_db`'s `healthy`, `owner`, `cluster_size`,
+    `voters`, `is_voter` and `majority` are `isHealthy`, `owner`, `clusterSize`, `voters`,
+    `isVoter` and `majority`, and `persister.stats()` is the space's `persisterStats` (the
+    persister belongs to the space here). Left out, each with its reason:
+    `wait_committed_change` (protoBaseST's committed root is an Atom the acceptor publishes, with
+    no version counter or condition to wait on; a reader polls `committedEpoch`, and `sync:` is
+    the durability wait); the `persister` and `tier` objects (owned by the space; `_persister`
+    and `_tier` stay private); `transport`, `lease_duration`, `acquire_timeout` and
+    `restart_grace` (read from `config`: `leaseDuration`, `acquireTimeout`, and `leaseDuration +
+    driftMargin`; the transport is an option, not state to read back); `known_root`,
+    `accepted_root` and `committed_root` (`committedRoot` and `acceptorState`); and the commit
+    path's members (`permit`, `finish`, `replicate`, `acquire`, `release`, `lease` and the
+    others), which the commit round calls through private selectors (`_permit`, `_done:outcome:`,
+    and so on) and an application never calls (chapter 14).
   - Reads (Task 24, `space.st`). `proto_db`'s readers read the coordinator's `_committed`
     under its lock, which the commit thread sets before `commit()` returns. protoBaseST's
     committed knowledge is the acceptor's (an actor), so the readers' root is an Atom the
@@ -823,7 +837,7 @@ The detail:
     `proto_db`'s does not: the commit round flushes before its replicate (L11).
   - `sync:` takes milliseconds (a SmallInteger >= 0, or `nil` for no deadline), `proto_db`'s
     `sync` seconds; `PBDatabase >> sync:` is the space's. The persister's counters are its own
-    (`aSpace _persister stats`: cycles, roots_written, roots_behind, roots_busy, errors,
+    (`aSpace persisterStats`: cycles, roots_written, roots_behind, roots_busy, errors,
     refreshes, persisted_epoch, last_error), as `proto_db`'s `persister.stats()`. The lag is
     measured on the node's clock (the `#clock` option's when set), `proto_db`'s on
     `time.monotonic`. An unexpected error is written to stderr and kept, not re-raised: no

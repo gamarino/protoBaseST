@@ -71,6 +71,7 @@ no other lock exists in the protoST layer.
 | `committedEpoch` | The epoch of the newest committed root the node knows (`proto_db`'s committed_epoch), `0` when none; without a coordinator, the storage's root epoch (`0` for an empty space). It never goes backwards, `forceRejoin` on a survivor aside. |
 | `persistedEpoch` | The epoch of the newest root the node knows persisted in `space.root` (`proto_db`'s persisted_epoch, the persister's), `0` when none; without a coordinator, `committedEpoch`. |
 | `sync: ms` | Waits until every commit the node knows is persisted (`proto_db`'s sync): `nil` once the persisted root orders at or above the node's committed root, so `persistedEpoch >= committedEpoch`; `PBTimeoutError` after ms milliseconds (a SmallInteger >= 0, or `nil` for no deadline); `PBUnexpectedError` at once when the persister failed. `nil` at once without a coordinator, or when the node knows no committed root. A durability barrier, not a visibility barrier: a commit on this node that writes something is the barrier for reads. `PBDatabase >> sync:` is the space's. |
+| `persisterStats` | The persister's counters, a fresh Dictionary (`proto_db`'s `persister.stats()`): `'cycles'`, `'roots_written'`, `'roots_behind'`, `'roots_busy'`, `'errors'`, `'refreshes'`, `'persisted_epoch'`, `'last_error'`; `nil` without a coordinator. |
 | `isClosed`, `storage`, `lockTimeout`, `coordinator` | State (`coordinator` is `nil` without a cluster). |
 
 ### PBDatabase
@@ -890,6 +891,9 @@ For tests, tools and readers of the format. An application does not need them.
   `'healthy'`, `'fenced'`, `'tier_failed'`, `'persisting'`, `'rejoining'`, `'rejoin_blocked'`,
   `'failure'`, `'dispatch_seconds_max'`, `'dispatch_slow'` (dispatcher steps over 10 ms). `forceRejoin`, `committedRoot` (a `PBLabeledRoot` read from an Atom),
   `committedEpoch`, `needsConfirmation`, `isFenced`, `isRunning`, `nodeId`, `config`,
+  `isHealthy` (`stats` `'healthy'`), `owner` (this node while its ownership is live, else the
+  owner it learnt last, `nil` when none), `clusterSize`, `voters`, `isVoter`, `majority`
+  (`proto_db`'s healthy, owner, cluster_size, voters, is_voter and majority),
   `acceptorState` and `nodeState` (the published states). For the round runner, all `Future`s:
   `_permit` and `_permitWithin:` milliseconds (a `PBPermission`, or rejected with `PBTimeoutError`, `PBUnexpectedError` when fenced,
   `PBClosedError` when not running), `_baseFor:` (a `PBBaseDecision`), `_replicate:under:`
@@ -989,7 +993,7 @@ For tests, tools and readers of the format. An application does not need them.
   `start`, `stop` (a `Future`), `waitFor:within:` (what `sync:` waits on), `persistedEpoch`,
   `persistedRoot`, `isRunning`, `failure`, `stats` (`'cycles'`, `'roots_written'`,
   `'roots_behind'`, `'roots_busy'`, `'errors'`, `'refreshes'`, `'persisted_epoch'`, `'last_error'`). The
-  space's `_persister` answers it.
+  space's `_persister` answers it; `persisterStats` is the public read of its `stats`.
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.
