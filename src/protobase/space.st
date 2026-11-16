@@ -11,8 +11,11 @@ ProtoBase's ObjectSpace, Database, Snapshot and HistoryEntry
   PBObjectSpace storage: s coordinator: c   a space of the cluster node c over s, a
                                             storage in cluster mode (PBFileStorage
                                             clusterPath:, CC20); the node's tier
-                                            (PBSharedTier) attached to c; also
-                                            storage:coordinator:lockTimeout:
+                                            (PBSharedTier) attached to c; its
+                                            commits wait for a write permission
+                                            up to c's acquireTimeout; also
+                                            storage:coordinator:lockTimeout: ms,
+                                            whose commits wait up to ms
   aSpace coordinator                        c, or nil without a cluster
   aSpace listDatabases                      the database names, sorted
   aSpace newDatabase: aName                 creates the database (version 0)
@@ -64,7 +67,7 @@ _PBNameCheck class >> check: aName what: aWhat
 
 "=== PBObjectSpace ============================================================"
 
-Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed runner coordinator tier'.
+Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed runner coordinator tier permitTimeout'.
 
 PBObjectSpace class >> registerAtomClass: aClass
   ^ PBTypeRegistry register: aClass.
@@ -80,17 +83,25 @@ PBObjectSpace class >> storage: aStorage lockTimeout: milliseconds
   ((aStorage respondsTo: #isClusterMode) and: [aStorage isClusterMode]) ifTrue: [
     ^ PBValidationError signal: 'PBObjectSpace storage: ' , aStorage printString
       , ' was opened in cluster mode (PBFileStorage clusterPath:): it is written only through a coordinator, PBObjectSpace storage:coordinator:'].
-  ^ self basicNew _setStorage: aStorage lockTimeout: milliseconds coordinator: nil tier: nil.
+  ^ self basicNew _setStorage: aStorage lockTimeout: milliseconds coordinator: nil tier: nil permitTimeout: nil.
 
 "A space of the cluster node aCoordinator (a started PBClusterCoordinator) over aClusterStorage,
  a storage opened in cluster mode (PBFileStorage clusterPath:, CC20), with the default lock
  timeout. The node's tier (PBSharedTier storage:nodeId:) is attached to the coordinator before
  the space is answered (proto_db ObjectSpace(coordinator=)); a refused attach closes the tier
- and is signalled. The caller owns the coordinator: close detaches it, never stops it."
+ and is signalled. The caller owns the coordinator: close detaches it, never stops it. Its
+ commits, the confirmation among them, wait for a write permission up to the coordinator's
+ acquireTimeout (proto_db ObjectSpace(lock_timeout=None))."
 PBObjectSpace class >> storage: aClusterStorage coordinator: aCoordinator
-  ^ self storage: aClusterStorage coordinator: aCoordinator lockTimeout: self defaultLockTimeout.
+  ^ self _storage: aClusterStorage coordinator: aCoordinator lockTimeout: self defaultLockTimeout permitTimeout: nil.
 
+"As storage:coordinator:, its commits, the confirmation among them, waiting for a write permission
+ up to milliseconds instead (proto_db ObjectSpace(lock_timeout=), the bound of _run_round's
+ permit and of its timeout's text)."
 PBObjectSpace class >> storage: aClusterStorage coordinator: aCoordinator lockTimeout: milliseconds
+  ^ self _storage: aClusterStorage coordinator: aCoordinator lockTimeout: milliseconds permitTimeout: milliseconds.
+
+PBObjectSpace class >> _storage: aClusterStorage coordinator: aCoordinator lockTimeout: milliseconds permitTimeout: aBound
   | aTier ok |
   self _checkStorage: aClusterStorage lockTimeout: milliseconds.
   "A storage not in cluster mode is refused by PBSharedTier storage:nodeId: (PBValidationError)."
@@ -99,7 +110,8 @@ PBObjectSpace class >> storage: aClusterStorage coordinator: aCoordinator lockTi
   aTier := PBSharedTier storage: aClusterStorage nodeId: aCoordinator nodeId.
   ok := false.
   [(aCoordinator _attach: aTier) wait. ok := true] ensure: [ok ifFalse: [aTier close]].
-  ^ self basicNew _setStorage: aClusterStorage lockTimeout: milliseconds coordinator: aCoordinator tier: aTier.
+  ^ self basicNew _setStorage: aClusterStorage lockTimeout: milliseconds coordinator: aCoordinator tier: aTier
+    permitTimeout: aBound.
 
 PBObjectSpace class >> _checkStorage: aStorage lockTimeout: milliseconds
   (aStorage isNil or: [aStorage isClassObject]) ifTrue: [
@@ -108,11 +120,12 @@ PBObjectSpace class >> _checkStorage: aStorage lockTimeout: milliseconds
     ^ PBValidationError signal: 'PBObjectSpace: lockTimeout is a positive SmallInteger of milliseconds, not '
       , milliseconds printString].
 
-PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds coordinator: aCoordinator tier: aTier
+PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds coordinator: aCoordinator tier: aTier permitTimeout: aBound
   "Runs once, on a fresh instance."
   storage isNil ifFalse: [^ PBUserError signal: 'PBObjectSpace is initialised once'].
   storage := aStorage.
   lockTimeout := milliseconds.
+  permitTimeout := aBound.
   coordinator := aCoordinator.
   tier := aTier.
   closed := Atom on: false.
@@ -152,6 +165,12 @@ PBObjectSpace >> storage
 "Milliseconds a commit waits for the root lock."
 PBObjectSpace >> lockTimeout
   ^ lockTimeout.
+
+"Milliseconds a cluster commit waits for a write permission (the lockTimeout given to
+ storage:coordinator:lockTimeout:), nil for the coordinator's acquireTimeout (storage:coordinator:,
+ proto_db lock_timeout None); nil without a coordinator."
+PBObjectSpace >> _permitTimeout
+  ^ permitTimeout.
 
 PBObjectSpace >> isClosed
   ^ closed value.
@@ -195,8 +214,8 @@ PBObjectSpace >> _currentSpaceRoot
 "The root record a new transaction starts from (a PBRootRecord), or nil for an
  empty space (ProtoBase _snapshot_record, proto_db _read_storage_root). Without
  a coordinator, the storage's current root. With one, the newest committed
- root this node knows (the coordinator's committedRoot; the persisted root,
- learnt as committed, when it knows none: _committedRecord), after a
+ root this node knows (the coordinator's committedRoot; when it knows none,
+ the peers' recovered root, else the persisted root: _committedRecord), after a
  confirmation when the node needs one: on the first snapshot after the attach,
  and on any snapshot after forceRejoin on a survivor asked for one again, since
  needsConfirmation is read on every snapshot (L18; Task 16, review I2)."
@@ -224,22 +243,36 @@ PBObjectSpace >> _confirm
       , (e messageText ifNil: ['(no message)']). e return: nil].
 
 "The record of the newest committed root this node knows (proto_db current_root), nil for the
- empty space. When the node knows none (a node that never learnt one, or one that forgot it, its
- confirmation failed), the persisted root, which the coordinator then takes as committed
- (_observePersisted:): only committed roots are persisted. proto_db asks the peers for their
- roots (recover_root) before it reads the persisted one; protoBaseST reads the persisted one
- directly (docs/deviations.md)."
+ empty space. When the node knows none (a node that never learnt one, or one that forgot it: a
+ log whose committed entry was lost, forceRejoin on a survivor, its confirmation in progress or
+ failed), it recovers it from the peers first (PBClusterCoordinator >> _recover: the highest
+ committed root a majority of witnesses reports, published to the readers before the recovery
+ answers); a PBConflictError of the recovery is written to stderr (_inform:) and only then, if
+ the node still knows none, the persisted root is read and taken as committed
+ (_observePersisted:from:: the empty space too, so the next snapshot neither recovers nor reads
+ the storage again)."
 PBObjectSpace >> _committedRecord
-  | root |
+  | root persisted |
   root := coordinator committedRoot.
   root isNil ifTrue: [
-    root := tier readPersisted.
-    coordinator _observePersisted: root].
+    [coordinator _recover wait] on: PBConflictError do: [:e |
+      self _inform: 'Node ' , coordinator nodeId , ': recovery from the peers failed ('
+        , (e messageText ifNil: ['(no message)']) , '); reading the persisted root'.
+      e return: nil].
+    root := coordinator committedRoot].
+  root isNil ifTrue: [
+    persisted := tier readPersisted.
+    (coordinator _observePersisted: persisted from: tier) wait.
+    root := coordinator committedRoot].
   root isNil ifTrue: [^ nil].
   ^ root record.
 
 "aString on stderr, prefixed with the space; never signals (proto_db logger.warning)."
 PBObjectSpace >> _warn: aString
+  [Stdio stderr nextPutAll: self printString , ': ' , aString; lf; flush] on: Error do: [:e | nil].
+
+"aString on stderr, prefixed with the space; never signals (proto_db logger.info)."
+PBObjectSpace >> _inform: aString
   [Stdio stderr nextPutAll: self printString , ': ' , aString; lf; flush] on: Error do: [:e | nil].
 
 "The epoch of the newest committed root this node knows (proto_db committed_epoch), 0 when none;

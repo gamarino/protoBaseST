@@ -533,7 +533,8 @@ _PBAcceptor >> fence: aReason
 "Attaches aTier (proto_db attach, _attach_locked): a fresh PBLoggedRoots from its loadRoots (N4),
  the startupGrace check (L17), the acceptor state attached (carry-over (b)), then the start
  step over that log (the rejoined marker of a learner or lone voter, the committed root
- published), reported to the dispatcher. The tier attached already: true at once (a no-op);
+ published, the readers' committed root of the log replaced dropped first), reported to the
+ dispatcher. The tier attached already: true at once (a no-op);
  another while one is attached: PBValidationError, before its roots are loaded."
 _PBAcceptor >> attach: aTier
   | loaded logged config restart current |
@@ -555,6 +556,9 @@ _PBAcceptor >> attach: aTier
       , (restart / 1000) printString , ' ms (the default)'].
   cells acceptorState swap: [:s | s attached: logged].
   tier value: aTier ifCurrent: nil.
+  "proto_db attach: the node must not inherit the committed root of the log it replaces; the
+   readers' root is reset, and the start step publishes this log's (Task 24 fix round 1, I3)."
+  cells committed swap: [:old | nil].
   self handle: PBStartNode new.
   ^ true.
 
@@ -592,6 +596,14 @@ _PBAcceptor >> readPersisted: aToken
     ifTrue: [failure := PBClosedError new messageText: 'Node ' , cells config nodeId , ' has no tier attached'; yourself]
     ifFalse: [[root := t readPersisted] on: Error do: [:e | failure := e]].
   cells dispatcher value handle: (PBStorageRead token: aToken root: root failure: failure).
+
+"aRoot, read from aTier's persisted root by a space (PBClusterCoordinator >> _observePersisted:from:):
+ counted storage_root_reads, and learnt committed (PBLearnCommitted accept: false logged: false)
+ when aTier is still the tier attached; answers true."
+_PBAcceptor >> observePersisted: aRoot from: aTier
+  cells count: 'storage_root_reads'.
+  tier value == aTier ifTrue: [self handle: (PBLearnCommitted root: aRoot accept: false logged: false)].
+  ^ true.
 
 "Whether aRoot is readable on the tier, for the dispatcher (PBRootProbed)."
 _PBAcceptor >> probe: aRoot token: aToken
@@ -771,7 +783,14 @@ PBClusterCoordinator >> _want: aBlock kind: aKind
 "A write permission: a Future of a PBPermission, rejected with PBTimeoutError (acquireTimeout),
  PBUnexpectedError (fenced) or PBClosedError (stopped)."
 PBClusterCoordinator >> _permit
-  ^ self _want: [:token :s | PBPermitWanted waiter: token] kind: #permit.
+  ^ self _permitWithin: nil.
+
+"As _permit, the wait bounded by milliseconds (proto_db permit(timeout): the space's lock_timeout),
+ by acquireTimeout when nil."
+PBClusterCoordinator >> _permitWithin: milliseconds
+  | micros |
+  micros := milliseconds isNil ifTrue: [nil] ifFalse: [milliseconds * 1000].
+  ^ self _want: [:token :s | PBPermitWanted waiter: token timeout: micros] kind: #permit.
 
 "The base of a commit under aPermission: a Future of a PBBaseDecision."
 PBClusterCoordinator >> _baseFor: aPermission
@@ -853,12 +872,26 @@ PBClusterCoordinator >> committedRoot
 PBClusterCoordinator >> _publishCommitted: aLabeledRoot
   cells publishCommitted: (PBPublishCommitted root: aLabeledRoot).
 
-"The space read the persisted root aLabeledRoot because this node knows no committed root
- (proto_db current_root's storage read): counted storage_root_reads, and published to the readers
- as committed (it is: only committed roots are persisted), so later reads never go below it."
-PBClusterCoordinator >> _observePersisted: aLabeledRoot
-  cells count: 'storage_root_reads'.
-  aLabeledRoot isNil ifFalse: [self _publishCommitted: aLabeledRoot].
+"A recovery round (proto_db recover_root(), what current_root runs when the node knows no
+ committed root): a Future of { known. root }, the highest accepted root among a majority of
+ witnesses; every committed root learnt from the answers is published to the readers before it
+ resolves (holder.st _recovered:in:now:effects:). Rejected with PBConflictError when fewer than a
+ majority of witnesses answer within requestTimeout."
+PBClusterCoordinator >> _recover
+  ^ self _want: [:token :s | PBRecoverWanted every: false waiter: token] kind: #recover.
+
+"The space read aLabeledRoot (nil: no root) from aTier's persisted root because this node knows no
+ committed root, not even after a recovery (proto_db current_root's storage read): a Future that
+ resolves once the acceptor took it. Counted storage_root_reads; unless aTier was detached
+ meanwhile (then it says nothing now), the acceptor learns it committed, not accepted (it is
+ committed: only committed roots are persisted; a granting majority that knows nothing newer must
+ refound), the empty space as the root labelled 0 with no record (proto_db's known empty space,
+ (True, None, 0)), and publishes it, so later reads neither recover nor read the storage again."
+PBClusterCoordinator >> _observePersisted: aLabeledRoot from: aTier
+  | f |
+  self isRunning ifFalse: [f := Future new. f rejectWith: cells closedError. ^ f].
+  ^ cells acceptor value observePersisted: (aLabeledRoot isNil ifTrue: [PBLabeledRoot label: 0 record: nil] ifFalse: [aLabeledRoot])
+    from: aTier.
 
 "The epoch of committedRoot, 0 when none."
 PBClusterCoordinator >> committedEpoch

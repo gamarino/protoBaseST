@@ -27,7 +27,7 @@ keeps values immutable, spec 12.6).
 
 The effects, in the order of the core's step (an answer that comes at once is queued and handed
 to the core after the step's other effects, never inside them):
-  PBAskPermit   the coordinator's _permit; its answer (a PBPermission, or the error) comes back
+  PBAskPermit   the coordinator's _permitWithin:; its answer (a PBPermission, or the error) comes back
                 as PBPermitted.
   PBAskBase     _baseFor:; PBBaseDecided.
   PBBuild       synchronous, on the runner: the entry's build on the base's record with the
@@ -51,7 +51,8 @@ to the core after the step's other effects, never inside them):
                 follows it in the same step is posted after it, from this actor, so both reach
                 the dispatcher's mailbox in that order: the done frees the node's permission
                 before the next permit asks (R148, carry-over (h)); a commit that starts while a
-                kept permission ends waits, its wait counted against acquireTimeout.
+                kept permission ends waits, its wait counted against the permit's bound (the space's
+                permit timeout, PBObjectSpace >> _permitTimeout).
   PBSettle      the PBCommitEntry's Future: true resolves it (the transaction's collections
                 marked consumed, D33, and its critical section recorded: critical_commits and
                 the build and replication seconds of stats), false (nothing to publish) too; an
@@ -287,9 +288,10 @@ PBClusterRound >> applyCount: aCount
 
 "=== the shell's steps (seams: a test subclass overrides one) ================="
 
-"The permit (a Future)."
+"The permit (a Future), its wait bounded by the space's permit timeout (proto_db _run_round's
+ permit(lock_timeout): the space's lockTimeout when one was given, else acquireTimeout)."
 PBClusterRound >> _askPermit
-  ^ coordinator _permit.
+  ^ coordinator _permitWithin: space _permitTimeout.
 
 "The base under aPermission (a Future)."
 PBClusterRound >> _askBase: aPermission

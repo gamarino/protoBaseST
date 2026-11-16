@@ -9,7 +9,7 @@ clock, a socket or a file, sends, logs or waits.
 
   Events (PBCoreEvent): PBReceived message: (a PBClusterMessage that arrived), PBTimerFired
     token: event: (a PBTimer came due), PBStartNode, PBStopNode, PBPermitWanted waiter: (a
-    local commit wants a write permission), PBBaseWanted permission: waiter: (the base of a
+    local commit wants a write permission; waiter:timeout: bounds the wait), PBBaseWanted permission: waiter: (the base of a
     commit under a permission), PBReplicateWanted permission: root: pred: waiter: (replicate a
     built root), PBDoneReport permission: outcome: root: (the outcome a holder reports, #committed,
     #unknown or #none: proto_db's done outcomes, and the root it committed), PBRejoinWanted (the operator's forceRejoin)
@@ -215,27 +215,42 @@ PBRejoinWanted >> dispatchWith: aCore in: aNodeState now: t
 
 "--- PBPermitWanted ---"
 
-PBCoreEvent subclass: #PBPermitWanted instanceVariableNames: 'waiter'.
+PBCoreEvent subclass: #PBPermitWanted instanceVariableNames: 'waiter timeout'.
 
 "A local commit wants a write permission; aWaiter is settled (PBSettle) with a PBPermission or
- the error that ends the wait."
+ the error that ends the wait, within the config's acquireTimeout."
 PBPermitWanted class >> waiter: aWaiter
-  ^ self basicNew _setWaiter: (self _present: aWaiter named: 'waiter').
+  ^ self waiter: aWaiter timeout: nil.
 
-PBPermitWanted >> _setWaiter: aWaiter
+"As waiter:, within aTimeout microseconds (proto_db permit(timeout): the space's lock_timeout),
+ the config's acquireTimeout when nil."
+PBPermitWanted class >> waiter: aWaiter timeout: aTimeout
+  (aTimeout isNil or: [(aTimeout isKindOf: Integer) and: [aTimeout > 0]]) ifFalse: [
+    ^ PBValidationError signal: 'PBPermitWanted: a timeout is a positive Integer of microseconds or nil, not '
+      , aTimeout printString].
+  ^ self basicNew _setWaiter: (self _present: aWaiter named: 'waiter') timeout: aTimeout.
+
+PBPermitWanted >> _setWaiter: aWaiter timeout: aTimeout
   "Runs once, on a fresh instance."
   waiter isNil ifFalse: [^ PBUserError signal: 'PBPermitWanted is immutable'].
   waiter := aWaiter.
+  timeout := aTimeout.
   ^ self.
 
 PBPermitWanted >> waiter
   ^ waiter.
 
+"The bound of the wait in microseconds, nil for the config's acquireTimeout."
+PBPermitWanted >> timeout
+  ^ timeout.
+
 PBPermitWanted >> dispatchWith: aCore in: aNodeState now: t
   ^ aCore dispatchPermitWanted: self in: aNodeState now: t.
 
 PBPermitWanted >> printOn: aStream
-  aStream nextPutAll: 'PBPermitWanted('; nextPutAll: (PBCoreValue textOf: waiter); nextPut: $).
+  aStream nextPutAll: 'PBPermitWanted('; nextPutAll: (PBCoreValue textOf: waiter).
+  timeout isNil ifFalse: [aStream nextPutAll: ' within '; print: timeout].
+  aStream nextPut: $).
 
 "--- PBBaseWanted ---"
 

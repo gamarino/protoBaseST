@@ -242,7 +242,7 @@ another member is the same mistake, and `proto_db` documents it as forbidden.)
 
 The blocks come from `examples/cluster/15_majority_loss.st`. `forceRejoin` is also tested by the
 simulator (`sim_rejoin.st` (6)), by `cluster_rejoin_rules.st` (7) and (14), and, with real
-coordinators and the read that follows it, by `cluster_reads.st` (8). The program uses a 3000 ms
+coordinators and the read that follows it, by `cluster_reads_restarts.st` (3). The program uses a 3000 ms
 lease, so that a commit's build and replication fit within the belief on a loaded machine (with
 the 600 ms lease of the other programs the belief is 200 ms, which a build can exceed, CC18), and
 an `acquireTimeout` of 8 s, longer than the startup grace of that lease (5 s): a commit of the

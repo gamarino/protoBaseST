@@ -459,12 +459,12 @@ PBCoordinatorCore >> _leaseEnd: anAttempt in: s now: t
 "=== PBCoordinatorCore: the local demand ====================================="
 
 "A local commit wants a permission (proto_db permit, then _permission_from_owner): its deadline
- is acquireTimeout from now; it is queued at this node's ownership while that one serves, else
+ is its timeout from now, acquireTimeout when it has none; it is queued at this node's ownership while that one serves, else
  it asks the owner the hint names (owner.st _ask:), else it joins the waiters, the first of
  which starts an acquisition."
 PBCoordinatorCore >> dispatchPermitWanted: anEvent in: s now: t
   ^ self _step: [:fx | | own state |
-    state := self _expect: anEvent waiter in: s now: t.
+    state := self _expect: anEvent waiter within: anEvent timeout in: s now: t.
     own := state ownership.
     (own notNil and: [own isServingAt: t])
       ifTrue: [self _ownLoop: (self _issue: (self _queueLocal: { anEvent waiter } in: state now: t) now: t effects: fx)

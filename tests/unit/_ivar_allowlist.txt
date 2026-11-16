@@ -34,7 +34,7 @@ PBFileStorage>>_setDirectory:segmentMaxBytes:atomCacheEntries:atomCacheBytes:clu
 _PBAtomCache>>_setCapacity:bytes:
 PBHistoryEntry>>_setRoot:database:
 PBSnapshot>>_setRoot:database:
-PBObjectSpace>>_setStorage:lockTimeout:coordinator:tier:
+PBObjectSpace>>_setStorage:lockTimeout:coordinator:tier:permitTimeout:
 PBDatabase>>_setSpace:name:
 PBNotation class>>_setJSON:
 PBTxState>>_setReads:writes:replaced:mreads:mwrites:mexpected:state:
@@ -71,7 +71,7 @@ PBLease>>_setTerm:validUntil:root:certain:
 PBPermission>>_setSeq:rid:owner:
 PBReceived>>_setMessage:
 PBTimerFired>>_setToken:event:
-PBPermitWanted>>_setWaiter:
+PBPermitWanted>>_setWaiter:timeout:
 PBBaseWanted>>_setPermission:waiter:
 PBReplicateWanted>>_setPermission:root:pred:waiter:
 PBDoneReport>>_setPermission:outcome:root:

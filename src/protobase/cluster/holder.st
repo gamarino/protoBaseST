@@ -952,8 +952,10 @@ PBCoordinatorCore >> _recoveryTimer: anEvent in: s now: t effects: fx
  result is the highest accepted root among the witnesses' answers and this node's own; their
  committed roots are learnt (committed knowledge only, accept=False: a peer's may be the
  persisted root), the hint rises to every answer's accepted label, and the suspicion held when
- the query was sent is cleared (both halves). A plain recovery settles { known. root }; a base
- choice goes on (_afterRecovery:)."
+ the query was sent is cleared (both halves). A plain recovery (proto_db current_root's
+ recover_root) publishes the highest committed root it learnt to the readers (PBPublishCommitted)
+ before it settles { known. root }, so the waiter that wakes reads it, before the acceptor has
+ learnt it (Task 24 fix round 1, review I1); a base choice goes on (_afterRecovery:)."
 PBCoordinatorCore >> _recovered: aChoice in: s now: t effects: fx
   | c answers own needed best h learnt state |
   c := s config.
@@ -980,7 +982,9 @@ PBCoordinatorCore >> _recovered: aChoice in: s now: t effects: fx
   state := state with: { #hints -> h }.
   state suspectTerm <= aChoice suspected ifTrue: [state := state with: { #suspectTerm -> 0 }].
   aChoice suspected > 0 ifTrue: [fx add: (PBToAcceptor event: (PBRecovered suspected: aChoice suspected))].
-  aChoice permission isNil ifTrue: [^ self _settle: aChoice waiter with: { best notNil. best } in: state effects: fx].
+  aChoice permission isNil ifTrue: [
+    learnt isNil ifFalse: [fx add: (PBPublishCommitted root: learnt)].
+    ^ self _settle: aChoice waiter with: { best notNil. best } in: state effects: fx].
   ^ self _afterRecovery: (aChoice with: { #learnt -> learnt. #current -> best }) in: state now: t effects: fx.
 
 "proto_db _lease_base after recover_root: the phase-1 floor (phase1Floor:, R127) raises the

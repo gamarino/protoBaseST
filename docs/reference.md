@@ -60,7 +60,7 @@ no other lock exists in the protoST layer.
 |---|---|
 | `PBObjectSpace class >> storage: aStorage` | Space over a storage, with the default lock timeout (30000 ms). `PBValidationError` if not a storage. |
 | `PBObjectSpace class >> storage: aStorage lockTimeout: ms` | The same, with a positive SmallInteger of milliseconds. A commit waits at most that long for the root lock, counted from the moment it is queued, then `PBTimeoutError`. |
-| `PBObjectSpace class >> storage: aClusterStorage coordinator: aCoordinator`, `storage:coordinator:lockTimeout:` | A space of a cluster node: the storage opened with `PBFileStorage clusterPath:`, the coordinator a started `PBClusterCoordinator`. The node's `PBSharedTier` is attached to the coordinator before the space is answered (a refused attach closes the tier and is signalled). `PBValidationError` for a storage not in cluster mode; `storage:` refuses a cluster-mode storage. `close` detaches the tier and closes the node's acceptor log; the caller owns the coordinator (it keeps running). |
+| `PBObjectSpace class >> storage: aClusterStorage coordinator: aCoordinator`, `storage:coordinator:lockTimeout:` | A space of a cluster node: the storage opened with `PBFileStorage clusterPath:`, the coordinator a started `PBClusterCoordinator`. Its commits wait for a write permission up to the coordinator's `acquireTimeout`, or up to the `lockTimeout` given (`PBTimeoutError`, its text naming the bound). The node's `PBSharedTier` is attached to the coordinator before the space is answered (a refused attach closes the tier and is signalled). `PBValidationError` for a storage not in cluster mode; `storage:` refuses a cluster-mode storage. `close` detaches the tier and closes the node's acceptor log; the caller owns the coordinator (it keeps running). |
 | `PBObjectSpace class >> registerAtomClass: aClass` | Registers an application record class under its `typeName` and `typeAliases` (`PBTypeRegistry register:`). Process-wide, as `proto_db`'s `register_atom_class`. `PBValidationError` for a name already taken, outside the grammar, or a `proto_db.` name outside the built-in table. |
 | `PBObjectSpace class >> defaultLockTimeout` | 30000. |
 | `firstLockDelay`, `longestLockDelay` (class) | 1 and 50 ms: the round runner's retry delays while the root lock is held (`PBRoundRunner class >> firstLockDelay`, `longestLockDelay`). |
@@ -524,7 +524,8 @@ For tests, tools and readers of the format. An application does not need them.
   `lastDemand`, `lastLocal`, `renewal`, `renewStarted`, `straggling`, `token`, `seq`, `pipeline`,
   `base`, `isCommitted`, `isAbandoned`, `isTermFenced`, `renewAfter`, `isLiveAt:`, `isServingAt:`, `entryOf:seq:`;
   `lease:base:committed:now:`), each answering `with:` (an Array of field -> value associations).
-  `dispatchPermitWanted:in:now:` records the waiter's deadline (`acquireTimeout`), queues it at a
+  `dispatchPermitWanted:in:now:` records the waiter's deadline (the event's `timeout`, else
+  `acquireTimeout`: `PBPermitWanted waiter:timeout:`), queues it at a
   serving ownership, else asks the owner the hint names (`cluster/owner.st`), else adds it to the
   waiters and starts an acquisition: it waits while the acceptor rejoins, defers to the member a
   release named until `turnSilence` (`'deferrals'`, `'deferral_timeouts'`, a `'want'` broadcast when
@@ -582,7 +583,7 @@ For tests, tools and readers of the format. An application does not need them.
   handed back with done `'none'`, else held (`'permits_held'`, valid from the request's send); a
   refusal (`'permits_refused'`) or a silence of `leaseDuration` forgets the owner only while the
   hint names the term asked under. A local waiter queued at the ownership leaves the queue with
-  `PBTimeoutError` at its deadline (`acquireTimeout`). A certain permit, held or issued to a
+  `PBTimeoutError` at its deadline (its bound). A certain permit, held or issued to a
   local waiter, teaches its base committed (`PBLearnCommitted`, not logged); a grant's committed
   root is committed knowledge only (`cluster/proposer.st`).
 - **Holder's replication** (`cluster/holder.st`): `proto_db`'s replicate and `_on_answer` for an
@@ -852,7 +853,7 @@ For tests, tools and readers of the format. An application does not need them.
   `'failure'`, `'dispatch_seconds_max'`, `'dispatch_slow'` (dispatcher steps over 10 ms). `forceRejoin`, `committedRoot` (a `PBLabeledRoot` read from an Atom),
   `committedEpoch`, `needsConfirmation`, `isFenced`, `isRunning`, `nodeId`, `config`,
   `acceptorState` and `nodeState` (the published states). For the round runner, all `Future`s:
-  `_permit` (a `PBPermission`, or rejected with `PBTimeoutError`, `PBUnexpectedError` when fenced,
+  `_permit` and `_permitWithin:` milliseconds (a `PBPermission`, or rejected with `PBTimeoutError`, `PBUnexpectedError` when fenced,
   `PBClosedError` when not running), `_baseFor:` (a `PBBaseDecision`), `_replicate:under:`
   (`#committed`, `#none` or `#unknown`; rejected with `PBCorruptionError` for a protocol
   violation, `PBValidationError` for a root not built for its permission), `_done:outcome:` and
@@ -896,7 +897,7 @@ For tests, tools and readers of the format. An application does not need them.
   root (`true`); a conflict is `PBConflictError` (retryable, nothing sent; `permitHeld` when the
   round keeps its permission for the caller's retry); `PBOutcomeUnknownError` once its root left
   the node and no outcome is known; `PBTimeoutError` when no permission comes within
-  `acquireTimeout` (the text names it). `run:` retries a held conflict at once, without the
+  the space's `lockTimeout` when one was given, else `acquireTimeout` (the text names the bound). `run:` retries a held conflict at once, without the
   backoff (it counts as an attempt), and tells the round when a held retry is not coming.
   `close` closes the round first: a commit in it whose root has not left the node is
   `PBClosedError`, one whose replicate left is `PBOutcomeUnknownError`. A cluster commit never
@@ -906,8 +907,14 @@ For tests, tools and readers of the format. An application does not need them.
 - **Reads in cluster mode** (`space.st`, Task 24; `proto_db`'s `_read_storage_root`,
   current_root and committed_epoch): a snapshot (a new transaction, `listDatabases`,
   `openDatabase:`) of a cluster space starts from the newest committed root its node knows, the
-  coordinator's `committedRoot`; when the node knows none, from the persisted root, which the
-  coordinator then takes as committed (counted `'storage_root_reads'`). Before it, while the
+  coordinator's `committedRoot`. When the node knows none, it recovers it from the peers first
+  (`PBClusterCoordinator >> _recover`, `proto_db`'s recover_root: the committed roots a majority
+  of witnesses reports, published to the readers before the recovery answers); a recovery that
+  fails (`PBConflictError`) is written to stderr (`recovery from the peers failed ...; reading the
+  persisted root`), and only if the node still knows none is the persisted root read and taken
+  as committed (`_observePersisted:from:`, counted `'storage_root_reads'`; the empty space as the
+  root labelled 0 with no record, so the next snapshot neither recovers nor reads the storage
+  again; nothing is learnt from a tier detached meanwhile). Before it, while the
   coordinator's `needsConfirmation` holds (after every attach, and again after `forceRejoin` on a
   survivor), the space runs a confirmation: `_confirmed`, then a commit that writes nothing
   (`PBCommitEntry confirmationDeadline:`) through the round runner, which obtains a write
@@ -918,7 +925,10 @@ For tests, tools and readers of the format. An application does not need them.
   A commit publishes its root to the node's readers before it returns
   (`PBClusterCoordinator >> _publishCommitted:`), so it reads its own write. The readers' root
   keeps the higher of the roots published (`PBRootOrder`); `PBPublishCommitted root: nil`, which
-  the acceptor publishes when `forceRejoin` on a survivor drops its committed root, drops it.
+  the acceptor publishes when `forceRejoin` on a survivor drops its committed root, drops it, and
+  an attach resets it to the committed root of the log attached. The confirmation, as every
+  cluster commit, waits for its permission up to the space's `lockTimeout` when one was given
+  (`storage:coordinator:lockTimeout:`), else up to the coordinator's `acquireTimeout`.
   A transaction that writes nothing asks for no permission and is no barrier; a commit that writes
   something and returns normally is (`run:` writing `'_read_barrier'`, and `newDatabase:`).
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and

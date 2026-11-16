@@ -691,9 +691,9 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     for its kept permission to be ended') and its misuse error ('already holds a write
     permission') have no counterpart: the done of a permission and the next permit request are
     posted in that order into the one dispatcher mailbox, so a commit never meets a permission
-    still being ended. Its wait counts inside the permit's own `acquireTimeout`, and the
-    `PBTimeoutError` names the configured bound in milliseconds ('within 8000 ms'), never what
-    is left of it (rc4 C1).
+    still being ended. Its wait counts inside the permit's own bound (the space's `lockTimeout`
+    when one was given, else `acquireTimeout`, as rc4's), and the `PBTimeoutError` names that
+    bound in milliseconds ('within 8000 ms'), never what is left of it (rc4 C1).
   - `'replication'` in `stats` `'critical'` runs from the send of the replicate to the settle of
     the commit on the runner (it includes the time the answer waits in the runner's mailbox);
     rc4 times the `replicate` call.
@@ -709,22 +709,16 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     committed knowledge is the acceptor's (an actor), so the readers' root is an Atom the
     acceptor publishes to, and the commit round publishes its root there too, before the commit
     settles (`_publishCommitted:`): the Atom keeps the higher root (`PBRootOrder`), so the
-    acceptor's later publish of an older root never lowers it, and only the acceptor's drop
-    (`forceRejoin` on a survivor) clears it. *Cost:* none; the readers see what `proto_db`'s do.
-  - When the node knows no committed root, `proto_db`'s `current_root` asks the peers
-    (`recover_root`) and reads the persisted root only when that fails; protoBaseST reads the
-    persisted root directly (and takes it as committed). This happens only on an empty cluster,
-    or after a confirmation failed (no permission within `acquireTimeout`, which a recovery round
-    would mostly fail too), or between a survivor's `forceRejoin` and its confirmation. *Cost:* in
-    those cases a read may start from an older committed root than a recovery would find: a
-    committed state still, never a wrong one, as `proto_db`'s own fallback.
-  - The confirmation's `_confirmed` is posted to the dispatcher, which hands it to the acceptor;
-    `proto_db`'s `confirmed()` clears the flag under the coordinator's lock. A snapshot that
-    starts before the acceptor took it confirms again. *Cost:* an extra empty round, never a
-    weaker read.
-  - The confirmation waits up to `acquireTimeout` for its permission (the cluster round's bound
-    for every commit, Task 23), not the space's `lockTimeout` as `proto_db`'s
-    `_commit_under_lease`; its failure is written to stderr, `proto_db`'s `logger.warning`.
+    acceptor's later publish of an older root never lowers it; only the acceptor's drop
+    (`forceRejoin` on a survivor) and an attach (which resets it to the new log's committed root,
+    as `proto_db`'s attach resets `_committed`) clear it. A recovery round publishes the committed
+    roots it learnt there before it answers, as `proto_db`'s `recover_root` observes them under
+    its lock before it returns. *Cost:* none; the readers see what `proto_db`'s do.
+  - The confirmation's check (`needsConfirmation`) and its record that it started (`_confirmed`)
+    are two steps in both: `proto_db` takes the coordinator's lock for each, protoBaseST reads the
+    acceptor's published state and posts `_confirmed` to the dispatcher, which hands it to the
+    acceptor. Two snapshots that pass the check before the record both confirm in either; the
+    window here is wider by that hop. *Cost:* an extra empty round, never a weaker read.
 - **The shared tier and cluster storage mode (Task 21, `cluster/tier.st`, `proto_db`
   `PlainTier`).**
   - Cluster mode is chosen when the storage opens (`PBFileStorage clusterPath:`, CC20), not

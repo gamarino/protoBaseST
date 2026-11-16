@@ -15,17 +15,25 @@
                 ever), pauseSend (the send deferred until the Future it holds resolves),
                 buildDelay (milliseconds a build sleeps first), poison (a TraceStorage poisoned
                 after that sleep), hideTier (the HidesTierFailure plant: the shell reports the
-                tier never failed), held (the permitHeld conflicts settled).
+                tier never failed), held (the permitHeld conflicts settled), settles (for each
+                commit settled true, whether the node's readers already held the root of the
+                round's last #committed replicate, noted in committing: the publish runs before
+                the settle, Task 24), built (the keys of the roots its builds answered,
+                hasBuilt:).
   SeamRound     a PBClusterRound that applies the RoundSeam of its node (Seams, by node id);
                 Rounds keeps the last round made for each node.
   SeamSpace     a PBObjectSpace whose cluster round is a SeamRound.
   Worker        an actor client: once:block:retries: answers { #ok. value } or { #error. class
                 name. text }; increments:... runs a counter workload with a token per commit.
-  SeamSpace     also notes, in SeamSpace notes, each confirmation it starts ('<id> confirm') and
-                each warning it writes ('<id> warn <text>'), for the cluster read tests.
+  SeamSpace     also notes, in SeamSpace notes, each confirmation it starts ('<id> confirm'),
+                each warning it writes ('<id> warn <text>') and each information line
+                ('<id> info <text>'), for the cluster read tests; holdConfirmationOf:until:
+                holds a node's next confirmation commit (after the coordinator recorded that
+                it started) until a Future resolves.
   CommitKit     a cluster of coordinators over one PBInProcessNetwork and one space directory
                 each node opens with its own TraceStorage; waits are conditions with a
-                deadline of 60 s (waitUntil:, settle:), never a duration asserted. restart:
+                deadline of 60 s (waitUntil:; settle: 120 s; limit: sets another), never a
+                duration asserted; open:lockTimeout: opens with an explicit lockTimeout. restart:
                 closes a node's space, stops it and starts a new coordinator of that id (a new
                 incarnation) over the same acceptor log, then reopens its space. Seams of a
                 subclass: endpointFor: (the transport of a node) and acceptorClass."
@@ -62,7 +70,7 @@ TraceStorage >> _newSegmentWriter: aByteArray
   poison == true ifTrue: [^ FileSystemError signal: 'injected failure: the disk is gone'].
   ^ super _newSegmentWriter: aByteArray.
 
-Object subclass: #RoundSeam instanceVariableNames: 'trace permitGate answerGate holdBase holdSend holdAnswer pauseSend buildDelay poison hideTier held'.
+Object subclass: #RoundSeam instanceVariableNames: 'trace permitGate answerGate holdBase holdSend holdAnswer pauseSend buildDelay poison hideTier held settles committing built'.
 
 RoundSeam class >> new
   ^ self basicNew setUp.
@@ -79,6 +87,9 @@ RoundSeam >> setUp
   poison := Atom on: nil.
   hideTier := Atom on: false.
   held := Atom on: 0.
+  settles := Atom on: #().
+  committing := Atom on: nil.
+  built := Atom on: #().
 
 RoundSeam >> trace ^ trace.
 RoundSeam >> permitGate ^ permitGate.
@@ -91,6 +102,13 @@ RoundSeam >> buildDelay ^ buildDelay.
 RoundSeam >> poison ^ poison.
 RoundSeam >> hideTier ^ hideTier.
 RoundSeam >> held ^ held.
+RoundSeam >> settles ^ settles.
+RoundSeam >> committing ^ committing.
+RoundSeam >> built ^ built.
+
+"Whether aLabeledRoot is one this node's round built (its key among built's)."
+RoundSeam >> hasBuilt: aLabeledRoot
+  ^ aLabeledRoot notNil and: [built value includes: aLabeledRoot key].
 
 RoundSeam >> note: aString
   trace swap: [:old | old copyWith: aString].
@@ -177,11 +195,13 @@ SeamRound >> _askBase: aPermission
   ^ super _askBase: aPermission.
 
 SeamRound >> _build: aBuild
-  | ms |
+  | ms root |
   ms := self seam buildDelay value.
   ms isNil ifFalse: [(Future after: ms) wait].
   self seam poison value isNil ifFalse: [self seam poison value poison: true].
-  ^ super _build: aBuild.
+  root := super _build: aBuild.
+  root isNil ifFalse: [self seam built swap: [:old | old copyWith: root key]].
+  ^ root.
 
 SeamRound >> _tierFailed
   self seam hideTier value ifTrue: [^ false].
@@ -211,17 +231,33 @@ SeamRound >> _replicate: aRoot under: aPermission
   gate isNil ifTrue: [^ f].
   ^ self seam after: gate pipe: f.
 
+SeamRound >> _step: anEvent
+  ((anEvent isKindOf: PBReplicated) and: [anEvent outcome = #committed]) ifTrue: [
+    self seam committing swap: [:old | self roundState current]].
+  ^ super _step: anEvent.
+
 SeamRound >> applySettle: aSettle
+  | current committed |
   ((aSettle outcome isKindOf: PBConflictError) and: [aSettle outcome permitHeld]) ifTrue: [
     self seam held swap: [:n | n + 1]].
+  current := self seam committing value.
+  (aSettle outcome == true and: [current notNil]) ifTrue: [
+    committed := self coordinator committedRoot.
+    self seam settles swap: [:old | old copyWith: (committed notNil and: [(PBRootOrder compare: committed with: current) >= 0])]].
   ^ super applySettle: aSettle.
 
 SeamRound setUp.
 
-PBObjectSpace subclass: #SeamSpace instanceVariableNames: '' classVariableNames: 'Notes'.
+PBObjectSpace subclass: #SeamSpace instanceVariableNames: '' classVariableNames: 'Notes ConfirmGates'.
 
 SeamSpace class >> setUp
   Notes := Atom on: #().
+  ConfirmGates := Atom on: Dictionary new.
+
+"The confirmation commit of anId's next space waits for aFuture first (20 s at most; an expired
+ gate is noted '<id> confirm gate expired'). The gate is used once."
+SeamSpace class >> holdConfirmationOf: anId until: aFuture
+  ConfirmGates swap: [:d | | copy | copy := d copy. copy at: anId put: aFuture. copy].
 
 SeamSpace class >> note: aString
   Notes swap: [:old | old copyWith: aString].
@@ -237,9 +273,25 @@ SeamSpace >> _confirm
   SeamSpace note: self coordinator nodeId , ' confirm'.
   ^ super _confirm.
 
+SeamSpace >> _commitEntry: anEntry
+  | id gate |
+  anEntry isConfirmation ifTrue: [
+    id := self coordinator nodeId.
+    gate := ConfirmGates value at: id ifAbsent: [nil].
+    gate isNil ifFalse: [
+      ConfirmGates swap: [:d | | copy | copy := d copy. copy removeKey: id ifAbsent: [nil]. copy].
+      SeamSpace note: id , ' confirm held'.
+      ([gate waitWithin: 20000. true] on: Error do: [:e | e return: false]) ifFalse: [
+        SeamSpace note: id , ' confirm gate expired']]].
+  ^ super _commitEntry: anEntry.
+
 SeamSpace >> _warn: aString
   SeamSpace note: self coordinator nodeId , ' warn ' , aString.
   ^ super _warn: aString.
+
+SeamSpace >> _inform: aString
+  SeamSpace note: self coordinator nodeId , ' info ' , aString.
+  ^ super _inform: aString.
 
 SeamSpace setUp.
 
@@ -274,7 +326,7 @@ Worker >> increments: aDatabase count: n prefix: aPrefix retries: r
 Worker >> close: aSpace
   ^ [aSpace close. true] on: Error do: [:e | e return: e class name].
 
-Object subclass: #CommitKit instanceVariableNames: 'ids dir network nodes spaces options storages peers restarts'.
+Object subclass: #CommitKit instanceVariableNames: 'ids dir network nodes spaces options storages peers restarts limit'.
 
 "The nodes anArray over the space directory aDirectory, with extra options."
 CommitKit class >> ids: anArray dir: aDirectory options: aDictionary
@@ -286,6 +338,7 @@ CommitKit >> setIds: anArray dir: aDirectory options: aDictionary
   options := aDictionary.
   storages := Dictionary new.
   restarts := Dictionary new.
+  limit := 60000.
   self start.
 
 "New coordinators (a new network), started, nothing attached."
@@ -360,9 +413,22 @@ CommitKit >> space: anId
 CommitKit >> storage: anId
   ^ storages at: anId.
 
+"The deadline of waitUntil: (milliseconds, 60000 unless set); settle: waits twice as long."
+CommitKit >> limit: milliseconds
+  limit := milliseconds.
+
 "Opens the space of anId (a SeamSpace over a new TraceStorage of the directory) and answers it."
 CommitKit >> open: anId
   ^ self open: anId segmentMaxBytes: PBFileStorage defaultSegmentMaxBytes.
+
+"As open:, the space opened with storage:coordinator:lockTimeout: milliseconds."
+CommitKit >> open: anId lockTimeout: milliseconds
+  | st space |
+  st := TraceStorage clusterPath: dir pathString segmentMaxBytes: PBFileStorage defaultSegmentMaxBytes.
+  storages at: anId put: st.
+  space := SeamSpace storage: st coordinator: (self node: anId) lockTimeout: milliseconds.
+  spaces at: (ids indexOf: anId) put: space.
+  ^ space.
 
 CommitKit >> open: anId segmentMaxBytes: n
   | st space |
@@ -376,18 +442,18 @@ CommitKit >> openAll
   ids do: [:id | self open: id].
   ^ self waitUntil: [nodes allSatisfy: [:n | (n stats at: 'rejoining') not]].
 
-"Whether aBlock answers true within 60 s, polled every 10 ms."
+"Whether aBlock answers true within the limit (60 s unless set), polled every 10 ms."
 CommitKit >> waitUntil: aBlock
   | deadline |
-  deadline := Time millisecondClockValue + 60000.
+  deadline := Time millisecondClockValue + limit.
   [aBlock value] whileFalse: [
     Time millisecondClockValue > deadline ifTrue: [^ false].
     (Future after: 10) wait].
   ^ true.
 
-"The value of aFuture within 120 s, or #hung."
+"The value of aFuture within twice the limit (120 s unless set), or { #hung. the error's class name }."
 CommitKit >> settle: aFuture
-  ^ [aFuture waitWithin: 120000] on: Error do: [:e | e return: { #hung. e class name }].
+  ^ [aFuture waitWithin: limit * 2] on: Error do: [:e | e return: { #hung. e class name }].
 
 "The database aName of anId's space, once its node knows it (nil after 60 s)."
 CommitKit >> db: aName on: anId

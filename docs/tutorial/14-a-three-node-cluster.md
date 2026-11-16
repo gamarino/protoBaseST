@@ -250,10 +250,12 @@ retry builds on the root just committed instead of losing the next turn (held re
 ## Reading
 
 > The barriers below are commits (Task 23); the reads through the coordinator are Task 24
-> (`tests/unit/cluster_reads.st`).
+> (`tests/unit/cluster_reads.st`, `cluster_reads_restarts.st`, `cluster_reads_majority.st`).
 
-A read in cluster mode takes the newest root **its node knows committed**. Apart from the
-confirmation after an attach (below), it sends nothing and never waits. The price: it may miss a commit another node acknowledged a moment ago, because the
+A read in cluster mode takes the newest root **its node knows committed**. It sends nothing and
+never waits, apart from two cases (below): the confirmation after an attach, or after
+`forceRejoin` on a survivor, and a recovery from the peers when the node knows no committed root
+at all. The price: it may miss a commit another node acknowledged a moment ago, because the
 node learns that commit from a `'done'` message, asynchronously, and no bound on that delay is
 promised. The snapshot is always a state that was committed, never a mixture.
 
@@ -294,9 +296,10 @@ local reads elsewhere. (There is no read-only barrier; `proto_db` does not have 
 A node that attaches its log knows only what the log recorded; its own last "committed" entry is
 not synced on its own and may have been lost in a power loss (chapter 13). So the space's first snapshot
 after every attach runs a **confirmation commit**, an empty round under a permission, before it
-reads. Reads never go backwards across a restart. On a coordinator, `committedEpoch` is the
-epoch of the newest root it knows committed; the space answers the same once Task 24 lands. It
-never goes down, except after `forceRejoin` on a survivor, which is outside the failure model
+reads. A node that knows no committed root (that lost entry was its only one) first asks its
+peers for theirs, and reads the persisted root only when a majority does not answer. Reads never
+go backwards across a restart. `committedEpoch`, on the space or on its coordinator, is the
+epoch of the newest root the node knows committed. It never goes down, except after `forceRejoin` on a survivor, which is outside the failure model
 (chapter 15).
 
 ## Durability: the persister

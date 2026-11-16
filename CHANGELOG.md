@@ -4,8 +4,10 @@
 
 - Reads in cluster mode (Task 24, `space.st`; `proto_db`'s `_read_storage_root`, `current_root`
   and `committed_epoch`): a snapshot of a cluster space starts from the newest committed root its
-  node knows (`committedRoot`), or, when it knows none, from the persisted root, then taken as
-  committed (`'storage_root_reads'`). While `needsConfirmation` holds (after every attach, and
+  node knows (`committedRoot`); when it knows none, from the committed root a majority of its
+  peers reports (`PBClusterCoordinator >> _recover`, published to the readers before it answers),
+  and only when that recovery fails from the persisted root, then taken as committed
+  (`'storage_root_reads'`; the empty space too, so it is read once). While `needsConfirmation` holds (after every attach, and
   again after `forceRejoin` on a survivor: it is read on every snapshot, review I2), the snapshot
   first runs a confirmation, a commit that writes nothing (`PBCommitEntry
   confirmationDeadline:`) through the round runner, so a restarted node reads at or above every
@@ -13,9 +15,14 @@
   and the read goes on from the root the node knows. A commit publishes its root to its node's
   readers before it returns (`PBClusterCoordinator >> _publishCommitted:`), so it reads its own
   write; the readers' root keeps the higher of the roots published, and `PBPublishCommitted root:
-  nil` (the acceptor's drop on `forceRejoin` of a survivor) clears it. `PBObjectSpace >>
-  committedEpoch`. Task 23's temporary read (the space's `known` root and `_learnCommitted:`) is
-  gone. Tests: `tests/unit/cluster_reads.st`; five checklist rows ported.
+  nil` (the acceptor's drop on `forceRejoin` of a survivor) clears it, and an attach resets it to
+  the new log's committed root. A cluster commit, the confirmation among them, waits for its
+  permission up to the space's `lockTimeout` when one was given
+  (`storage:coordinator:lockTimeout:`), else up to `acquireTimeout`, and its `PBTimeoutError`
+  names that bound (`PBPermitWanted waiter:timeout:`, `PBClusterCoordinator >> _permitWithin:`).
+  `PBObjectSpace >> committedEpoch`. Task 23's temporary read (the space's `known` root and
+  `_learnCommitted:`) is gone. Tests: `tests/unit/cluster_reads.st`,
+  `cluster_reads_restarts.st`, `cluster_reads_majority.st`; five checklist rows ported.
 
 - Cluster commits (Task 23, `cluster/round.st`): in a space opened with
   `PBObjectSpace storage:coordinator:`, `commit`, `newDatabase:` and `run:` go through the

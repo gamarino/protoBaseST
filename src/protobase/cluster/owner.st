@@ -45,8 +45,8 @@ Nothing here reads a clock: t is the node's clock (CC3).
     holder's done(term, seq, inc, outcome, root, copies: this node for a committed root, ranges)
     is broadcast; at its own ownership the outcome is applied at once, if the permission was
     issued to this incarnation.
-  The holder side (PBHolder, proto_db _permit_waits). A waiter's deadline is acquireTimeout from
-    its PBPermitWanted. With an owner hint naming another member (term not 0), a waiter asks it
+  The holder side (PBHolder, proto_db _permit_waits). A waiter's deadline is its PBPermitWanted's
+    timeout from it, acquireTimeout when it has none (proto_db permit(timeout)). With an owner hint naming another member (term not 0), a waiter asks it
     (_ask:, a PBPermitAsk): permit_req(term, rid, inc) under the hint's term, counted
     permit_requests_sent, sent again every requestTimeout while unanswered (counted
     permit_requests_retried: the owner answers a retry with the same permit, O7). It ends:
@@ -216,11 +216,19 @@ PBHolder >> deadlines
 PBHolder >> seen
   ^ (self _at: #seen) collect: [:e | e copy].
 
-"The deadline of aWaiter (microseconds of the node's clock), nil when none is recorded."
+"The deadline of aWaiter (microseconds of the node's clock), nil when none is recorded. An entry
+ of deadlines is { waiter. deadline } for a wait bounded by acquireTimeout, { waiter. deadline.
+ bound } for one bounded by its own timeout (PBPermitWanted waiter:timeout:)."
 PBHolder >> deadlineOf: aWaiter
   | e |
   e := (self _at: #deadlines) detect: [:d | d first = aWaiter] ifNone: [nil].
-  ^ e isNil ifTrue: [nil] ifFalse: [e last].
+  ^ e isNil ifTrue: [nil] ifFalse: [e at: 2].
+
+"The bound of aWaiter's wait in microseconds, nil when it is acquireTimeout (or none is recorded)."
+PBHolder >> boundOf: aWaiter
+  | e |
+  e := (self _at: #deadlines) detect: [:d | d first = aWaiter] ifNone: [nil].
+  ^ (e isNil or: [e size < 3]) ifTrue: [nil] ifFalse: [e at: 3].
 
 "The replications not decided yet (holder.st PBReplication), a fresh Array."
 PBHolder >> replications
@@ -245,10 +253,18 @@ PBCoordinatorCore >> _holderIn: s
 
 "s with aWaiter's deadline recorded: acquireTimeout from t (proto_db permit's deadline)."
 PBCoordinatorCore >> _expect: aWaiter in: s now: t
-  | h |
+  ^ self _expect: aWaiter within: nil in: s now: t.
+
+"s with aWaiter's deadline recorded: aBound microseconds from t, acquireTimeout when nil (proto_db
+ permit(timeout): timeout, else acquire_timeout)."
+PBCoordinatorCore >> _expect: aWaiter within: aBound in: s now: t
+  | h entry |
   h := self _holderIn: s.
+  entry := aBound isNil
+    ifTrue: [{ aWaiter. t + s config acquireTimeout }]
+    ifFalse: [{ aWaiter. t + aBound. aBound }].
   ^ s with: { #holder -> (h with: { #deadlines -> ((h deadlines reject: [:e | e first = aWaiter])
-    copyWith: { aWaiter. t + s config acquireTimeout }) }) }.
+    copyWith: entry) }) }.
 
 "aWaiter settled with anOutcome (a PBSettle), its deadline forgotten."
 PBCoordinatorCore >> _settle: aWaiter with: anOutcome in: s effects: fx
@@ -281,13 +297,16 @@ PBCoordinatorCore >> _late: someWaiters in: s now: t
   h := self _holderIn: s.
   ^ someWaiters select: [:w | | d | d := h deadlineOf: w. d notNil and: [t >= d]].
 
-"someWaiters settled with PBTimeoutError, for aReason."
+"someWaiters settled with PBTimeoutError, for aReason; the text names each waiter's bound (proto_db
+ permit: its timeout, else acquire_timeout)."
 PBCoordinatorCore >> _timeOut: someWaiters because: aReason in: s effects: fx
   | state |
   state := s.
-  someWaiters do: [:w |
+  someWaiters do: [:w | | bound |
+    bound := (self _holderIn: state) boundOf: w.
+    bound isNil ifTrue: [bound := s config acquireTimeout].
     state := self _settle: w with: (PBTimeoutError new messageText: 'Node ' , s config nodeId
-      , ' could not obtain a write permission within ' , (s config acquireTimeout // 1000) printString , ' ms ('
+      , ' could not obtain a write permission within ' , (bound // 1000) printString , ' ms ('
       , aReason , ')'; yourself) in: state effects: fx].
   ^ state.
 
