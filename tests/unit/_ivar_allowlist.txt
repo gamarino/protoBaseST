@@ -100,13 +100,13 @@ PBRootProbed>>_setToken:readable:
 PBRecovered>>_setSuspected:
 PBReadPersisted>>_setToken:
 PBProbeRoot>>_setRoot:token:
-PBConflictError>>_setPermitHeld:text:
+PBConflictError>>_setPermitHeld:text:cause:
 PBRoundEnqueued>>_setEntry:
 PBPermitted>>_setPermission:
 PBBaseDecided>>_setDecision:
 PBBuilt>>_setEntry:root:micros:
 PBBuildConflict>>_setEntry:error:
-PBBuildFailed>>_setEntry:error:
+PBBuildFailed>>_setEntry:error:tierFailed:
 PBReplicated>>_setOutcome:error:
 PBHoldExpired>>_setToken:
 PBAskBase>>_setPermission:

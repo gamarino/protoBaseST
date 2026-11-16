@@ -1363,6 +1363,10 @@ base a round must first re-commit is "nothing sent", so outcome `#none` and not 
 first and fail first. Tests: `sim_round_rules.st` families and the new checks only. The shell half
 (the tier's failed flag into `PBBuildFailed`) and the C1 timeout text land in Task 23.
 
+- Done (`task-22b-report.md`): the shell builds `PBBuildFailed entry:error:tierFailed:` (no
+  constructor without the flag) with `PBFileStorage isFailed`; the rule is
+  `_expiredRead:in:now:` and `_recommitFailed:in:now:effects:`.
+
 ### Task 23: Cluster commits
 
 **Files:**

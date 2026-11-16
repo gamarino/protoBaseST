@@ -12,6 +12,25 @@
                   while its root was sent (its retry applies it twice).
   PlantEarlierRootTakesEffect  the same, the retry conflicting too: the commit ends none
                   with its first attempt's root in the chain (H7).
+  The base read failing after the permission expired (rc4 C3, R212, R231, R233; proto_db
+  tests/support/plant_defects.py, the lease_read_* plants):
+  PlantExpiredUnexpected  lease_read_expired_unexpected: no failed base read is ever made a
+                  retryable conflict (_expiredRead:in:now: answers nil).
+  PlantUnexpectedSubclasses  lease_read_subclasses: a subclass of PBUnexpectedError (an unknown
+                  outcome) is converted too (_isExactlyUnexpected: by isKindOf:).
+  PlantPoisonedConverted  lease_read_poisoned_converted: a failed tier's error is converted
+                  (the tier flag dropped from _expiredRead:in:now:).
+  HiddenTierFailure  lease_read_failure_hidden: a PBBuildFailed whose isTierFailed answers false
+                  (the shell's report of a poisoned tier lost; the tiered half is Phase D).
+  PlantValidityIgnored  a protoBaseST plant: the permission's validity dropped from
+                  _expiredRead:in:now:, so a read failing under a valid permission is converted.
+  PlantRecommitSentEarly  lease_read_commit_base_sent_early: a re-commit counts as sent before
+                  its reads (rc3's rule: a failed re-commit build ends unknown unless its error
+                  is a conflict, validation or user error, and it is never converted).
+  PlantRecommitNeverSent  lease_read_commit_base_never_sent: a re-commit is never sent, so its
+                  replication's unknown outcome ends the permission none.
+  PlantedUnexpectedSubclass  a PBUnexpectedError subclass of the test (proto_db's second
+                  parametrised error, ProtoWriteRefusedError, has no counterpart in the port).
   RoundSim        a PBSim whose nodes commit through the round state machine
                   (PBCoordinatorCore round:in:now:): one PBRoundState per incarnation, the
                   round's effects performed by this shell (PBAskPermit, PBAskBase, PBBuild,
@@ -90,9 +109,57 @@ PlantEarlierRootTakesEffect >> _entryBuilt: anEvent in: s now: t effects: fx
         PBConflictError new messageText: 'the hot key changed after the transaction read it'; yourself }) })
     now: t effects: fx.
 
+"--- the base read failing after the permission expired (rc4 C3) ---"
+
+RoundRules subclass: #PlantExpiredUnexpected.
+
+PlantExpiredUnexpected >> _expiredRead: anEvent in: s now: t
+  ^ nil.
+
+RoundRules subclass: #PlantUnexpectedSubclasses.
+
+PlantUnexpectedSubclasses >> _isExactlyUnexpected: anError
+  ^ anError isKindOf: PBUnexpectedError.
+
+RoundRules subclass: #PlantPoisonedConverted.
+
+PlantPoisonedConverted >> _expiredRead: anEvent in: s now: t
+  ((self _isExactlyUnexpected: anEvent error) and: [(s permission isValidAt: t) not]) ifFalse: [^ nil].
+  ^ self _expiredConflict: anEvent error.
+
+RoundRules subclass: #PlantValidityIgnored.
+
+PlantValidityIgnored >> _expiredRead: anEvent in: s now: t
+  ((self _isExactlyUnexpected: anEvent error) and: [anEvent isTierFailed not]) ifFalse: [^ nil].
+  ^ self _expiredConflict: anEvent error.
+
+RoundRules subclass: #PlantRecommitSentEarly.
+
+PlantRecommitSentEarly >> _recommitFailed: anEvent in: s now: t effects: fx
+  | error |
+  self _expect: #recommit in: s for: anEvent.
+  error := anEvent error.
+  ^ self _failRound: s with: error
+    sent: ((error isKindOf: PBConflictError) or: [(error isKindOf: PBValidationError) or: [error isKindOf: PBUserError]]) not
+    now: t effects: fx.
+
+RoundRules subclass: #PlantRecommitNeverSent.
+
+PlantRecommitNeverSent >> _replicationFailed: s with: aReplicated now: t effects: fx
+  (s phase = #recommitting and: [aReplicated outcome = #unknown]) ifTrue: [
+    ^ self _failRound: s with: aReplicated error sent: false now: t effects: fx].
+  ^ super _replicationFailed: s with: aReplicated now: t effects: fx.
+
+PBBuildFailed subclass: #HiddenTierFailure.
+
+HiddenTierFailure >> isTierFailed
+  ^ false.
+
+PBUnexpectedError subclass: #PlantedUnexpectedSubclass.
+
 "=== RoundSim ================================================================"
 
-PBSim subclass: #RoundSim instanceVariableNames: 'rounds txs inRound waiters known started acks baseDelays onReplicate replicates reports settles decisions stopped recommits heldDelay hotVersions expired'.
+PBSim subclass: #RoundSim instanceVariableNames: 'rounds txs inRound waiters known started acks baseDelays onReplicate replicates reports settles decisions stopped recommits heldDelay hotVersions expired buildFailures failedUnder failureClass'.
 
 RoundSim >> rounds
   rounds isNil ifTrue: [rounds := Dictionary new].
@@ -195,6 +262,45 @@ RoundSim >> runTo: aTime steps: n
     queue do: [:e | ((e at: 1) notNil and: [(self _isPaused: (e at: 3)) not and: [next isNil or: [(e at: 1) < next]]]) ifTrue: [next := e at: 1]].
     (next isNil or: [next > aTime]) ifTrue: [now := now max: aTime. ^ self].
     self step].
+
+"The next PBBuild performed at anId of aKind (#recommit: the unchanged root of a base re-commit,
+ proto_db _commit_base; #entry: a commit's) fails, once: the round gets PBBuildFailed with
+ anError (this very object) and isTierFailed. With isLate the base read outlives the permission:
+ the answer arrives 1 ms (node clock) after the round's permission ends; else at once. The
+ permission it failed under is failedUnder."
+RoundSim >> failNextBuild: aKind at: anId with: anError tierFailed: isTierFailed late: isLate
+  buildFailures isNil ifTrue: [buildFailures := OrderedCollection new].
+  buildFailures add: { anId. aKind. anError. isTierFailed. isLate }.
+
+"The PBRoundEvent class of a failed build (PBBuildFailed unless a test plants another)."
+RoundSim >> failureClass
+  ^ failureClass ifNil: [PBBuildFailed].
+
+RoundSim >> failureClass: aClass
+  failureClass := aClass.
+
+"The permission under which the last planned build failure (failNextBuild:...) happened, nil
+ before."
+RoundSim >> failedUnder
+  ^ failedUnder.
+
+"Performs the planned failure of aBuild at the current node, if one is due: true, else false."
+RoundSim >> _failBuild: aBuild
+  | kind spec permission at |
+  buildFailures isNil ifTrue: [^ false].
+  kind := aBuild entry isNil ifTrue: [#recommit] ifFalse: [#entry].
+  spec := buildFailures detect: [:f | f first = current id and: [(f at: 2) = kind]] ifNone: [nil].
+  spec isNil ifTrue: [^ false].
+  buildFailures remove: spec.
+  permission := (self roundOf: current id) permission.
+  failedUnder := permission.
+  at := (spec at: 5)
+    ifTrue: [(current clock globalAt: permission validUntil + 1000) max: now]
+    ifFalse: [now].
+  self _trace: current id , ' build of ' , (PBCoreValue textOf: aBuild entry) , ' fails: ' , (spec at: 3) class name.
+  self _schedule: #round node: current
+    payload: (self failureClass entry: aBuild entry error: (spec at: 3) tierFailed: (spec at: 4)) at: at.
+  ^ true.
 
 "No loop client starts a new transaction from now on."
 RoundSim >> stopLoops
@@ -357,6 +463,7 @@ RoundSim >> _after: someMicros at: aNode
 
 RoundSim >> applyBuild: aBuild
   | entry tx micros snapshot root token |
+  (self _failBuild: aBuild) ifTrue: [^ self].
   entry := aBuild entry.
   entry isNil ifTrue: [
     "proto_db _commit_base: an unchanged root on the base."
@@ -698,3 +805,57 @@ RoundFamilies class >> minority: aRules seed: n
   sim run: 'm' at: 'n0' hot: false builds: #(1000) retries: 0.
   self resolve: #('m') in: sim.
   ^ { sim outcomeOf: 'm'. (sim errorsOf: 'm') anySatisfy: [:x | x isKindOf: PBTimeoutError] }.
+
+"--- 8. a base read failing after the permission expired (rc4 C3: R212, R231, R233) ---"
+
+"{ outcome of a. attempts of a. the class of a's first error. that error is anError itself. it
+ is a PBConflictError caused by anError with proto_db's text, not held. the PBReplicates under
+ the permission the read failed under. that permission's report }: proto_db
+ test_cluster_lease_read.py, the base-read cases. n0's commit a (3 retries; a client retries a
+ conflict, Database.run) builds once on a base; with aKind #recommit the logs hold r1 accepted,
+ not committed, so the round first re-commits it (proto_db _commit_base) and that build is the
+ one that fails. The build fails with anError, the tier failed when isTierFailed; with isLate,
+ the read outlives the permission (its answer arrives 1 ms after the permission ends)."
+RoundFamilies class >> baseRead: aRules seed: n kind: aKind error: anError tierFailed: isTierFailed late: isLate
+  ^ self baseRead: aRules seed: n kind: aKind error: anError tierFailed: isTierFailed late: isLate event: PBBuildFailed.
+
+RoundFamilies class >> baseRead: aRules seed: n kind: aKind error: anError tierFailed: isTierFailed late: isLate event: aClass
+  | sim first under report |
+  sim := self sim: aRules seed: n committed: aKind = #entry options: Dictionary new.
+  sim failureClass: aClass.
+  sim failNextBuild: aKind at: 'n0' with: anError tierFailed: isTierFailed late: isLate.
+  sim run: 'a' at: 'n0' hot: false builds: #(1000) retries: 3.
+  self resolve: #('a') in: sim.
+  first := (sim errorsOf: 'a') isEmpty ifTrue: [nil] ifFalse: [(sim errorsOf: 'a') first].
+  under := sim failedUnder.
+  report := sim reports detect: [:r | (r at: 2) == under] ifNone: [nil].
+  sim converge: 2000000.
+  ^ { sim outcomeOf: 'a'. sim attemptsOf: 'a'. first class. first == anError.
+    (first isKindOf: PBConflictError) and: [first permitHeld not and: [first cause == anError
+      and: [(self textOf: first) includesSubstring: 'the write permission expired before its base could be read; nothing was sent']]].
+    under isNil ifTrue: [nil] ifFalse: [(sim replicates select: [:r | (r at: 2) == under]) size].
+    report isNil ifTrue: [nil] ifFalse: [report at: 3] }.
+
+"{ outcome of a. a's errors are one PBOutcomeUnknownError, no conflict. the re-commit's
+ replication outcome. the report of the permission it was sent under. its replication answered
+ after that permission ended }: proto_db
+ test_a_base_re_commit_that_sent_its_root_is_never_a_retryable_conflict (R238L). The logs hold r1
+ accepted, not committed: n0's first round re-commits it. Once that PBReplicate is handed over,
+ n0 is cut off, so no majority acknowledges within the permission: the re-commit's root left the
+ node, the outcome is unknown, and a (no retries) ends PBOutcomeUnknownError, never a retryable
+ conflict."
+RoundFamilies class >> recommitSent: aRules seed: n
+  | sim rep report |
+  sim := self sim: aRules seed: n committed: false options: Dictionary new.
+  sim onReplicate: [:id | sim partition: #(#('n0') #('n1' 'n2'))].
+  sim run: 'a' at: 'n0' hot: false builds: #(1000) retries: 0.
+  self resolve: #('a') in: sim.
+  rep := sim replicates isEmpty ifTrue: [nil] ifFalse: [sim replicates first].
+  report := rep isNil ifTrue: [nil] ifFalse: [sim reports detect: [:r | (r at: 2) == (rep at: 2)] ifNone: [nil]].
+  ^ { sim outcomeOf: 'a'.
+    (sim errorsOf: 'a') size = 1 and: [((sim errorsOf: 'a') first isKindOf: PBOutcomeUnknownError)
+      and: [((sim errorsOf: 'a') first isKindOf: PBConflictError) not]].
+    rep isNil ifTrue: [nil] ifFalse: [(rep at: 6) isSymbol ifTrue: [rep at: 6] ifFalse: [(rep at: 6) class]].
+    (rep notNil and: [sim recommits includes: (sim keyText: (rep at: 3))]).
+    report isNil ifTrue: [nil] ifFalse: [report at: 3].
+    report notNil and: [((sim nodeAt: 'n0') clock localAt: (report at: 4)) >= (rep at: 2) validUntil] }.

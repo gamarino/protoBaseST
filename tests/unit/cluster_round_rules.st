@@ -1,4 +1,4 @@
-"EXPECT: ok 33"
+"EXPECT: ok 34"
 "The commit round (cluster/holder.st, PBCoordinatorCore round:in:now:) called directly, one guard
  per check (proto_db transactions.py _run_round, _permit_round, _keep, _take_kept,
  _await_retries, _drop_kept; coordinator.py replicate's _check_reserve and rejoin-ballot
@@ -24,8 +24,8 @@
  permission ends, the queue asks again. (18) #stale requeues, nothing settled, the permission
  ends #unknown; after a committed round, #committed. (19) #unreachable: a retryable conflict,
  #unknown. (20) needsCommit: the base is re-committed first (its replicate's pred the base),
- then the entries build on the re-commit. (21) A failed re-commit: #none for a conflict,
- #unknown for any other error. (22) #unknown: the replication's PBOutcomeUnknownError (its text
+ then the entries build on the re-commit. (21) A failed re-commit sent nothing (R233): #none for
+ a conflict and for any other error. (22) #unknown: the replication's PBOutcomeUnknownError (its text
  proto_db's, an unknown outcome without it refused) for every built entry, a
  conflicted one its own conflict. (23) A permit error settles the batch. (24) PBReportDone
  carries a root exactly with #committed. (26) termRetries stale permissions in a row fail the
@@ -37,7 +37,8 @@
  #committed after a committed round. (30) A build error: a PBDBError fails its commit alone, any
  other error ends the round. (31) With no held caller, a kept permission waits for as many
  commits as the round had conflicts. (32) The stale limit fails every queued commit, those
- queued after the round's too. Also: an expired permission's refusal is not counted (7); a held
+ queued after the round's too. (33) PBBuildFailed carries whether the tier failed, a Boolean
+ (R231). Also: an expired permission's refusal is not counted (7); a held
  hold is at least retryWait (11); rounds 2 to permitRetries hold, the next does not (13); a
  stale round's commits go back to the head of the queue (18); a PBDropKept of a caller not
  awaited changes nothing (12, 16)."
@@ -251,10 +252,10 @@ c that: 'needsCommit: re-committed first (pred the base), then the entries build
   equals: { nil. 1. 'a'. 2 }.
 
 "(21)"
-c that: 'a failed re-commit: #none for a conflict, #unknown otherwise'
-  is: { [reportOf value: (go value: core value: st first value: { { PBBuildFailed entry: nil error: (PBConflictError new messageText: 'c'; yourself). 1000 } }) last] on: Error do: [:ex | ex class].
-    [reportOf value: (go value: core value: st first value: { { PBBuildFailed entry: nil error: (Error new messageText: 'io'; yourself). 1000 } }) last] on: Error do: [:ex | ex class] }
-  equals: { #(#none). #(#unknown) }.
+c that: 'a failed re-commit sent nothing: #none for a conflict and for any other error (R233)'
+  is: { [reportOf value: (go value: core value: st first value: { { PBBuildFailed entry: nil error: (PBConflictError new messageText: 'c'; yourself) tierFailed: false. 1000 } }) last] on: Error do: [:ex | ex class].
+    [reportOf value: (go value: core value: st first value: { { PBBuildFailed entry: nil error: (Error new messageText: 'io'; yourself) tierFailed: false. 1000 } }) last] on: Error do: [:ex | ex class] }
+  equals: { #(#none). #(#none) }.
 
 "(22)"
 st := go value: core value: fresh value: { permitted. { PBRoundEnqueued entry: (e value: 'h' value: true). 0 }. { PBPermitted permission: perm. 0 }. { ok. 1000 }.
@@ -349,9 +350,9 @@ c that: '#none: a retryable conflict, never held, reported #none; after a commit
 
 "(30) m5: an entry's build error other than a PBDBError ends the round"
 st := go value: core value: (rule value: core value: true) first value: {
-  { PBBuildFailed entry: (e value: 'a' value: false) error: (Error new messageText: 'bug'; yourself). 2000 } }.
+  { PBBuildFailed entry: (e value: 'a' value: false) error: (Error new messageText: 'bug'; yourself) tierFailed: false. 2000 } }.
 x := go value: core value: (rule value: core value: true) first value: {
-  { PBBuildFailed entry: (e value: 'a' value: false) error: (PBValidationError new messageText: 'v'; yourself). 2000 } }.
+  { PBBuildFailed entry: (e value: 'a' value: false) error: (PBValidationError new messageText: 'v'; yourself) tierFailed: false. 2000 } }.
 c that: 'a build error: a PBDBError fails its commit alone; any other error ends the round, nothing sent'
   is: { (settles value: st last) collect: [:q | { q first. q last messageText }]. reportOf value: st last.
     (settles value: x last) collect: [:q | q first]. x first phase }
@@ -376,5 +377,13 @@ st := go value: core value: st first value: { { PBPermitted permission: perm. 90
 c that: 'after termRetries stale permissions, a commit queued meanwhile fails too'
   is: { (settles value: st last) collect: [:q | q first]. st first phase. st first queue }
   equals: { #('a' 'q'). #idle. #() }.
+
+"(33) R231: the tier flag of PBBuildFailed"
+c that: 'PBBuildFailed carries whether the tier failed, a Boolean, and has no constructor without it'
+  is: { (PBBuildFailed entry: nil error: Error new tierFailed: true) isTierFailed.
+    (PBBuildFailed entry: nil error: Error new tierFailed: false) isTierFailed.
+    err value: [PBBuildFailed entry: nil error: Error new tierFailed: nil].
+    PBBuildFailed class includesSelector: #entry:error: }
+  equals: { true. false. PBValidationError. false }.
 
 c report.

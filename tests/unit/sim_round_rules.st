@@ -1,4 +1,4 @@
-"EXPECT: ok 11"
+"EXPECT: ok 24"
 "The commit round as a pure state machine (cluster/holder.st, PBCoordinatorCore round:in:now:;
  proto_db transactions.py _run_round, _permit_round, _keep, _take_kept, _await_retries; spec 5.6,
  D-LIVE-2, CC11, CC18, R121, H7) in the simulator: every node commits through its PBRoundState,
@@ -16,12 +16,21 @@
  clients beside blind writers on every node, each held retry 2 ms (virtual) after its conflict:
  still fair (a held retry is awaited by its caller; a blind commit does not take its round).
  (10) A conflict in a round that ends unknown gets its own conflict: its client ends. (11) A
- commit on a minority node ends PBTimeoutError (spec 5.7): its client ends."
+ commit on a minority node ends PBTimeoutError (spec 5.7): its client ends.
+ A base read failing after the permission expired (rc4 C3; proto_db test_cluster_lease_read.py,
+ R212, R231, R233, R238L): (12) a commit's base read failing with exactly PBUnexpectedError after
+ the permission expired is a retryable PBConflictError caused by it, nothing sent, the
+ permission ending none, and the client's retry commits; (13) a subclass of PBUnexpectedError
+ keeps its meaning; (14) under a valid permission the error stands; (15) a failed tier keeps its
+ own error; (16) a base re-commit whose read fails sent nothing (none, not unknown); (17) the
+ same after the permission expired is a retryable conflict; (18) a re-commit whose root was
+ sent is never a retryable conflict (unknown). (19) to (24): the plants of those rules are
+ caught."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_round'.
 
-| c out fair |
+| c out fair U expired honest poisoned reread reexpired resent |
 c := Check new.
 "Fair (D-LIVE-2, proto_db test_hot_key_increments_never_starve_a_member): every member commits
  at least once per 50 virtual rounds, the fewest acknowledged commits of a member are at least
@@ -100,5 +109,90 @@ c that: 'a conflict in a round that ends unknown gets its own conflict ({ h. its
 c that: 'a commit on a minority node ends PBTimeoutError ({ outcome. error })'
   is: (RoundFamilies minority: RoundRules new seed: 1)
   equals: { #failed. true }.
+
+"(12) to (18): rc4 C3. { outcome. attempts. first error's class. it is the planted error itself.
+ a retryable conflict caused by it with proto_db's text. replicates under the failed permission.
+ its report }"
+U := [:text | PBUnexpectedError new messageText: text; yourself].
+expired := RoundFamilies baseRead: RoundRules new seed: 1 kind: #entry error: (U value: 'Reading segment x failed after 3 attempt(s): store unreachable') tierFailed: false late: true.
+c that: 'a base read failing with exactly PBUnexpectedError after the permission expired is a retryable conflict, nothing sent ({ outcome. attempts. first error. the planted error. the conflict caused by it. replicates under the permission. its report })'
+  is: expired
+  equals: { #acknowledged. 2. PBConflictError. false. true. 0. #none }.
+
+"(13)"
+out := { RoundFamilies baseRead: RoundRules new seed: 1 kind: #entry error: (PBOutcomeUnknownError new messageText: 'planted outcome unknown'; yourself) tierFailed: false late: true.
+  RoundFamilies baseRead: RoundRules new seed: 1 kind: #entry error: (PlantedUnexpectedSubclass new messageText: 'planted subclass'; yourself) tierFailed: false late: true }.
+c that: 'a subclass of PBUnexpectedError is never made retryable ({ PBOutcomeUnknownError. another subclass })'
+  is: out
+  equals: { { #unknown. 1. PBOutcomeUnknownError. true. false. 0. #none }. { #failed. 1. PlantedUnexpectedSubclass. true. false. 0. #none } }.
+
+"(14)"
+honest := RoundFamilies baseRead: RoundRules new seed: 1 kind: #entry error: (U value: 'store unreachable') tierFailed: false late: false.
+c that: 'a base read failing under a valid permission stays an honest PBUnexpectedError ({ outcome. attempts. first error. the planted error. converted. replicates. report })'
+  is: honest
+  equals: { #failed. 1. PBUnexpectedError. true. false. 0. #none }.
+
+"(15)"
+poisoned := RoundFamilies baseRead: RoundRules new seed: 1 kind: #entry error: (U value: 'Writing manifest failed: disk full') tierFailed: true late: true.
+c that: 'a failed tier keeps its own error under an expired permission ({ outcome. attempts. first error. the planted error. converted. replicates. report })'
+  is: poisoned
+  equals: { #failed. 1. PBUnexpectedError. true. false. 0. #none }.
+
+"(16)"
+reread := RoundFamilies baseRead: RoundRules new seed: 1 kind: #recommit error: (U value: 'store unreachable') tierFailed: false late: false.
+c that: 'a base re-commit whose read fails sent nothing: the permission ends none, not unknown, and the error stands ({ outcome. attempts. first error. the planted error. converted. replicates. report })'
+  is: reread
+  equals: { #failed. 1. PBUnexpectedError. true. false. 0. #none }.
+
+"(17)"
+reexpired := RoundFamilies baseRead: RoundRules new seed: 1 kind: #recommit error: (U value: 'store unreachable') tierFailed: false late: true.
+c that: 'a base re-commit read failing after the permission expired is a retryable conflict, nothing sent ({ outcome. attempts. first error. the planted error. the conflict caused by it. replicates. report })'
+  is: reexpired
+  equals: { #acknowledged. 2. PBConflictError. false. true. 0. #none }.
+
+"(18)"
+resent := RoundFamilies recommitSent: RoundRules new seed: 1.
+c that: 'a base re-commit that sent its root is never a retryable conflict ({ outcome. one PBOutcomeUnknownError. the replication. it was the re-commit. report. reported after the permission ended })'
+  is: resent
+  equals: { #unknown. true. PBOutcomeUnknownError. true. #unknown. true }.
+
+"(19)"
+out := { RoundFamilies baseRead: PlantExpiredUnexpected new seed: 1 kind: #entry error: (U value: 'store unreachable') tierFailed: false late: true.
+  RoundFamilies baseRead: PlantExpiredUnexpected new seed: 1 kind: #recommit error: (U value: 'store unreachable') tierFailed: false late: true }.
+c that: 'PlantExpiredUnexpected is caught (an expired permission''s failed base read is not retryable: the client ends failed, not converted)'
+  is: (out collect: [:o | { o first. o at: 5 }])
+  equals: { { #failed. false }. { #failed. false } }.
+
+"(20)"
+out := RoundFamilies baseRead: PlantUnexpectedSubclasses new seed: 1 kind: #entry error: (PBOutcomeUnknownError new messageText: 'planted outcome unknown'; yourself) tierFailed: false late: true.
+c that: 'PlantUnexpectedSubclasses is caught (an unknown outcome became a retryable conflict, retried)'
+  is: { out first. out at: 4. out at: 5 }
+  equals: { #acknowledged. false. true }.
+
+"(21)"
+out := { RoundFamilies baseRead: PlantPoisonedConverted new seed: 1 kind: #entry error: (U value: 'Writing manifest failed: disk full') tierFailed: true late: true.
+  RoundFamilies baseRead: RoundRules new seed: 1 kind: #entry error: (U value: 'Writing manifest failed: disk full') tierFailed: true late: true event: HiddenTierFailure }.
+c that: 'PlantPoisonedConverted and HiddenTierFailure are caught (a failed tier''s error became a retryable conflict)'
+  is: (out collect: [:o | { o first. o at: 5 }])
+  equals: { { #acknowledged. true }. { #acknowledged. true } }.
+
+"(22)"
+out := RoundFamilies baseRead: PlantValidityIgnored new seed: 1 kind: #entry error: (U value: 'store unreachable') tierFailed: false late: false.
+c that: 'PlantValidityIgnored is caught (a read failing under a valid permission became a retryable conflict, held and retried)'
+  is: { out first. out at: 3. out at: 4 }
+  equals: { #acknowledged. PBConflictError. false }.
+
+"(23)"
+out := { RoundFamilies baseRead: PlantRecommitSentEarly new seed: 1 kind: #recommit error: (U value: 'store unreachable') tierFailed: false late: false.
+  RoundFamilies baseRead: PlantRecommitSentEarly new seed: 1 kind: #recommit error: (U value: 'store unreachable') tierFailed: false late: true }.
+c that: 'PlantRecommitSentEarly is caught (a re-commit whose read failed ended its permission unknown, not converted)'
+  is: (out collect: [:o | { o at: 5. o last }])
+  equals: { { false. #unknown }. { false. #unknown } }.
+
+"(24)"
+out := RoundFamilies recommitSent: PlantRecommitNeverSent new seed: 1.
+c that: 'PlantRecommitNeverSent is caught (a re-commit whose root was sent ended its permission none)'
+  is: (out at: 5)
+  equals: #none.
 
 c report.

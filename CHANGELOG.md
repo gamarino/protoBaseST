@@ -24,6 +24,16 @@
   to rc4 (Python 3.12 or newer). **After merging, run `tests/interop/setup_venv.sh` in every
   checkout:** a venv still holding rc2 (and every worktree linked to it) fails
   `tests/interop/env.sh` (exit 1, FAIL, not SKIP) until it is rebuilt at rc4.
+- Cluster core, rc4 C3 (Task 22b; R212, R231, R233): in the commit round
+  (`roundBuildFailed:in:now:`), a build that failed with exactly `PBUnexpectedError` once the
+  write permission is no longer valid, the commit's tier not failed, is a retryable
+  `PBConflictError` ("the write permission expired before its base could be read; nothing was
+  sent", its `cause` the read error: `PBConflictError text:cause:`); a subclass, a failed tier
+  or a valid permission keeps the error. A failed re-commit build sent nothing whatever its
+  error, so its permission ends `#none`, not `#unknown`. `PBBuildFailed` is now
+  `entry:error:tierFailed:` (`isTierFailed`; no constructor without the flag), which the shell
+  fills in Task 23. The seven `test_cluster_lease_read.py` rows deferred to 22b are ported
+  (`sim_round_rules.st` (12) to (24), with the six rc4 plants and one of the port's).
 - Group commit on a standalone storage (Task 22, `proto_db` D52 and `_standalone_round`), with
   the shared round runner (`round.st`). Every commit and every new database is a
   `PBCommitEntry` (`transaction:willRetry:deadline:`, `createDatabase:deadline:`, `future`)

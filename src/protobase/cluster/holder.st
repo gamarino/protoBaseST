@@ -79,7 +79,10 @@ no proposal). Nothing here reads a clock: t is the node's clock (CC3).
     build after the first the group bound (CC11, groupBoundAllows:now:) asks for sendReserve +
     the round's longest build, the rest back to the head of the queue; before any send
     mayReplicate:now: refuses less than sendReserve left (R121, the CC18 text) and a term below
-    the rejoin ballot (L14), nothing sent, a retryable conflict. Outcomes as H7. A stale base
+    the rejoin ballot (L14), nothing sent, a retryable conflict. A failed build sent nothing,
+    the re-commit's too (R233); one that failed with exactly PBUnexpectedError once the
+    permission is no longer valid, the tier not failed, is a retryable conflict (R212, R231).
+    Outcomes as H7. A stale base
     requeues the round at the head; termRetries stale permissions in a row fail the queue
     (proto_db _TERM_RETRIES). Held retries (D-LIVE-2): a conflicted entry that will retry gets
     PBConflictError held:, and the permission is kept, max(min(retryHold, the time left),
@@ -1467,22 +1470,30 @@ PBBuildConflict >> roundWith: aCore in: aRoundState now: t
 PBBuildConflict >> printOn: aStream
   aStream nextPutAll: 'PBBuildConflict('; nextPutAll: (PBCoreValue textOf: entry); nextPut: $).
 
-PBRoundEvent subclass: #PBBuildFailed instanceVariableNames: 'entry error'.
+PBRoundEvent subclass: #PBBuildFailed instanceVariableNames: 'entry error tierFailed'.
 
 "The build of anEntry (nil: of the unchanged root of a base that needs a commit first) failed
- with anError (an Exception, not signalled, other than a conflict of an entry)."
-PBBuildFailed class >> entry: anEntryOrNil error: anError
+ with anError (an Exception, not signalled, other than a conflict of an entry); isTierFailed (a
+ Boolean): whether the commit's tier has failed, a write having poisoned it (proto_db
+ tier.failure is not None, R231; the shell passes PBFileStorage isFailed, Task 23). There is no
+ shorter constructor: a shell always says whether its tier failed, since a failed tier keeps its
+ own error where a failed read under an expired permission becomes a retryable conflict
+ (roundBuildFailed:in:now:)."
+PBBuildFailed class >> entry: anEntryOrNil error: anError tierFailed: isTierFailed
   (anEntryOrNil isNil or: [anEntryOrNil isKindOf: PBRoundEntry]) ifFalse: [
     ^ PBValidationError signal: 'PBBuildFailed: an entry is a PBRoundEntry or nil, not ' , anEntryOrNil printString].
   (anError isKindOf: Exception) ifFalse: [
     ^ PBValidationError signal: 'PBBuildFailed: an error is an Exception, not ' , anError printString].
-  ^ self basicNew _setEntry: anEntryOrNil error: anError.
+  (isTierFailed == true or: [isTierFailed == false]) ifFalse: [
+    ^ PBValidationError signal: 'PBBuildFailed: tierFailed is a Boolean, not ' , isTierFailed printString].
+  ^ self basicNew _setEntry: anEntryOrNil error: anError tierFailed: isTierFailed.
 
-PBBuildFailed >> _setEntry: anEntryOrNil error: anError
+PBBuildFailed >> _setEntry: anEntryOrNil error: anError tierFailed: isTierFailed
   "Runs once, on a fresh instance."
   error isNil ifFalse: [^ PBUserError signal: 'PBBuildFailed is immutable'].
   entry := anEntryOrNil.
   error := anError.
+  tierFailed := isTierFailed.
   ^ self.
 
 PBBuildFailed >> entry
@@ -1491,11 +1502,17 @@ PBBuildFailed >> entry
 PBBuildFailed >> error
   ^ error.
 
+"Whether the commit's tier had failed when the build failed (R231)."
+PBBuildFailed >> isTierFailed
+  ^ tierFailed.
+
 PBBuildFailed >> roundWith: aCore in: aRoundState now: t
   ^ aCore roundBuildFailed: self in: aRoundState now: t.
 
 PBBuildFailed >> printOn: aStream
-  aStream nextPutAll: 'PBBuildFailed('; nextPutAll: (PBCoreValue textOf: entry); nextPutAll: ', '; print: error class; nextPut: $).
+  aStream nextPutAll: 'PBBuildFailed('; nextPutAll: (PBCoreValue textOf: entry); nextPutAll: ', '; print: error class.
+  tierFailed ifTrue: [aStream nextPutAll: ', tier failed'].
+  aStream nextPut: $).
 
 "--- PBReplicated ---"
 
@@ -1951,29 +1968,63 @@ PBCoordinatorCore >> roundBuildConflict: anEvent in: s now: t
     self _buildNext: (s with: { #building -> nil. #conflicted -> ((s conflicted) copyWith: { anEvent entry. anEvent error }) })
       now: t effects: fx].
 
-"A build that failed (proto_db _permit_round: ProtoDBError, entry.finish(error)): an entry's
- PBDBError fails it alone, any other error ends the round with it, nothing sent (proto_db's
- except branch); the re-commit's ends the round with its error, and the outcome is unknown unless nothing
- a voter may accept can have left (proto_db: 'sent' is set before _commit_base; nothing_sent
- only for a conflict, validation or user error)."
+"A build that failed (proto_db _permit_round). Every build comes before the round's PBReplicate
+ (a PBBuildFailed answers a PBBuild): it reads the base, writes only to the local tier and
+ sends nothing a voter may accept, so nothing was sent. A base read that failed with exactly
+ PBUnexpectedError once the permission is no longer valid, the tier not failed, is a retryable
+ conflict (_expiredRead:in:now:, R212, R231): an entry's is its own conflict, as from its build;
+ the re-commit's ends the round with it. Otherwise an entry's PBDBError fails it alone and any
+ other error ends the round with it; the re-commit's ends the round with its error
+ (_recommitFailed:in:now:effects:)."
 PBCoordinatorCore >> roundBuildFailed: anEvent in: s now: t
-  ^ self _step: [:fx |
+  ^ self _step: [:fx | | expired |
     anEvent entry isNil
-      ifTrue: [
-        self _expect: #recommit in: s for: anEvent.
-        self _failRound: s with: anEvent error sent: (self _nothingSent: anEvent error) not now: t effects: fx]
+      ifTrue: [self _recommitFailed: anEvent in: s now: t effects: fx]
       ifFalse: [
         self _expect: #build in: s for: anEvent.
         self _expectBuilding: anEvent in: s.
-        (anEvent error isKindOf: PBDBError)
+        expired := self _expiredRead: anEvent in: s now: t.
+        expired notNil
           ifTrue: [
-            fx add: (PBSettle waiter: anEvent entry token outcome: anEvent error).
-            self _buildNext: (s with: { #building -> nil }) now: t effects: fx]
-          ifFalse: [self _failRound: s with: anEvent error sent: false now: t effects: fx]]].
+            self _buildNext: (s with: { #building -> nil. #conflicted -> ((s conflicted) copyWith: { anEvent entry. expired }) })
+              now: t effects: fx]
+          ifFalse: [
+            (anEvent error isKindOf: PBDBError)
+              ifTrue: [
+                fx add: (PBSettle waiter: anEvent entry token outcome: anEvent error).
+                self _buildNext: (s with: { #building -> nil }) now: t effects: fx]
+              ifFalse: [self _failRound: s with: anEvent error sent: false now: t effects: fx]]]].
 
-"proto_db _permit_round's except: an error that says nothing acceptable left the node."
-PBCoordinatorCore >> _nothingSent: anError
-  ^ (anError isKindOf: PBConflictError) or: [(anError isKindOf: PBValidationError) or: [anError isKindOf: PBUserError]].
+"R233 (proto_db _commit_base's sending(), called just before its replicate): the re-commit's
+ build, the read of the base's records and space and the save of its unchanged root, comes
+ before its PBReplicate, the first effect a voter may accept, so its failure sent nothing,
+ whatever the error: the round ends with it (the retryable conflict of _expiredRead:in:now:
+ when that applies) and the permission does not end unknown for it. A failure after that
+ PBReplicate is its PBReplicated (_replicationFailed:with:now:effects:), never this."
+PBCoordinatorCore >> _recommitFailed: anEvent in: s now: t effects: fx
+  self _expect: #recommit in: s for: anEvent.
+  ^ self _failRound: s with: ((self _expiredRead: anEvent in: s now: t) ifNil: [anEvent error]) sent: false now: t effects: fx.
+
+"R212, R231 (proto_db _check_expired_read): the retryable PBConflictError caused by the error of
+ the PBBuildFailed anEvent when that error is exactly PBUnexpectedError (_isExactlyUnexpected:;
+ never a subclass: an unknown outcome keeps its meaning), the commit's tier has not failed (a
+ poisoned tier's error keeps its own) and the permission is no longer valid at t; else nil.
+ Such a read was cut at the permission's end, or outlived it, and nothing was sent (structural:
+ see roundBuildFailed:in:now:), so the commit may be retried. The permission's validity only
+ chooses between a retryable and a non-retryable error; it decides no outcome (R82). Under a
+ valid permission the error stands: an honest failure."
+PBCoordinatorCore >> _expiredRead: anEvent in: s now: t
+  ((self _isExactlyUnexpected: anEvent error) and: [anEvent isTierFailed not and: [(s permission isValidAt: t) not]])
+    ifFalse: [^ nil].
+  ^ self _expiredConflict: anEvent error.
+
+"proto_db type(error) is ProtoUnexpectedError."
+PBCoordinatorCore >> _isExactlyUnexpected: anError
+  ^ anError class == PBUnexpectedError.
+
+"proto_db _check_expired_read's conflict, caused by anError."
+PBCoordinatorCore >> _expiredConflict: anError
+  ^ PBConflictError text: 'the write permission expired before its base could be read; nothing was sent' cause: anError.
 
 "--- sending ---"
 

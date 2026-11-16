@@ -658,7 +658,8 @@ For tests, tools and readers of the format. An application does not need them.
   `PBRoundEnqueued entry:`, `PBPermitted permission:` (a `PBPermission` or an error value),
   `PBBaseDecided decision:` (a `PBBaseDecision` or an error value), `PBBuilt entry:root:micros:`
   (entry `nil` for the re-commit of a base that needs one; root `nil` for nothing to publish),
-  `PBBuildConflict entry:error:`, `PBBuildFailed entry:error:`, `PBReplicated outcome:`
+  `PBBuildConflict entry:error:`, `PBBuildFailed entry:error:tierFailed:` (`isTierFailed`: whether
+  the commit's tier had failed, a Boolean the shell always passes), `PBReplicated outcome:`
   (`#committed`, `#none`, or the replication's `PBOutcomeUnknownError`; a bare `#unknown` is
   refused; `outcome`, `error`),
   `PBHoldExpired token:`, `PBDropKept caller:`. Effects: `PBAskPermit`, `PBAskBase permission:`,
@@ -675,7 +676,13 @@ For tests, tools and readers of the format. An application does not need them.
   longest build, the belief and `leaseDuration`, CC18) and a term below the rejoin ballot (L14;
   `dispatchReplicateWanted:` checks it again at the send against the acceptor's ballot and then
   sends nothing, `#none`). A build error that is a `PBDBError` fails its commit alone; any other
-  ends the round, nothing sent.
+  ends the round, nothing sent. Every build, the re-commit's too, comes before the round's
+  `PBReplicate`, so a failed build sent nothing: a failed re-commit ends the permission `#none`,
+  never `#unknown` (R233). A build that failed with exactly `PBUnexpectedError` (never a
+  subclass) once the permission is no longer valid, the tier not failed, is a retryable
+  `PBConflictError` "the write permission expired before its base could be read; nothing was
+  sent" whose `cause` is that error (`PBConflictError text:cause:`; R212, R231): a commit's
+  fails alone, as a conflict of its build; the re-commit's ends the round.
   `#committed` settles the built entries `true`; `#none` is a retryable conflict; an unknown
   outcome settles every built entry with the replication's `PBOutcomeUnknownError` (its text
   says why), never retried. A `#stale` base requeues the
