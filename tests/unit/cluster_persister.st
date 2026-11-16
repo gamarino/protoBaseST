@@ -28,7 +28,7 @@
  the runner, so afterwards n0's storage holds no root lock, the persister counted no error, and a
  later persist (sync:) succeeds. Every step after the release runs bounded (Persist within:do:):
  a root lock kept by a write made beside the commit's shows up as a failed check, never a hang.
- (7) A stopped node's commit (its own persister's writes dropped) is persisted by another node
+ (7) A stopped node's commit (its own persister's write dropped, waited for before it stops) is persisted by another node
  after persistLag (200 ms here): sync: on that node returns and space.root reaches the commit
  (outcome only).
  (8) The checklist row: an unexpected persister failure (a plain Error in every pass of n2's
@@ -168,14 +168,16 @@ kit openAll.
 PersistSeams dropWrites: #('n0').
 s := Persist create: kit on: 'n0' counter: 41.
 r1 := (kit node: 'n0') committedRoot.
-out := { s. kit waitUntil: [#('n1' 'n2') allSatisfy: [:id | (kit node: id) committedEpoch >= r1 epoch]] }.
+out := { s. kit waitUntil: [#('n1' 'n2') allSatisfy: [:id | (kit node: id) committedEpoch >= r1 epoch]].
+  "n0's persister has tried to write its commit (and was dropped) before n0 stops: its low band
+   pass runs one persistInterval after the commit, so it is waited for, never assumed."
+  kit waitUntil: [PersistSeams noted: 'n0 write dropped'] }.
 kit down: 'n0'.
 PersistSeams dropWrites: #().
 out := out , { Persist sync: (kit space: 'n1') within: 10000. Persist sync: (kit space: 'n2') within: 10000.
-  (PBRootOrder compare: (Persist persistedIn: base / 'b') with: r1) >= 0. Persist persistedCounterIn: base / 'b'.
-  PersistSeams noted: 'n0 write dropped' }.
+  (PBRootOrder compare: (Persist persistedIn: base / 'b') with: r1) >= 0. Persist persistedCounterIn: base / 'b' }.
 c that: 'a stopped node''s commits are persisted by another node after persistLag'
-  is: out equals: #(#ok true nil nil true 41 true).
+  is: out equals: #(#ok true true nil nil true 41).
 kit shutdown.
 
 Persist step: '(8)'.
