@@ -2,6 +2,17 @@
 
 ## 0.2.0 (unreleased)
 
+- Format interop of cluster mode with `proto_db` v2.0.0rc4 (Task 26): `proto_db` reads a
+  cluster space protoBaseST wrote with three nodes on one directory (its verifier accepts it,
+  its dump equals protoBaseST's, and its `cluster_fields` and `cluster_previous` chain equal the
+  SpaceRoot fields protoBaseST wrote: `tests/interop/cluster_space_to_py.sh`), and the acceptor
+  logs round-trip both ways: each `cluster/<n>.roots` the nodes wrote loads to the same values in
+  `proto_db`'s `RootsLog` (log format 2), a log `proto_db` writes loads to the same values in
+  `PBAcceptorLog`, the same entry sequence gives the same bytes on both sides, and `_node_log`
+  names the file `PBSharedTier logName:` names for the five ids of Review Focus 5
+  (`tests/interop/rootlog_both_ways.sh`, helpers `_st_cluster_space.st` and `py_rootlog.py`). No
+  format defect was found.
+
 - The persister, `persistedEpoch` and `sync:` (Task 25, `cluster/persister.st`; `proto_db`'s
   `Persister`, `persisted_epoch` and `sync` at v2.0.0rc4): each cluster space runs a
   `PBPersister` on a low band actor, started after the attach and stopped by `close` before the
