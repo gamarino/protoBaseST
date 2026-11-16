@@ -55,6 +55,18 @@ PBClusterConfig class >> _micros: aValue named: aName positive: mustBePositive
 
 "The configuration of the member aNodeId of the cluster anArrayOfPBPeer with the options of
  aDictionary (keys as the list above, durations in milliseconds)."
+"someMicros (an Integer >= 0) as milliseconds for a message: an Integer when whole, else a
+ decimal without trailing zeros (3333334 -> '3333.334'), never a Fraction (review M1)."
+PBClusterConfig class >> msText: someMicros
+  | whole rest digits |
+  whole := someMicros // 1000.
+  rest := someMicros \\ 1000.
+  rest = 0 ifTrue: [^ whole printString].
+  digits := rest printString.
+  [digits size < 3] whileTrue: [digits := '0' , digits].
+  [digits last = $0] whileTrue: [digits := digits copyFrom: 1 to: digits size - 1].
+  ^ whole printString , '.' , digits.
+
 PBClusterConfig class >> nodeId: aNodeId peers: anArrayOfPBPeer options: aDictionary
   | membership opt micros duration margin minMargin belief request reserve grace backoff low high key |
   (aDictionary isKindOf: Dictionary) ifFalse: [
@@ -83,8 +95,8 @@ PBClusterConfig class >> nodeId: aNodeId peers: anArrayOfPBPeer options: aDictio
   margin >= duration ifTrue: [
     ^ PBValidationError signal: 'driftMargin must be smaller than leaseDuration'].
   margin < minMargin ifTrue: [
-    ^ PBValidationError signal: 'driftMargin must be at least ' , minMargin printString
-      , ' us (2/3 of leaseDuration): a holder believes its lease for at most a third of the granters'' promise (R78b)'].
+    ^ PBValidationError signal: 'driftMargin must be at least ' , (self msText: minMargin)
+      , ' ms (2/3 of leaseDuration): a holder believes its lease for at most a third of the granters'' promise (R78b)'].
   belief := duration - margin.
   request := micros value: #requestTimeout value: 250000 value: true.
   request >= belief ifTrue: [
@@ -92,7 +104,7 @@ PBClusterConfig class >> nodeId: aNodeId peers: anArrayOfPBPeer options: aDictio
   reserve := micros value: #sendReserve value: (request min: belief // 4) value: false.
   reserve > (belief // 4) ifTrue: [
     ^ PBValidationError signal: 'sendReserve must be at most (leaseDuration - driftMargin) / 4 ('
-      , (belief // 4) printString , ' us): a larger reserve would refuse by rule the permissions an owner issues'].
+      , (self msText: belief // 4) , ' ms): a larger reserve would refuse by rule the permissions an owner issues'].
   grace := micros value: #startupGrace value: duration + margin value: false.
   backoff := opt value: #backoff value: #(1 50).
   ((backoff isCollection and: [backoff isString not]) and: [backoff size = 2]) ifFalse: [

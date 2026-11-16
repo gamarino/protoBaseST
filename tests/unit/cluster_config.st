@@ -1,4 +1,4 @@
-"EXPECT: ok 23"
+"EXPECT: ok 27"
 "PBClusterConfig (cluster/config.st): the options of a cluster member and the timer table.
  Options are milliseconds; the accessors answer microseconds (CC3). With the proto_db defaults
  (lease 2000 ms) the margin is ceiling(2D/3) = 1333334 us, the belief 666666 us, the send
@@ -77,4 +77,16 @@ c that: 'the member check comes before the duration checks' signals: PBValidatio
   during: [PBClusterConfig nodeId: 'n9' peers: peers options: (Dictionary new at: #leaseDuration put: 0; yourself)].
 c that: 'tier options are ordinary unknown options' signals: PBValidationError containing: 'tier'
   during: [build value: { #tier -> 1 }].
+"Review M1: durations in messages are milliseconds, an Integer or a decimal, never a Fraction or us."
+c that: 'the driftMargin bound is stated in ms, as a decimal' signals: PBValidationError containing: 'at least 1333.334 ms'
+  during: [build value: { #driftMargin -> 1333 }].
+c that: 'the sendReserve bound is stated in ms, as a decimal' signals: PBValidationError containing: '(166.666 ms)'
+  during: [build value: { #sendReserve -> 200 }].
+c that: 'msText: prints microseconds as milliseconds: an Integer, else a decimal without trailing zeros'
+  is: ({ 0. 1000. 3333334. 166666. 1500. 1. 120000 } collect: [:us | PBClusterConfig msText: us])
+  equals: #('0' '1' '3333.334' '166.666' '1.5' '0.001' '120').
+c that: 'no us in the refusals'
+  is: ({ { #driftMargin -> 1333 }. { #sendReserve -> 200 } } collect: [:pairs |
+    [build value: pairs. 'accepted'] on: PBValidationError do: [:e | e return: (e messageText includesSubstring: ' us')]])
+  equals: #(false false).
 c report displayNl.

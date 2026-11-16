@@ -1,4 +1,4 @@
-"EXPECT: ok 10"
+"EXPECT: ok 11"
 "The coordinator shell (cluster/coordinator.st) over PBInProcessNetwork and MemoryTier, the tier
  double (_cluster_shell.st): proto_db test_cluster_coordinator.py, test_cluster_durability.py,
  test_cluster_tier_failures.py and test_cluster_rejoin_records.py, the parts that need the
@@ -178,6 +178,21 @@ grace := [:ms :ids | | k x |
 c that: 'a restart on a log needs a grace of one lease plus the drift margin'
   is: ({ 0. 120. 600. 999. 1000. nil } collect: [:ms | grace value: ms value: three]) , { grace value: 0 value: #('n1') }
   equals: { #(#PBValidationError true). #(#PBValidationError true). #(#PBValidationError true). #(#PBValidationError true). #ok. #ok. #ok }.
+
+"Review M1: with the default lease (2000 ms, driftMargin 1333.334 ms) the refusal names the restart
+ grace in milliseconds as a decimal, never as a Fraction."
+r := [| k x |
+  k := ShellKit ids: three.
+  x := k node: 'n1' options: (Dictionary new at: #leaseDuration put: 2000; at: #driftMargin put: nil; at: #startupGrace put: 0; yourself)
+    rules: PBCoordinatorCore new acceptorClass: _PBAcceptor.
+  x start.
+  q := k settle: (x _attach: (MemoryTier served: 'n1' trace: k trace)).
+  x stop waitWithin: 60000.
+  q] value.
+c that: 'the L17 refusal states startupGrace and the restart grace in ms, as decimals'
+  is: { r first. ((r at: 2) messageText includesSubstring: 'startupGrace=0 ms').
+    ((r at: 2) messageText includesSubstring: '= 3333.334 ms (the default)'). ((r at: 2) messageText includesSubstring: '/') }
+  equals: { #error. true. true. false }.
 
 "--- (8), (9): stop settles every pending Future ---"
 kit := ShellKit ids: three.

@@ -569,9 +569,9 @@ _PBAcceptor >> attach: aTier
     rejoined: loaded isRejoined dataEntryCount: loaded dataEntryCount entries: loaded entries.
   restart := config leaseDuration + config driftMargin.
   (logged isRejoined and: [config startupGrace < restart and: [config membership ids size > 1]]) ifTrue: [
-    ^ PBValidationError signal: 'Node ' , config nodeId , ': startupGrace=' , (config startupGrace / 1000) printString
+    ^ PBValidationError signal: 'Node ' , config nodeId , ': startupGrace=' , (PBClusterConfig msText: config startupGrace)
       , ' ms is accepted only on a cluster''s first start; this node''s acceptor log shows it has served the cluster before, so it may have granted a lease that is still running. Start it with a startupGrace of at least leaseDuration + driftMargin = '
-      , (restart / 1000) printString , ' ms (the default)'].
+      , (PBClusterConfig msText: restart) , ' ms (the default)'].
   cells acceptorState swap: [:s | s attached: logged].
   tier value: aTier ifCurrent: nil.
   "proto_db attach: the node must not inherit the committed root of the log it replaces; the
