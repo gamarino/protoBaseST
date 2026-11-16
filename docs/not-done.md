@@ -14,7 +14,7 @@ design (spec section 2) or a cut made while building, with its reason.
   (Phase D), no pipelined permits (DEPTH 1), no mixed clusters with `proto_db` nodes (a
   non-goal), no TLS (frames are plaintext; an optional HMAC authenticates them), no read-only
   barrier, no notify. A three-member cluster commits about half as many small transactions per
-  second as one standalone process ([deviations.md](deviations.md#cluster-mode-commits-per-second)).
+  second as one standalone process on disjoint roots, and a third as many on one hot key ([deviations.md](deviations.md#cluster-mode-commits-per-second)).
 - No cloud or tiered storage, no durability mode other than `fsync`, no Windows.
 - No writes to indexed collections, no merges onto them, no index queries, no vector-index
   writes or training.

@@ -103,30 +103,30 @@ its name, its default and what it drives. None of them decides an acceptance, an
 the truth of an outcome. Each one, when it fires, can only cause a conservative failure: a timeout,
 an abandoned term, a retried commit, an unknown outcome. The column "Set by" says whether you can
 change it: an option, a value derived from options, or a fixed constant of the protocol. The fixed
-ones are internal: you cannot set them and need not. The same table, generated from
-`PBClusterConfig timerTable` and checked against it by the tests, is in
-[reference.md](../reference.md).
+ones are internal: you cannot set them and need not. The Timer and Default columns are
+`PBClusterConfig timerTable`'s, checked against it by `tests/docs/timer_table_sync.sh`; the table
+generated from it, with its own wording of each row, is in [reference.md](../reference.md).
 
 | Timer | Set by | Default | Drives (liveness only) |
 |---|---|---|---|
 | leaseDuration | `#leaseDuration` | 2000 ms | How long a grant blocks other holders on the granter's timer. |
-| driftMargin | `#driftMargin` | ⌈2/3 × leaseDuration⌉, the minimum | The holder's belief is leaseDuration − driftMargin, a third of the promise. |
+| driftMargin | `#driftMargin` | ceiling(2/3 x leaseDuration), the minimum | The holder's belief is leaseDuration − driftMargin, a third of the promise. |
 | renewal | derived: half the belief | at half the belief left | When the owner renews while it has demand; a failed renewal ends the term only when a majority fenced it (chapter 13). |
 | permitFloor | derived: a quarter of the belief | a quarter of the belief left | No permission is issued with less; the owner renews first. |
 | renewBackoff | derived from `#requestTimeout` | requestTimeout / 4, at least 1 ms | After a renewal round neither won nor fenced, no renewal before the refusals' remaining, at least this, within the lease. |
-| idleEnd | derived: leaseDuration / 4 | 500 ms | How long an owner without demand keeps its term before releasing it. |
+| idleEnd | derived: leaseDuration / 4 | leaseDuration / 4 without demand | How long an owner without demand keeps its term before releasing it. |
 | ownerIdleRelease | `#ownerIdleRelease` | nil (off) | Ends a term whose own threads stopped asking. |
 | requestTimeout | `#requestTimeout` | 250 ms | How long an attempt, a renewal, a recovery round or a query waits. |
 | sendReserve | `#sendReserve` | min(requestTimeout, belief // 4) | Least validity left before anything acceptable is sent; less gives a retryable conflict. |
-| permissionDeadline | derived: valid + requestTimeout | | An owner without a done by then abandons the term. |
+| permissionDeadline | derived: valid + requestTimeout | valid + requestTimeout | An owner without a done by then abandons the term. |
 | startupGrace | `#startupGrace` | leaseDuration + driftMargin | Grants refused after a start (efficiency). |
-| backoff | `#backoff` | `#(1 50)` ms | Jittered delay between lost attempts. |
+| backoff | `#backoff` | #(1 50) ms | Jittered delay between lost attempts. |
 | wakeSpread | fixed (internal) | 3 ms | A random spread, so that the members one release wakes do not all ask at the same instant. |
 | straggle | fixed (internal) | 5 ms, factor 4 | Once a majority answered an attempt that is still undecided, how long the remaining answers are awaited. |
-| turnSilence | fixed (internal), capped by requestTimeout | 50 ms | A release may name the member whose turn is next; the others keep quiet this long so that it can ask first. |
+| turnSilence | fixed (internal), capped by requestTimeout | 50 ms, capped by requestTimeout | A release may name the member whose turn is next; the others keep quiet this long so that it can ask first. |
 | acquireTimeout | `#acquireTimeout` | 30000 ms | When a permit request gives up with a timeout. |
 | gatherAttempts | fixed (internal) | 3 | How many times a rejoin round asks a silent member again. |
-| persist | `#persistInterval`, `#persistLag` | 50 ms, 1000 ms | Persister passes; when any node persists another's commits. |
+| persist | `#persistInterval`, `#persistLag` | persistInterval 50 ms, persistLag 1000 ms | Persister passes; when any node persists another's commits. |
 | retryHold | fixed (internal) | hold 100 ms, wait 5 ms, 3 retries | How long a round keeps its permission for a conflicting transaction that `run:` is about to retry (chapter 14). |
 
 The claim that timers decide only liveness is meant to be tested, not just stated. The timer audit
@@ -153,48 +153,53 @@ at a time, across the whole cluster. The measurement below shows the price and w
 
 It was taken with `bench/run_cluster.sh` on one machine, so read it as **indicative only**: an
 AMD Ryzen 5 5500U (6 cores), Linux, a ZFS disk with real `fsync`, protoST 0.12.0, protoBaseST at
-`34e9aa5` with the benchmark of the commit that added it, 2026-11-16, five interleaved runs of 120
-transactions each, every cluster member a protost process of its own on 127.0.0.1 with the
-default options. Every run counted its commits and had a verifier count them again; a run whose
-counts differed would have been refused. The full table and its caveats are in
-[deviations.md](../deviations.md#cluster-mode-commits-per-second).
+commit f5ec4b2, 2026-11-16, five interleaved runs of 120 transactions each, every cluster member a
+protost process of its own on 127.0.0.1 with the default options. Every process counted the
+commits it made and a verifier counted them again; a run whose counts differed would have been
+refused. The full table and its caveats are in
+[deviations.md](../deviations.md#cluster-mode-commits-per-second). Commits per second, from the
+fastest of the five runs:
 
 | Workload | Standalone | 1 member | 3 members |
 |---|---|---|---|
-| *tiny*: one writer per process, each on its own root | 44 commits/s | 26 commits/s | 24 commits/s |
-| *conc-hot*: four writers per process, one shared key | 50 commits/s | 26 commits/s | 15 commits/s |
+| *tiny*: one writer per process, each on its own root | 46 commits/s | 28 commits/s | 26 commits/s |
+| *conc-hot*: four writers per process, one shared key | 51 commits/s | 30 commits/s | 17 commits/s |
 
 Three things to read in it:
 
-- **A one-member cluster already pays most of the price** (0.59 of standalone on *tiny*): each
-  commit adds a synced append to the acceptor log and a message round to the same segment `fsync`.
-- **Two more members cost little, and add nothing**: three members on disjoint roots make 0.9
-  times the commits of one. Each commit waits for the one permission.
-- **Where the time goes**, per commit at three members (medians): about 7 ms saving the
-  transaction's records before asking (no permission held), about 20 ms building under the
-  permission (13 ms on the hot key), about 12 ms replicating to a majority. The build at three
-  members is more than twice the build at one (7.5 ms); the likely cause, not established, is that
-  a member builds on roots other members wrote, whose records it must read from disk.
+- **A one-member cluster already pays most of the price** (0.60 of standalone on *tiny*). The
+  design's expectation, not measured separately, is that each commit adds a synced append to the
+  acceptor log and the round's actor messages to the same segment `fsync`.
+- **Two more members add nothing, and on a hot key they cost a lot**: on disjoint roots three
+  members make 0.93 times the commits of one, and on one hot key 0.57 times. Each commit waits for
+  the one permission.
+- **Where the time goes**, per commit at three members (medians): about 6 ms saving the
+  transaction's records before asking (no permission held), about 18 ms building under the
+  permission (11 ms on the hot key), about 12 ms from the replicate's send to the commit settled.
+  These are costs per commit, not a latency: each is the mean of one stage, and the wait for a
+  permission, the queueing and the segment sync are in no column. The build at three members is
+  more than twice the build at one (7.4 ms); the likely cause, not established, is that a member
+  builds on roots other members wrote, whose records it must read from disk.
 
-Contention costs more in a cluster: the hot key needed 407 to 467 retries per 120 commits at three
-members, against 72 to 97 standalone, and 67 rounds in 600 commits were refused by the send
-reserve (retryable, nothing sent, retried by `run:`). No `proto_db` figure is shown: its cluster was
-not run on this workload, and figures from other workloads do not compare.
+Contention costs more in a cluster: the hot key needed 392 to 446 retries per 120 commits at three
+members, against 86 to 106 standalone, and 51 rounds in 600 commits were refused by the send
+reserve (retryable, nothing sent, retried by `run:`). Why those permissions ran short at the send
+was not measured. No `proto_db` figure is shown: its cluster was not run on this workload, and
+figures from other workloads do not compare.
 
 ## Choosing the durations
 
 - **Start with `proto_db`'s defaults.** The maintainer chose to keep them, configurable. The
   measurement above used them; no study of other values has been made.
 - **The belief must hold a whole round.** With a 2 s lease the belief is about 667 ms and the send
-  reserve 167 ms. A round builds every queued commit of its node inside that window. Measured
-  above, a build takes about 8 to 20 ms per small commit, so a round of a few tens of small commits
-  fits; a round of large transactions may not, and under contention some rounds already miss (the
-  reserve refusals above). The port stops adding commits
+  reserve 167 ms, which leaves about 500 ms of builds per permission. Measured above, a small
+  commit's build takes about 7 to 18 ms, so a round of about two dozen small commits fits
+  (500 / 18 ≈ 28); a round of large transactions may not. The port stops adding commits
   to a round when the time left falls below the reserve plus the longest build measured in the
   round (a liveness-only addition to `proto_db`); the rest wait for the next permission. If a
-  single transaction's build exceeds the belief, every round is refused, and the conflict says so,
-  naming the build time and `leaseDuration`: lengthen the lease. On a loaded machine the example
-  programs use 3000 ms for that reason.
+  single transaction's build alone exceeds the belief, every round is refused, and the conflict
+  says so, naming the build time and `leaseDuration`. The reserve refusals measured above are not
+  that case: their builds were about 11 ms, and their cause was not measured.
 - **A longer lease costs failover time.** When an owner dies, nothing is issued until its grant
   expires on the voters' clocks: about one `leaseDuration`.
 - **Short leases cost renewals and grace.** Every term renews at half its belief; every restart
@@ -250,6 +255,12 @@ The counters start at zero. The ones to watch:
   reply to another incarnation), and the transports' `'frames_rejected'` and
   `'connections_dropped'` (malformed frames, or a key on one side only). A misconfigured member is
   dropped and counted, never allowed into a quorum.
+- **Two names that look alike:** `'messages_ignored'` counts messages whose *sender* is not
+  another member; `'ignored_messages'` counts valid messages from a member whose *type* a node
+  never sends at DEPTH 0 over shared storage (`'records'`, `'warm'`, `'store'`, `'propose'`,
+  `'fetch'`, `'fetched'`, `'commit_query'`, `'commit_info'`: tiered storage and pipelining). In a protoBaseST
+  cluster both stay at 0; a rising `'ignored_messages'` means a member speaks a protocol this
+  port does not (a `proto_db` node with tiered storage, say).
 - **Slow steps:** `'dispatch_slow'`, dispatcher steps over 10 ms.
 
 ## What the port does not do
@@ -304,7 +315,8 @@ Be as sceptical as the design is:
   Choose the durations for your build times and for how long a failover may take.
 - `stats` names health, leases, permissions, replication and misconfiguration as `proto_db` does,
   with a few counters of its own.
-- A cluster costs throughput (about half of standalone on one machine, measured) and buys survival
-  of a member's failure; more members add safety, not speed.
+- A cluster costs throughput (on one machine, about half of standalone for small commits on
+  disjoint roots, a third on a hot key) and buys survival of a member's failure; more members add
+  safety, not speed.
 - The port is the protocol over one shared directory; tiered storage and pipelining are still to
   come, and format 5 is refused.

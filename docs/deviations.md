@@ -319,7 +319,7 @@ first:
 - **DEPTH = 0 (Q3).** One write permission at a time across the cluster. `proto_db`'s pipelined
   permits (DEPTH 1, D55, rules H1-H7) are not ported; a received permit naming a proposal
   (`after`) is held as uncertain (below). Throughput is bounded by one permission round trip plus
-  the round's builds, whatever the number of members ([Performance](#cluster-mode-commits-per-second)).
+  the round's builds, its segment sync and its replication, whatever the number of members ([Performance](#cluster-mode-commits-per-second)).
 - **The group bound (Q4, CC11, liveness only).** A round stops adding commits when the
   permission's time left falls below `sendReserve` plus the longest build of the round; the rest
   wait for the next permission. `proto_db` builds the whole batch and refuses it whole when the
@@ -337,9 +337,11 @@ first:
   Recorded as a proposal for `proto_db` ([decisions.md](decisions.md#proposals-to-proto_db)).
 - **Message types never sent at DEPTH 0 (CC7).** `records`, `warm`, `store`, `propose`, `fetch`,
   `fetched`, `commit_query` and `commit_info` are decoded and validated like every type (an
-  invalid one drops the connection), then ignored. *As built:* they are ignored without a count;
-  the plan's counter for them (`ignored_messages`) was not built. `'messages_ignored'` counts only
-  messages whose sender is not another member.
+  invalid one drops the connection), then ignored and counted in `stats` as
+  `'ignored_messages'` (a `store` of another voter set counts `'config_mismatches'` only: the
+  fingerprint is checked first, as in `proto_db`'s `_route`). `proto_db` handles these types; at
+  DEPTH 0 over shared storage no protoBaseST member sends them. Not to be confused with
+  `'messages_ignored'`, which counts messages whose sender is not another member.
 - **About 16 members in practice.** Membership is static; `PBMembership` accepts at most 4096
   members (the rank's 12 bits). Every connection has its own reader actor and every peer its own
   sender actor, so a member of an N-member cluster runs about 2(N - 1) transport actors. "About
@@ -937,56 +939,70 @@ is dominated by the 100 in-memory tree inserts, which this work did not change.
 `bench/run_cluster.sh` (`RUNS=5`, interleaved, `CLUSTER_SCALE=1`: 120 transactions per run, split
 evenly over the members). **Indicative only.** Measured 2026-11-16 on an AMD Ryzen 5 5500U (6
 cores, 12 threads, Linux 7.0.0), protoST 0.12.0 (`build_rel0100`, used as built), protoBaseST at
-`34e9aa5` with the benchmark files of the commit that added them (cluster plan Task 29); the run
-directories on ZFS (`sync=standard`, lz4), `fsync` durability. The machine ran nothing else heavy;
-the desktop's own load average was 3.1 before and 4.8 after. Each member is a protost process of
-its own on 127.0.0.1 with `proto_db`'s default options (a 2000 ms lease: belief 667 ms, send
-reserve 167 ms). Every run self-reports: each process writes the transactions it committed, a
+`f5ec4b2` (cluster plan Task 29, fix round 1); the run directories on ZFS (`sync=standard`, lz4),
+`fsync` durability. The machine ran nothing else heavy; the desktop's own load average was 2.9
+before and 5.7 after. Each member is a protost process of its own on 127.0.0.1 with `proto_db`'s
+default options (a 2000 ms lease: belief 667 ms, send reserve 167 ms). Every run self-reports:
+each process counts the transactions it committed (one per `run:` that returned normally), a
 verifier reads the space afterwards (in a cluster: member n0, after a read barrier, through the
-cluster) and compares a checksum, and the runner refuses a run whose counts differ, or whose
-coordinators counted another number of commits (`critical_commits`). All 30 runs passed.
+cluster) and compares a checksum, and the runner refuses a run whose members' commits do not add up
+to the run's total, whose verifier counts another number, or whose coordinators counted another
+number of commits (`critical_commits`). All 30 runs passed. Two hand mutants were refused: a member
+that left one commit uncounted (the members' sum 119, not 120) and a member that skipped one commit
+(the verifier's checksum).
 
 - **tiny**: one writer per process; each member writes its own root, one new key per transaction.
-  No two transactions conflict, but every one needs a write permission.
+  No two transactions conflict on data, but every one needs a write permission.
 - **conc-hot**: four writers (actors) per process, every writer of every member incrementing one
   key of one shared root: read-modify-write, conflicts retried by `run:`.
 
 Commits per second from the minimum / median wall time (the first process's start to the last
-one's end); per commit, the medians of the runs, in milliseconds: *save*, the root-independent
-work (the commit's atoms saved before the permission is asked, design spec 7.2); *build*, the
-root-dependent work under the permission (validation, merge, path copy, the new root saved);
-*replication*, from the replicate's send to the commit settled (the acceptors' synced appends and
-the acknowledgements):
+one's end). Per commit, the medians of the runs, in milliseconds: *save*, the root-independent work
+(the commit's atoms saved before the permission is asked, design spec 7.2), timed inside one
+message of the space's round runner; *build*, the root-dependent work under the permission
+(validation, merge, path copy, the new root saved); *replication*, from the replicate's send to the
+commit settled (the acceptors' synced appends and the acknowledgements). Step 4 of the commit path,
+the one sync of the shared segment before the replicate, is in no column:
 
 | Profile | Mode | Commits/s | Retries (min-max) | Save | Build | Replication | Reserve refusals (5 runs) |
 |---|---|---|---|---|---|---|---|
-| tiny | standalone | 44.3 / 43.0 | 0 | | | | |
-| tiny | 1 member | 26.3 / 26.0 | 0 | 7.3 | 7.5 | 9.1 | 0 |
-| tiny | 3 members | 23.8 / 22.7 | 0 | 7.0 | 19.8 | 11.9 | 0 |
-| conc-hot | standalone | 50.2 / 45.5 | 72-97 | | | | |
-| conc-hot | 1 member | 26.0 / 24.3 | 195-232 | 5.7 | 9.2 | 9.9 | 2 |
-| conc-hot | 3 members | 14.9 / 13.7 | 407-467 | 10.1 | 13.2 | 13.0 | 67 |
+| tiny | standalone | 46.3 / 44.8 | 0 | | | | |
+| tiny | 1 member | 27.8 / 25.7 | 0 | 7.3 | 7.4 | 9.3 | 0 |
+| tiny | 3 members | 25.9 / 23.5 | 0-2 | 6.3 | 18.0 | 11.8 | 2 |
+| conc-hot | standalone | 51.3 / 46.4 | 86-106 | | | | |
+| conc-hot | 1 member | 29.9 / 26.2 | 128-238 | 5.3 | 8.8 | 9.6 | 1 |
+| conc-hot | 3 members | 17.1 / 14.8 | 392-446 | 9.4 | 11.5 | 12.7 | 51 |
+
+Each column is the mean, over the committed transactions, of that stage's duration on the member
+that committed it. The replication stage spans actor messages and includes their waits; it charges
+every commit of a round the round's whole send-to-settle time. The columns do not add up to a
+commit's latency: the wait for a permission, the queueing, and the segment sync of step 4 are in no
+column. End-to-end latency was not measured.
 
 What the figures say, and what they do not:
 
 - **A cluster costs throughput; it buys survival of a member's failure.** Three members commit
-  about half as many tiny transactions per second as one standalone process (0.54x) and about
-  a third as many hot ones (0.30x). A one-member cluster already pays most of it (0.59x on
-  tiny): the acceptor log's synced appends and the round's messages come on top of the same
-  segment `fsync`.
+  0.56 times as many tiny transactions per second as one standalone process, and 0.33 times as
+  many hot ones. A one-member cluster already pays most of it (0.60 on tiny). The design's
+  expectation, not measured separately, is that the acceptor log's synced appends and the round's
+  actor messages come on top of the same segment `fsync`.
 - **Adding members does not add throughput.** One permission at a time across the cluster
-  (DEPTH 0): three members on disjoint roots reach 0.90x of one member, not 3x.
+  (DEPTH 0): three members on disjoint roots reach 0.93 times the commits of one member, and on
+  one hot key 0.57 times.
 - **The build under the permission is the cluster's critical section** (spec 7.2). At three
-  members it is 13 to 20 ms per commit, against 7.5 to 9 ms at one. Why the tiny build more than
-  doubles is **not established**; the likely cause, unmeasured, is that a member builds on roots
-  other members wrote, whose records are not in its atom cache and are decoded from the segment.
-- **Hot keys hurt more in a cluster.** Retries rise from 72-97 (standalone) to 407-467 per 120
-  commits at three members, and a few rounds are refused by the send reserve (67 in 600
-  commits): retryable conflicts, nothing sent, retried by `run:`. The reserve refusals show
-  rounds whose builds did not fit the 667 ms belief under contention.
-- The *save* and *replication* columns are measured on each member's monotonic clock and summed
-  over the members, so they include waiting in the members' actor mailboxes; they are costs per
-  committed transaction, not latencies.
+  members it is 11 to 18 ms per commit, against 7.4 to 8.8 ms at one. Why the tiny build more
+  than doubles is **not established**; the likely cause, unmeasured, is that a member builds on
+  roots other members wrote, whose records are not in its atom cache and are decoded from the
+  segment.
+- **Hot keys hurt more in a cluster.** Retries rise from 86-106 (standalone) to 392-446 per 120
+  commits at three members, and 51 rounds in 600 commits were refused by the send reserve
+  (retryable conflicts, nothing sent, retried by `run:`; two such refusals also occurred on tiny,
+  which is what its 0-2 retries are). A reserve refusal is a round that reached the send with
+  less than `sendReserve` plus its longest build left on its permission. Why permissions ran that
+  short under contention was not measured.
+- The figures vary between runs of the whole benchmark: an earlier run with the benchmark files of `3f5aa19` (the
+  same workload, before the members counted their own commits) gave 44.3, 26.3 and 23.8 commits/s on
+  tiny and 50.2, 26.0 and 14.9 on conc-hot. Read differences of 10 % as noise.
 - **No `proto_db` figure is shown**: `proto_db`'s cluster was not run on this workload shape, so
   no ratio to it is claimed. Memory was not measured.
 

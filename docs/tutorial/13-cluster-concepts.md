@@ -69,8 +69,8 @@ written off the commit path.
 > the whole coordination protocol; it does not protect you from losing the directory itself.
 > Separate disks per member with an object store (tiered storage) are `proto_db`'s and are not
 > ported (chapter 16). On one machine the standalone lock is simpler, and faster: in a first,
-> indicative measurement a standalone process committed about 44 small transactions per second
-> where three member processes together committed about 24 (chapter 16). A cluster buys
+> indicative measurement a standalone process committed about 46 small transactions per second
+> where three member processes together committed about 26 (chapter 16). A cluster buys
 > survival of a process's failure, not speed.
 
 ## Members, voters and majorities
@@ -207,8 +207,8 @@ A permission carries the base root to build on and how long it is valid; the hol
 validity from the send of its request, as for the lease. protoBaseST issues one permission at a
 time (DEPTH 0); `proto_db` pipelines one more (DEPTH 1), which is not ported (chapter 16). One
 consequence is measured: adding members does not add throughput. Three members writing disjoint
-roots committed about 0.9 times as many transactions per second as one member alone, because
-every commit of the cluster waits for the one permission (chapter 16, *What a commit costs*).
+roots committed about 0.93 times as many transactions per second as one member alone, and on one
+hot key 0.57 times, because every commit of the cluster waits for the one permission (chapter 16, *What a commit costs*).
 
 Inside its permission the holder builds each queued transaction on the root the previous one
 produced: validation, merge and path copies are the same code as standalone mode (chapters 5 and

@@ -223,10 +223,13 @@ Your code waits only on the commit itself.
 
 Those steps are not free, and it helps to know where the time goes. In a first, indicative
 measurement (chapter 16 has the conditions and the table), a small commit on three member
-processes cost about 7 ms in step 1, which needs no permission, about 20 ms in step 3, the build
-under the permission, and about 12 ms in steps 4 to 6. Steps 3 to 6 run under the cluster's one
-permission, so they bound how many commits the whole cluster makes per second; step 1 does not,
-which is why the commit path saves the records *before* asking.
+processes cost about 6 ms in step 1, which needs no permission, about 18 ms in step 3, the build
+under the permission, and about 12 ms in steps 5 and 6, from the replicate's send to the commit
+settled. Step 4, the segment sync, is not in any measured column. These are costs per commit,
+not a latency: each is the mean of one stage, and the wait for a permission and the queueing are
+in no column, so they do not add up to how long a commit takes. Steps 3 to 6 run under the
+cluster's one permission, so they bound how many commits the whole cluster makes per second;
+step 1 does not, which is why the commit path saves the records *before* asking.
 
 A commit now has **three** outcomes, so a careful workload writes a value unique to each commit,
 a token, and keeps the unknown ones apart:

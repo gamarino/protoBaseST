@@ -9,20 +9,32 @@
   save timed by a benchmark-only subclass of the round, `BenchRound`). Each run self-reports: every
   process writes the commits it made, a verifier recounts them through the cluster after a read
   barrier, and the runner refuses a run whose counts or checksum differ. Indicative figures of
-  2026-11-16 (Ryzen 5 5500U, ZFS, protoST 0.12.0, protoBaseST `34e9aa5`): tiny 44.3 commits/s
-  standalone, 26.3 with 1 member, 23.8 with 3; conc-hot 50.2, 26.0 and 14.9
+  2026-11-16 (Ryzen 5 5500U, ZFS, protoST 0.12.0, protoBaseST `f5ec4b2`, after fix round 1): tiny
+  46.3 commits/s standalone, 27.8 with 1 member, 25.9 with 3; conc-hot 51.3, 29.9 and 17.1
   (`docs/deviations.md`, Performance). Documentation: a cluster status paragraph and a Benchmarks
   section in the README; tutorial chapters 13-16 updated with the measured costs and the
   real-process tests, their stale task markers removed; `docs/reference.md` names rc4 and gains
   the timer table generated from `PBClusterConfig timerTable`, guarded by the new
   `tests/docs/timer_table_sync.sh` (helper `_timer_table.st`); `docs/deviations.md` gains a
   cluster-mode summary (shared storage only, `flock` on network file systems, DEPTH = 0, the group
-  bound, HMAC, CC5, CC6, CC7 as built, about 16 members, a plain `proto_db` writer on a cluster
+  bound, HMAC, CC5, CC6, CC7, about 16 members, a plain `proto_db` writer on a cluster
   space, mixed clusters) and the checklist at rc4 (298 rows: 223 ported, 75 n/a);
   `docs/decisions.md` gains section 4 (Q1-Q8, CC1-CC25, the execution rulings, D62 known and not
-  adopted: format 5 refused) and the proposals to `proto_db` (ProtoDB#1 done as R149/R149a in rc4;
+  adopted: format 5 refused) and the proposals to `proto_db` (gamarino/ProtoDB#1, the protoBase repository's issue 1, done as R149/R149a in rc4;
   Q7(a), Q7(b) and CC6 open); `docs/not-done.md` states the cluster's cuts and what is unproven
-  (the full timer audit and the 5000-seed soak run only in Task 30). No change to `src/`.
+  (the full timer audit and the 5000-seed soak run only in Task 30).
+  Fix round 1: each benchmark process counts the commits it made (one per `run:` that returned
+  normally) instead of writing the number planned, so the runner's check of the run's total can
+  fail (two hand mutants refused: a commit left uncounted, a commit skipped); the figures were
+  measured again. The runner's dirty check sees untracked files. The message types never sent at
+  DEPTH 0 (`records`, `warm`, `store`, `propose`, `fetch`, `fetched`, `commit_query`,
+  `commit_info`) are now counted in `stats` as `'ignored_messages'`, as cluster plan CC7 states
+  (`PBCoordinatorCore class >> ignoredTypes`, after the voter-set check; tests
+  `cluster_ignored_types.st`, `cluster_acceptance_rules.st` (24), `cluster_coordinator_attach.st`
+  (2)). Chapter 16's timer table is checked against `PBClusterConfig timerTable` too. The text of
+  the measurements was corrected: which steps the replication column covers, what the columns
+  are (costs per commit, not latencies), and that the cause of the reserve refusals was not
+  measured.
 
 - Real processes, part 2 (Task 28, `tests/cluster/`): `_node_seams.st` holds a round of a worker's
   commit at one of three points (the root built, its replicate sent, the permission's done sent)

@@ -195,10 +195,11 @@ differs.
 
 As built:
 
-- **CC7**: the eight types are decoded, validated and ignored, but **not counted**: the counter
-  the call names was not built (`PBCoordinatorCore >> dispatchReceived:in:now:` ignores a type no
-  module handles). Recorded in [deviations.md](deviations.md#cluster-mode) by Task 29, which
-  changes no code; whether to add the counter is for Task 30's review of these calls.
+- **CC7**: built as the call says. The eight types are decoded and validated, then ignored and
+  counted in `stats` (`ignored_messages`) by `PBCoordinatorCore >> dispatchReceived:in:now:`
+  after the voter-set check (`PBCoordinatorCore class >> ignoredTypes`, an explicit list, so a
+  Phase D handler cannot silently change what is counted). The counter was missing until Task 29's
+  fix round 1, which added it with its tests (`cluster_ignored_types.st`).
 - **CC10** supersedes the "caller owns the backoff" half of R19; the "never waits" half stands.
 - **CC4** and **CC2**: protocol 14 since Task 22a (13 before), with the same layout.
 
@@ -252,7 +253,9 @@ Still open (checked against `v2.0.0rc4`):
 - **Q7(a): refuse a cluster space without a coordinator.** *Proposal:* `FileStorage` (and every
   storage that can hold a cluster space) should refuse to publish a root into a space whose
   SpaceRoot carries `cluster_term`, or whose directory holds `cluster/`, unless the write comes
-  through a coordinator, as the external-writer rule already refuses other unsafe writers.
+  through a coordinator, as `proto_db`'s format spec already requires of a minimal external
+  writer ("A minimal external writer (file storage)", step 6: no `cluster/` directory and no
+  `cluster_term`); `proto_db`'s own `FileStorage` does not apply that check at rc4.
   *Why:* today a plain `proto_db` process that opens a member's directory publishes a root outside
   the cluster's order; the next persisted cluster root replaces it, and the write is lost without
   an error. *Precedent:* protoBaseST refuses it (`PBFileStorage path:` refuses `cluster/`;

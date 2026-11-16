@@ -32,8 +32,8 @@ network. It is tested in a seeded simulator with planted defects, in one process
 processes killed with `kill -9`; `proto_db`'s 298 cluster tests are each ported or justified
 (`tests/unit/cluster_checklist.tsv`). The full timer audit and the long soak run only in the final
 verification, so those claims are not yet proven. Measured on one machine, indicatively: three
-members commit about half as many small transactions per second as one standalone process
-([docs/deviations.md](docs/deviations.md#cluster-mode-commits-per-second)). Start with
+members commit about half as many small transactions per second as one standalone process on
+disjoint roots, and a third as many on one hot key ([docs/deviations.md](docs/deviations.md#cluster-mode-commits-per-second)). Start with
 [chapter 13](docs/tutorial/13-cluster-concepts.md); what it does not do is in
 [docs/not-done.md](docs/not-done.md).
 

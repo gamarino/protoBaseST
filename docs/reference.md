@@ -882,7 +882,9 @@ For tests, tools and readers of the format. An application does not need them.
   dispatcher `PBLogDetached`. `stop` answers a `Future` that settles once every pending `Future`
   is settled (a replication in flight `#unknown`, the rest `PBClosedError`), the acceptor step in
   progress has run (the steps queued behind the stop are dropped) and the transport stopped. `stats` (CC24) holds every counter of the rules (0
-  until counted), `'messages_ignored'` (messages whose sender is not another member) and
+  until counted; among them `'ignored_messages'`, valid messages from a member of a type never
+  sent at DEPTH 0, `PBCoordinatorCore class >> ignoredTypes`, CC7), `'messages_ignored'`
+  (messages whose sender is not another member) and
   `'healthy'`, `'fenced'`, `'tier_failed'`, `'persisting'`, `'rejoining'`, `'rejoin_blocked'`,
   `'failure'`, `'dispatch_seconds_max'`, `'dispatch_slow'` (dispatcher steps over 10 ms). `forceRejoin`, `committedRoot` (a `PBLabeledRoot` read from an Atom),
   `committedEpoch`, `needsConfirmation`, `isFenced`, `isRunning`, `nodeId`, `config`,
