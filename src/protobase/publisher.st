@@ -173,8 +173,14 @@ PBPublisher >> _roundOf: entries at: aCollection into: results
  (nil: an empty space): the transaction's _buildOn:, or version 0 of a new
  database."
 PBPublisher >> _build: anEntry on: aRecord
-  anEntry isCreateDatabase ifTrue: [^ self _newDatabase: anEntry databaseName on: aRecord].
-  ^ anEntry transaction _buildOn: aRecord.
+  ^ self _build: anEntry on: aRecord stamp: nil.
+
+"As _build:on:, with aStampOrNil: nil for a standalone commit (the same root, byte for byte),
+ { term. epoch } for a cluster commit (PBSpaceRoot databases:stamp:previous:; the commit round,
+ cluster/round.st)."
+PBPublisher >> _build: anEntry on: aRecord stamp: aStampOrNil
+  anEntry isCreateDatabase ifTrue: [^ self _newDatabase: anEntry databaseName on: aRecord stamp: aStampOrNil].
+  ^ anEntry transaction _buildOn: aRecord stamp: aStampOrNil.
 
 "The SpaceRoot of aRecord with the database aName added at version 0
  (ProtoBase ObjectSpace.new_database): empty objects and mutables, no
@@ -182,13 +188,16 @@ PBPublisher >> _build: anEntry on: aRecord
  identity: the 16 bytes of a version-4 UUID, as ProtoBase's
  uuid.uuid4().bytes. An existing name is PBValidationError."
 PBPublisher >> _newDatabase: aName on: aRecord
+  ^ self _newDatabase: aName on: aRecord stamp: nil.
+
+PBPublisher >> _newDatabase: aName on: aRecord stamp: aStampOrNil
   | current databases root |
   current := space _spaceRootAt: aRecord.
   databases := current isNil ifTrue: [PBDictionary new] ifFalse: [current databases].
   (databases has: aName) ifTrue: [^ PBValidationError signal: 'Database ' , (PBCodec repr: aName) , ' already exists'].
   root := PBDatabaseRoot objects: PBDictionary new mutables: PBDictionary new version: 0
     committedAt: DateTime nowUTC origin: UUID new bytes previous: nil.
-  ^ PBSpaceRoot databases: (databases setAt: aName value: root).
+  ^ PBSpaceRoot databases: (databases setAt: aName value: root) stamp: aStampOrNil previous: current.
 
 "Steps 6 and 8: publishes aRecord, built on the root record aCurrent (nil: an
  empty space); when the publish fails, decides its outcome by reading

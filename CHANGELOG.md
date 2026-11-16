@@ -2,6 +2,21 @@
 
 ## 0.2.0 (unreleased)
 
+- Cluster commits (Task 23, `cluster/round.st`): in a space opened with
+  `PBObjectSpace storage:coordinator:`, `commit`, `newDatabase:` and `run:` go through the
+  coordinator. `PBClusterRound` performs the core's commit round (`round:in:now:`) on the space's
+  round runner: one write permission per round, the base (re-committed first when it needs a
+  commit), each build stamped `{ term. epoch }` and saved, the tier flushed before the replicate
+  (L11), the done before the next permit (R148), held retries (D-LIVE-2: `run:` retries a
+  `permitHeld` conflict at once, counted as an attempt, and drops the kept permission when no
+  retry comes). Closing the space settles every commit in flight: `PBClosedError` when nothing of
+  it left the node, `PBOutcomeUnknownError` once its replicate left. The core gains
+  `PBReplicateFailed` and `PBRoundClosed`; the coordinator `_replicateRound:under:`, `_rules`,
+  `_now`, `_count:`, `_recordCritical:replication:`, and `stats` `critical_commits` and
+  `critical` (`'build'`, `'replication'` seconds). `PBCommitEntry
+  transaction:willRetry:caller:deadline:`, `PBTransaction >> _buildOn:stamp:`, `PBPublisher >>
+  _build:on:stamp:` and `PBSpaceRoot databases:stamp:previous:`; the standalone path writes the
+  same bytes.
 - Follows `proto_db` 2.0.0rc4 at format 4 (cluster Task 22a; the delta is
   `docs/superpowers/specs/2026-11-15-rc4-delta.md`). Cluster protocol 14
   (`PBClusterMessage protocolVersion`): the optional `unknown` of `fetched` and `commit_info`

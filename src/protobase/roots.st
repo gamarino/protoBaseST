@@ -67,6 +67,14 @@ PBSpaceRoot class >> databases: aDictionary term: aTerm epoch: anEpoch previous:
     'databases' -> aDictionary. 'cluster_term' -> aTerm. 'cluster_epoch' -> anEpoch.
     'cluster_previous' -> aSpaceRootOrNil }).
 
+"The new, unsaved space root over aDictionary built on aSpaceRootOrNil: without a stamp (nil, a
+ standalone commit) databases: aDictionary, no cluster field, nothing else; with aStamp
+ ({ term. epoch }, a cluster commit, proto_db _new_space_root with a _ClusterStamp)
+ databases:term:epoch:previous: with aSpaceRootOrNil as the previous root."
+PBSpaceRoot class >> databases: aDictionary stamp: aStampOrNil previous: aSpaceRootOrNil
+  aStampOrNil isNil ifTrue: [^ self databases: aDictionary].
+  ^ self databases: aDictionary term: aStampOrNil first epoch: aStampOrNil last previous: aSpaceRootOrNil.
+
 "The term of the cluster lease the root was committed under, or nil."
 PBSpaceRoot >> clusterTerm
   ^ self stateAt: 'cluster_term'.

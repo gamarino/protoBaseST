@@ -416,9 +416,9 @@ a := a , { planted converge: 100. (lines value: planted value: 'converge: still 
 c that: 'converge: answers whether the queue emptied' is: a equals: #(true false 1).
 
 "(12) No file of the simulator or of the core in src/protobase/cluster reads a clock (STPATH names
- <repo>/src). The shells (transport.st, coordinator.st) are the files that may; the list of core files is every
+ <repo>/src). The shells (transport.st, coordinator.st, round.st) are the files that may; the list of core files is every
  file of the directory less them, so a new core file is checked without being named here."
-failure := OSProcess shell: 'src="${STPATH%%:*}"; for f in transport coordinator; do test -f "$src/protobase/cluster/$f.st" || { echo "an exempt shell is missing: $f.st"; exit 2; }; done; core=$(ls "$src"/protobase/cluster/*.st | grep -v -E ''/(transport|coordinator)\.st$''); grep -l -E ''millisecondClockValue|microsecondClockValue|utcMicroseconds|nowUTC|__clock|Time now|Date today|DateTime now|millisecondsToRun|timeToRun|Future after|Delay'' "$src/../tests/unit/_sim.st" $core'.
+failure := OSProcess shell: 'src="${STPATH%%:*}"; for f in transport coordinator round; do test -f "$src/protobase/cluster/$f.st" || { echo "an exempt shell is missing: $f.st"; exit 2; }; done; core=$(ls "$src"/protobase/cluster/*.st | grep -v -E ''/(transport|coordinator|round)\.st$''); grep -l -E ''millisecondClockValue|microsecondClockValue|utcMicroseconds|nowUTC|__clock|Time now|Date today|DateTime now|millisecondsToRun|timeToRun|Future after|Delay'' "$src/../tests/unit/_sim.st" $core'.
 c that: 'no file of the simulator or of the core in src/protobase/cluster reads a clock'
   is: { failure exitCode. failure output } equals: { 1. '' }.
 

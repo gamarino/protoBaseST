@@ -883,12 +883,32 @@ For tests, tools and readers of the format. An application does not need them.
   signals `PBClosedError` on a closed storage. `logClass` is a test seam, and
   so is `PBAcceptorLog class >> _syncDirectory:`. The differences from `proto_db` are in
   [deviations.md](deviations.md#cluster-mode).
+- **Commits in cluster mode** (`cluster/round.st`, Task 23; `proto_db`'s `_run_round`,
+  `_permit_round`, `_commit_base` and `Database.run`'s held retries): in a space opened with
+  `PBObjectSpace storage:coordinator:`, `commit`, `newDatabase:` and `run:` keep their API and
+  go through the coordinator: the space's round runner hands each commit to its
+  `PBClusterRound`, which performs the effects of the core's round (`round:in:now:`): one write
+  permission per round for every commit queued, the base, the builds (each stamped
+  `{ term. epoch }`, its SpaceRoot `databases:term:epoch:previous:`), the tier's `flushLocal`
+  before the replicate (L11), the done before the next permit (R148). The atoms a commit wrote
+  are saved before the permission is asked. A commit answers once a majority acknowledged its
+  root (`true`); a conflict is `PBConflictError` (retryable, nothing sent; `permitHeld` when the
+  round keeps its permission for the caller's retry); `PBOutcomeUnknownError` once its root left
+  the node and no outcome is known; `PBTimeoutError` when no permission comes within
+  `acquireTimeout` (the text names it). `run:` retries a held conflict at once, without the
+  backoff (it counts as an attempt), and tells the round when a held retry is not coming.
+  `close` closes the round first: a commit in it whose root has not left the node is
+  `PBClosedError`, one whose replicate left is `PBOutcomeUnknownError`. A cluster commit never
+  writes `space.root` (the persister's, Task 25). A new transaction starts from the newest
+  committed root the node knows (its `committedRoot`, or the space's own last commit). The
+  coordinator's `stats` add `'critical_commits'` and `critical` (a Dictionary of summed seconds,
+  `'build'` and `'replication'`).
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.
   A large value is stored in a `PBValueBox`.
 - **Roots**: `PBSpaceRoot` (`databases`, `clusterTerm`, `clusterEpoch`, `clusterPrevious`;
-  `databases:` and, for a cluster commit, `databases:term:epoch:previous:`),
+  `databases:` and, for a cluster commit, `databases:term:epoch:previous:`; `databases:stamp:previous:` chooses between them),
   `PBDatabaseRoot` (`objects`, `mutables`, `version`, `committedAt`, `previous`, `origin`).
   A DatabaseRoot without `mutables` is `PBCorruptionError`; a SpaceRoot written by a cluster node
   is `PBNotSupportedError` in a space without a coordinator.

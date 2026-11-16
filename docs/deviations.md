@@ -676,6 +676,24 @@ A message protoBaseST builds (`type:from:fields:`) is stricter than `proto_db`'s
     refused `no_storage` after `learner` (`proto_db` `_refusal`'s order, `fenced` aside: a
     fenced node sends nothing), counted `grants_refused_no_storage` for a peer; a plain query
     is answered `'unknown'`.
+- **Commits through the coordinator (Task 23, `cluster/round.st`, `proto_db` `_run_round`,
+  `_permit_round`, `Database.run`).**
+  - The round runs on the space's round runner, an actor, as messages; `proto_db` runs it on the
+    thread of the commit that leads the group (the runner thread waits on its own retry, so it
+    leaves the kept permission in `group.kept`). Here the runner never waits: a held caller's
+    retry is a later message, and `Database.run`'s caller is an object made for each `run:`
+    (`proto_db` uses the thread id).
+  - `stats` `'critical'` has two stages, `'build'` (validation, merge and path copy together)
+    and `'replication'`; `proto_db` has four (`validation`, `replay`, `path_copy`,
+    `replication`). `critical_commits` is the same count.
+  - A replicate that fails with an error (`PBReplicateFailed`) is decided by the error's class,
+    as `proto_db`'s `nothing_sent`: a conflict, validation (`PBClosedError` included) or user
+    error sent nothing; any other error, a failed flush included, leaves the outcome unknown.
+  - A permission that arrives after the round closed is ended `#none` at once; `proto_db`'s
+    closing thread never asked for one.
+  - Until Task 24, a transaction of a cluster space reads the newest committed root the node
+    knows (the coordinator's `committedRoot`, or the round's own last commit), with no confirmation
+    round and no fetch of records; Task 24 owns the cluster read path.
 - **The shared tier and cluster storage mode (Task 21, `cluster/tier.st`, `proto_db`
   `PlainTier`).**
   - Cluster mode is chosen when the storage opens (`PBFileStorage clusterPath:`, CC20), not

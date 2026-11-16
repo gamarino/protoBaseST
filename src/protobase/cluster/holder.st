@@ -88,7 +88,11 @@ no proposal). Nothing here reads a clock: t is the node's clock (CC3).
     (proto_db _TERM_RETRIES). Held retries (D-LIVE-2): a conflicted entry that will retry gets
     PBConflictError held:, and the permission is kept, max(min(retryHold, the time left),
     retryWait), until every held caller (PBRoundEntry caller) has queued its retry. PBReportDone
-    ends each permission with its outcome.
+    ends each permission with its outcome. A replicate that failed with an error
+    (PBReplicateFailed) ends the round with it, unknown unless the error says nothing was sent
+    (a conflict, validation or user error, proto_db nothing_sent); a closed space (PBRoundClosed)
+    settles every commit, PBOutcomeUnknownError once its root left the node, PBClosedError
+    otherwise (Task 23, Review Focus 1).
 
 Not here: the rejoin ballot itself (rejoin.st sets it when a rejoin completes), bounded replication, copies and
 the gate (Phase D).
@@ -1526,6 +1530,60 @@ PBReplicated >> roundWith: aCore in: aRoundState now: t
 PBReplicated >> printOn: aStream
   aStream nextPutAll: 'PBReplicated('; nextPutAll: outcome; nextPut: $).
 
+"--- PBReplicateFailed, PBRoundClosed ---"
+
+PBRoundEvent subclass: #PBReplicateFailed instanceVariableNames: 'error'.
+
+"The answer to PBReplicate when it failed with anError (an Exception, not signalled) instead of
+ an outcome: the shell's flush of the records before the send failed, or the coordinator
+ rejected the replicate (a protocol violation, a root not built for its permission, a fenced or
+ stopped node). proto_db _permit_round's except branch decides what was sent
+ (roundReplicateFailed:in:now:)."
+PBReplicateFailed class >> error: anError
+  (anError isKindOf: Exception) ifFalse: [
+    ^ PBValidationError signal: 'PBReplicateFailed: an error is an Exception, not ' , anError printString].
+  ^ self basicNew _setError: anError.
+
+PBReplicateFailed >> _setError: anError
+  "Runs once, on a fresh instance."
+  error isNil ifFalse: [^ PBUserError signal: 'PBReplicateFailed is immutable'].
+  error := anError.
+  ^ self.
+
+PBReplicateFailed >> error
+  ^ error.
+
+PBReplicateFailed >> roundWith: aCore in: aRoundState now: t
+  ^ aCore roundReplicateFailed: self in: aRoundState now: t.
+
+PBReplicateFailed >> printOn: aStream
+  aStream nextPutAll: 'PBReplicateFailed('; print: error class; nextPut: $).
+
+PBRoundEvent subclass: #PBRoundClosed instanceVariableNames: 'left'.
+
+"The space of the round was closed (Review Focus 1); isLeft (a Boolean): whether the replicate the
+ round asked for last has left the node (the shell calls the coordinator's replicate: proto_db's
+ sent flag, set just before it)."
+PBRoundClosed class >> left: isLeft
+  (isLeft == true or: [isLeft == false]) ifFalse: [
+    ^ PBValidationError signal: 'PBRoundClosed: left is a Boolean, not ' , isLeft printString].
+  ^ self basicNew _setLeft: isLeft.
+
+PBRoundClosed >> _setLeft: isLeft
+  "Runs once, on a fresh instance."
+  left isNil ifFalse: [^ PBUserError signal: 'PBRoundClosed is immutable'].
+  left := isLeft.
+  ^ self.
+
+PBRoundClosed >> hasLeft
+  ^ left.
+
+PBRoundClosed >> roundWith: aCore in: aRoundState now: t
+  ^ aCore roundClosed: self in: aRoundState now: t.
+
+PBRoundClosed >> printOn: aStream
+  aStream nextPutAll: 'PBRoundClosed('; nextPutAll: (left ifTrue: ['left'] ifFalse: ['not left']); nextPut: $).
+
 "--- PBHoldExpired, PBDropKept ---"
 
 PBRoundEvent subclass: #PBHoldExpired instanceVariableNames: 'token'.
@@ -2071,6 +2129,46 @@ PBCoordinatorCore >> _replicationFailed: s with: aReplicated now: t effects: fx
     , 'this node under ' , (PBCoreValue textOf: s permission) , ' (it ended, or had too little time left, before the root '
     , 'was sent); nothing was replicated'; yourself)
     sent: false now: t effects: fx.
+
+"The answer to PBReplicate was an error (PBReplicateFailed), of the round's root or of the
+ re-commit's: proto_db _permit_round's except branch, where sent is set before replicate is
+ called. Nothing was sent exactly when the error is a PBConflictError, a PBValidationError
+ (PBClosedError included) or a PBUserError (_nothingSent:); any other error (a protocol
+ violation, PBUnexpectedError, a failed flush) leaves the permission's outcome unknown. Every
+ entry of the round gets the error itself."
+PBCoordinatorCore >> roundReplicateFailed: anEvent in: s now: t
+  ^ self _step: [:fx |
+    (#(#replicate #recommitting) includes: s phase) ifFalse: [
+      ^ PBValidationError signal: 'The round takes ' , anEvent printString , ' only in phase replicate or recommitting, not in '
+        , s phase].
+    self _failRound: s with: anEvent error sent: (self _nothingSent: anEvent error) not now: t effects: fx].
+
+"proto_db nothing_sent's error classes: a conflict, validation or user error says that nothing a
+ voter may accept left the node."
+PBCoordinatorCore >> _nothingSent: anError
+  ^ (anError isKindOf: PBConflictError) or: [(anError isKindOf: PBValidationError) or: [anError isKindOf: PBUserError]].
+
+"The space was closed (Review Focus 1; PBRoundClosed): every commit of the node is settled. The
+ queued ones and those asking for a permission get PBClosedError (nothing of theirs left the
+ node); a round under a permission ends as _failRound:with:sent:now:effects: ends it, with
+ PBOutcomeUnknownError once its replicate left the node (phase #replicate or #recommitting and
+ the shell's left), else PBClosedError, and the permission ends with its outcome (#unknown once
+ the root left). The queue is empty, so no permit is asked."
+PBCoordinatorCore >> roundClosed: anEvent in: s now: t
+  ^ self _step: [:fx | | sent closed state |
+    sent := anEvent hasLeft and: [#(#replicate #recommitting) includes: s phase].
+    closed := PBClosedError new messageText: 'Node ' , s config nodeId , ': the space was closed before this commit''s root '
+      , 'was sent; nothing was replicated'; yourself.
+    self _finish: s batch , s queue with: closed effects: fx.
+    state := s with: { #queue -> #(). #batch -> #() }.
+    s permission isNil
+      ifTrue: [state with: { #phase -> #idle }]
+      ifFalse: [
+        self _failRound: state with: (sent
+            ifTrue: [PBOutcomeUnknownError new messageText: 'Node ' , s config nodeId , ': the space was closed while this '
+              , 'commit''s root was being replicated; it may or may not take effect'; yourself]
+            ifFalse: [closed])
+          sent: sent now: t effects: fx]].
 
 "proto_db _permit_round's except branch: the round ends with anError. A conflicted entry gets its
  own conflict (not part of what was sent, never held); every other entry of the round (built,

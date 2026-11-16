@@ -1,4 +1,4 @@
-"EXPECT: ok 34"
+"EXPECT: ok 36"
 "The commit round (cluster/holder.st, PBCoordinatorCore round:in:now:) called directly, one guard
  per check (proto_db transactions.py _run_round, _permit_round, _keep, _take_kept,
  _await_retries, _drop_kept; coordinator.py replicate's _check_reserve and rejoin-ballot
@@ -389,5 +389,48 @@ c that: 'a build failing with exactly PBUnexpectedError after the permission exp
   is: { st first conflicted collect: [:q | q first token]. (st first conflicted collect: [:q | q last cause == x]) asArray.
     (st first conflicted collect: [:q | q last class]) asArray. (settles value: st last) size }
   equals: { #('a'). { true }. { PBConflictError }. 0 }.
+
+"(35) Task 23: a replicate that failed with an error (PBReplicateFailed: the shell's flush, or a
+ rejection of the coordinator's replicate). proto_db _permit_round's except branch: nothing was
+ sent when the error is a conflict, a validation error (PBClosedError included) or a user error;
+ any other error (a protocol violation, PBUnexpectedError) leaves the permission unknown. Every
+ entry of the round gets the error itself, never a guess; the re-commit's replicate too."
+st := go value: core value: (rule value: core value: false) first value: {
+  { PBBuilt entry: (e value: 'a' value: false) root: (rec value: T value: 2) micros: 1000. 2000 } }.
+x := [:anError | go value: core value: st first value: { { PBReplicateFailed error: anError. 3000 } }].
+out := (go value: core value: fresh value: { permitted. { PBPermitted permission: perm. 0 } }) first.
+out := go value: core value: out value: { { PBBaseDecided decision: (PBBaseDecision base: r1 needsCommit: true outcome: #ok). 1000 }.
+  { PBBuilt entry: nil root: (rec value: T value: 2) micros: 0. 1000 }.
+  { PBReplicateFailed error: (PBCorruptionError new messageText: 'v'; yourself). 2000 } }.
+c that: 'a failed replicate ends the round with its error: nothing sent for a conflict, validation or user error, unknown otherwise'
+  is: { #(#PBValidationError #PBClosedError #PBConflictError #PBUserError #PBCorruptionError #PBUnexpectedError) collect: [:k | | r |
+      r := x value: ((Smalltalk at: k) new messageText: 'x'; yourself).
+      { (firstErr value: r last) class name. reportOf value: r last. r first phase }].
+    (settles value: out last) collect: [:q | q first]. reportOf value: out last.
+    err value: [go value: core value: fresh value: { { PBReplicateFailed error: Error new. 0 } }].
+    err value: [PBReplicateFailed error: 3] }
+  equals: { { { #PBValidationError. #(#none). #idle }. { #PBClosedError. #(#none). #idle }. { #PBConflictError. #(#none). #idle }.
+      { #PBUserError. #(#none). #idle }. { #PBCorruptionError. #(#unknown). #idle }. { #PBUnexpectedError. #(#unknown). #idle } }.
+    #('a'). #(#unknown). PBValidationError. PBValidationError }.
+
+"(36) Task 23, Review Focus 1: the space closed (PBRoundClosed left:). Every commit of the node
+ is settled: one nothing of which left the node PBClosedError, one whose root left it (the
+ shell's replicate left, in #replicate or #recommitting) PBOutcomeUnknownError; a conflicted
+ entry its own conflict. A permission held ends with its outcome (#unknown once the root left),
+ and no permit is asked."
+x := [:aState :isLeft | go value: core value: aState value: { { PBRoundClosed left: isLeft. 5000 } }].
+out := { (go value: core value: fresh value: { permitted. { PBRoundEnqueued entry: (e value: 'q' value: false). 0 } }) first.
+  (go value: core value: fresh value: { permitted. { PBPermitted permission: perm. 0 } }) first.
+  st first. st first.
+  (hround value: core value: true value: 4000) first }.
+out := (1 to: 5) collect: [:i | x value: (out at: i) value: (#(true true false true true) at: i)].
+c that: 'closing settles every commit: PBClosedError when nothing left, PBOutcomeUnknownError once the root left; the permission ends, no permit'
+  is: (out collect: [:r | { (settles value: r last) collect: [:q | { q first. q last class name }]. reportOf value: r last.
+    (r last select: [:f | f isKindOf: PBAskPermit]) size. r first phase. r first queue size }])
+  equals: { { { { 'a'. #PBClosedError }. { 'q'. #PBClosedError } }. #(). 0. #idle. 0 }.
+    { { { 'a'. #PBClosedError } }. #(#none). 0. #idle. 0 }.
+    { { { 'a'. #PBClosedError } }. #(#none). 0. #idle. 0 }.
+    { { { 'a'. #PBOutcomeUnknownError } }. #(#unknown). 0. #idle. 0 }.
+    { #(). #(#committed). 0. #idle. 0 } }.
 
 c report.

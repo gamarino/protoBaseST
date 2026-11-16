@@ -9,12 +9,16 @@ runner; the caller waits only on the entry's Future.
   PBCommitEntry transaction: aTx willRetry: aBoolean deadline: us
                               the commit of aTx (in the state #committing);
                               willRetry: whether the caller retries a
-                              conflict (Database.run), kept for the cluster
+                              conflict (Database.run), read by the cluster
                               round (Task 23), unused by a standalone round;
                               us the monotonic microsecond
                               (Time microsecondClockValue) after which a
                               commit still waiting for the root lock ends in
                               PBTimeoutError
+  PBCommitEntry transaction: aTx willRetry: aBoolean caller: anObject deadline: us
+                              as above, from the caller anObject (one per
+                              Database.run: its held retries, cluster/round.st);
+                              without it the entry is its own caller
   PBCommitEntry createDatabase: aName deadline: us
                               version 0 of the database aName
   anEntry future              the Future the runner settles: true when
@@ -25,6 +29,16 @@ runner; the caller waits only on the entry's Future.
                               Future; nothing else (see below)
   aRunner closeStorage        a round of what is queued, then the storage is
                               closed; a Future of nil
+  aRunner closeRound          a space with a coordinator: its cluster round is
+                              closed (PBClusterRound >> close); a Future of nil
+  aRunner dropKept: aCaller   a space with a coordinator: PBDropKept (a held
+                              retry that is not coming); nothing otherwise
+
+With a coordinator (PBObjectSpace storage:coordinator:) the runner hands every
+entry, every dropKept: and every answer of the coordinator to its
+PBClusterRound (cluster/round.st), on this actor (carry-over (j): the runner is
+its own actor), and none of the standalone protocol below runs: no root lock,
+no space.root.
 
 A standalone round takes the whole queue, in the order it was queued, and
 hands it to PBPublisher >> publishGroup: (publisher.st): one root lock, one
@@ -70,20 +84,24 @@ cells: Atoms created by its initialiser and changed only on the actor."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/publisher'.
+Import from: 'protobase/cluster/round'.
 
 "=== PBCommitEntry ============================================================"
 
-Object subclass: #PBCommitEntry instanceVariableNames: 'transaction databaseName willRetry deadline future'.
+Object subclass: #PBCommitEntry instanceVariableNames: 'transaction databaseName willRetry caller deadline future'.
 
 PBCommitEntry class >> transaction: aTransaction willRetry: aBoolean deadline: microseconds
+  ^ self transaction: aTransaction willRetry: aBoolean caller: nil deadline: microseconds.
+
+PBCommitEntry class >> transaction: aTransaction willRetry: aBoolean caller: anObject deadline: microseconds
   aTransaction isNil ifTrue: [^ PBValidationError signal: 'PBCommitEntry transaction: a transaction was expected, not nil'].
-  ^ self basicNew _setTransaction: aTransaction name: nil willRetry: aBoolean deadline: microseconds.
+  ^ self basicNew _setTransaction: aTransaction name: nil willRetry: aBoolean caller: anObject deadline: microseconds.
 
 PBCommitEntry class >> createDatabase: aName deadline: microseconds
   aName isNil ifTrue: [^ PBValidationError signal: 'PBCommitEntry createDatabase: a database name was expected, not nil'].
-  ^ self basicNew _setTransaction: nil name: aName willRetry: false deadline: microseconds.
+  ^ self basicNew _setTransaction: nil name: aName willRetry: false caller: nil deadline: microseconds.
 
-PBCommitEntry >> _setTransaction: aTransaction name: aName willRetry: aBoolean deadline: microseconds
+PBCommitEntry >> _setTransaction: aTransaction name: aName willRetry: aBoolean caller: anObject deadline: microseconds
   "Runs once, on a fresh instance."
   future isNil ifFalse: [^ PBUserError signal: 'PBCommitEntry is immutable'].
   (aBoolean == true or: [aBoolean == false]) ifFalse: [
@@ -94,6 +112,7 @@ PBCommitEntry >> _setTransaction: aTransaction name: aName willRetry: aBoolean d
   transaction := aTransaction.
   databaseName := aName.
   willRetry := aBoolean.
+  caller := anObject.
   deadline := microseconds.
   future := Future new.
   ^ self.
@@ -111,6 +130,11 @@ PBCommitEntry >> isCreateDatabase
 
 PBCommitEntry >> willRetry
   ^ willRetry.
+
+"Who commits: the object Database.run made for its attempts (the held retries of one caller,
+ cluster/round.st), else the entry itself."
+PBCommitEntry >> caller
+  ^ caller ifNil: [self].
 
 "The monotonic microsecond after which a commit still waiting for the root
  lock ends in PBTimeoutError."
@@ -134,7 +158,7 @@ PBCommitEntry >> printOn: aStream
 
 "=== PBRoundRunner ============================================================"
 
-Object subclass: #PBRoundRunner instanceVariableNames: 'space publisher queue scheduled delay proxy'.
+Object subclass: #PBRoundRunner instanceVariableNames: 'space publisher queue scheduled delay proxy cluster'.
 
 "The first retry delay after a #locked round, and the longest, in
  milliseconds (ProtoBase FileStorage._acquire_process_lock: 0.001 s doubling
@@ -155,14 +179,16 @@ PBRoundRunner class >> space: aSpace
  uses to supply its own publisher (PBObjectSpace >> _newRunner). Answers the
  actor proxy."
 PBRoundRunner class >> space: aSpace publisher: aPublisher
-  | runner actor |
+  | runner actor cell |
+  cell := Atom on: nil.
   runner := self basicNew _setSpace: aSpace publisher: aPublisher queue: (Atom on: #())
-    scheduled: (Atom on: false) delay: (Atom on: self firstLockDelay) proxy: (Atom on: nil).
+    scheduled: (Atom on: false) delay: (Atom on: self firstLockDelay) proxy: cell
+    cluster: (aSpace coordinator isNil ifTrue: [nil] ifFalse: [aSpace _newClusterRound: aPublisher proxy: cell]).
   actor := runner asActor.
   runner _publishProxy: actor.
   ^ actor.
 
-PBRoundRunner >> _setSpace: aSpace publisher: aPublisher queue: aQueue scheduled: aScheduled delay: aDelay proxy: aProxy
+PBRoundRunner >> _setSpace: aSpace publisher: aPublisher queue: aQueue scheduled: aScheduled delay: aDelay proxy: aProxy cluster: aRound
   "Runs once, on a fresh instance."
   space isNil ifFalse: [^ PBUserError signal: 'PBRoundRunner is initialised once'].
   space := aSpace.
@@ -171,6 +197,7 @@ PBRoundRunner >> _setSpace: aSpace publisher: aPublisher queue: aQueue scheduled
   scheduled := aScheduled.
   delay := aDelay.
   proxy := aProxy.
+  cluster := aRound.
   ^ self.
 
 "Sets the proxy cell once (from nil), before the proxy is answered."
@@ -188,6 +215,7 @@ PBRoundRunner >> _publishProxy: anActor
 PBRoundRunner >> enqueue: anEntry
   (anEntry isKindOf: PBCommitEntry) ifFalse: [
     ^ PBValidationError signal: 'PBRoundRunner enqueue: a PBCommitEntry was expected, not ' , anEntry printString].
+  cluster isNil ifFalse: [^ cluster enqueue: anEntry].
   self _schedule.
   queue swap: [:entries | entries copyWith: anEntry].
   ^ anEntry future.
@@ -199,8 +227,35 @@ PBRoundRunner >> enqueue: anEntry
  (_runRound), so a round already coming stays the one that is coming: no
  second retry chain is started (review m4). Answers nil."
 PBRoundRunner >> closeStorage
+  cluster isNil ifFalse: [
+    cluster close.
+    publisher closeStorage.
+    ^ nil].
   queue value isEmpty ifFalse: [self _runRound].
   publisher closeStorage.
+  ^ nil.
+
+"--- the cluster round (a space with a coordinator) ---"
+
+"Closes the cluster round: every commit it holds is settled (PBClusterRound >> close). Answers
+ nil; nothing without a coordinator."
+PBRoundRunner >> closeRound
+  cluster isNil ifFalse: [cluster close].
+  ^ nil.
+
+"aCaller's held retry is not coming (Database.run): PBDropKept. Nothing without a coordinator."
+PBRoundRunner >> dropKept: aCaller
+  cluster isNil ifFalse: [cluster dropKept: aCaller].
+  ^ nil.
+
+"An answer of the coordinator to an effect of the cluster round's generation anInteger."
+PBRoundRunner >> _clusterEvent: anEvent generation: anInteger
+  cluster event: anEvent generation: anInteger.
+  ^ nil.
+
+"aBlock, posted by the cluster round to run later on this actor (PBClusterRound >> _later:)."
+PBRoundRunner >> _clusterDo: aBlock generation: anInteger
+  cluster do: aBlock generation: anInteger.
   ^ nil.
 
 "The message of a round (posted by _schedule, or sent by a retry timer): the

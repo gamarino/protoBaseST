@@ -90,7 +90,7 @@ Import from: 'protobase/cluster/rejoin'.
 
 "=== _PBNodeCells: the shared cells of one node ============================="
 
-Object subclass: #_PBNodeCells instanceVariableNames: 'config node acceptorState committed counters fence stopped waiters dispatcher acceptor transport dispatchMax tokens'.
+Object subclass: #_PBNodeCells instanceVariableNames: 'config node acceptorState committed counters fence stopped waiters dispatcher acceptor transport dispatchMax tokens critical'.
 
 "The names of the counters stats always reports (0 until counted): every PBCount of the rules,
  and messages_ignored, the shell's."
@@ -100,7 +100,13 @@ _PBNodeCells class >> statNames
       'permit_requests_sent' 'permits_foreign_dropped' 'permits_held' 'permits_issued' 'permits_refused'
       'recoveries' 'refused' 'rejoin_ballots' 'rejoins' 'renewal_failures' 'renewals' 'replication_failures'
       'replications' 'sends_refused_reserve' 'stale_replies' 'storage_root_reads' 'terms_abandoned'
-      'terms_fenced' 'terms_released_idle_local' 'turns_named' 'turns_taken').
+      'terms_fenced' 'terms_released_idle_local' 'turns_named' 'turns_taken' 'critical_commits').
+
+"The stages of a commit's critical section stats reports under 'critical' (summed seconds; the
+ commit round counts them, Task 23): the build (validation, merge and path copy, proto_db's
+ validation, replay and path_copy together) and the replication."
+_PBNodeCells class >> criticalNames
+  ^ #('build' 'replication').
 
 _PBNodeCells class >> config: aConfig
   | zero |
@@ -109,9 +115,9 @@ _PBNodeCells class >> config: aConfig
   ^ self basicNew _setConfig: aConfig node: (Atom on: nil) acceptorState: (Atom on: nil) committed: (Atom on: nil)
     counters: (Atom on: zero) fence: (Atom on: nil) stopped: (Atom on: false) waiters: (Atom on: Dictionary new)
     dispatcher: (Atom on: nil) acceptor: (Atom on: nil) transport: (Atom on: nil) dispatchMax: (Atom on: 0)
-    tokens: (Atom on: 0).
+    tokens: (Atom on: 0) critical: (Atom on: (self criticalNames collect: [:k | 0])).
 
-_PBNodeCells >> _setConfig: aConfig node: aNode acceptorState: anAcceptorState committed: aCommitted counters: aCounters fence: aFence stopped: aStopped waiters: aWaiters dispatcher: aDispatcher acceptor: anAcceptor transport: aTransport dispatchMax: aMax tokens: aTokens
+_PBNodeCells >> _setConfig: aConfig node: aNode acceptorState: anAcceptorState committed: aCommitted counters: aCounters fence: aFence stopped: aStopped waiters: aWaiters dispatcher: aDispatcher acceptor: anAcceptor transport: aTransport dispatchMax: aMax tokens: aTokens critical: aCritical
   "Runs once, on a fresh instance."
   config isNil ifFalse: [^ PBUserError signal: '_PBNodeCells is immutable'].
   config := aConfig.
@@ -127,6 +133,7 @@ _PBNodeCells >> _setConfig: aConfig node: aNode acceptorState: anAcceptorState c
   transport := aTransport.
   dispatchMax := aMax.
   tokens := aTokens.
+  critical := aCritical.
   ^ self.
 
 _PBNodeCells >> config
@@ -168,6 +175,10 @@ _PBNodeCells >> transport
 
 _PBNodeCells >> dispatchMax
   ^ dispatchMax.
+
+"The summed microseconds of each stage of criticalNames, an Array in that order."
+_PBNodeCells >> critical
+  ^ critical.
 
 "A new waiter token: an Integer, never repeated in this coordinator."
 _PBNodeCells >> nextToken
@@ -235,7 +246,11 @@ _PBNodeCells >> takeAll
  anError."
 _PBNodeCells >> settleAllWith: anError
   self takeAll do: [:w |
-    (w first = #replicate) ifTrue: [(w at: 2) resolve: #unknown] ifFalse: [(w at: 2) rejectWith: anError]].
+    (w first = #replicate) ifTrue: [(w at: 2) resolve: #unknown].
+    (w first = #roundReplicate) ifTrue: [(w at: 2) resolve: (PBOutcomeUnknownError new messageText: 'Node ' , config nodeId
+      , ': the node ended while the root was being replicated (' , anError messageText
+      , '); it may or may not take effect'; yourself)].
+    (#(#replicate #roundReplicate) includes: w first) ifFalse: [(w at: 2) rejectWith: anError]].
 
 "=== _PBDispatcher =========================================================="
 
@@ -364,7 +379,8 @@ _PBDispatcher >> applyTimer: aTimer
   fired := aTimer fired.
   (Future after: ms) thenDo: [:x | proxy handle: fired].
 
-"The waiter's Future: a replication's PBOutcomeUnknownError is #unknown; another Exception
+"The waiter's Future: a replication's PBOutcomeUnknownError is #unknown (the commit round's,
+ #roundReplicate, keeps the error itself as the value, its text the case's); another Exception
  rejects it; any other outcome resolves it. A waiter this shell did not register (or settled
  already) is ignored."
 _PBDispatcher >> applySettle: aSettle
@@ -373,6 +389,7 @@ _PBDispatcher >> applySettle: aSettle
   w isNil ifTrue: [^ self].
   outcome := aSettle outcome.
   (w first = #replicate and: [outcome isKindOf: PBOutcomeUnknownError]) ifTrue: [^ (w at: 2) resolve: #unknown].
+  (w first = #roundReplicate and: [outcome isKindOf: PBOutcomeUnknownError]) ifTrue: [^ (w at: 2) resolve: outcome].
   (outcome isKindOf: Exception) ifTrue: [^ (w at: 2) rejectWith: outcome].
   (w at: 2) resolve: outcome.
 
@@ -760,6 +777,36 @@ PBClusterCoordinator >> _replicate: aLabeledRoot under: aPermission
   ^ self _want: [:token :s | PBReplicateWanted permission: aPermission root: aLabeledRoot
       pred: (core predFor: aPermission in: s) waiter: token] kind: #replicate.
 
+"As _replicate:under:, for the commit round (cluster/round.st): a Future of #committed, #none or
+ the PBOutcomeUnknownError itself (its text proto_db's for the case; also when the node ends with
+ the replication in flight), never #unknown; rejected as _replicate:under: is (a protocol
+ violation, a root not built for the permission, fenced, stopped)."
+PBClusterCoordinator >> _replicateRound: aLabeledRoot under: aPermission
+  | core |
+  core := rules.
+  ^ self _want: [:token :s | PBReplicateWanted permission: aPermission root: aLabeledRoot
+      pred: (core predFor: aPermission in: s) waiter: token] kind: #roundReplicate.
+
+"--- the commit round's reads (cluster/round.st) ---"
+
+"The rules (a PBCoordinatorCore): the commit round runs round:in:now: of the same core."
+PBClusterCoordinator >> _rules
+  ^ rules.
+
+"The node's clock (microseconds; the #clock option's when set): the round's now."
+PBClusterCoordinator >> _now
+  ^ cells now.
+
+"Adds one to the counter aName (a PBCount of the round)."
+PBClusterCoordinator >> _count: aName
+  cells count: aName.
+
+"One commit's critical section (proto_db record_critical): counted critical_commits, its build
+ and replication microseconds added to stats' 'critical'."
+PBClusterCoordinator >> _recordCritical: buildMicros replication: replicationMicros
+  cells count: 'critical_commits'.
+  cells critical swap: [:old | { (old at: 1) + buildMicros. (old at: 2) + replicationMicros }].
+
 "Ends aPermission with anOutcome (#committed, #unknown or #none): a Future resolved once
  dispatched."
 PBClusterCoordinator >> _done: aPermission outcome: aSymbol
@@ -813,7 +860,9 @@ PBClusterCoordinator >> nodeState
   ^ cells node value.
 
 "The counters (CC24) and the health of the node (proto_db stats): healthy, fenced, tier_failed,
- persisting, rejoining, rejoin_blocked, failure, dispatch_seconds_max. A fresh Dictionary."
+ persisting, rejoining, rejoin_blocked, failure, dispatch_seconds_max; critical_commits and
+ critical (a Dictionary of summed seconds, 'build' and 'replication', criticalNames). A fresh
+ Dictionary."
 PBClusterCoordinator >> stats
   | d s v failure rejoining |
   d := cells counters value copy.
@@ -829,6 +878,9 @@ PBClusterCoordinator >> stats
     at: 'rejoin_blocked' put: ((rejoining and: [s notNil]) ifTrue: [rules rejoinBlockedIn: s] ifFalse: [nil]);
     at: 'failure' put: failure;
     at: 'dispatch_seconds_max' put: cells dispatchMax value / 1000000.0.
+  d at: 'critical' put: (Dictionary new
+    at: 'build' put: (cells critical value at: 1) / 1000000.0;
+    at: 'replication' put: (cells critical value at: 2) / 1000000.0; yourself).
   ^ d.
 
 PBClusterCoordinator >> printOn: aStream

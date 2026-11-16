@@ -48,8 +48,9 @@ _PBPlace>>_setPointer:storage:
 PBIndexedCollection>>_setLog:complete:
 _PBOpLog>>_setPrevious:op:
 PBPublisher>>_setSpace:
-PBCommitEntry>>_setTransaction:name:willRetry:deadline:
-PBRoundRunner>>_setSpace:publisher:queue:scheduled:delay:proxy:
+PBCommitEntry>>_setTransaction:name:willRetry:caller:deadline:
+PBRoundRunner>>_setSpace:publisher:queue:scheduled:delay:proxy:cluster:
+PBClusterRound>>_setSpace:publisher:proxy:
 PBLogScan>>_setPayloads:validEnd:torn:
 PBFramedLog>>_setPath:file:payloads:
 PBPeer>>_setNodeId:host:port:
@@ -108,6 +109,8 @@ PBBuilt>>_setEntry:root:micros:
 PBBuildConflict>>_setEntry:error:
 PBBuildFailed>>_setEntry:error:tierFailed:
 PBReplicated>>_setOutcome:error:
+PBReplicateFailed>>_setError:
+PBRoundClosed>>_setLeft:
 PBHoldExpired>>_setToken:
 PBAskBase>>_setPermission:
 PBBuild>>_setEntry:base:stamp:
@@ -126,7 +129,7 @@ _PBTcpReader>>_setTransport:socket:nodeId:key:handler:
 _PBTcpSender>>_setTransport:peer:queue:link:proxy:
 _PBSendQueue>>_setFrames:bytes:draining:closed:
 PBLogDetached>>_setLog:
-_PBNodeCells>>_setConfig:node:acceptorState:committed:counters:fence:stopped:waiters:dispatcher:acceptor:transport:dispatchMax:tokens:
+_PBNodeCells>>_setConfig:node:acceptorState:committed:counters:fence:stopped:waiters:dispatcher:acceptor:transport:dispatchMax:tokens:critical:
 _PBDispatcher>>_setCells:rules:
 _PBAcceptor>>_setCells:rules:tier:
 PBClusterCoordinator>>_setConfig:rules:acceptorClass:cells:run:

@@ -64,7 +64,7 @@ _PBNameCheck class >> check: aName what: aWhat
 
 "=== PBObjectSpace ============================================================"
 
-Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed runner coordinator tier'.
+Object subclass: #PBObjectSpace instanceVariableNames: 'storage lockTimeout closed runner coordinator tier known'.
 
 PBObjectSpace class >> registerAtomClass: aClass
   ^ PBTypeRegistry register: aClass.
@@ -116,6 +116,7 @@ PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds coordinator: aC
   coordinator := aCoordinator.
   tier := aTier.
   closed := Atom on: false.
+  known := Atom on: nil.
   runner := self _newRunner.
   ^ self.
 
@@ -124,6 +125,28 @@ PBObjectSpace >> _setStorage: aStorage lockTimeout: milliseconds coordinator: aC
  (PBRoundRunner space:publisher:)."
 PBObjectSpace >> _newRunner
   ^ PBRoundRunner space: self.
+
+"The cluster round of the runner (a space with a coordinator), over aPublisher, posting its
+ answers to the runner's proxy in aCell. A seam: a test subclass answers a subclass of
+ PBClusterRound."
+PBObjectSpace >> _newClusterRound: aPublisher proxy: aCell
+  ^ PBClusterRound space: self publisher: aPublisher proxy: aCell.
+
+"The node's tier (a PBSharedTier), nil without a coordinator."
+PBObjectSpace >> _tier
+  ^ tier.
+
+"The cluster round learnt that aLabeledRoot committed (its own commit): the last-known root,
+ kept when it orders above the one known (PBRootOrder)."
+PBObjectSpace >> _learnCommitted: aLabeledRoot
+  known swap: [:old | PBRootOrder max: old with: aLabeledRoot].
+
+"Database.run's held retry for aCaller is not coming (cluster/round.st PBDropKept); nothing
+ without a coordinator. Posted, never waited."
+PBObjectSpace >> _dropKept: aCaller
+  coordinator isNil ifTrue: [^ self].
+  closed value ifTrue: [^ self].
+  runner dropKept: aCaller.
 
 "The cluster coordinator of the space, nil for a space opened without one (proto_db coordinator)."
 PBObjectSpace >> coordinator
@@ -176,10 +199,18 @@ PBObjectSpace >> _currentSpaceRoot
   ^ self _spaceRootAt: self _snapshotRecord.
 
 "The storage's current root record (a PBRootRecord), or nil for an empty
- space: what a new transaction starts from (ProtoBase _snapshot_record)."
+ space: what a new transaction starts from (ProtoBase _snapshot_record). With
+ a coordinator, the newest committed root this node knows: the coordinator's
+ committedRoot or the last root the space's own round committed, whichever
+ orders higher, else the storage's (persisted) root. This is the minimal read
+ of a cluster space Task 23 needs; Task 24 owns the cluster read path."
 PBObjectSpace >> _snapshotRecord
+  | root |
   self _checkOpen.
-  ^ storage readRoot.
+  coordinator isNil ifTrue: [^ storage readRoot].
+  root := PBRootOrder max: coordinator committedRoot with: known value.
+  (root isNil or: [root record isNil]) ifTrue: [^ storage readRoot].
+  ^ root record.
 
 "The PBSpaceRoot aRootRecord points to, nil for nil. A space root committed by
  a cluster node is PBNotSupportedError, unless the space has a coordinator."
@@ -228,14 +259,17 @@ PBObjectSpace >> openDatabase: aName
     ^ PBValidationError signal: 'Database ' , (PBCodec repr: aName) , ' does not exist'].
   ^ PBDatabase basicNew _setSpace: self name: aName.
 
-"Closes the space and its storage. Idempotent. With a coordinator, its tier is
- detached first and the node's acceptor log closed (proto_db close); the
+"Closes the space and its storage. Idempotent. With a coordinator, its cluster
+ round is closed first (every commit in it settled: PBClosedError when nothing
+ of it left the node, PBOutcomeUnknownError once its root's replicate left),
+ then its tier is detached and the node's acceptor log closed (proto_db close); the
  coordinator keeps running. The storage is closed by the round runner, after a
  round of the commits queued before (store.st: a close never interrupts a
  publish)."
 PBObjectSpace >> close
   (closed value: true ifCurrent: false) ifFalse: [^ self].
-  [tier isNil ifFalse: [[(coordinator _detach: tier) wait] ensure: [tier close]]]
+  [[coordinator isNil ifFalse: [runner closeRound wait]]
+     ensure: [tier isNil ifFalse: [[(coordinator _detach: tier) wait] ensure: [tier close]]]]
     ensure: [runner closeStorage wait].
 
 PBObjectSpace >> printOn: aStream
