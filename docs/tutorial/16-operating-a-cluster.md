@@ -5,7 +5,8 @@ Program: [examples/cluster/16_configuration.st](../../examples/cluster/16_config
 Previous: [15. Failures and recovery](15-failures-and-recovery.md).
 
 This chapter is the reference an operator needs: the options and the rules among them, the timers,
-what a commit costs, how to choose the durations, what `stats` reports, and an honest account of
+what a commit costs, how to choose the durations, what `stats` reports, how to bring an existing
+database into a cluster, and an honest account of
 what the port does not do and what is not proven yet. The full API is in [reference.md](../reference.md), and every
 difference from `proto_db` is in [deviations.md](../deviations.md#cluster-mode).
 
@@ -262,6 +263,41 @@ The counters start at zero. The ones to watch:
   cluster both stay at 0; a rising `'ignored_messages'` means a member speaks a protocol this
   port does not (a `proto_db` node with tiered storage, say).
 - **Slow steps:** `'dispatch_slow'`, dispatcher steps over 10 ms.
+
+## Bringing an existing database into a cluster
+
+Most clusters start from a database that already exists. Stop every process that has the
+directory open, then open it on every member as chapter 14 does: `PBFileStorage clusterPath:` on
+the same directory, and `PBObjectSpace storage:coordinator:` with each member's coordinator. Nothing
+has to be exported or converted first:
+
+- The current root of a standalone space has no cluster fields. The members read it as a root of
+  term 0, at the storage's epoch, which is `proto_db`'s rule too.
+- The first member to obtain a lease takes that root as its base. Its first commit becomes the
+  first cluster root, and that root's `clusterPrevious` link is the old plain root. The history
+  of every database is kept.
+- Every member reads the old data at once, and `proto_db` 2.0.0rc4 reads the converted directory
+  like any other cluster space.
+
+`tests/unit/cluster_standalone_into_cluster.st` does this with a space written by protoBaseST.
+`tests/interop/standalone_into_cluster.sh` does it with a space written by protoBaseST and with
+one written by `proto_db`, and then has `proto_db` read the result.
+
+**The move is one way.** As soon as a member opens the directory, the directory holds `cluster/`,
+where the members keep their acceptor logs. From then on, `PBFileStorage path:` refuses the
+directory with `PBNotSupportedError`. A plain space also refuses a current root that carries a
+`cluster_term`. There are two reasons:
+
+- A standalone writer takes no write permission, so the root it publishes is outside the
+  cluster's order of roots.
+- The acceptor logs in `cluster/` still hold the leases the members granted and the roots they
+  accepted. The next cluster commit would build on those logs, and the next persisted cluster
+  root would replace the standalone write: that write would be silently lost.
+
+To get the data back into a standalone space, copy it: read each database through a cluster
+member, and write its root objects into a fresh directory opened with `PBFileStorage path:`. The
+copy starts a new history. `proto_db`'s own `FileStorage` does not refuse a cluster directory.
+That route is not tested here, and it is safe only when every member is stopped for good.
 
 ## What the port does not do
 
