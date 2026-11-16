@@ -18,7 +18,10 @@
   MuteEndpoint   a transport that, once armed, drops what would tell n2 of others' commits.
   PersistKit     a CommitKit opening GateStorage and PersistSpace, over MuteEndpoints.
   Persist        reads of the persisted root (its counter, through a fresh storage of the
-                 directory), the wiped logs and the progress lines on stderr (never asserted)."
+                 directory), the wiped logs, the progress lines on stderr (never asserted), and
+                 within:do: (a step run on its own actor, bounded by a deadline: a step that
+                 would hang answers #hung, so a check fails on it instead of the file).
+  Bounded        the actor within:do: runs its step on."
 Import from: 'protobase'.
 Import from: '_cluster_commit'.
 
@@ -181,7 +184,19 @@ PersistKit >> revive: anId
   self up: anId.
   ^ self open: anId.
 
+Object subclass: #Bounded.
+
+Bounded >> run: aBlock
+  ^ [{ #ok. aBlock value }] on: Error do: [:e | e return: { #error. e class name }].
+
 Object subclass: #Persist.
+
+"aBlock run on a new actor: its value, the class name of its error, or #hung when it has not ended
+ within milliseconds (the actor is left behind)."
+Persist class >> within: milliseconds do: aBlock
+  | r |
+  r := [(Bounded new asActor run: aBlock) waitWithin: milliseconds] on: Error do: [:e | e return: #(#hung)].
+  ^ r first = #ok ifTrue: [r last] ifFalse: [r first = #error ifTrue: [r last] ifFalse: [#hung]].
 
 "aString on stderr with the monotonic milliseconds: where a run is, never asserted."
 Persist class >> step: aString

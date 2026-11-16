@@ -10,8 +10,8 @@
  on a ReadWorker actor, so a commit that does not return shows up as { #hung. ... } or as an
  expired gate, never as a hang.
  (1) Transactions read the committed root, not the storage: ten commits over two nodes, read on
- both, with at most four storage root reads made for transactions (storage_root_reads; the
- persister's reads, since Task 25, are not theirs) and no root published by a commit (every
+ both, with at most four storage root reads made for transactions (the storages' readRoot
+ calls less the persisters' reads, since Task 25) and no root published by a commit (every
  publish is a persister's write)
  (proto_db transactions::test_transactions_read_the_committed_root_not_the_storage).
  (2) Read-your-writes: a commit returns after its node's readers see its root, also while the
@@ -48,14 +48,20 @@ db0 := s0 newDatabase: 'db'.
 db0 run: [:t | t setRootObject: 'counter' value: 0].
 db1 := kit db: 'db' on: 'n1'.
 0 to: 9 do: [:i | (i \\ 2 = 0 ifTrue: [db0] ifFalse: [db1]) run: Reads incr].
-"The storage root reads made for transactions (the read path and the coordinator's refound reads,
- 'storage_root_reads'), not the persister's (since Task 25; proto_db's RecordingStorage skips the
- persister threads' reads too); every publish of space.root is a write of a persister (its
- 'roots_written'), none a commit's."
-reads := #('n0' 'n1') inject: 0 into: [:n :id | n + ((kit node: id) stats at: 'storage_root_reads')].
+"The storage root reads made for transactions: every readRoot of the storages of n0 and n1 (their
+ traces), less the persisters' (since Task 25; proto_db's RecordingStorage skips the persister
+ threads' reads too): a refresh reads once, a persist: that took the root lock and published
+ reads twice (its order check and replaceRoot:'s epoch check; roots_written), one refused reads
+ once (roots_behind), a #busy one reads nothing. The persister counts a read
+ after it, so the difference is waited for, never sampled once. Every publish of space.root is a
+ write of a persister (its 'roots_written'), none a commit's."
+reads := [#('n0' 'n1') inject: 0 into: [:n :id | | st |
+  st := (kit space: id) _persister stats.
+  n + (((kit storage: id) instVarNamed: 'trace') value count: [:x | x = 'read root'])
+    - ((st at: 'refreshes') + (2 * (st at: 'roots_written')) + (st at: 'roots_behind'))]].
 publishes := [kit ids inject: 0 into: [:n :id | n + (((kit storage: id) instVarNamed: 'trace') value select: [:x | x = 'publish']) size]].
 c that: 'the committed root, not the storage: ten commits over two nodes are read on both, at most four storage root reads, no root published by a commit'
-  is: { Reads counter: db1. kit waitUntil: [(Reads counter: db0) = 10]. reads <= 4.
+  is: { Reads counter: db1. kit waitUntil: [(Reads counter: db0) = 10]. kit waitUntil: [reads value <= 4].
     kit waitUntil: [publishes value = (kit ids inject: 0 into: [:n :id | n + ((kit space: id) _persister stats at: 'roots_written')])] }
   equals: { 10. true. true. true }.
 

@@ -16,15 +16,18 @@
  (3) The checklist row: sync: on the last committer, both epochs, the persisted value without the
  cluster's reads, and the next transaction on another node starts at its committedEpoch
  (transactions::test_sync_waits_for_the_persisted_epoch_and_exposes_both_epochs).
- (4) Never backwards (CC19, rc4's shape): with n0's write of R1 held, n0 commits R2 and another
- node persists R2 first; the tier refuses R1 and R2 again; released, n0's persister is refused
- (roots_behind), reads R2 back, and space.root stays R2.
+ (4) Never backwards (CC19, rc4's shape): with n0's write of R1 held, n0 commits R2; n1, which
+ knows R2 committed and did not commit it, writes nothing over two passes of its persister (only
+ the committer writes before persistLag, D44); n1's round runner then persists R2 first (the
+ tier's persist: on n1's one writer); the tier refuses R1 and R2 again; released, n0's persister
+ is refused (roots_behind), reads R2 back, and space.root stays R2.
  (5) sync: while another holder keeps the root lock ends PBTimeoutError naming the persisted
  epoch, each attempt #busy; once released, sync: returns.
  (6) One writer per storage (Task 21 review I1): a commit's pushAtom: is held in progress on n0's
  round runner (GateStorage) while n0's persister is made to write; the write waits behind it on
  the runner, so afterwards n0's storage holds no root lock, the persister counted no error, and a
- later persist (sync:) succeeds.
+ later persist (sync:) succeeds. Every step after the release runs bounded (Persist within:do:):
+ a root lock kept by a write made beside the commit's shows up as a failed check, never a hang.
  (7) A stopped node's commit (its own persister's writes dropped) is persisted by another node
  after persistLag (200 ms here): sync: on that node returns and space.root reaches the commit
  (outcome only).
@@ -45,7 +48,7 @@ Import from: '_check'.
 Import from: '_cluster_commit'.
 Import from: '_cluster_persist'.
 
-| c base kit out r1 r2 holder hold push w tierN1 written publishes e epoch tr accepted s mark |
+| c base kit out r1 r2 holder hold push w runnerN1 written publishes e epoch tr accepted s mark n1Writes n1Mark cycles |
 c := Check new.
 base := FileSystem temp / ('pbst-cluster-persister-' , Smalltalk pid printString).
 base deleteAll.
@@ -94,7 +97,9 @@ c that: 'sync: waits for the persisted epoch and exposes both epochs'
   equals: { #(#ok). nil. true. true. 17. true. true. #refused }.
 
 Persist step: '(4)'.
-"(4) n0's next write is held; n0 commits R1, then R2; n1's tier persists R2 first."
+"(4) n0's next write is held; n0 commits R1, then R2; n1's round runner persists R2 first."
+n1Writes := [| st | st := (kit space: 'n1') _persister stats. (st at: 'roots_written') + (st at: 'roots_behind')].
+n1Mark := n1Writes value.
 hold := Future new.
 mark := PersistSeams notes size.
 PersistSeams holdWritesOf: 'n0' until: hold.
@@ -103,14 +108,17 @@ r1 := (kit node: 'n0') committedRoot.
 out := out , { kit waitUntil: [PersistSeams noted: 'n0 write held' after: mark] }.
 out := out , { Persist run: (kit db: 'db' on: 'n0') retries: 3 }.
 r2 := (kit node: 'n0') committedRoot.
-tierN1 := (kit space: 'n1') _tier.
-out := out , { tierN1 persist: r2. tierN1 persist: r1. tierN1 persist: r2 }.
+out := out , { kit waitUntil: [| x | x := (kit node: 'n1') committedRoot. x notNil and: [x key = r2 key]] }.
+cycles := (kit space: 'n1') _persister stats at: 'cycles'.
+out := out , { kit waitUntil: [((kit space: 'n1') _persister stats at: 'cycles') >= (cycles + 2)]. n1Writes value - n1Mark }.
+runnerN1 := (kit space: 'n1') instVarNamed: 'runner'.
+out := out , { kit settle: (runnerN1 persist: r2). kit settle: (runnerN1 persist: r1). kit settle: (runnerN1 persist: r2) }.
 hold resolve: true.
 out := out , { kit waitUntil: [((kit space: 'n0') _persister stats at: 'roots_behind') >= 1].
   kit waitUntil: [(kit space: 'n0') _persister persistedRoot key = r2 key] }.
-c that: 'the persister never goes backwards: a higher root persisted first refuses the lower one, and the equal one'
+c that: 'the persister never goes backwards: a higher root persisted first refuses the lower one, and the equal one; before persistLag only the committer writes'
   is: out , { (kit space: 'n0') _tier readPersisted key = r2 key. (PBRootOrder compare: r2 with: r1) }
-  equals: #(#ok true #ok true false false true true true 1).
+  equals: #(#ok true #ok true true 0 true false false true true true 1).
 
 Persist step: '(5)'.
 "(5) Another holder keeps the root lock."
@@ -146,11 +154,12 @@ push resolve: true.
 out := out , { (kit settle: w) first }.
 out := out , { kit waitUntil: [(kit space: 'n0') persistedEpoch >= (kit node: 'n0') committedEpoch].
   (kit storage: 'n0') holdsRootLock. (kit space: 'n0') _persister stats at: 'errors'.
-  Persist run: (kit db: 'db' on: 'n0') retries: 3. (Persist sync: (kit space: 'n0') within: 10000). (kit storage: 'n0') holdsRootLock.
+  Persist within: 30000 do: [Persist run: (kit db: 'db' on: 'n0') retries: 3].
+  Persist within: 15000 do: [Persist sync: (kit space: 'n0') within: 10000]. (kit storage: 'n0') holdsRootLock.
   (kit space: 'n0') _persister stats at: 'errors' }.
 c that: 'one writer per storage: a persist made while a commit write is in progress on the node waits behind it, the root lock is released, and a later persist succeeds'
   is: out equals: #(#ok true true true false #ok true false 0 #ok nil false 0).
-kit shutdown.
+Persist within: 60000 do: [kit shutdown].
 
 Persist step: '(7)'.
 "(7) persistLag 200 ms; n0's writes are dropped; n0 commits, then stops."

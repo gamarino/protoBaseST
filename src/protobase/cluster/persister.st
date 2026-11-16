@@ -41,8 +41,8 @@ it (aCoordinator _committedHere:, proto_db by == node_id) or when the oldest pen
 waited persistLag or more (a crashed or partitioned committer: any node then writes the newest
 root it knows). Only the newest root is written (coalescing). The write is aWriter persist:,
 whose answer comes back to this actor: true, the root persisted (roots_written); false, the
-storage holds that root or a newer one (roots_behind; the persisted root is read again, so the
-persister never goes backwards, CC19); #busy, another holder has the root lock (roots_busy, a
+storage holds a newer root, or that root at a version at or above its own (roots_behind; the
+persisted root is read again, so the persister never goes backwards, CC19); #busy, another holder has the root lock (roots_busy, a
 protoBaseST counter; the next pass, one interval later, tries again). A pass that does not write
 while behind reads the persisted root (refresh), at most once per max(persistInterval,
 min(250 ms, persistLag / 4)) unless a waiter forces it, so the node learns roots another node

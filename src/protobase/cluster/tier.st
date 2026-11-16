@@ -156,8 +156,9 @@ PBSharedTier >> _labeled: aRootRecord
     record: (PBRootRecord _version: aRootRecord version segment: aRootRecord segment offset: aRootRecord offset epoch: epoch).
 
 "Publishes the record of aLabeledRoot as the storage root (CC19, proto_db PlainTier.persist):
- true once published; false when the storage holds that root or a newer one in the order of
- roots; #busy when another holder has the root lock. The lock is released whatever happens.
+ true once published; false when the storage holds a newer root in the order of roots, or that
+ root at a version at or above its own (_holds:over:, rc4's shape); #busy when another holder
+ has the root lock. The lock is released whatever happens.
  A protoBaseST addition: the label and epoch of aLabeledRoot must be the cluster_term and
  cluster_epoch its SpaceRoot carries (PBValidationError, nothing written), so the root persisted
  is ordered as readPersisted later reports it."

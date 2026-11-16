@@ -305,9 +305,9 @@ epoch of the newest root the node knows committed. It never goes down, except af
 > The persister and `sync:` are Task 25 (`tests/unit/cluster_persister.st`,
 > `cluster_persister_recovery.st`).
 
-`space.root` is written by each node's persister, after the commit, by compare-and-swap, never
-backwards. The commit point does not need it: acknowledged commits are durable in the voters'
-synced logs. Every `persistInterval` (50 ms) the persister of each space looks at the newest root
+`space.root` is written by each node's persister, after the commit, under the storage's root
+lock, never backwards. The commit point does not need it: acknowledged commits are durable in
+the voters' synced logs. Every `persistInterval` (50 ms) the persister of each space looks at the newest root
 its node knows committed. It writes it when its own node committed that root, or, when the root
 has waited `persistLag` (1000 ms) unpersisted, whoever committed it: a crashed or cut-off
 committer's commits are still persisted by another member. Only the newest root is written, so a

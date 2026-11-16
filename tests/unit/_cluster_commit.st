@@ -40,7 +40,7 @@
                 subclass: endpointFor: (the transport of a node) and acceptorClass."
 Import from: 'protobase'.
 
-PBFileStorage subclass: #TraceStorage instanceVariableNames: 'trace poison'.
+PBFileStorage subclass: #TraceStorage instanceVariableNames: 'trace poison published'.
 
 TraceStorage >> trace: anAtom
   trace := anAtom.
@@ -61,7 +61,14 @@ TraceStorage >> flushSegment
 
 TraceStorage >> replaceRoot: aRecord
   self note: 'publish'.
+  published isNil ifTrue: [published := Atom on: 0].
+  published swap: [:n | n + 1].
   ^ super replaceRoot: aRecord.
+
+"How many replaceRoot: this storage was sent since it opened (a count trace: never resets; every
+ replaceRoot: of a cluster node runs on its round runner, one at a time)."
+TraceStorage >> publishes
+  ^ published isNil ifTrue: [0] ifFalse: [published value].
 
 TraceStorage >> readRoot
   self note: 'read root'.
@@ -133,20 +140,6 @@ RoundSeam >> flushedBeforeEachReplicate
     x = 'flush' ifTrue: [flushed := true].
     x = 'replicate' ifTrue: [flushed ifFalse: [^ false]. flushed := false]].
   ^ true.
-
-"How many 'publish' entries of the trace fall between a 'flush' and the 'replicate' after it (a
- root published under a commit). Since Task 25 the persister publishes space.root, through the
- round runner, between the runner's messages; a flush and its replicate are one message
- (PBClusterRound >> _sendNow:), so none can fall there."
-RoundSeam >> publishedUnderAReplicate
-  | open n |
-  open := false.
-  n := 0.
-  trace value do: [:x |
-    x = 'flush' ifTrue: [open := true].
-    x = 'replicate' ifTrue: [open := false].
-    (x = 'publish' and: [open]) ifTrue: [n := n + 1]].
-  ^ n.
 
 "Whether the n-th 'permit' of the trace (n > 1) follows at least n - 1 'done' (R148: a
  permission's done reaches the node before the next permit asks)."
