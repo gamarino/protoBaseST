@@ -19,7 +19,8 @@
  - key specs: a path step through an absent attribute is MISSING, an explicit nil stays nil,
    and the presence tests (isNone, notNone) and ne: tell them apart as a scan does;
  - extractors: a named, registered, pure block; a name keeps its meaning; an extractor that
-   fails during a merge fails only that commit, and the error names it (ruling IQ1).
+   fails during a merge fails only that commit, with the block's own exception passed through
+   unchanged (ruling IQ1 as corrected, plan call IP2: exactly as proto_db).
 
  Run it (from examples/tutorial, once moved): STPATH=<repository>/src protost 17_indexes.st"
 Import from: 'protobase'.
@@ -142,13 +143,13 @@ lesson check: 'a name keeps its meaning: rebinding it is refused'
     signals: PBValidationError containing: 'name_length'
     during: [PBKeySpec registerExtractor: 'name_length' block: [:p | (p at: 'name') size + 1] version: '1'].
 
-"An extractor that fails during a merge fails that commit only, and names itself (ruling IQ1)."
+"An extractor that fails during a merge fails that commit only, with its own exception (IQ1, IP2)."
 nameless := db newTransaction.
 named := db newTransaction.
 nameless setRootObject: 'people' value: (nameless newDictionary setAt: 800 value: (nameless newObject: { 'city' -> 'Oslo' })).
 named setRootObject: 'people' value: (named newDictionary setAt: 801 value: (named newObject: { 'name' -> 'person801'. 'city' -> 'Oslo' })).
-lesson check: 'the commit whose merge ran the failing extractor fails, naming it'
-    signals: Error containing: 'name_length' during: [nameless commit].
+lesson check: 'the commit whose merge ran the failing extractor fails with the block''s own error'
+    signals: Error containing: 'a person without a name' during: [nameless commit].
 named commit.
 people := db newTransaction getRootObject: 'people'.
 lesson check: 'the other commit went through' isTrue: (people has: 801).
