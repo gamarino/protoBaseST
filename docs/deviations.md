@@ -23,6 +23,7 @@ Contents:
 [Conformance vectors](#conformance-vectors) |
 [Cluster wire messages](#cluster-wire-messages) |
 [Cluster mode](#cluster-mode) |
+[Indexed queries (planned)](#indexed-queries-planned) |
 [Errors and messages](#errors-and-messages) |
 [Performance](#performance) |
 [Known protoST limits](#known-protost-limits)
@@ -106,7 +107,9 @@ explicit.
   cannot do either, so it does not do a lesser version. Index *queries* are not provided either:
   indexes are decoded and kept. `extend:` of nothing still answers the receiver, as `proto_db`'s.
   *Cost:* a database that uses indexes can be read and its non-indexed parts changed; the indexed
-  collections cannot be changed from protoST.
+  collections cannot be changed from protoST. *Planned for 0.3.0, not implemented:* index
+  maintenance in every mutator and merges onto indexed collections, the refusal narrowed to vector
+  and unknown index kinds ([Indexed queries (planned)](#indexed-queries-planned)).
 - **`PBRepeatedKeysDictionary` is read only.** Its writes and merges are a non-goal. A new empty
   one is mergeable and its rebase answers `current` unchanged, as `proto_db`'s.
 - **Immutability is by convention** (decision 3). No instance is frozen at run time: a method
@@ -895,6 +898,32 @@ The detail:
     and reloads the log; protoST cannot simulate a power loss. The `tiered` kind is not ported
     (DEPTH = 0).
 
+## Indexed queries (planned)
+
+> **Planned for 0.3.0, not implemented.** These are the differences the approved
+> [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md) plans on purpose,
+> written early so the draft chapters ([17](tutorial/17-indexes.md),
+> [18](tutorial/18-queries-and-plans.md), [19](tutorial/19-ordered-reads-and-pages.md)) and the
+> guide ([queries.md](queries.md)) can link here. Until the feature lands, the entry
+> "Indexed collections are not written or merged" above is what holds. Each entry becomes a
+> deviation when its task is merged.
+
+| What | Difference from `proto_db` | Why | Cost |
+|---|---|---|---|
+| Opaque predicates in `explain` | A block condition is the node `BlockFilter` with `description`, where `proto_db` has `PythonFilter` (call IC6). | The node runs a protoST block; naming it after Python would mislead. | A one-name difference in `explain`; the query vectors hold no opaque predicate. |
+| Equality on the field builder | `eq:` and `ne:` build `==` and `!=`; `=` is not overridden on `PBField` (IC4, ruling IQ2). | `=` must stay an equality for collections and tests. | Less like Python's `F.city == "Oslo"`; `aField = v` answers a Boolean, which `where:` refuses. |
+| Projection | `project:` and `collect:`; `PBQuery` has **no** `select:` (ruling IQ2). | Smalltalk's `select:` filters; `proto_db`'s `select` projects, and would read backwards. | A name to learn. |
+| Selection blocks | Not in the first release (ruling IQ2): a block condition is opaque and never uses an index. | Translating a block by running it on a recording object fails silently (`30 < (p at: 'age')`, inlined `ifTrue:` and `==`, methods of the element). | Index-using conditions are written with `PBField`. |
+| Plan choice on near ties (R2) | The descent term `log2 (G + 2)` is computed as `ln x / ln 2` (protoST has no `log2`; ruling IQ4: protoST is not changed), which can differ from C's `log2` in the last bit. Two candidates whose costs are within a relative 1e-12 may be ranked differently: the same answer by another plan. | No protoST change for plan parity (IQ4). | The query vectors report such a plan difference by name and do not fail on it; any other plan difference, and every result difference, fails. |
+| Vector and unknown index kinds | A collection holding a `PBVectorIndex`, or an index of a kind protoBaseST does not know, stays read only: every change and every merge onto it is `PBNotSupportedError` naming it (IC2, ruling IQ5). | Vector search is out of scope; maintaining the other indexes but not that one would write a stale index. | Such a collection is changed from Python only. |
+| Pagers | In-process only: no portable token, no `resumePager:` (ruling IQ3). | The token's plan digest is over Python's `repr` of the plan, which protoST cannot reproduce byte for byte (spec 3.2; a portable digest is proposal IQ7, not sent). | A page sequence cannot be resumed by another process or language. |
+| Deferred | No query result cache; no `GroupBy`, `Agg`, `Join`, `Unnest` (`select_many`) or `ValuesScan`; no computed values, `startswith` / `endswith` or field-to-field comparisons; no collection `rebuilt` (misfiled format-3 repair) (ruling IQ3, spec 3.2). | Each is either not portable today or not an optimisation; a block condition covers computed values meanwhile. | Programs that need them wait, or use a block. |
+
+Not a deviation, but worth knowing: an extractor runs inside the commit when a blind write is
+merged onto a collection with an extractor index, and an exception it raises fails only that commit
+and passes through unchanged, exactly as in `proto_db` (ruling IQ1 as corrected; plan call IP2).
+Purity is a documented contract ([queries.md](queries.md#extractors-and-their-purity-contract)).
+
 ## Errors and messages
 
 - The error classes mirror `proto_db/errors.py` with `PB` for `Proto`. `proto_db`'s extra classes
@@ -1036,6 +1065,22 @@ What the figures say, and what they do not:
   tiny and 50.2, 26.0 and 14.9 on conc-hot. Read differences of 10 % as noise.
 - **No `proto_db` figure is shown**: `proto_db`'s cluster was not run on this workload shape, so
   no ratio to it is claimed. Memory was not measured.
+
+### Queries and indexes (not measured yet)
+
+Planned for 0.3.0 (spec section 7.3, `bench/run_query.sh`). No figure exists; the drafts cite these
+markers, each filled by the task named:
+
+- [measured in T8: Q1-Q4, point equality, `in` and ranges, compound conditions, ordering, indexed
+  against a forced scan, in both implementations]
+- [measured in T9: Q5, page k by rank against materialised, and `count` by rank]
+- [measured in T4: M1 (plan task 4a), commits per second with 0, 1 and 3 indexes; M3 (plan task
+  4b), merges onto an indexed current, standalone and in a three-member cluster]
+- [measured in T3: M2, the bulk build against the fold of single additions]
+- [measured in T7: P1 planner overhead, P2 the scan-to-index crossover, P3 the hand-built
+  intersection against the filter plan]
+- [measured in T10: the full comparison with `proto_db`, with date, machine, load, both commits and
+  both binaries]
 
 ## Known protoST limits
 
