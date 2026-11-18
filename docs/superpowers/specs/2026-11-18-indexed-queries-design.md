@@ -78,7 +78,7 @@ after they are measured.
 | Who keeps the index? | The program keeps a second root (`byCity`) and updates it in the same transaction, as chapter 4 does today. | Every writer must remember it, in both languages; a blind write that merges the data root does not merge the program's idea of the index; nothing checks that the two agree. | The index is part of the collection version: every mutator returns content and indexes computed in one step (`proto_db` `collections/base.py:1-13`). There is no code path that returns a stale index. Measured: a contract test that compares every index with a scan after random mutator sequences. |
 | When is the index updated? | At commit time, in the publisher, for the roots that changed. | An uncommitted version (what the transaction reads back) would disagree with its own index; a snapshot could see an index ahead of or behind its data. | Path copying: the index is an immutable tree beside the data, each version shares unchanged subtrees with the last. Measured: the extra cost per write with 0, 1 and 3 indexes (bench M1), so the reader sees what "index what you query" costs. |
 | Can a blind write still merge? | Replace the indexed root, as the prototype would have done had it not refused. | Last writer wins: a concurrent commit's change is lost silently. | Replay the transaction's intent through the public mutators onto the current version, which maintain the current indexes (`proto_db` `collections/base.py:594-631`). Measured: merge replay cost onto an indexed current (bench M3). |
-| Should the planner use an index whenever one exists? | Yes, an index is faster. | For a tiny collection, or for `!=`, an index visits as much as a scan and adds descents; for an unselective predicate the scan is cheaper. | A cost model: one unit per row produced, per key group visited and per tree level descended (`keyed.py:596-622`). Measured: the crossover collection size where the planner switches, and that the switch is where the timings cross (bench P2). |
+| Should the planner use an index whenever one exists? | Yes, an index is faster. | Not always: an index pays a descent per value looked up and a visit per key group, so for an unselective predicate (a wide range, an `in` of most keys) reading every element once can cost less. | A cost model: one unit per row produced, per key group visited and per tree level descended (`keyed.py:596-622`). Even `!=`, which reads almost everything, is charged n + G + 1 by the index complement against 2n for a scan plus a filter, so the complement wins whenever the index has fewer than n − 1 key groups (`test_ne_term_alone_prefers_the_index_complement_over_scan_plus_filter`: 211 against 400). Measured: whether real timings cross where the model says they do (bench P2). The model's own crossover for a tiny collection is only one or two elements, so P2 is not a search for a "small collection" threshold. |
 | Is `not (x = 5)` the same as `x ~= 5`? | Rewrite it to use the index. | An element without `x` satisfies the first and not the second (absence is not a value, D28). | Negations stay residual filters; only `not isNone` becomes `notNone`, the one exact rewrite (`planner.py:98-126`). Shown by an example, not a benchmark. |
 | Two indexed conjuncts: intersect the two index results? | Yes, use both indexes. | Under the cost model an intersection always costs at least a filter over the better input (`planner.py:52-55`). | One access path plus residual filters. Measured: both plans built by hand on the same data (bench P3), to show whether the model's claim holds at protoST's speed too. |
 | Page 50 of an ordered report? | Run the query, skip 49 pages. | Cost grows with the page number; a concurrent commit shifts rows between pages. | Rank access on weighted trees, O(log n + page size), on one snapshot (`keyed.py:35-41`, `pager.py:1-11`). Measured: time of page k for k = 0 .. last, by rank and by skipping (bench Q5). |
@@ -304,7 +304,7 @@ machinery), `terms.st`, `plans.st`, `planner.st`, `query.st`, `pager.st`; `avl.s
 | `PBKeySpec` | `KeySpec` | A frozen `(kind, arg)`: `path:`, `element`, `extractor:`, `forTermPath:`; `extract:` (answers the key or `PBMissing default`), `termPath`, `describe`, `asData` / `fromData:` (the persisted tuple). Compares by value. |
 | `PBKeySpec class` registry | `register_extractor` and friends | `registerExtractor: aName block: aBlock version: aStringOrNil`, `unregisterExtractor:`, `extractorVersion:`. Process-wide, one `Atom` of an immutable dictionary. Rebinding a name to another block or version is `PBValidationError`. |
 | `PBIndex` | `Index` | `keySpec` keeps answering the persisted tuple (the 0.1.0 API); the new `keySpecObject` answers it as a `PBKeySpec` (maintainer, 2026-11-18). Gains `withAdded:`, `withRemoved:`, `withReplaced:with:`, `supports:`, `estimate:`, `plan:`, `supportsOrder:`, `orderedPlan:`, `empty`, `build:`, `explain`, `validate:`; `_with:` builds a new unsaved version (as `PBIndexedCollection >> _withChanges:log:complete:` does). Abstract hooks signal `PBUserError` ("subclass responsibility"). |
-| `PBKeyGroupIndex` | `KeyGroupIndex` | Groups, side group, member keys, rank segments, cost model. `name:keySpec:` (a String is a path) makes an empty index with `member_tokens` 1. |
+| `PBKeyGroupIndex` | `KeyGroupIndex` | Groups, side group, member keys, rank segments, cost model. `name:keySpec:` (the primitive; it takes a `PBKeySpec`) makes an empty index with `member_tokens` 1; `name:path:` is a convenience for `name: n keySpec: (PBKeySpec path: p)`. |
 | `PBEqualityIndex`, `PBRangeIndex` | `EqualityIndex`, `RangeIndex` | Supported operators; `PBRangeIndex` adds ordered iteration. |
 | `PBVectorIndex` | `VectorIndex` | Unchanged, read only; `supports:` answers false; it makes its collection refuse writes. |
 | `PBIndexSet` | `IndexSet` | Gains `withIndex:`, `without:`, `onAdd:`, `onRemove:`, `onReplace:with:`, `rebuiltStale:`. |
@@ -317,7 +317,7 @@ machinery), `terms.st`, `plans.st`, `planner.st`, `query.st`, `pager.st`; `avl.s
 | `PBQueryPlan` and subclasses `PBCollectionScan`, `PBIndexPlan`, `PBFilter`, `PBBlockFilter`, `PBUnion`, `PBIntersect`, `PBProject`, `PBSort`, `PBLimit`, `PBCount`, `PBDistinct` | `plans.py` | `execute` (a new stream each time; `do:` evaluates a block per row), `explain` (a `PBFrozenDict` with `proto_db`'s keys), `estimate`, `windowFrom:to:`, `exactRows`. |
 | `PBPlanner` | `planner.py` | `PBPlanner plan: aCollectionOrPlan where: anExpression orderBy: keys limit: n offset: m`; `normalize:`. Pure function of its arguments. |
 | `PBQuery`, `PBField` | `Queryable`, `F` / `Field` | The front end (5.5). |
-| `PBPager` | `Pager` | `on: aPlanOrQuery pageSize: n`; `rows`, `pages`, `page: k`, `byRank`, `explain`. No `token` (deferred). |
+| `PBPager` | `Pager` | `on: aPlanOrQuery pageSize: n`; `rows`, `pages`, `page: k` (zero-based, as `proto_db`), `byRank`, `explain` (`pager` → `page_size`, `by_rank`; `plan` → the plan's explain; no `portable`, since tokens are deferred). No `token` (deferred). |
 | `PBMisfiledError` | `ProtoMisfiledError` | New error, a `PBCorruptionError` subclass, as in `proto_db`. |
 
 `MISSING` already exists as `PBMissing default` (format kind `@missing`, design spec 4.1); it
@@ -421,7 +421,7 @@ rebuilt or dropped silently.
 **Defining indexes:**
 
 ```smalltalk
-people := people addIndex: (PBEqualityIndex name: 'by_city' path: 'city').
+people := people addIndex: (PBEqualityIndex name: 'by_city' path: 'city').   "convenience: one path"
 people := people addIndex: (PBRangeIndex name: 'by_age' keySpec: (PBKeySpec path: 'age')).
 PBKeySpec registerExtractor: 'name_length' block: [:p | (p at: 'name') size] version: '1'.
 people := people addIndex: (PBRangeIndex name: 'by_name_length' keySpec: (PBKeySpec extractor: 'name_length')).
@@ -433,15 +433,16 @@ binary comparisons, because overriding `=` on a builder breaks every collection 
 ```smalltalk
 city := PBField path: 'city'.                    "PBField element, PBField extractor: 'name_length'"
 (city eq: 'Oslo')                                "==        ne: is !="
-((PBField path: 'age') between: 30 and: 35)      "between[]; betweenOpen:and:, ...LeftOpen, ...RightOpen"
+((PBField path: 'age') between: 30 and: 35)      "between[]; betweenOpen:and: is between(), betweenLeftOpen:and: between(], betweenRightOpen:and: between[)"
 ((PBField path: 'age') > 70)                     "< <= > >= answer predicates (the receiver is the field)"
 (city in: #('Lima' 'Rome'))                      "in"
 ((PBField path: 'address.zip') isNone)           "?N; notNone, isTrue, notTrue, contains:"
-((city eq: 'Oslo') & ((PBField path: 'age') > 70))   "& | and not combine; and: / or: are not used"
+((city eq: 'Oslo') & ((PBField path: 'age') > 70))   "& | and not combine expressions only; and: / or: are not used"
 ```
 
-A plain block is accepted where a predicate is (`[:p | (p at: 'age') \\ 7 = 0]`): it is opaque,
-becomes a `BlockFilter` in `explain` (the counterpart of `PythonFilter`, named after the language
+A plain block enters a query only through `where:` (`q where: [:p | (p at: 'age') \\ 7 = 0]`);
+`&`, `|` and `not` take expressions only. Chained `where:` calls combine with AND. A block is
+opaque, becomes a `BlockFilter` in `explain` (the counterpart of `PythonFilter`, named after the language
 that runs it, a deviation), and never uses an index. The house mixing rule is `proto_db`'s: in a
 top-level AND, pure conjuncts go to the planner and each block becomes its own filter on top; an
 OR or NOT holding a block is one block filter for the whole predicate (`linq.py:48-61`).
@@ -499,7 +500,8 @@ same plan in both implementations, with these specifics:
   report near-tie differences; results must always match.
 - **Same `explain`.** The keys (`plan`, `estimate`, `children`, `index`, `term`, `predicate`,
   `keys`, `limit`, `offset`, `by_rank`) and node names are `proto_db`'s, except `BlockFilter` with
-  `description`. `explain` answers a `PBFrozenDict` of Strings, Numbers, `nil`, Booleans and
+  `description`. An index's `explain` gives `kind` as `proto_db`'s class name (`'EqualityIndex'`,
+  `'RangeIndex'`), not the protoST class name. `explain` answers a `PBFrozenDict` of Strings, Numbers, `nil`, Booleans and
   Arrays, so `PBNotation describe:` prints it and the conformance runner compares it.
 - **No fallback.** Nothing in the query path catches an error to answer something else; a
   malformed query is `PBValidationError`, an unsupported one `PBNotSupportedError`
@@ -657,7 +659,7 @@ from the model, or whose figures differ between implementations, or whose plan c
 | M2 | Build | `addIndex:` on n elements (bulk) against the fold of `withAdded:` |
 | M3 | Merge | blind writes merged onto an indexed current, standalone and in a three-member cluster (`bench/run_cluster.sh` profile) |
 | P1 | Planner overhead | `plan` and `explain` only, no execution, for predicates of 1 to 32 conjuncts and 0 to 8 indexes |
-| P2 | Crossover | the collection size where the planner switches from scan to index, and the measured times on either side |
+| P2 | Model against timings | for a range term swept from very selective to unselective, and for `!=` on indexes with few and with nearly n key groups: the point where the cost model switches between the index plan and scan plus filter, and whether the measured times of the two plans (both forced) cross at that point. The model's crossover in collection size alone is one or two elements, so size is not the variable swept. |
 | P3 | Intersect | the two-index intersection built by hand against the planner's filter plan |
 
 **The comparison.** Every Q, M and P workload runs on both sides with the same seed, the same data
@@ -694,7 +696,7 @@ that must be empty at release; extending the check is part of task T0.
 | # | Chapter | Teaches (from 1.3) | Program |
 |---|---|---|---|
 | 17 | **Indexes** | Why a walk costs n; why the hand-kept index of chapter 4 fails; an index as part of the version; what each write costs with 0, 1, 3 indexes; key specs, `MISSING` and `nil`; extractors and purity. | `examples/tutorial/17_indexes.st` |
-| 18 | **Queries and the planner** | The builder and the cascade trap; `explain` read node by node; why the planner sometimes scans (the crossover, measured); why `not (x = 5)` is not `x ~= 5`; why no intersection; block predicates and why they never use an index. | `examples/tutorial/18_queries_and_plans.st` |
+| 18 | **Queries and the planner** | The builder and the cascade trap; `explain` read node by node; why the planner sometimes scans (where the model switches, and whether the measured times agree); why `not (x = 5)` is not `x ~= 5`; why no intersection; block predicates and why they never use an index. | `examples/tutorial/18_queries_and_plans.st` |
 | 19 | **Ordered reads and pages** | Skip-k against rank access, measured; one snapshot means stable pages under concurrent commits. | `examples/tutorial/19_ordered_reads_and_pages.st` |
 | 11 (update) | One directory, two languages | An index added by Python, changed and merged by protoST, validated by Python. | `11_python_interop.sh` (extended) |
 
@@ -741,6 +743,21 @@ The spec was approved on 2026-11-18 with these answers to the open questions it 
 | IQ6 | Propose query and index-shape vectors to `proto_db`. | **Stays a proposal; nothing is sent upstream.** | Recorded under "Proposals to `proto_db`" in `decisions.md`. |
 | IQ7 | Propose a portable plan digest to `proto_db`. | **Stays a proposal; nothing is sent upstream.** | The same. Pager tokens stay deferred. |
 | IQ8 | Release vehicle. | **0.3.0, after 0.2.0**, as proposed (IC10). | `CHANGELOG.md` gets a 0.3.0 section. |
+
+**Controller rulings 2026-11-18** (on gaps the documentation drafts found):
+
+| # | Ruling |
+|---|---|
+| CR1 | The `!=` claim of 1.3 was wrong. Under D30 the index complement costs n + G + 1 against 2n for scan plus filter, so it wins whenever the index has fewer than n − 1 key groups (`proto_db` `test_ne_term_alone_prefers_the_index_complement_over_scan_plus_filter`). 1.3 corrected. |
+| CR2 | P2 measures whether real timings cross where the cost model says; the model's crossover for a tiny collection is only one or two elements. 1.3, 7.3 and the chapter 18 row corrected. |
+| CR3 | `name:keySpec:` is the primitive index constructor; `name:path:` is a convenience for a single-path key spec. Both listed (5.2, 5.5). |
+| CR4 | An index's `explain` `kind` uses `proto_db`'s names (`'EqualityIndex'`, `'RangeIndex'`), as plan nodes keep `proto_db`'s names (5.6). |
+| CR5 | Chained `where:` calls combine with AND. `&`, `|` and `not` take expressions only; a block enters only through `where:` and becomes a `BlockFilter` (5.5). |
+| CR6 | `where:` with an argument that is neither a `PBExpression` nor a one-argument block signals `PBValidationError` with the text `where: expects a PBExpression or a one-argument block, got a <class name>` (for example `got a Boolean`). |
+| CR7 | The half-open selectors are `betweenLeftOpen:and:` (`between(]`) and `betweenRightOpen:and:` (`between[)`); pages are zero-based; the pager's `explain` is `pager` → `page_size`, `by_rank` and `plan` → the plan's explain, with no `portable`; `PBExpression class >> compile:` belongs to the term task (T5). |
+| CR8 | Group commit with a failing extractor: when a group-commit leader builds several transactions and one extractor fails, only that transaction's commit fails and the others commit. Tested in the plan's Task 4b. |
+| CR9 | The final task (T10) rewrites every "planned for 0.3.0" note in `docs/not-done.md` and `docs/deviations.md` into a present-tense statement of what is. |
+| CR10 | The guide's worked-plan estimates (for example a cost of 152.585) are model output, labelled "model estimate", never presented as measurements. They must equal `proto_db`'s own planner output for the same data, generated from `proto_db` by a script, never computed by hand; Task 0 checks the label and Task 7 checks the numbers. |
 
 ---
 

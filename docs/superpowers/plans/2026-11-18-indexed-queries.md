@@ -25,7 +25,7 @@ implementation task makes its part runnable and measured.
   interop tests, the vector generators and the Python side of the benchmarks.
 
 **Spec:** `docs/superpowers/specs/2026-11-18-indexed-queries-design.md` (read all of it, including
-section 9.2, the maintainer's rulings IQ1-IQ8 of 2026-11-18, and section 4, the binding
+section 9.2, the maintainer's rulings IQ1-IQ8 and the controller rulings CR1-CR10 of 2026-11-18, and section 4, the binding
 deliverables D1-D7). The normative behaviour is `proto_db` at `v2.0.0rc4`: `proto_db/indexing/*`,
 `proto_db/query/*` (less `cache.py` and the vector parts), `proto_db/collections/{avl,base,lists,
 dictionaries,hash_dictionaries,sets}.py`, `docs/source/indexing-framework.rst` and
@@ -188,6 +188,11 @@ reviews, fixes and integrates.
     persisted tuple, `keySpecObject` the `PBKeySpec`. Grep the drafts for `PBExtractorError`,
     `keySpecData` and `keySpec` and fix every hit that contradicts this.
   - Naming: `proto_db`, never "ProtoDB"/"ProtoBase"; no "successor" of GemStone.
+  - Controller rulings CR1-CR10 (spec 9.2) hold in the drafts: the `!=` text of CR1, P2 as CR2
+    states it, both constructors (CR3), `kind` names (CR4), `where:` and `&` / `|` / `not` (CR5,
+    CR6 with its exact text), `betweenLeftOpen:and:` / `betweenRightOpen:and:`, zero-based
+    pages, the pager's `explain` without `portable` (CR7); every worked-plan figure is labelled
+    "model estimate" (CR10), never presented as a measurement.
 - [ ] **Step 2: write the doc-guard changes and run them to see them fail on the merged drafts.**
   Merge `feat/queries-docs` (`git merge --no-ff feat/queries-docs`), then run
   `tests/run_tests.sh tests/docs`. Expected before the guard changes: FAIL in
@@ -354,8 +359,9 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
 - Consumes: Task 1 (`keyFromSortedOrderKeys:nodeClass:`, weights), Task 2 (`PBKeySpec`,
   `PBMemberKeys`, `PBMisfiledError`).
 - Produces:
-  - `PBKeyGroupIndex class >> name: aString keySpec: aKeySpecOrString` (a String is a path) and
-    `name: aString path: aString`: an empty unsaved index, `member_tokens` 1, fields in
+  - `PBKeyGroupIndex class >> name: aString keySpec: aPBKeySpec` (the primitive, CR3; anything
+    but a `PBKeySpec` is `PBValidationError`) and `name: aString path: aString` (the convenience,
+    `name: n keySpec: (PBKeySpec path: p)`): an empty unsaved index, `member_tokens` 1, fields in
     `persistedFields` order.
   - `PBIndex >> withAdded: anElement`, `withRemoved: anElement`,
     `withReplaced: old with: new`, `empty`, `build: aCollection` → new unsaved index;
@@ -380,7 +386,9 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
     answer new versions and leave the receiver unchanged; counts; duplicates in a multiset;
     `withRemoved:` of an absent element as `proto_db` decides; side group for unorderables;
     `empty` keeps the definition; `build:` equals the fold of `withAdded:` node for node);
-    `mixed numeric and unorderable keys` (Review Focus 2); `explain` keys and values; `validate:`
+    `mixed numeric and unorderable keys` (Review Focus 2); `explain` keys and values, with `kind` `'EqualityIndex'` / `'RangeIndex'` (`proto_db`'s names,
+    CR4), `index`, `key`, `entries`, `keys`, `unorderable`; `name:path:` equals
+    `name:keySpec: (PBKeySpec path:)`; `validate:`
     passes on built indexes and fails with `PBMisfiledError` on a hand-misfiled member; a
     `PBVectorIndex withAdded:` signals `PBNotSupportedError` containing `'vector'`; IP3:
     `keySpec` still answers the tuple, `keySpecObject` an equal `PBKeySpec`.
@@ -495,9 +503,11 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
     `PBNotSupportedError`.
   - `idx_merge_extractor.st` (`"EXPECT: ok 5"`, ruling IQ1, Review Focus 1): extractor
     `'flaky'` raises for one marked element. (a) Standalone: the commit whose merge extracts it
-    fails with the block's own exception (`ZeroDivide`), unchanged; the next commit succeeds. (b) Group commit
-    (D52) of three blind writers, the middle one hitting the element: the other two commit, the
-    middle fails with that same `ZeroDivide`. (c) The simulator's cluster round
+    fails with the block's own exception (`ZeroDivide`), unchanged; the next commit succeeds. (b) `group commit: one extractor fails` (CR8): a
+    group-commit leader (D52) builds three queued blind-write transactions in one round, the
+    middle one's merge hitting the element: the first and third commits' Futures resolve
+    committed and their writes are in the new root; only the middle one's Future fails, with that
+    same `ZeroDivide`. (c) The simulator's cluster round
     (`PBClusterRound >> _build:` with the same three): the same outcome, the round runner still
     serving the next round. (d) The publisher's module comment names the exception (a text check
     of `publisher.st`).
@@ -561,7 +571,8 @@ Depends on Task 2 only; may run before Task 3 if the executor prefers.
   behaviours that apply; `matches:` on `QData values:` equals `proto_db`'s answers recorded in
   `terms.msgpack` for every operator; `degenerate terms as proto_db` (Review Focus 4);
   `compile:` of every recorded list gives a term whose `asList` is the same list and whose
-  `describe` is `proto_db`'s text; `near[]` refused.
+  `describe` is `proto_db`'s text; `near[]` refused; `& | not take expressions only` (CR5): a
+  block argument to `&` or `|` signals `PBValidationError`.
 - [ ] **Step 2:** write `py_term_cases.py`, vendor its output, run
   `tests/run_tests.sh tests/unit/qry_terms.st tests/unit/qry_expressions.st`. Expected: FAIL.
 - [ ] **Step 3:** implement, porting `terms.py` and `expressions.py`.
@@ -626,8 +637,8 @@ Depends on Task 2 only; may run before Task 3 if the executor prefers.
   `GroupBy`, `Join`, `Unnest`) and `keyed.py:266-336`, `461-647`.
 - [ ] **Step 4:** run the three. Expected: PASS.
 - [ ] **Step 5:** guide section "Reading a plan": its worked plans are now produced by a program
-  under `examples/queries/` that prints and checks them; replace their `T6` markers with the
-  printed estimates. Reference ("Plans and explain"), pending lines, checklist rows, CHANGELOG;
+  under `examples/queries/` that prints and checks them. Their estimates are model output,
+  labelled "model estimate" (CR10); Task 7 checks them against `proto_db`. Reference ("Plans and explain"), pending lines, checklist rows, CHANGELOG;
   commit `Queries T6: plan operators, explain, index access paths, rank access`.
 
 ### Task 7: The planner, the index-equals-scan property, query vectors
@@ -672,10 +683,20 @@ Depends on Task 2 only; may run before Task 3 if the executor prefers.
 - [ ] **Step 3:** implement, porting `planner.py` line by line (less `:15-26`, `199-234`).
 - [ ] **Step 4:** run the three. Expected: PASS. Record the near-tie count in the commit body.
 - [ ] **Step 5: bench P1-P3.** Add the workloads (P1: `plan` and `explain` only, 1-32
-  conjuncts, 0-8 indexes; P2: the crossover size and the times either side; P3: the hand-built
+  conjuncts, 0-8 indexes; P2 (CR2): whether the measured times of the index plan and of scan plus filter, both forced,
+  cross where the cost model switches, for a range swept from very selective to unselective and
+  for `!=` on indexes with few and with nearly n key groups (the model's crossover in collection
+  size is one or two elements, so size is not swept); P3: the hand-built
   intersection against the planner's filter plan). Run `RUNS=5 bench/run_query.sh P1 P2 P3`.
   Expected: `verified` (plans equal between implementations, or IP8 near ties named). Record and
   replace the T7 markers.
+- [ ] **Step 5b: worked plans equal `proto_db`'s (CR10).** Write
+  `tests/interop/py_guide_plans.py`, which builds the guide's worked-plan data with `proto_db`
+  and prints `proto_db`'s own `explain` for each worked plan, and `tests/docs/guide_plans.sh`,
+  which requires every "model estimate" number quoted in `docs/queries.md` and chapter 18 to
+  equal that output (within IP8's tolerance) and the protoBaseST program's printed plan to equal
+  it too. Expected: FAIL first on any hand-computed figure in the drafts; fix the text from the
+  generated output, never by hand; then PASS.
 - [ ] **Step 6:** guide (planner section), R2 deviation entry citing `PBCost class >> log2:`,
   reference ("Queries": `PBPlanner`), pending lines, checklist rows, CHANGELOG; commit
   `Queries T7: the planner; index equals scan; query vectors; P1-P3 measured`.
@@ -706,6 +727,12 @@ Depends on Task 2 only; may run before Task 3 if the executor prefers.
     aBoolean`, `thenBy:`, `thenBy:descending:`, `skip:`, `take:`, `distinct` → a new `PBQuery`;
     `asArray`, `do:`, `count`, `first` (`PBUserError` when empty), `firstOrNil`, `explain`,
     `plan`, `pagerSize: n` (Task 9). No `select:` (ruling IQ2).
+  - `where:` takes a `PBExpression` or a one-argument block; chained `where:` calls combine with
+    AND (CR5); anything else signals `PBValidationError` with exactly
+    `'where: expects a PBExpression or a one-argument block, got a ' , anArgument class name`
+    (CR6; for `true`: `where: expects a PBExpression or a one-argument block, got a Boolean`,
+    using the class name protoST answers for `true`, recorded in the test). A block enters a
+    query only through `where:`.
   - The mixing rule (`linq.py:48-61`): in a top-level AND, pure conjuncts go to the planner and
     each block becomes its own `PBBlockFilter` on top; an OR or NOT holding a block is one block
     filter for the whole predicate.
@@ -716,7 +743,9 @@ Depends on Task 2 only; may run before Task 3 if the executor prefers.
   rows); immutability (every message answers a new query; the receiver's `explain` unchanged);
   `the cascade does not chain` (`q where: p; take: 5` leaves `q`'s plan unchanged);
   `query keeps its version` (Review Focus 3); `first` of an empty query signals `PBUserError`;
-  `PBQuery` does not understand `select:`; mixing rule plans equal `proto_db`'s shape on the same
+  `PBQuery` does not understand `select:`; `chained where: is AND` (`(q where: a) where: b`
+  plans and answers as `q where: a & b`); `where: a Boolean` signals `PBValidationError` whose
+  `messageText` is the CR6 text exactly, and so does a two-argument block; mixing rule plans equal `proto_db`'s shape on the same
   predicate (node names, `BlockFilter` for `PythonFilter`).
 - [ ] **Step 2:** run `tests/run_tests.sh tests/unit/qry_field.st tests/unit/qry_query.st`.
   Expected: FAIL.
@@ -743,8 +772,10 @@ Depends on Task 2 only; may run before Task 3 if the executor prefers.
 **Interfaces:**
 - Consumes: Tasks 6-8.
 - Produces: `PBPager class >> on: aPlanOrQuery pageSize: n` (`n` ≥ 1, else
-  `PBValidationError`); `rows` (Integer), `pages` (Integer), `page: k` (0-based, as
-  `proto_db`; out of range as `pager.py` decides) → `Array`, `byRank` (Boolean), `explain`.
+  `PBValidationError`); `rows` (Integer), `pages` (Integer), `page: k` (zero-based, as
+  `proto_db`, CR7; a negative or non-Integer `k` is `PBValidationError`; past the last page as
+  `pager.py` decides) → `Array`, `byRank` (Boolean), `explain` → `PBFrozenDict` with exactly
+  `pager` → {`page_size`. `by_rank`} and `plan` → the plan's `explain`; no `portable` (CR7).
   `PBQuery >> pagerSize: n` answers `PBPager on: self pageSize: n`. No `token` (deferred, 3.2).
 
 - [ ] **Step 1: write the failing tests.** `qry_pager.st` (`"EXPECT: ok 8"`): the
@@ -794,7 +825,10 @@ A failure found here is fixed in the owning module, fail-first.
   against `indexing-framework.rst` and `query-planner.rst`; README and `docs/tutorial/README.md`
   rows (drop "draft"); `gemstone.md` and `soil.md` re-checked; `docs/decisions.md` gets IC1-IC10,
   IQ1-IQ8 and IP1-IP15 (updated where execution changed one), and "Proposals to `proto_db`"
-  (IQ6, IQ7: not sent); `docs/not-done.md` gets the deferred items of spec 3.2.
+  (IQ6, IQ7: not sent), and CR1-CR10; `docs/not-done.md` gets the deferred items of spec 3.2.
+  **CR9:** every "planned for 0.3.0" (or "in 0.3.0", "will") note in `docs/not-done.md` and
+  `docs/deviations.md` is rewritten as a present-tense fact of what is shipped or still not
+  done; `grep -n "0.3.0" docs/not-done.md docs/deviations.md` shows no future-tense line.
 - [ ] **Step 6:** commit `Queries: final verification`; report to the maintainer. Do not merge, tag or push.
 
 ---
