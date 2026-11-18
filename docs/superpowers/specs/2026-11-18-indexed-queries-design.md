@@ -257,6 +257,15 @@ explicit:
 These are the maintainer's requirement of 2026-11-18 and are **binding**: the feature is not done
 until each criterion holds. Each is owned by the tasks named in section 11.
 
+**Documentation first (maintainer's priority, 2026-11-18).** For the conceptual description the
+documentation matters more than the code, so the conceptual guide (D2) and the tutorial chapters
+(D3) are drafted **before any implementation task**, against the API this spec approves. Their
+code samples are marked pending until the API lands; each later implementation task turns its
+chapter's samples into runnable examples and tests (D4) and replaces the "not measured yet"
+markers with its measured figures (D5). The drafts keep the course-material form of 1.3 (the
+obvious solution, why it fails, the measured alternative); a figure that has not been measured is
+marked as such and never invented.
+
 | # | Deliverable | Acceptance criteria |
 |---|---|---|
 | D1 | **Reference documentation** in `docs/reference.md` | Every new public class and every public message (sections 5.2 and 5.5) is listed with its arguments, its answer and the errors it signals. `tests/docs/reference_selectors.sh` passes with no allowance for the new selectors; every selector the new chapters and the guide cite exists in `src/protobase`. |
@@ -310,6 +319,7 @@ machinery), `terms.st`, `plans.st`, `planner.st`, `query.st`, `pager.st`; `avl.s
 | `PBQuery`, `PBField` | `Queryable`, `F` / `Field` | The front end (5.5). |
 | `PBPager` | `Pager` | `on: aPlanOrQuery pageSize: n`; `rows`, `pages`, `page: k`, `byRank`, `explain`. No `token` (deferred). |
 | `PBMisfiledError` | `ProtoMisfiledError` | New error, a `PBCorruptionError` subclass, as in `proto_db`. |
+| `PBExtractorError` | none (a deviation, IQ1 in 9.2) | New error, a `PBValidationError` subclass: an extractor block raised; names the extractor and carries the original error (`cause`). |
 
 `MISSING` already exists as `PBMissing default` (format kind `@missing`, design spec 4.1); it
 becomes visible API as the answer of `extract:` and of a projected absent field.
@@ -400,8 +410,10 @@ it. The rules that make the bytes equal:
 **Rule for what cannot be maintained:** a collection holding a vector index or an unknown index
 kind is read and refused for writes (3.3); a key-group index with format-3 tokens is rebuilt on
 first change. An index built by `proto_db` with an extractor that this process has not registered
-is read and queried for the terms that do not need extraction (a lookup reads only the trees),
-but any change to the collection, or a `validate:`, signals `proto_db`'s error, `PBValidationError`
+is read, and a query whose plan never extracts a key (an index access path with no residual
+filter on the extractor's path) runs, because a lookup reads only the trees; a query whose plan
+does extract (a scan, or a residual filter on `@name`) signals, and so does any change to the
+collection or a `validate:`: `proto_db`'s error, `PBValidationError`
 naming the extractor and telling the program to register it (`keyspec.py:139-146`). It is never
 rebuilt or dropped silently.
 
@@ -565,10 +577,13 @@ in the 0.1 prefix list syntax (language neutral) with an order and a window:
 The database directory and a JSON file are vendored under `tests/conformance/vectors-queries/`
 with a SHA-256 manifest and the generator's commit, regenerated only by an explicit script (as
 `fetch_vectors.sh` is). `tests/conformance/queries.st` opens the directory, runs every query, and
-requires: results equal in every case, always; costs equal within a relative 1e-12 (the log2
-issue, R2); and the same plan tree and index choice, except where the chosen and the rejected
-candidate's costs are within that tolerance of each other (a near tie), which is reported by name
-and not failed (ruling IQ4). Any other plan difference fails. The same generator also checks, on the Python
+requires: results equal in every case, always; and the same plan tree and index choice, with
+every node's rows equal and costs equal within a relative 1e-12 (the log2 issue, R2). When the
+plans differ, the case is a near tie, reported by name and not failed (ruling IQ4), only if the
+root cost protoBaseST computes for its own plan and the root cost `proto_db` recorded for its
+plan are within that tolerance of each other: both are optimal under their own arithmetic, so
+equal costs mean the two candidates tied. Any other plan difference fails. (`explain` shows the
+chosen plan only, so the rule compares the two chosen plans, never a rejected candidate.) The same generator also checks, on the Python
 side, that each recorded result equals a scan (the invariant), so a vector can never encode a
 `proto_db` bug as truth without the generator failing.
 
@@ -589,11 +604,17 @@ conformance set is IQ6, kept as a proposal and not sent (ruling, 9.2).
 ### 7.1 Unit tests (ported from `proto_db`)
 
 Every `proto_db` test of the in-scope parts is ported or justified in
-`tests/unit/queries_checklist.tsv`: `tests/unit/test_equality_index.py` (13 tests),
-`test_range_index.py` (11), `test_index_base.py` (28), `test_index_key_neutrality.py` (3),
-`test_index_contract.py` (3), `test_planner.py` (38), `test_query_plans.py` (4),
-`test_linq.py` (56), `test_pager.py`, and the vector, cache and token tests marked "excluded" or
-"deferred". The counts are of `def test_` lines; parametrised cases are more.
+`tests/unit/queries_checklist.tsv` (tag `v2.0.0rc4`; these files are unchanged at `b99285b`):
+`tests/unit/test_equality_index.py` (13 tests), `test_range_index.py` (11), `test_index_base.py`
+(28), `test_index_key_neutrality.py` (3), `test_index_contract.py` (3), `test_keyspec.py` (19),
+`test_terms.py` (19), `test_expressions.py` (25), `test_planner.py` (38), `test_query_plans.py`
+(4), `test_linq.py` (56), `test_pager.py` (19); `tests/property/test_index_equals_scan.py` (2),
+`test_index_rank.py` (5); `tests/concurrency/test_index_weights_concurrency.py` (1),
+`test_indexed_roots.py` (2), `test_pager_stability.py` (1); and, as excluded or deferred rows,
+`test_vector_index.py` (30), `test_query_cache.py` (19) and
+`tests/property/test_query_cache_soundness.py` (3): 301 rows. The counts are of `def test_`
+lines; parametrised cases are more. (The first version of this list omitted the key-spec, term,
+expression, property and concurrency files; corrected while writing the plan.)
 
 ### 7.2 Property and contract tests
 
@@ -713,7 +734,7 @@ The spec was approved on 2026-11-18 with these answers to the open questions it 
 
 | # | Question | Ruling (2026-11-18) | Consequence for the design |
 |---|---|---|---|
-| IQ1 | Application code in the commit build: a merge onto a collection with an extractor index runs the extractor in the publisher (and in the cluster round), which `publisher.st:71-73` says runs no application code. | **As `proto_db`.** The extractor runs in the commit. An error it raises fails only that commit and names the extractor. Purity is a documented contract. | 5.3 and 5.8 as written; the publisher's module comment names the exception; the extractor registry's comment, the reference and chapter 17 state the purity contract; a test plants a failing extractor and checks that only its commit fails, with the name in the error. |
+| IQ1 | Application code in the commit build: a merge onto a collection with an extractor index runs the extractor in the publisher (and in the cluster round), which `publisher.st:71-73` says runs no application code. | **As `proto_db`.** The extractor runs in the commit. An error it raises fails only that commit and names the extractor. Purity is a documented contract. | 5.3 and 5.8 as written; the publisher's module comment names the exception; the extractor registry's comment, the reference and chapter 17 state the purity contract; a test plants a failing extractor and checks that only its commit fails, with the name in the error. **Found while planning:** `proto_db`'s `KeySpec.extract` (`keyspec.py`, `extract`) propagates the extractor's own exception unchanged, so "names the extractor" is not what `proto_db` does. The plan (call IP2) meets the ruling's wording by signalling `PBExtractorError` (a `PBValidationError`) naming the extractor and carrying the original error, and records the difference in `deviations.md`; flagged for the maintainer's confirmation. |
 | IQ2 | The shape of the query API. | **The proposal as written:** `eq:` / `ne:` with the binary comparisons, `&` / `|` / `not`, `project:` / `collect:` for projection, no `select:` on `PBQuery`, no selection blocks in the first release. | 5.5 as written. |
 | IQ3 | Scope cut: pager tokens, the query cache, `GroupBy` / `Join` / `Unnest`, computed values, `ValuesScan`. | **Deferred, as proposed.** | 3.2 as written; `not-done.md` lists them. |
 | IQ4 | A `log2` primitive in protoST for exact plan parity. | **No protoST change; a documented deviation.** The query vectors compare plans and report near-tie differences; results must always match. | R2 is a `deviations.md` entry; the query-vector runner reports a plan difference on a near-tie (costs within a relative 1e-12 of each other) as an expected difference and fails on any other plan difference and on every result difference. |
@@ -755,8 +776,14 @@ the rulings are in section 9.2.
 
 ## 11. Proposed task breakdown
 
-A rough order only; the detailed plan (with per-task tests and reviews) comes later. Docs,
-tutorials and benchmarks run **alongside** the code: each task delivers its own tests, its part of
+A rough order only; the detailed plan is `docs/superpowers/plans/2026-11-18-indexed-queries.md`.
+**Order (maintainer, 2026-11-18): documentation first.** The conceptual guide, the drafts of
+chapters 17-19, the chapter 11 update, the new reference sections and the pending examples are
+written first, before T1, by a separate documentation job on branch `feat/queries-docs` (off
+`3eb28c6`); the plan's opening task reviews and integrates them. Figures not yet measured are
+marked `[measured in T<n>: …]`, naming the task below that measures them. The table below lists the
+implementation work; each of its tasks then makes its chapter's samples runnable and replaces its
+markers with measured figures. Benchmarks run **alongside** the code: each task delivers its own tests, its part of
 the reference, and the benchmark of the code it adds; a final task runs the full comparison and
 the audits once.
 
