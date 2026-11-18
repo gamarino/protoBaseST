@@ -50,8 +50,8 @@ db newTransactionDo: [:t |
     t setRootObject: 'byCity' value: byCity].
 ```
 
-Then a writer adds a person and does not touch `byCity`. It might be a program written a year
-later, or the Python side of chapter 11, which has never heard of a root named `byCity`:
+Then a writer adds a person and does not touch `'byCity'`. It might be a program written a year
+later, or the Python side of chapter 11, which has never heard of a root named `'byCity'`:
 
 ```smalltalk
 db run: [:t |
@@ -66,9 +66,9 @@ lesson check: 'the hand-kept index does not, and nothing said so'
 This is how a hand-kept index fails, and none of it is a bug in the program that kept it:
 
 - **Every writer must remember it**, in both languages, forever. The database does not know that
-  `byCity` describes `people`; to the database they are two unrelated roots.
-- **Merges do not help.** Two blind writes to `people` merge (chapter 6), and two blind writes to
-  `byCity` merge too, but each root is merged on its own. Nothing keeps the second in step with
+  `'byCity'` describes `'people'`; to the database they are two unrelated roots.
+- **Merges do not help.** Two blind writes to `'people'` merge (chapter 6), and two blind writes to
+  `'byCity'` merge too, but each root is merged on its own. Nothing keeps the second in step with
   the first.
 - **Nothing checks that the two agree.** The stale answer is a valid answer to the database. It
   is found later, by someone else, as a wrong report.
@@ -96,9 +96,9 @@ lesson check: 'and the planner used it' is: (oslo explain at: 'plan') equals: 'I
 The decisive property is where the index is updated: **in every mutator**, in the transaction's
 own thread, before the commit. `setAt:value:` computes the new tree of the dictionary and the new
 version of each index in one step and answers one new collection holding both
-(`proto_db`, `collections/base.py:1-13`). There is no code path that answers a collection with a
+(`proto_db`, `collections/base.py` lines 1-13). There is no code path that answers a collection with a
 stale index, so a writer cannot forget: the writer that added person 600 above would have updated
-`by_city` without knowing it existed.
+`'by_city'` without knowing it existed.
 
 Why not at commit time, in the publisher, for the roots that changed? Because a transaction reads
 back its own uncommitted versions (chapter 5), and those would then disagree with their own
@@ -126,7 +126,7 @@ lesson check: 'validate: every index equals a scan'
     is: ([after validate. 'clean'] on: PBCorruptionError do: [:e | e messageText]) equals: 'clean'.
 ```
 
-Replacing person 0 by a version living in Oslo moved it from one key group of `by_city` to
+Replacing person 0 by a version living in Oslo moved it from one key group of `'by_city'` to
 another; removing person 1 took it out of the Oslo group. The transaction opened before the commit
 still reads its own snapshot, and the snapshot's indexes are the snapshot's: an index is never
 shared between versions in a way that could leak a later change into an earlier one.
@@ -151,11 +151,11 @@ lesson check: 'both blind writes merged, the index counts them' is: (inCity valu
 lesson check: 'and the merged version keeps its indexes' is: after indexNames equals: #('by_age' 'by_city').
 ```
 
-Neither transaction read `people`, and neither new dictionary has an index. The obvious way to
+Neither transaction read `'people'`, and neither new dictionary has an index. The obvious way to
 merge them onto the indexed root would be to replace it, and a concurrent commit's change would be
 lost silently. Chapter 6's merge does something else: it replays each transaction's intents
 (`setAt:value:` of 700, of 701) through the **public mutators of the current version**, and those
-mutators maintain the current version's indexes (`proto_db`, `collections/base.py:594-631`). The
+mutators maintain the current version's indexes (`proto_db`, `collections/base.py` lines 594-631). The
 merge needs no index-specific rule at all.
 
 Two consequences, both explained in [the guide](../queries.md#index-maintenance-under-immutability-and-the-commit):
@@ -251,7 +251,7 @@ always gives the same key, whatever the time, the process or any state outside t
 index stores the keys the block computed; an extractor that reads the clock, a counter or a global
 gives keys that no later scan can reproduce, and the index then disagrees with its elements
 silently. Nothing can check purity, so it is a documented contract, as in `proto_db`
-(`keyspec.py:60-83`). The block must also be thread-safe: it may run on any actor, and during a
+(`keyspec.py` lines 60-83). The block must also be thread-safe: it may run on any actor, and during a
 merge it runs in the publisher.
 
 **A name keeps its meaning.** The name and the declared version are the extractor's identity
@@ -259,7 +259,7 @@ across processes, never its code. Binding a registered name to another block is 
 what an extractor computes needs a new name or a new version, and a rebuilt index, exactly as
 changing an index definition does.
 
-**Another process.** A database written by a process that registered `name_length` can be read by
+**Another process.** A database written by a process that registered `'name_length'` can be read by
 one that did not: a lookup reads only the stored trees. But any change to that collection, or a
 `validate`, needs the extractor and signals `PBValidationError` naming it and telling the program to
 register it. It is never rebuilt or dropped silently.
@@ -272,7 +272,7 @@ the commit, which the publisher otherwise never runs. The maintainer's ruling IQ
 exactly as `proto_db` does: **an exception raised by an extractor fails only the commit whose merge
 ran it, and it reaches that commit's caller unchanged.** protoBaseST adds no error class of its
 own and does not wrap it, because `proto_db`'s `KeySpec.extract` does not either
-(`keyspec.py`, `extract`).
+(`keyspec.py`, `KeySpec.extract`).
 
 ```smalltalk
 nameless setRootObject: 'people' value: (nameless newDictionary setAt: 800 value: (nameless newObject: { 'city' -> 'Oslo' })).
@@ -286,12 +286,12 @@ lesson check: 'and the failed one left nothing behind' isTrue: (people has: 800)
 ```
 
 The nameless person passed every check in its own transaction, because its new dictionary had no
-index. Only the merge onto the indexed root ran `name_length`, and only then did it fail. Outside a
+index. Only the merge onto the indexed root ran `'name_length'`, and only then did it fail. Outside a
 merge the same error appears earlier and more plainly: a mutator of an indexed collection runs the
 extractor in the transaction's own thread, at the call.
 
 Because the exception is the block's own, its text is all the caller learns. An extractor that can
-fail should say in its message what it was extracting, as `name_length` does above ("a person
+fail should say in its message what it was extracting, as `'name_length'` does above ("a person
 without a name").
 
 ## What to take away

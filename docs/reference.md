@@ -1122,7 +1122,7 @@ protoBaseST does not know is refused the same way.
 | `path`, `op`, `value`, `keySpec` | |
 | `matches: anElement` | The scan oracle, `proto_db`'s D28 semantics ([queries.md](queries.md#key-specs-missing-and-nil)). |
 | `describe`, `asList` | `{ 'path'. 'op'. 'value' }` for `explain`; the 0.1 list form. |
-| `PBExpression`: `evaluate: anElement`, `describe`, `asList`, `termsDo: aBlock`, `&`, `\|`, `not` | Every condition (a term, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate`). `PBAnd` and `PBOr` are n-ary and flattened; `x not not` is `x`. |
+| `PBExpression`: `evaluate: anElement`, `describe`, `asList`, `termsDo: aBlock`, `&`, `\|`, `not` | Every condition (a term, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate`). `PBAnd` and `PBOr` are n-ary and flattened; `aCondition not not` is the condition itself. |
 | `PBAnd withAll: anArray`, `PBOr withAll: anArray`, `PBNot of: anExpression` | Explicit construction. |
 | `PBExpression class >> compile: anArray` | The 0.1 prefix list syntax: `{ 'city'. '=='. 'Oslo' }`; terms in sequence are joined by AND; `'&'`, `'\|'` binary, `'!'` unary. Malformed: `PBValidationError` naming the position. |
 | `PBBlockPredicate` | An opaque condition: a block and a description. Never answered by an index. |
@@ -1139,7 +1139,7 @@ protoBaseST does not know is refused the same way.
 ### Queries
 
 **`PBQuery`** is immutable: every message but the ones that run it answers a new query. A cascade
-(`q where: p; take: 5`) sends every message to `q` and keeps only the last answer.
+(`q where: p; take: 5`) sends every message to the first receiver and keeps only the last answer.
 
 | Message | Meaning |
 |---|---|
@@ -1176,15 +1176,15 @@ Every node is a `PBQueryPlan`, immutable once built, safe to run on any actor:
 
 | Node (`explain`) | Class | Fields |
 |---|---|---|
-| `CollectionScan` | `PBCollectionScan` | `collection`, `rows`, `indexes` |
-| `IndexLookup`, `IndexRange`, `IndexComplement`, `IndexOrderedScan` | `PBIndexPlan` | `index`, `term` (`nil` for an ordered scan), `descending` (ordered scan) |
-| `Filter` | `PBFilter` | `predicate` |
-| `BlockFilter` | `PBBlockFilter` | `description` |
+| `CollectionScan` | `PBCollectionScan` | `'collection'`, `'rows'`, `'indexes'` |
+| `IndexLookup`, `IndexRange`, `IndexComplement`, `IndexOrderedScan` | `PBIndexPlan` | `'index'`, `'term'` (`nil` for an ordered scan), `'descending'` (ordered scan) |
+| `Filter` | `PBFilter` | `'predicate'` |
+| `BlockFilter` | `PBBlockFilter` | `'description'` |
 | `Union`, `Intersect` | `PBUnion`, `PBIntersect` | none |
-| `Project` | `PBProject` | `fields` or `function` |
+| `Project` | `PBProject` | `'fields'` or `'function'` |
 | `Sort` | `PBSort` | `keys` (each `{ 'key'. 'descending' }`) |
-| `Limit` | `PBLimit` | `limit`, `offset`, `by_rank` (only when true) |
-| `Count` | `PBCount` | `by_rank` (only when true) |
+| `Limit` | `PBLimit` | `'limit'`, `'offset'`, `'by_rank'` (only when true) |
+| `Count` | `PBCount` | `'by_rank'` (only when true) |
 | `Distinct` | `PBDistinct` | none |
 
 The meaning of every node, field and estimate, with three worked plans, is
@@ -1198,7 +1198,7 @@ deferred).
 | Message | Meaning |
 |---|---|
 | `PBPager on: aPlanOrQuery pageSize: n` | `n` ≥ 1, else `PBValidationError`. |
-| `page: k` | Page `k`, **zero-based** as `proto_db`'s, as an `Array`. By rank when the plan offers it, else from a result materialised once. |
+| `page: k` | Page k, **zero-based** as `proto_db`'s, as an `Array`. By rank when the plan offers it, else from a result materialised once. |
 | `rows`, `pages` | The exact number of rows; of pages (0 for an empty result). |
 | `byRank` | True when pages are sought by rank (O(log n + page size)). |
 | `explain` | `{ 'pager' -> { 'page_size'. 'by_rank' }. 'plan' -> the plan's explain }`. |

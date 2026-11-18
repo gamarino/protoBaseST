@@ -14,7 +14,7 @@ Previous: [17. Indexes](17-indexes.md). Next: [19. Ordered reads and pages](19-o
 Chapter 17 made indexes part of the collection. This chapter asks questions of it: how to write a
 query, how to read the plan that answers it, and why the planner sometimes ignores an index that
 exists. The data is chapter 17's: 600 people, four cities in turn, ages 18 to 77, ten people of
-each age, with an equality index `by_city` and a range index `by_age`.
+each age, with an equality index `'by_city'` and a range index `'by_age'`.
 
 ## A query is a value
 
@@ -32,10 +32,10 @@ kept := (q where: (city eq: 'Oslo')) take: 5.
 lesson check: 'keep each answer' is: (planOf value: kept) equals: 'Limit <- IndexLookup'.
 ```
 
-The cascade is the trap to see first. `q where: ...; take: 5` sends both messages to `q` and
+The cascade is the trap to see first. `q where: ...; take: 5` sends both messages to q and
 answers the last one's result: the first five people, from anywhere. It is the same trap as
 `tags add: 'urgent'` with the answer discarded (README), and nothing fails. Parentheses keep each
-answer. (`planOf` is a six-line block of the program that lists the node names of a plan from the
+answer. (planOf, a six-line block of the program, lists the node names of a plan from the
 root down, `'Limit <- IndexLookup'`; it reads `explain`, which the next section explains.)
 
 The second trap is `=`:
@@ -57,9 +57,9 @@ simply `false`, and `where:` refuses it as a malformed query.
 | `city eq: 'Oslo'`, `city ne: 'Oslo'` | `==`, `!=` |
 | `age < 30`, `age <= 30`, `age > 70`, `age >= 70` | `<`, `<=`, `>`, `>=` (the field must be the receiver: `30 < age` sends `<` to an Integer) |
 | `age between: 30 and: 35` | `between[]`; also `betweenOpen:and:`, `betweenLeftOpen:and:`, `betweenRightOpen:and:` |
-| `city in: #('Lima' 'Rome')` | `in` |
+| `city in: #('Lima' 'Rome')` | `'in'` |
 | `zip isNone`, `zip notNone` | `?N`, `?!N` |
-| `active isTrue`, `active notTrue`, `tags contains: 'urgent'` | `?T`, `?!T`, `contains` |
+| `active isTrue`, `active notTrue`, `tags contains: 'urgent'` | `?T`, `?!T`, `'contains'` |
 | `a & b`, `a \| b`, `a not` | `And`, `Or`, `Not` |
 
 `&` and `|` are binary messages, so Smalltalk evaluates them left to right with no precedence
@@ -69,7 +69,7 @@ and the compiler inlines them.
 ## Reading a plan
 
 `explain` answers the plan that will run, as a `PBFrozenDict`: the node name under `plan`, its own
-fields, an `estimate` with `rows` and `cost`, and `children`. The shape and the keys are
+fields, an `'estimate'` with `'rows'` and `'cost'`, and `'children'`. The shape and the keys are
 `proto_db`'s (`proto_db/query/plans.py`), so a plan reads the same in both languages.
 
 ```smalltalk
@@ -83,9 +83,9 @@ lesson check: 'the rows it produces' is: oslo count equals: 150.
 ```
 
 An `IndexLookup` descends the index to the Oslo group and produces its members. Its estimate is the
-planner's prediction, not a measurement: `rows` is what it expects to produce (exact here, because
-the group records its size), and `cost` is an abstract number of units, one per row produced, per
-key group visited and per tree level descended (`proto_db/indexing/keyed.py:596-622`). Costs are
+planner's prediction, not a measurement: `'rows'` is what it expects to produce (exact here, because
+the group records its size), and `'cost'` is an abstract number of units, one per row produced, per
+key group visited and per tree level descended (`proto_db/indexing/keyed.py` lines 596-622). Costs are
 only for comparing candidate plans with each other. The guide reads every node and every field,
 with three worked plans: [Reading a plan](../queries.md#reading-a-plan).
 
@@ -120,7 +120,7 @@ lesson check: 'the same rows: an index never changes an answer'
 
 The obvious plan for two indexed conditions is to ask both indexes and intersect the two answers.
 `proto_db`'s planner never builds it, and protoBaseST's will not either. Under the cost model an
-intersection of `a` and `b` costs `cost(a) + rows(a) + cost(b) + rows(b)`, and a filter over the
+intersection of a and b costs `cost(a) + rows(a) + cost(b) + rows(b)`, and a filter over the
 better input costs `cost(a) + rows(a)`: the intersection can never be cheaper
 (`proto_db/query/planner.py`, module docstring, "Access paths and cost"). So enumerating
 intersections would only add untested code.
@@ -158,7 +158,7 @@ lesson check: 'ne: has an index plan, the complement' is: (planOf value: (q wher
 lesson check: 'the one exact rewrite: not isNone is notNone' is: (planOf value: (q where: age isNone not)) equals: 'IndexRange'.
 ```
 
-`few` holds three people: one aged 30, one aged 40, one without an age. The obvious optimisation
+The list few holds three people: one aged 30, one aged 40, one without an age. The obvious optimisation
 rewrites `not (age = 30)` as `age ne: 30` to use the index. It would change the answer: the ageless
 person satisfies the first (it is not true that its age is 30) and not the second (`ne:` matches
 present keys only, chapter 17). So the planner keeps a negated term as a residual filter, and the

@@ -13,7 +13,7 @@ Previous: [18. Queries and the planner](18-queries-and-plans.md). Back to the [i
 A report shows people by age, fifty to a page, and the user asks for page 50. This chapter is about
 the two questions behind that request: what page 50 costs, and whether page 50 is still the page
 that follows page 49 when someone commits in between. The data is chapter 18's 600 people, with a
-range index `by_age`.
+range index `'by_age'`.
 
 ## An order on an indexed key
 
@@ -48,9 +48,9 @@ For an order on one key, the planner compares two candidates: plan the condition
 first sorts 60 rows; the second reads 600. ([The guide](../queries.md#plan-3-an-ordered-window)
 works out both costs.) With several order keys a `Sort` is always used.
 
-## `by_rank`: a window that is sought, not skipped
+## `'by_rank'`: a window that is sought, not skipped
 
-Both windows above show `by_rank`: true in their `Limit` node. It means the `Limit` does not run its
+Both windows above show `'by_rank'`: true in their `Limit` node. It means the `Limit` does not run its
 source and throw rows away until it reaches the window: it asks the source for rows `offset` to
 `offset + limit` directly. The index trees carry, in every node, the number of occurrences below it
 (a *weight*), so occurrence number *r* is found by one descent, as a position is found in a
@@ -60,7 +60,7 @@ instead of O(offset + its size).
 Rank access is offered by an index lookup, range or ordered scan; by a scan of a `PBList` or a
 `PBDictionary`; by a `Limit` over one of those; by a filter of a single term over an ordered scan of
 the index that answers that term; and by a sort on one key over an index plan of that same key, as
-in `narrow` above, because the range is already in key order (`proto_db/query/plans.py`, `window`
+in the narrow query above, because the range is already in key order (`proto_db/query/plans.py`, the window method
 of each node). Anything else, a block key, two order keys, a residual filter of two terms, has no
 rank, and its rows must be produced to be counted.
 
@@ -143,13 +143,13 @@ lesson check: 'count of a range, by rank'
 
 `count` uses the same weights: when the plan knows its exact number of rows without producing them
 (an index plan does, from the weights of the groups it covers), the count is read, not computed by
-walking the rows. A `Count` node in a plan shows `by_rank`: true when it does so.
+walking the rows. A `Count` node in a plan shows `'by_rank'`: true when it does so.
 
 ## What to take away
 
 - An order on an indexed key streams the index; a selective condition is found by its index and
   sorted.
-- `by_rank` means a window is sought in O(log n + its size), not skipped.
+- `'by_rank'` means a window is sought in O(log n + its size), not skipped.
 - Skipping k pages costs k pages; a pager seeks page k when its plan has rank access, and
   materialises once when it does not.
 - A pager reads one snapshot: every row once, whatever commits meanwhile. A new query per page
