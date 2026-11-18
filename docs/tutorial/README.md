@@ -62,6 +62,24 @@ chapters 14 to 16 runs. What a cluster costs, measured on one machine, is in cha
 | 15 | [Failures and recovery](15-failures-and-recovery.md) | `15_losing_members.st`, `15_wiped_disk.st`, `15_majority_loss.st` |
 | 16 | [Operating a cluster](16-operating-a-cluster.md) | `16_configuration.st` |
 
+### Indexed queries (planned for 0.3.0; drafts, not implemented)
+
+> **Draft.** These chapters are written before the code, from the approved
+> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md). **The API they
+> use does not exist yet**: their programs live in
+> [examples/queries/pending/](../../examples/queries/pending/README.md) and have never run, and
+> every figure they need is a `[measured in T<n>: ...]` marker. Today protoBaseST reads
+> `proto_db`'s indexes and refuses every change to an indexed collection (chapter 4). The concepts
+> are in [queries.md](../queries.md).
+
+| # | Chapter | Program (pending) |
+|---|---|---|
+| 17 | [Indexes](17-indexes.md) | `17_indexes.st.pending` |
+| 18 | [Queries and the planner](18-queries-and-plans.md) | `18_queries_and_plans.st.pending` |
+| 19 | [Ordered reads and pages](19-ordered-reads-and-pages.md) | `19_ordered_reads_and_pages.st.pending` |
+
+Chapter 11 also gains a draft section, "Indexes, from both sides".
+
 ## Running the programs
 
 You need protoST 0.10.0 or newer and this repository's `src/` on the module path (README,
@@ -91,7 +109,10 @@ Both are explained in chapter 2, and both surprise Smalltalk programmers:
 - [erp.md](erp.md): the guided build of a small ERP in one script, with the reasoning
   behind each design choice. These chapters split the same ground into small programs and add
   bytes, actors, crashes and the refusals; read either first.
-- [reference.md](../reference.md): every public class and message.
+- [reference.md](../reference.md): every public class and message (and, marked planned, the
+  indexed-query API).
+- [queries.md](../queries.md): indexed queries and the query planner, the conceptual guide
+  (draft; not implemented).
 - [deviations.md](../deviations.md): every difference from `proto_db`, every refusal, and the
   performance figures.
 - [decisions.md](../decisions.md): the choices, with what each costs if it is wrong.

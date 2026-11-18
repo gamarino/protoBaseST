@@ -66,7 +66,8 @@ lesson check: 'a read root is protected, not merged'
 
 - A `PBList` keeps no log, so a blind write of a list replaces the root (the last commit wins).
 - Mutable cells are never merged.
-- A collection with an index is refused outright (chapter 4).
+- A collection with an index is refused outright (chapter 4). Planned for 0.3.0, not implemented:
+  merges onto indexed collections, replayed through their mutators (draft [chapter 17](17-indexes.md)).
 
 So the choice is the programmer's, per write: read and be protected, or write blindly and merge.
 `proto_db` makes the same choice in the same places; the 27 concurrent-commit scenarios of
