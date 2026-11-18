@@ -1,9 +1,9 @@
 # protoBaseST indexed queries and the query planner: analysis and design proposal
 
 - **Date:** 2026-11-18
-- **Status:** PROPOSAL, for the maintainer's review. No code is written. Implementation starts
-  after the cluster release (0.2.0) ships. The open questions that are the maintainer's call are
-  in section 10.3.
+- **Status:** APPROVED by the maintainer on 2026-11-18. The rulings on the open questions IQ1 to
+  IQ8 are recorded in section 9.2. No code is written. Implementation starts after the cluster
+  release (0.2.0) ships; the plan is `docs/superpowers/plans/2026-11-18-indexed-queries.md`.
 - **Scope in one line:** port `proto_db`'s index maintenance (equality and range indexes), its
   term and expression language, its planner and its plan operators, an idiomatic Smalltalk query
   front end, and in-process paging by rank. **Vector indexes and vector search are excluded.**
@@ -19,8 +19,8 @@
   citation below holds for the normative tag `v2.0.0rc4`. Citations are `file:line` at that
   content.
 - **protoBaseST** at `02d9826` (branch `feat/queries`, from `feat/cluster`). **protoST** at
-  `b7e206a` (0.12.0). protoCore and protoST need **no change** for the recommended scope; one
-  optional protoST primitive is discussed in 10.3 (IQ4).
+  `b7e206a` (0.12.0). protoCore and protoST need **no change** (ruling IQ4, section 9.2: no
+  `log2` primitive is requested).
 - **Not verified while writing:** nothing was built or run (the machine is reserved for the
   cluster's timer audit). Every statement about protoBaseST is from reading its source; every
   statement about `proto_db` is from reading its source and docs. The effort figures in 11 are
@@ -144,7 +144,7 @@ paths at `b99285b` (= `v2.0.0rc4` for these files).
 | Op log records index-definition changes (`@index_add`, `@index_remove`) | `:42-44`, `572-573` | **Missing.** `_PBOpLog` logs element ops only. |
 | `rebase_onto` replays element ops through index-maintaining mutators, then index-definition ops, `ProtoConflictError` for an index created concurrently | `:594-631` | **Partial.** Element replay exists; onto an indexed current it is refused; index-definition replay missing. |
 | Transaction merge rule `_merged` | `transactions.py:3217-3223` | **Exists** (`transactions.st:671-675`), but refused onto an indexed current through `rebaseOnto:`. |
-| Merges resolve extractors on the committing transaction's behalf, registries pre-built outside the lock | `transactions.py:2865-2873`, `3136-3145` | **Not applicable as such** (no runtime registry in protoBaseST, format 5 refused); the question of application code in the publisher is IQ1. |
+| Merges resolve extractors on the committing transaction's behalf, registries pre-built outside the lock | `transactions.py:2865-2873`, `3136-3145` | **Not applicable as such** (no runtime registry in protoBaseST, format 5 refused); application code in the publisher is allowed for extractors by ruling IQ1 (9.2). |
 
 ### 2.4 Term and expression language
 
@@ -229,7 +229,7 @@ paths at `b99285b` (= `v2.0.0rc4` for these files).
 
 | Item | Why deferred | What it would take |
 |---|---|---|
-| Portable pager tokens, `resumePager:`, `snapshot_ref` | The token's plan digest is BLAKE2b-128 of the Python `repr()` of a nested tuple (`cache.py:264-303`). Reproducing Python's `repr` of floats, strings, `Decimal` and nested tuples byte for byte in protoST is fragile and is not a format anyone specified. Without it a token from one language is refused by the other. | An upstream proposal to `proto_db` (IQ7): a digest over a canonical msgpack encoding of the plan key. Then a separate, small plan. |
+| Portable pager tokens, `resumePager:`, `snapshot_ref` | The token's plan digest is BLAKE2b-128 of the Python `repr()` of a nested tuple (`cache.py:264-303`). Reproducing Python's `repr` of floats, strings, `Decimal` and nested tuples byte for byte in protoST is fragile and is not a format anyone specified. Without it a token from one language is refused by the other. | A proposal to `proto_db` (IQ7, kept as a proposal, not sent): a digest over a canonical msgpack encoding of the plan key. Then a separate, small plan. |
 | Query result cache | It is an optimisation whose soundness rests on the key covering everything a result depends on (`cache.py:1-49`: pointers, extractor generations, the decimal context). Its value at protoST's speed is unmeasured, and a wrong key returns a wrong answer silently. | Port after the planner is measured, with `proto_db`'s soundness property tests (`tests/property/test_query_cache_soundness.py`). |
 | `GroupBy` / `Agg`, `Join`, `Unnest` (`select_many`), `ValuesScan` | Execution operators, not optimisation: no index is involved and the planner never chooses them. They are straightforward ports with their own semantics to test (aggregate typing, `MISSING` groups). | A follow-up task list over the same plan classes. |
 | Computed values, `startswith` / `endswith`, field-to-field comparison | In `proto_db` they are not terms: they always become a `PythonFilter` (`linq.py:37-46`). A protoST block predicate does the same job today (5.5). | Port if the workshop asks for them. |
@@ -265,7 +265,7 @@ until each criterion holds. Each is owned by the tasks named in section 11.
 | D4 | **Runnable examples** in `examples/queries/` (and the chapter programs in `examples/tutorial/`) | Each example checks its own results (the house `lesson check:` style) and is run by `tests/run_tests.sh`. At least: indexes and lookups, ranges and ordered reads, compound predicates (AND / OR / NOT) with `explain`, paging, a merge onto an indexed root, and Python interop (a Python-written indexed collection changed from protoST and validated by Python). |
 | D5 | **Performance tests** under `bench/` | The workloads of section 7.3: indexed against full scan per query shape (equality, `in`, range, AND, OR, ordering with paging), index maintenance on commit, planner overhead, and protoBaseST against `proto_db` on the same workloads. Every run prints the work it did (rows, queries, the plan chosen, a checksum of the results) and the runner refuses a run whose counts or checksums differ from the model or between implementations. The methodology is documented in the runner's header and in `docs/deviations.md#performance`, where the dated results are recorded with machine, load, commits and binaries. |
 | D6 | **Conformance and interop tests** (section 6) | Format vectors and query vectors pass in both directions; the expected-differences table is empty for this feature or lists each difference with its reason. |
-| D7 | **Decision records** | Every call of section 9 and every answer to section 10.3 is entered in `docs/decisions.md`; every deviation in `docs/deviations.md`; `docs/not-done.md` updated (indexes and queries leave the "not done" list; the deferred items of 3.2 enter it). |
+| D7 | **Decision records** | Every call of section 9.1 and every ruling of section 9.2 is entered in `docs/decisions.md`; every deviation in `docs/deviations.md`; `docs/not-done.md` updated (indexes and queries leave the "not done" list; the deferred items of 3.2 enter it). |
 
 ---
 
@@ -282,7 +282,7 @@ until each criterion holds. Each is owned by the tasks named in section 11.
 - **No locks in the Smalltalk layer.** Plans hold only immutable values, so they run on any
   thread or actor. The extractor registry is one `Atom` holding an immutable map, changed by
   compare-and-swap.
-- **No change to protoCore or protoST** (memory rule; IQ4 is a request, not an assumption).
+- **No change to protoCore or protoST** (memory rule; confirmed by ruling IQ4).
 
 ### 5.2 Classes and their responsibilities
 
@@ -355,7 +355,10 @@ which maintain `current`'s indexes, then the index-definition ops per name, with
 in `rebaseOnto:` moves from "any index" to "a vector or unknown index". The publisher's merge
 (`transactions.st:671-675`) needs no other change. **This runs during the commit's build**, in
 the publisher (standalone) or the round's build (cluster), so a path key spec reads atoms there
-and an extractor key spec runs its block there: IQ1.
+and an extractor key spec runs its block there. Ruling IQ1 (9.2): this is allowed, as in
+`proto_db`; an error raised by the extractor fails only that commit, with an error naming the
+extractor, and purity is a documented contract. The publisher's module comment ("runs no
+application code") is amended to name this one exception.
 
 **Unsaved atoms.** A new index version is an unsaved atom like a new collection version
 (`PBAtom >> oid` drawn on need, D21). Its trees hold elements (atoms by reference) in member keys.
@@ -413,7 +416,7 @@ PBKeySpec registerExtractor: 'name_length' block: [:p | (p at: 'name') size] ver
 people := people addIndex: (PBRangeIndex name: 'by_name_length' keySpec: (PBKeySpec extractor: 'name_length')).
 ```
 
-**Predicates.** The recommended builder (IQ2) uses keyword selectors for equality and keeps the
+**Predicates.** The builder (ruling IQ2) uses keyword selectors for equality and keeps the
 binary comparisons, because overriding `=` on a builder breaks every collection that compares it:
 
 ```smalltalk
@@ -451,7 +454,7 @@ chapter shows it first.
 |---|---|---|
 | `from_collection(c)` | `PBQuery from: c` | A collection or a plan; an `Array` or `OrderedCollection` is deferred with `ValuesScan`. |
 | `where(p)` | `where: p` | |
-| `select(...)` | `project: #('name' 'age')`, `collect: aBlock` | Smalltalk's `select:` filters, so `proto_db`'s name would read backwards. `select:` is **not** defined on `PBQuery` (IQ2). |
+| `select(...)` | `project: #('name' 'age')`, `collect: aBlock` | Smalltalk's `select:` filters, so `proto_db`'s name would read backwards. `select:` is **not** defined on `PBQuery` (ruling IQ2). |
 | `order_by(k, descending=)`, `then_by` | `orderBy:`, `orderBy:descending:`, `thenBy:`, `thenBy:descending:` | A path String, a `PBField`, or a block (a block key always sorts with `Sort`). |
 | `skip(n)`, `take(n)` | `skip:`, `take:` | |
 | `distinct()` | `distinct` | |
@@ -460,7 +463,7 @@ chapter shows it first.
 | `pager(n)` | `pagerSize: n` | In-process only. |
 | `plan_query(source, where, order_by, limit, offset)` | `PBPlanner plan:where:orderBy:limit:offset:` | `where:` also takes the 0.1 list syntax as an `Array`. |
 
-**Optional sugar (IQ2, not recommended for the first release): selection blocks.** A block such as
+**Not in the first release (ruling IQ2): selection blocks.** A block such as
 `[:each | (each at: 'city') = 'Oslo']` could be translated by evaluating it once against a
 recording proxy (protoST honours a user `doesNotUnderstand:` since 0.10.0, and a non-Boolean
 receiver of an inlined `and:` gets the real send, STATUS D53). It reads like GemStone's selection
@@ -480,7 +483,9 @@ same plan in both implementations, with these specifics:
   `keyed.py:596-622` and `plans.py:439-814`, with sums and products evaluated in Python's order.
   The descent term is `log2(groups + 2)`; protoST has no `log2` and its `log:` is `ln x / ln b`
   (`math_prims.cpp`, `prim_LogBase`), which can differ from C's `log2` in the last bit. Two
-  candidates whose costs differ by one ulp could then rank differently (risk R2, IQ4).
+  candidates whose costs differ by one ulp could then rank differently (risk R2). Ruling IQ4:
+  this is a documented deviation; protoST is not changed. The query vectors compare plans and
+  report near-tie differences; results must always match.
 - **Same `explain`.** The keys (`plan`, `estimate`, `children`, `index`, `term`, `predicate`,
   `keys`, `limit`, `offset`, `by_rank`) and node names are `proto_db`'s, except `BlockFilter` with
   `description`. `explain` answers a `PBFrozenDict` of Strings, Numbers, `nil`, Booleans and
@@ -560,14 +565,15 @@ in the 0.1 prefix list syntax (language neutral) with an order and a window:
 The database directory and a JSON file are vendored under `tests/conformance/vectors-queries/`
 with a SHA-256 manifest and the generator's commit, regenerated only by an explicit script (as
 `fetch_vectors.sh` is). `tests/conformance/queries.st` opens the directory, runs every query, and
-requires: the same plan tree and index choice, the same rows exactly, results equal, and costs
-equal within a relative 1e-12 (the log2 issue, R2), with every case where the choice differs
-listed in `_expected_differences.st` or failing. The same generator also checks, on the Python
+requires: results equal in every case, always; costs equal within a relative 1e-12 (the log2
+issue, R2); and the same plan tree and index choice, except where the chosen and the rejected
+candidate's costs are within that tolerance of each other (a near tie), which is reported by name
+and not failed (ruling IQ4). Any other plan difference fails. The same generator also checks, on the Python
 side, that each recorded result equals a scan (the invariant), so a vector can never encode a
 `proto_db` bug as truth without the generator failing.
 
 Upstream: these vectors are protoBaseST's, not `proto_db`'s. Proposing them for `proto_db`'s own
-conformance set is IQ6.
+conformance set is IQ6, kept as a proposal and not sent (ruling, 9.2).
 
 ### 6.3 What stays different
 
@@ -681,8 +687,12 @@ maps GemStone's indexes) and `soil.md` are re-checked. All are linked from `READ
 
 ## 9. Decisions taken in this spec
 
-Numbered IC1 to IC10 (indexed-queries calls), for `docs/decisions.md`; each can be overruled
-there.
+Two kinds, both for `docs/decisions.md`: the spec's own calls (9.1) and the maintainer's rulings
+on the open questions (9.2).
+
+### 9.1 The spec's calls, IC1 to IC10
+
+Numbered IC1 to IC10 (indexed-queries calls); each can be overruled in `docs/decisions.md`.
 
 | # | Call | Why | Cost if wrong |
 |---|---|---|---|
@@ -697,6 +707,21 @@ there.
 | IC9 | Pager tokens, the query cache, `GroupBy`/`Join`/`Unnest`, computed values: deferred (3.2). | Each is either not portable today (tokens) or not optimisation (the rest). | Programs that need them wait. |
 | IC10 | A version bump to 0.3.0 for the release that carries this feature, after 0.2.0 (cluster). | It changes what protoBaseST writes (indexed collections) and adds API. | Naming only. |
 
+### 9.2 The maintainer's rulings (2026-11-18)
+
+The spec was approved on 2026-11-18 with these answers to the open questions it raised.
+
+| # | Question | Ruling (2026-11-18) | Consequence for the design |
+|---|---|---|---|
+| IQ1 | Application code in the commit build: a merge onto a collection with an extractor index runs the extractor in the publisher (and in the cluster round), which `publisher.st:71-73` says runs no application code. | **As `proto_db`.** The extractor runs in the commit. An error it raises fails only that commit and names the extractor. Purity is a documented contract. | 5.3 and 5.8 as written; the publisher's module comment names the exception; the extractor registry's comment, the reference and chapter 17 state the purity contract; a test plants a failing extractor and checks that only its commit fails, with the name in the error. |
+| IQ2 | The shape of the query API. | **The proposal as written:** `eq:` / `ne:` with the binary comparisons, `&` / `|` / `not`, `project:` / `collect:` for projection, no `select:` on `PBQuery`, no selection blocks in the first release. | 5.5 as written. |
+| IQ3 | Scope cut: pager tokens, the query cache, `GroupBy` / `Join` / `Unnest`, computed values, `ValuesScan`. | **Deferred, as proposed.** | 3.2 as written; `not-done.md` lists them. |
+| IQ4 | A `log2` primitive in protoST for exact plan parity. | **No protoST change; a documented deviation.** The query vectors compare plans and report near-tie differences; results must always match. | R2 is a `deviations.md` entry; the query-vector runner reports a plan difference on a near-tie (costs within a relative 1e-12 of each other) as an expected difference and fails on any other plan difference and on every result difference. |
+| IQ5 | Vector and unknown index kinds keep their collection read only. | **Approved.** | IC2 as written. |
+| IQ6 | Propose query and index-shape vectors to `proto_db`. | **Stays a proposal; nothing is sent upstream.** | Recorded under "Proposals to `proto_db`" in `decisions.md`. |
+| IQ7 | Propose a portable plan digest to `proto_db`. | **Stays a proposal; nothing is sent upstream.** | The same. Pager tokens stay deferred. |
+| IQ8 | Release vehicle. | **0.3.0, after 0.2.0**, as proposed (IC10). | `CHANGELOG.md` gets a 0.3.0 section. |
+
 ---
 
 ## 10. Risks, gaps and open questions
@@ -706,47 +731,25 @@ there.
 | # | Risk | Mitigation |
 |---|---|---|
 | R1 | **Speed.** protoBaseST's AVL operations are 12 to 31 times slower than `proto_db`'s (`deviations.md`, "AVL operations"). Each indexed write adds two levels of tree work per index (group tree and members tree). Indexed writes may be slow enough to dominate commits. | Measure first (M1, M3) and say so in chapter 17. No speed claim is made. |
-| R2 | **Planner ties.** `log2` computed as `ln x / ln 2` can differ from C's `log2` by one ulp, so two candidates of almost equal cost may rank differently in the two implementations: same answer, different plan. | Query vectors compare plans exactly and report such cases; IQ4 asks for a `log2` primitive. |
-| R3 | **Application code in the commit build.** An extractor block runs during a merge in the publisher or the cluster round; a slow or failing block delays or fails that commit, and an impure one corrupts the index silently. | IQ1. In any case: the error fails that commit only, with the extractor's name; purity is documented as a contract, as in `proto_db`. |
+| R2 | **Planner ties.** `log2` computed as `ln x / ln 2` can differ from C's `log2` by one ulp, so two candidates of almost equal cost may rank differently in the two implementations: same answer, different plan. | Query vectors compare plans and report near-tie differences; results must always match (ruling IQ4: documented deviation, no protoST change). |
+| R3 | **Application code in the commit build.** An extractor block runs during a merge in the publisher or the cluster round; a slow or failing block delays or fails that commit, and an impure one corrupts the index silently. | Ruling IQ1: as in `proto_db`. The error fails that commit only and names the extractor; purity is a documented contract. |
 | R4 | **Shape drift in bulk builds.** A bulk build that balances differently from `_build_balanced` writes valid but different trees, breaking node-level conformance. | The shape-identity test (6.1.2) on every bulk path. |
-| R5 | **Plan digest is Python-specific.** Portable tokens cannot be ported as specified. | Deferred; IQ7. |
+| R5 | **Plan digest is Python-specific.** Portable tokens cannot be ported as specified. | Deferred; IQ7 stays a proposal to `proto_db`, not sent. |
 | R6 | **Hook-order mismatches** in the mutators produce valid indexes with different shapes. | Port each mutator against its Python source and the shape-identity test. |
 | R7 | **Effort.** `proto_db` reached this design through rulings D28-D58 and review rounds; porting the end state skips the iterations, not the reviews. | Reviews per task, as for the cluster. |
 
 ### 10.2 What protoST or protoCore lacks
 
 - **`log2`** (protoST): `Float >> log:` divides two natural logarithms. Needed only for exact plan
-  parity (R2). Asking for it is IQ4; protoST is not changed without the maintainer's permission.
+  parity (R2). Ruling IQ4: not requested; R2 is a documented deviation.
 - **Nothing in protoCore.** Immutable maps and lists, atoms with compare-and-swap and actors are
   what the design needs, and they exist.
 - **Speed of the interpreter** (R1): not a gap to fix in this feature.
 
-### 10.3 Open questions for the maintainer (most important first)
+### 10.3 Open questions
 
-- **IQ1. Application code in the commit build.** `PBPublisher`'s documentation states that it
-  "runs no application code" (`publisher.st:71-73`). A merge onto a collection with an extractor
-  index runs the extractor's block there (and in the cluster round). Options: (a) follow
-  `proto_db`: allow it, document the purity contract and that a failing extractor fails that
-  commit (recommended: it is the reference's behaviour and the only one that merges); (b) refuse
-  merges onto collections with extractor indexes (`PBNotSupportedError`): the publisher stays free
-  of application code, at the cost of a divergence (such roots conflict instead of merging);
-  (c) allow path and element key specs only, refuse extractor indexes for writes altogether.
-- **IQ2. The shape of the query API.** Approve: keyword equality (`eq:`, `ne:`) with binary
-  comparisons, `&` / `|` / `not`, `project:` / `collect:` for projection and no `select:` on
-  `PBQuery`; selection-block sugar left out of the first release. Or prefer another surface (for
-  example `select:` as the filter, Smalltalk's meaning, with `where:` as its synonym).
-- **IQ3. Scope cut.** Approve deferring portable pager tokens, the query cache, `GroupBy` /
-  `Join` / `Unnest`, computed values and `ValuesScan` (3.2).
-- **IQ4. `log2` in protoST.** Request a `Float >> log2` (C `log2`) primitive in protoST for exact
-  plan parity, or accept R2 as a documented, tested deviation (plans may differ on near-ties, the
-  answers never).
-- **IQ5. Vector and unknown index kinds stay read only** (IC2). Confirm.
-- **IQ6. Upstream query vectors.** Propose to `proto_db` (the maintainer owns it) that its
-  conformance set include index-maintenance shapes and query results with plans, so both
-  implementations test against one source.
-- **IQ7. Upstream plan digest.** Propose to `proto_db` a plan digest over a canonical msgpack
-  encoding of the plan key in place of `repr()`, before protoBaseST ports pager tokens.
-- **IQ8. Release vehicle.** 0.3.0 after 0.2.0 (IC10), or fold into another release.
+None. The questions IQ1 to IQ8 raised by this spec were answered by the maintainer on 2026-11-18;
+the rulings are in section 9.2.
 
 ---
 
