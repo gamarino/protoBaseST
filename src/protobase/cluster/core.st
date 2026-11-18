@@ -38,7 +38,9 @@ clock, a socket or a file, sends, logs or waits.
   PBAcceptorStep   state: appends: reply: vote: (the answer of accept:in:now:): the shell
                    writes the appends in order, syncs, and only once every append that asks for
                    a sync is durable performs the reply effects (atomic acceptor steps, R55,
-                   R81, R81b), then hands the step to the dispatcher (PBAcceptorDecided). vote
+                   R81, R81b), then hands the step to the dispatcher (PBAcceptorDecided), the
+                   steps in the order they were decided: the dispatcher's acceptorView is the
+                   last step handed back, so a shell never lets one overtake another. vote
                    is the grant or reject of this node's own request or renewal, or the ack of
                    its own replication (CC1: a node never sends to itself), nil for any other
                    step; learnt is the highest label of a root the step observed accepted or

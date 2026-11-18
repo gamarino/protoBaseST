@@ -41,7 +41,10 @@ applyTo:).
                  the node's PBSimDisk), sync (through the last append that asks for one; it
                  takes syncCost: microseconds of virtual time when the step asks for a sync,
                  none by default), reply (the reply effects, then PBAcceptorDecided to the
-                 dispatcher); the next step of the lane is decided only after that reply.
+                 dispatcher); the next step of the lane is decided only after that reply. What
+                 the acceptor hands the dispatcher (PBAcceptorDecided, PBAcceptorDiscarded and
+                 the tier reads' answers) reaches it in the order handed, as the real shell's
+                 one-actor-to-one-actor mailbox keeps it (_handBack:at:).
   PBTimer        comes due when the node's clock has advanced by its after (above).
   PBSettle       advances the synthetic transaction of its waiter: commit: aToken at: id asks
                  the node for a permission (PBPermitWanted), then for the base under it
@@ -263,8 +266,10 @@ PBSimDisk >> loggedRoots
 
 "One simulated node: its configuration, clock and disk survive a crash; the rest is its
  incarnation's. lane: the acceptor events not yet decided; laneBusy: a step is between its
- decision and its reply; owed: the last disk entry the acceptor asked to sync."
-Object subclass: #PBSimNode instanceVariableNames: 'config clock disk up gen state acceptor committed lane laneBusy owed paused'.
+ decision and its reply; owed: the last disk entry the acceptor asked to sync; handBacks: the
+ events the acceptor handed to the dispatcher and the dispatcher has not run yet, in the order
+ they were handed."
+Object subclass: #PBSimNode instanceVariableNames: 'config clock disk up gen state acceptor committed lane laneBusy owed paused handBacks'.
 
 PBSimNode class >> config: aConfig
   ^ self basicNew setConfig: aConfig.
@@ -279,6 +284,7 @@ PBSimNode >> setConfig: aConfig
   laneBusy := false.
   owed := 0.
   paused := nil.
+  handBacks := OrderedCollection new.
 
 "A crashed node configured with aConfig from its next start on (its disk and clock kept)."
 PBSimNode >> reconfigure: aConfig
@@ -343,6 +349,9 @@ PBSimNode >> laneBusy: aBoolean
 PBSimNode >> owed
   ^ owed.
 
+PBSimNode >> handBacks
+  ^ handBacks.
+
 PBSimNode >> owe: anIndex
   owed := owed max: anIndex.
 
@@ -355,6 +364,7 @@ PBSimNode >> startState: aNodeState acceptor: anAcceptorState
   lane := OrderedCollection new.
   laneBusy := false.
   owed := 0.
+  handBacks := OrderedCollection new.
 
 PBSimNode >> crash
   up := false.
@@ -363,6 +373,7 @@ PBSimNode >> crash
   committed := nil.
   lane := OrderedCollection new.
   laneBusy := false.
+  handBacks := OrderedCollection new.
 
 "The 16 segment bytes of the roots this node builds."
 PBSimNode >> segment
@@ -1169,6 +1180,7 @@ PBSim >> _run: anEvent
   kind = #dispatch ifTrue: [^ self _dispatch: payload at: node].
   kind = #timer ifTrue: [^ self _dispatch: (payload at: 2) at: node].
   kind = #accept ifTrue: [^ self _accept: node lane removeFirst at: node].
+  kind = #handBack ifTrue: [^ self _dispatch: node handBacks removeFirst at: node].
   kind = #sync ifTrue: [^ self _syncThrough: (payload at: 1) step: (payload at: 2) at: node].
   kind = #reply ifTrue: [^ self _reply: (payload at: 2) at: node syncedThrough: (payload at: 1)].
   ^ Error signal: 'PBSim: unknown event kind ' , kind printString.
@@ -1196,7 +1208,7 @@ PBSim >> _accept: anEvent at: aNode
     self _trace: aNode id , '   append failed, the step is discarded and not replied'.
     aNode lane addFirst: (PBAppendFailed reason: 'simulated append failure').
     aNode laneBusy: false.
-    self _schedule: #dispatch node: aNode payload: (PBAcceptorDiscarded step: step reason: 'simulated append failure') at: now.
+    self _handBack: (PBAcceptorDiscarded step: step reason: 'simulated append failure') at: aNode.
     ^ self _runLane: aNode].
   aNode acceptor: step state.
   last := 0.
@@ -1219,9 +1231,18 @@ PBSim >> _reply: aStep at: aNode syncedThrough: anIndex
   self _trace: aNode id , ' reply'.
   checker replyAt: aNode.
   self _apply: aStep reply at: aNode.
-  self _schedule: #dispatch node: aNode payload: (PBAcceptorDecided step: aStep) at: now.
+  self _handBack: (PBAcceptorDecided step: aStep) at: aNode.
   aNode laneBusy: false.
   self _runLane: aNode.
+
+"anEvent, which the acceptor hands to the dispatcher, queued behind those it handed before: the
+ real shell's acceptor is one actor sending to the dispatcher actor, whose mailbox keeps their
+ order (coordinator.st _PBAcceptor). Each #handBack event runs the oldest one, so the draw
+ among the events due at once never reorders them; it still interleaves them with every other
+ sender's events (a message, a timer, a commit)."
+PBSim >> _handBack: anEvent at: aNode
+  aNode handBacks addLast: anEvent.
+  self _schedule: #handBack node: aNode payload: nil at: now.
 
 PBSim >> _apply: anArray at: aNode
   current := aNode.
@@ -1291,13 +1312,14 @@ PBSim >> applyPublishAcceptor: aPublish
 PBSim >> applyFence: aFence
   ^ self.
 
+"The tier reads are the acceptor's (it owns the tier, coordinator.st): their answers are its
+ hand-backs, behind those it handed before. The simulator answers at once, not behind the
+ events still waiting in the lane as the real acceptor's mailbox would."
 PBSim >> applyReadPersisted: aRead
-  self _schedule: #dispatch node: current
-    payload: (PBStorageRead token: aRead token root: persisted failure: nil) at: now.
+  self _handBack: (PBStorageRead token: aRead token root: persisted failure: nil) at: current.
 
 PBSim >> applyProbeRoot: aProbe
-  self _schedule: #dispatch node: current
-    payload: (PBRootProbed token: aProbe token readable: (current disk canRead: aProbe root)) at: now.
+  self _handBack: (PBRootProbed token: aProbe token readable: (current disk canRead: aProbe root)) at: current.
 
 PBSim >> applyCount: aCount
   | key |

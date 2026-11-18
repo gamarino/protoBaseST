@@ -1,4 +1,4 @@
-"EXPECT: ok 13"
+"EXPECT: ok 14"
 "The deterministic simulator (_sim.st) over the core vocabulary (cluster/core.st), with test
  rules: EchoRules sends a want to every other member, sets one timer (1000 us) and hands its
  PBStartNode to its acceptor, which logs a synced promise and an unsynced committed entry.
@@ -25,7 +25,11 @@
  reads a clock of protoST's (Time, Date, DateTime, the clock primitives, Future after:, Delay);
  each name the exemption lists must be a file that exists. (13) Delays with reorder: true
  deliver every one of 50 messages from n0 to n1, out of send order for seed 11; with reorder:
- false the same seed keeps the send order (proto_db test_in_process_delays_reorder_messages)."
+ false the same seed keeps the send order (proto_db test_in_process_delays_reorder_messages).
+ (14) The acceptor hands its steps back to the dispatcher in the order it decided them (one
+ actor's mailbox order, coordinator.st _PBAcceptor): over seeds 1-12, six steps decided at one
+ virtual time each reach the dispatcher in order; a simulator that schedules each hand-back as
+ an event of its own (drawn among those due at once) is caught."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_sim'.
@@ -133,6 +137,13 @@ ConcurrentLaneSim >> applyToAcceptor: aToAcceptor
 ConcurrentLaneSim >> _runLane: aNode
   ^ self.
 
+"Plant of the simulator: each hand-back of the acceptor to the dispatcher is an event of its own,
+ drawn among the events due at once, so two hand-backs due together can arrive out of order."
+PBSim subclass: #UnorderedHandBackSim.
+
+UnorderedHandBackSim >> _handBack: anEvent at: aNode
+  self _schedule: #dispatch node: aNode payload: anEvent at: now.
+
 "Plant: every node accepts a different root labelled 7 at epoch 1."
 EchoRules subclass: #TwinRootRules.
 
@@ -236,6 +247,38 @@ OrderRules >> dispatchStartNode: anEvent in: s now: t
 
 OrderRules >> dispatchReceived: anEvent in: s now: t
   seen add: (anEvent message at: 'term').
+  ^ PBStep state: s effects: #().
+
+"Six acceptor steps per start, each appending an unsynced promise labelled 1 to 6 and replying
+ nothing, all decided at virtual time 0: seen, the labels of the steps handed back to the
+ dispatcher (PBAcceptorDecided), in the order they arrived."
+PBCoordinatorCore subclass: #HandBackRules instanceVariableNames: 'seen'.
+
+HandBackRules class >> new
+  ^ self basicNew setSeen.
+
+HandBackRules >> setSeen
+  seen := OrderedCollection new.
+
+HandBackRules >> seen
+  ^ seen asArray.
+
+"The harness rules test the simulator, not the rejoin (sim_rejoin.st): an acceptor report of an
+ empty log starts none."
+HandBackRules >> rejoinCheck: s now: t effects: fx
+  ^ s.
+
+HandBackRules >> dispatchStartNode: anEvent in: s now: t
+  ^ PBStep state: s effects: ((1 to: 6) asArray collect: [:k |
+      PBToAcceptor event: (PBReceived message: (PBClusterMessage type: 'request' from: s config nodeId
+        fields: { 'term' -> k. 'rid' -> k. 'inc' -> 0. 'vs' -> 0 }))]).
+
+HandBackRules >> acceptReceived: anEvent in: s now: t
+  ^ PBAcceptorStep state: s
+    appends: { PBLogAppend kind: #promise label: (anEvent message at: 'term') root: nil sync: false } reply: #().
+
+HandBackRules >> dispatchAcceptorDecided: anEvent in: s now: t
+  anEvent step appends isEmpty ifFalse: [seen add: anEvent step appends first label].
   ^ PBStep state: s effects: #().
 
 "--- the checks ---"
@@ -437,5 +480,20 @@ c that: 'delay:reorder: delivers every message out of send order; reorder: false
   is: { (a first asSortedCollection: [:x :y | x <= y]) asArray = (1 to: 50) asArray. a first ~= (1 to: 50) asArray.
     a last }
   equals: { true. true. (1 to: 50) asArray }.
+
+"(14) The acceptor's hand-backs reach the dispatcher in the order it decided its steps."
+a := (PBSimSoak seeds: (1 to: 12)) collect: [:seed |
+  | rules |
+  rules := HandBackRules new.
+  (PBSim seed: seed ids: #('n0') rules: rules options: Dictionary new) runUntil: [false] steps: 200.
+  rules seen].
+b := (1 to: 12) asArray collect: [:seed |
+  | rules |
+  rules := HandBackRules new.
+  (UnorderedHandBackSim seed: seed ids: #('n0') rules: rules options: Dictionary new) runUntil: [false] steps: 200.
+  rules seen].
+c that: 'the acceptor hands its steps back in decision order; a simulator that reorders them is caught'
+  is: { a asSet asArray. b anySatisfy: [:seen | seen ~= (1 to: 6) asArray]. b allSatisfy: [:seen | seen asSortedCollection asArray = (1 to: 6) asArray] }
+  equals: { { (1 to: 6) asArray }. true. true }.
 
 c report displayNl.
