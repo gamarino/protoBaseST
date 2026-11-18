@@ -100,8 +100,8 @@ spec states or a released API; Task 10 copies the table into `docs/decisions.md`
 | # | Call | Why |
 |---|---|---|
 | IP1 | Task numbers are the spec's T0-T10, so a marker `[measured in T<n>: …]` names the task that fills it. T4 is split into Tasks 4a and 4b; a `T4` marker is filled by whichever of the two measures it (M1 in 4a, M3 in 4b). Task 0b is the checklist. | One numbering for the docs job and the plan. |
-| IP2 | **(maintainer)** An error raised by an extractor block is re-signalled as `PBExtractorError` (subclass of `PBValidationError`) whose text names the extractor and the original error's class and text, with the original in `cause`. `proto_db`'s `KeySpec.extract` propagates the block's exception unchanged, so this is a deviation, made to meet ruling IQ1's "names the extractor". | Ruling IQ1's wording; found while planning (spec 9.2, IQ1 row). |
-| IP3 | **(maintainer)** `PBIndex >> keySpec` answers a `PBKeySpec` (decoded with `fromData:`); `keySpecData` answers the persisted tuple that `keySpec` answered in 0.1.0. A malformed persisted tuple is `PBValidationError` naming the index, when asked, never at read. | `name:keySpec:` takes a `PBKeySpec` (spec 5.5); an asymmetric getter would teach the wrong thing. Changes a 0.1.0 selector's answer. |
+| IP2 | **Ruled by the maintainer, 2026-11-18: exactly as `proto_db`.** An exception raised by an extractor block passes through `extract:` unchanged (`KeySpec.extract` does not wrap it) and fails only the commit whose merge ran it. No new error class, no deviation. | Ruling IQ1 as corrected in spec 9.2. |
+| IP3 | **Ruled by the maintainer, 2026-11-18: keep the released API.** `PBIndex >> keySpec` keeps answering the persisted `(kind, arg)` tuple, as in 0.1.0. The new `PBIndex >> keySpecObject` answers it as a `PBKeySpec` (`PBKeySpec fromData: self keySpec`); a malformed tuple is `PBValidationError` naming the index, when asked, never at read. Every later task uses `keySpecObject` for the object. | Compatibility of a 0.1.0 selector. |
 | IP4 | Test layout: unit, property and contract tests live flat in `tests/unit/` (`idx_*.st` indexes, `qry_*.st` terms, plans, planner, query, pager), helpers `_queries.st` (seeded data sets, the scan oracle) and `_qplants.st` (planted defects); generators and replays in `tests/interop/`. The spec's `tests/property/...`, `tests/contracts/...` names are `proto_db`'s files. | CC12 precedent: the runner sets the working directory to the test's and `_check.st` lives in `tests/unit`. |
 | IP5 | `tests/docs/pending_selectors.tsv` (columns: selector, task) lists the selectors the drafts cite before they exist. `reference_selectors.sh` accepts them; a listed selector that is now defined is an error (a stale line), so each task removes its own lines; with `PENDING_FINAL=1` (Task 10) a non-empty list is an error. | Drafts first (maintainer) with the guard kept honest. |
 | IP6 | `tests/docs/measured_markers.sh` lists every `[measured in T<n>: …]` in `docs/` and `README.md`, fails on a malformed marker or a task outside T0-T10, and with `MARKERS_FINAL=1` (Task 10) fails on any marker left. | Numbers never invented, never forgotten. |
@@ -118,8 +118,7 @@ spec states or a released API; Task 10 copies the table into `docs/decisions.md`
 ## Review Focus
 
 1. **An extractor that raises, or is slow, during a merge in a group commit or a cluster round.**
-   Only the commit whose merge ran the extractor fails, with `PBExtractorError` naming the
-   extractor; the other commits of the same round commit; the publisher and the round runner keep
+   Only the commit whose merge ran the extractor fails, with the block's own exception, unchanged; the other commits of the same round commit; the publisher and the round runner keep
    running. Test: Task 4b, `tests/unit/idx_merge_extractor.st` (standalone, group of three, and
    the simulator's cluster round).
 2. **Mixed numeric types and unorderable keys in one index** (1, 1.0, `Decimal` 1, `nil`,
@@ -182,8 +181,12 @@ reviews, fixes and integrates.
   - Semantics agree with `proto_db` (`indexing-framework.rst`, `query-planner.rst`): D28 absence,
     `!=` not the complement of `==`, the one `Not(?N)` rewrite, no intersection plan, Filter
     selectivity 0.5, unions only of index-only branches.
-  - Cluster interaction (spec 5.8) and IQ1's purity contract are stated; `PBExtractorError` named
-    with IP2's flag that it is a deviation.
+  - Cluster interaction (spec 5.8) and IQ1's purity contract are stated, with a failing
+    extractor's own exception passing through unchanged.
+  - **Rulings of 2026-11-18 (IP2, IP3):** no draft mentions `PBExtractorError` or any wrapping of
+    an extractor's error, and no draft says `keySpec` answers an object: `keySpec` answers the
+    persisted tuple, `keySpecObject` the `PBKeySpec`. Grep the drafts for `PBExtractorError`,
+    `keySpecData` and `keySpec` and fix every hit that contradicts this.
   - Naming: `proto_db`, never "ProtoDB"/"ProtoBase"; no "successor" of GemStone.
 - [ ] **Step 2: write the doc-guard changes and run them to see them fail on the merged drafts.**
   Merge `feat/queries-docs` (`git merge --no-ff feat/queries-docs`), then run
@@ -286,7 +289,7 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
 
 **Files:**
 - Create: `src/protobase/keyspec.st`, `src/protobase/keygroups.st` (member-key part only).
-- Modify: `src/protobase/errors.st` (`PBExtractorError`, `PBMisfiledError`), `src/protobase.st`.
+- Modify: `src/protobase/errors.st` (`PBMisfiledError`), `src/protobase.st`.
 - Test: `tests/unit/idx_keyspec.st`, `tests/conformance/index_keys.st`; create
   `tests/interop/py_index_keys.py` and the vendored output
   `tests/conformance/vectors-index-keys/keys.msgpack` + `manifest.sha256`.
@@ -306,9 +309,8 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
     `unregisterExtractor: aName`, `extractorVersion: aName`, `isExtractorRegistered: aName`
     (one `Atom` of a `PBFrozenDict`; rebinding a name to another block or version is
     `PBValidationError`; an unregistered name used is `PBValidationError` with `proto_db`'s text).
-  - `PBExtractorError` (`PBValidationError` subclass): `extractorName`, `cause` (IP2).
-    `extract:` wraps any error of the block in it; `PBMisfiledError` (`PBCorruptionError`
-    subclass) for Task 3.
+  - `extract:` lets any exception of an extractor block pass through unchanged (IP2);
+    `PBMisfiledError` (`PBCorruptionError` subclass) for Task 3.
   - `PBMemberKeys class >> surrogate: aValue`, `memberKeyOf: anElement` (`PBTuple`
     `{{0 or 1. element or surrogate}. exactToken bytes}`), `checkDepth: anElement` (`proto_db`'s
     index depth limits, `keyed.py:161-215`), `lowestOf: aValue` / `highestOf: aValue` (the
@@ -320,9 +322,8 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
     paths, absent → `PBMissing default`, `nil` kept as `nil`, private names → missing, data round
     trip, equality and hash); registry: register, rebind same block and version (accepted),
     rebind other (`PBValidationError`), unregister, use unregistered (`PBValidationError`
-    containing `'register'`); `PBExtractorError`: a block `[:e | 1 / 0]` registered as `'boom'`
-    makes `extract:` signal `PBExtractorError` whose `messageText` contains `'boom'` and whose
-    `cause` is a `ZeroDivide`; registration from 8 actors at once leaves 8 names (CAS).
+    containing `'register'`); `extractor error passes through`: a block `[:e | 1 / 0]` registered
+    as `'boom'` makes `extract:` signal `ZeroDivide` itself, not a `PBDBError`; registration from 8 actors at once leaves 8 names (CAS).
   - `index_keys.st` (`"EXPECT: index keys ok"`): for every case of `keys.msgpack`, the member
     key's wire bytes, the surrogate, `isOrderable:`, the bounds and the depth refusals equal
     `proto_db`'s (seeded values of every rank, unorderables, `PBMissing`, `nil`, atoms, nested
@@ -333,8 +334,7 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
   (`PBKeySpec` not understood).
 - [ ] **Step 3:** implement, porting `keyspec.py` and `keyed.py:81-215`.
 - [ ] **Step 4:** run both tests. Expected: PASS.
-- [ ] **Step 5:** reference ("Key specs and extractors"), remove pending lines, deviation entry
-  for IP2, guide section "Keys, `MISSING` and `nil`" samples runnable (move its program out of
+- [ ] **Step 5:** reference ("Key specs and extractors"), remove pending lines, guide section "Keys, `MISSING` and `nil`" samples runnable (move its program out of
   `examples/queries/pending/` if it needs nothing later), checklist rows of `test_keyspec.py` to
   `ported`; commit `Queries T2: key specs, extractor registry, member keys`.
 
@@ -361,7 +361,7 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
     `withReplaced: old with: new`, `empty`, `build: aCollection` → new unsaved index;
     `explain` → `PBFrozenDict` (keys of `keyed.py:651-675`); `validate: aCollection` (structural
     checks of `keyed.py:677-737`, `PBCorruptionError` or `PBMisfiledError`); `keySpec`,
-    `keySpecData` (IP3); `_with: aFieldDictionary`.
+    `keySpecObject` (IP3; `keySpec` unchanged); `_with: aFieldDictionary`.
   - `PBKeyGroupIndex >> groupCount`, `count`, `countOfKey: aKey`,
     `membersDo: aBlock` (block `[:element :count]`, groups in key order, side group last).
   - `PBVectorIndex` and an unknown index kind: every hook signals `PBNotSupportedError` naming
@@ -383,12 +383,13 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
     `mixed numeric and unorderable keys` (Review Focus 2); `explain` keys and values; `validate:`
     passes on built indexes and fails with `PBMisfiledError` on a hand-misfiled member; a
     `PBVectorIndex withAdded:` signals `PBNotSupportedError` containing `'vector'`; IP3:
-    `keySpec` answers a `PBKeySpec`, `keySpecData` the tuple.
+    `keySpec` still answers the tuple, `keySpecObject` an equal `PBKeySpec`.
   - `idx_contract.st` (`"EXPECT: ok 6"`): the structure half of `index_contract.py` over
     `QData values: 300 seed: s` for 5 seeds: random add / remove / replace keep `validate:`
     passing; `withReplaced:with:` equals remove then add; save and lazy load give equal
     `explain`; no hook changes its receiver.
-  - Extend `read_records_indexes.st` for IP3.
+  - Extend `read_records_indexes.st` for IP3 (`keySpecObject` of each decoded index; the
+    existing `keySpec` checks unchanged).
 - [ ] **Step 2:** run `tests/run_tests.sh tests/unit/idx_keygroups.st tests/unit/idx_contract.st
   tests/unit/read_records_indexes.st`. Expected: FAIL (`withAdded:` not understood).
 - [ ] **Step 3:** implement, porting `base.py:56-338` and `keyed.py:220-457`, `651-737`.
@@ -494,9 +495,9 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
     `PBNotSupportedError`.
   - `idx_merge_extractor.st` (`"EXPECT: ok 5"`, ruling IQ1, Review Focus 1): extractor
     `'flaky'` raises for one marked element. (a) Standalone: the commit whose merge extracts it
-    fails with `PBExtractorError` containing `'flaky'`; the next commit succeeds. (b) Group commit
+    fails with the block's own exception (`ZeroDivide`), unchanged; the next commit succeeds. (b) Group commit
     (D52) of three blind writers, the middle one hitting the element: the other two commit, the
-    middle fails with `PBExtractorError`. (c) The simulator's cluster round
+    middle fails with that same `ZeroDivide`. (c) The simulator's cluster round
     (`PBClusterRound >> _build:` with the same three): the same outcome, the round runner still
     serving the next round. (d) The publisher's module comment names the exception (a text check
     of `publisher.st`).
@@ -517,7 +518,7 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
 - [ ] **Step 6: bench M3.** Add workload M3 (blind writes merged onto an indexed current,
   standalone and in a three-member cluster with `bench/run_cluster.sh`'s profile). Run
   `RUNS=5 bench/run_query.sh M3`. Expected: `verified`. Record and replace the M3 markers.
-- [ ] **Step 7:** reference, deviations (IP2 entry cites this test), checklist rows
+- [ ] **Step 7:** reference, checklist rows
   (`test_indexed_roots.py`, `test_index_weights_concurrency.py`, merge rows), CHANGELOG; commit
   `Queries T4b: merges onto indexed currents; extractors in the commit (IQ1); M3 measured`.
 
@@ -794,8 +795,7 @@ A failure found here is fixed in the owning module, fail-first.
   rows (drop "draft"); `gemstone.md` and `soil.md` re-checked; `docs/decisions.md` gets IC1-IC10,
   IQ1-IQ8 and IP1-IP15 (updated where execution changed one), and "Proposals to `proto_db`"
   (IQ6, IQ7: not sent); `docs/not-done.md` gets the deferred items of spec 3.2.
-- [ ] **Step 6:** commit `Queries: final verification`; report to the maintainer with the
-  flagged calls (IP2, IP3). Do not merge, tag or push.
+- [ ] **Step 6:** commit `Queries: final verification`; report to the maintainer. Do not merge, tag or push.
 
 ---
 
@@ -818,14 +818,16 @@ A failure found here is fixed in the owning module, fail-first.
 3. **Type consistency.** `PBKeySpec` (2) is what `name:keySpec:` (3), `supportsOrder:` (6) and
    `PBTerm >> keySpec` (5) use; `PBSortKey` (6) is what `PBPlanner` (7) and `PBQuery` (8) build;
    `PBEstimate` (6) is `estimate:`'s answer; `windowFrom:to:` answers an `Array` everywhere;
-   `PBExtractorError` (2) is what 4b expects.
+   `keySpecObject` (3) is the only selector answering a `PBKeySpec` from an index; 4b expects
+   the extractor's own exception (2).
 4. **Review Focus.** Each of the five lines has a named test case in its owning task.
 5. **Proportion.** The plan is about the spec's length and holds no method body; the code is the
    port of the cited `proto_db` lines.
 
 Defects of the spec found while planning (fixed in the spec, commit `6680e50`): the checklist
 list of 7.1 omitted five test files (301 rows, not about 200); `proto_db` does not name a failing
-extractor (IQ1's "names the extractor" is a deviation, IP2); the near-tie rule now compares the
+extractor (the question behind IQ1 misdescribed it; the maintainer then ruled IP2: pass the
+exception through, as `proto_db`); the near-tie rule now compares the
 two chosen plans' root costs (6.2); an unregistered extractor index answers queries that never
-extract (5.4). Left as calls rather than spec edits: IP3 (`keySpec` answer), IP9 (`execute`
+extract (5.4). IP3 was ruled: `keySpec` unchanged, `keySpecObject` new. Left as calls rather than spec edits: IP9 (`execute`
 answers an `Array`), IP11 (MessagePack, not JSON), IP15 (term-facing index methods in Task 6).

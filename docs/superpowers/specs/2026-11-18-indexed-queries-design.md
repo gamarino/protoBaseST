@@ -303,7 +303,7 @@ machinery), `terms.st`, `plans.st`, `planner.st`, `query.st`, `pager.st`; `avl.s
 |---|---|---|
 | `PBKeySpec` | `KeySpec` | A frozen `(kind, arg)`: `path:`, `element`, `extractor:`, `forTermPath:`; `extract:` (answers the key or `PBMissing default`), `termPath`, `describe`, `asData` / `fromData:` (the persisted tuple). Compares by value. |
 | `PBKeySpec class` registry | `register_extractor` and friends | `registerExtractor: aName block: aBlock version: aStringOrNil`, `unregisterExtractor:`, `extractorVersion:`. Process-wide, one `Atom` of an immutable dictionary. Rebinding a name to another block or version is `PBValidationError`. |
-| `PBIndex` | `Index` | Gains `withAdded:`, `withRemoved:`, `withReplaced:with:`, `supports:`, `estimate:`, `plan:`, `supportsOrder:`, `orderedPlan:`, `empty`, `build:`, `explain`, `validate:`; `_with:` builds a new unsaved version (as `PBIndexedCollection >> _withChanges:log:complete:` does). Abstract hooks signal `PBUserError` ("subclass responsibility"). |
+| `PBIndex` | `Index` | `keySpec` keeps answering the persisted tuple (the 0.1.0 API); the new `keySpecObject` answers it as a `PBKeySpec` (maintainer, 2026-11-18). Gains `withAdded:`, `withRemoved:`, `withReplaced:with:`, `supports:`, `estimate:`, `plan:`, `supportsOrder:`, `orderedPlan:`, `empty`, `build:`, `explain`, `validate:`; `_with:` builds a new unsaved version (as `PBIndexedCollection >> _withChanges:log:complete:` does). Abstract hooks signal `PBUserError` ("subclass responsibility"). |
 | `PBKeyGroupIndex` | `KeyGroupIndex` | Groups, side group, member keys, rank segments, cost model. `name:keySpec:` (a String is a path) makes an empty index with `member_tokens` 1. |
 | `PBEqualityIndex`, `PBRangeIndex` | `EqualityIndex`, `RangeIndex` | Supported operators; `PBRangeIndex` adds ordered iteration. |
 | `PBVectorIndex` | `VectorIndex` | Unchanged, read only; `supports:` answers false; it makes its collection refuse writes. |
@@ -319,7 +319,6 @@ machinery), `terms.st`, `plans.st`, `planner.st`, `query.st`, `pager.st`; `avl.s
 | `PBQuery`, `PBField` | `Queryable`, `F` / `Field` | The front end (5.5). |
 | `PBPager` | `Pager` | `on: aPlanOrQuery pageSize: n`; `rows`, `pages`, `page: k`, `byRank`, `explain`. No `token` (deferred). |
 | `PBMisfiledError` | `ProtoMisfiledError` | New error, a `PBCorruptionError` subclass, as in `proto_db`. |
-| `PBExtractorError` | none (a deviation, IQ1 in 9.2) | New error, a `PBValidationError` subclass: an extractor block raised; names the extractor and carries the original error (`cause`). |
 
 `MISSING` already exists as `PBMissing default` (format kind `@missing`, design spec 4.1); it
 becomes visible API as the answer of `extract:` and of a projected absent field.
@@ -366,8 +365,8 @@ in `rebaseOnto:` moves from "any index" to "a vector or unknown index". The publ
 (`transactions.st:671-675`) needs no other change. **This runs during the commit's build**, in
 the publisher (standalone) or the round's build (cluster), so a path key spec reads atoms there
 and an extractor key spec runs its block there. Ruling IQ1 (9.2): this is allowed, as in
-`proto_db`; an error raised by the extractor fails only that commit, with an error naming the
-extractor, and purity is a documented contract. The publisher's module comment ("runs no
+`proto_db`; the exception the extractor raises passes through unchanged and fails only that
+commit, and purity is a documented contract. The publisher's module comment ("runs no
 application code") is amended to name this one exception.
 
 **Unsaved atoms.** A new index version is an unsaved atom like a new collection version
@@ -734,7 +733,7 @@ The spec was approved on 2026-11-18 with these answers to the open questions it 
 
 | # | Question | Ruling (2026-11-18) | Consequence for the design |
 |---|---|---|---|
-| IQ1 | Application code in the commit build: a merge onto a collection with an extractor index runs the extractor in the publisher (and in the cluster round), which `publisher.st:71-73` says runs no application code. | **As `proto_db`.** The extractor runs in the commit. An error it raises fails only that commit and names the extractor. Purity is a documented contract. | 5.3 and 5.8 as written; the publisher's module comment names the exception; the extractor registry's comment, the reference and chapter 17 state the purity contract; a test plants a failing extractor and checks that only its commit fails, with the name in the error. **Found while planning:** `proto_db`'s `KeySpec.extract` (`keyspec.py`, `extract`) propagates the extractor's own exception unchanged, so "names the extractor" is not what `proto_db` does. The plan (call IP2) meets the ruling's wording by signalling `PBExtractorError` (a `PBValidationError`) naming the extractor and carrying the original error, and records the difference in `deviations.md`; flagged for the maintainer's confirmation. |
+| IQ1 | Application code in the commit build: a merge onto a collection with an extractor index runs the extractor in the publisher (and in the cluster round), which `publisher.st:71-73` says runs no application code. | **Exactly as `proto_db`.** The extractor runs in the commit. The original exception it raises passes through unchanged (`KeySpec.extract` in `keyspec.py` does not wrap it) and fails only that commit. Purity is a documented contract. No new error class, no deviation. *(Corrected 2026-11-18: the question as first put to the maintainer said `proto_db` names the extractor in the error; it does not.)* | 5.3 and 5.8 as written; the publisher's module comment names the exception; the extractor registry's comment, the reference and chapter 17 state the purity contract; a test plants a failing extractor and checks that only its commit fails, with the block's own exception. |
 | IQ2 | The shape of the query API. | **The proposal as written:** `eq:` / `ne:` with the binary comparisons, `&` / `|` / `not`, `project:` / `collect:` for projection, no `select:` on `PBQuery`, no selection blocks in the first release. | 5.5 as written. |
 | IQ3 | Scope cut: pager tokens, the query cache, `GroupBy` / `Join` / `Unnest`, computed values, `ValuesScan`. | **Deferred, as proposed.** | 3.2 as written; `not-done.md` lists them. |
 | IQ4 | A `log2` primitive in protoST for exact plan parity. | **No protoST change; a documented deviation.** The query vectors compare plans and report near-tie differences; results must always match. | R2 is a `deviations.md` entry; the query-vector runner reports a plan difference on a near-tie (costs within a relative 1e-12 of each other) as an expected difference and fails on any other plan difference and on every result difference. |
@@ -753,7 +752,7 @@ The spec was approved on 2026-11-18 with these answers to the open questions it 
 |---|---|---|
 | R1 | **Speed.** protoBaseST's AVL operations are 12 to 31 times slower than `proto_db`'s (`deviations.md`, "AVL operations"). Each indexed write adds two levels of tree work per index (group tree and members tree). Indexed writes may be slow enough to dominate commits. | Measure first (M1, M3) and say so in chapter 17. No speed claim is made. |
 | R2 | **Planner ties.** `log2` computed as `ln x / ln 2` can differ from C's `log2` by one ulp, so two candidates of almost equal cost may rank differently in the two implementations: same answer, different plan. | Query vectors compare plans and report near-tie differences; results must always match (ruling IQ4: documented deviation, no protoST change). |
-| R3 | **Application code in the commit build.** An extractor block runs during a merge in the publisher or the cluster round; a slow or failing block delays or fails that commit, and an impure one corrupts the index silently. | Ruling IQ1: as in `proto_db`. The error fails that commit only and names the extractor; purity is a documented contract. |
+| R3 | **Application code in the commit build.** An extractor block runs during a merge in the publisher or the cluster round; a slow or failing block delays or fails that commit, and an impure one corrupts the index silently. | Ruling IQ1: exactly as in `proto_db`. The block's own exception passes through unchanged and fails that commit only; purity is a documented contract. |
 | R4 | **Shape drift in bulk builds.** A bulk build that balances differently from `_build_balanced` writes valid but different trees, breaking node-level conformance. | The shape-identity test (6.1.2) on every bulk path. |
 | R5 | **Plan digest is Python-specific.** Portable tokens cannot be ported as specified. | Deferred; IQ7 stays a proposal to `proto_db`, not sent. |
 | R6 | **Hook-order mismatches** in the mutators produce valid indexes with different shapes. | Port each mutator against its Python source and the shape-identity test. |
