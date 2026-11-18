@@ -3,6 +3,8 @@
 <!-- example: examples/tutorial/_interop_write.st -->
 <!-- example: examples/tutorial/11_python_side.py -->
 <!-- example: examples/tutorial/_interop_read.st -->
+<!-- example: examples/queries/pending/_indexed_change.st.pending -->
+<!-- example: examples/queries/pending/11_indexed_python_side.py.pending -->
 Program: [examples/tutorial/11_python_interop.sh](../../examples/tutorial/11_python_interop.sh),
 which runs [_interop_write.st](../../examples/tutorial/_interop_write.st),
 [11_python_side.py](../../examples/tutorial/11_python_side.py) and
@@ -113,7 +115,66 @@ other `proto_db` release.
 
 Python's `proto_db` can do things this prototype cannot, on the same directory: maintain and query
 indexes, write `RepeatedKeysDictionary`, run a cluster. A directory that uses them is still read by
-protoST, which refuses only the changes it cannot make exactly.
+protoST, which refuses only the changes it cannot make exactly. Index maintenance and queries are planned for
+0.3.0; the next section shows the planned interplay, as a draft.
+
+## Indexes, from both sides (draft)
+
+> **Draft: not implemented.** This section shows what protoBaseST 0.3.0 is planned to do (the
+> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md), chapter 17).
+> Today protoST reads Python's indexes and refuses every change to an indexed collection. The
+> code comes from pending programs that **have never run**:
+> [11_indexed_interop.sh.pending](../../examples/queries/pending/11_indexed_interop.sh.pending),
+> which runs [11_indexed_python_side.py.pending](../../examples/queries/pending/11_indexed_python_side.py.pending)
+> and [_indexed_change.st.pending](../../examples/queries/pending/_indexed_change.st.pending) on one
+> directory.
+
+Python writes forty people and indexes them:
+
+```python
+        for i in range(40):
+            people = people.set_at(i, tr.new_object(name=f"person{i}", city=CITIES[i % 4], age=18 + i))
+        people = people.add_index(EqualityIndex("by_city", "city")).add_index(RangeIndex("by_age", "age"))
+        tr.set_root_object("people", people)
+```
+
+protoST queries those indexes, changes the collection through its mutators, and merges a blind
+write onto it:
+
+```smalltalk
+people := db newTransaction getRootObject: 'people'.
+lesson check: 'Python''s indexes are read' is: people indexNames equals: #('by_age' 'by_city').
+lesson check: 'and queried here' is: (inOslo value: people) equals: 10.
+db run: [:tr | | ps |
+    ps := tr getRootObject: 'people'.
+    ps := ps setAt: 0 value: ((ps getAt: 0) with: 'city' value: 'Oslo').
+    ps := ps removeAt: 1.
+    ps := ps setAt: 40 value: (tr newObject: { 'name' -> 'person40'. 'city' -> 'Oslo'. 'age' -> 58 }).
+    tr setRootObject: 'people' value: ps].
+```
+
+```smalltalk
+mine := db newTransaction.
+mine setRootObject: 'people' value: (mine newDictionary
+    setAt: 41 value: (mine newObject: { 'name' -> 'person41'. 'city' -> 'Oslo'. 'age' -> 59 })).
+mine commit.
+```
+
+Python then checks every index against a scan, plans the same query with the same index, and runs
+`proto_db`'s verifier on the directory:
+
+```python
+    people.validate()
+    assert people.index_names() == ["by_age", "by_city"], people.index_names()
+    oslo = from_collection(people).where(F.city == "Oslo")
+    assert oslo.explain()["plan"] == "IndexLookup", oslo.explain()
+    assert oslo.count() == 12, oslo.count()
+```
+
+For this to hold, protoBaseST must write the index trees `proto_db` would have written for the same
+changes, node for node: the same keys, the same tree shapes, the same order of index updates in
+every mutator (spec 5.4). That is checked by the planned interop tests of spec 6.1, which run the
+same seeded operations in both languages and compare the dumps.
 
 ## Running it
 
