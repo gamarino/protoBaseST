@@ -1,8 +1,9 @@
 # protoBaseST tutorial
 
 A chaptered tutorial: twelve chapters, one concept each, each walking one program of
-[examples/tutorial/](../../examples/tutorial/README.md), and two orientation chapters for readers
-who know an object database already.
+[examples/tutorial/](../../examples/tutorial/README.md); four chapters on cluster mode, with the
+programs of [examples/cluster/](../../examples/cluster/README.md); and two orientation chapters for
+readers who know an object database already.
 
 protoBaseST is a Smalltalk implementation, on protoST, of the Python object database `proto_db`
 (developed in the [protoBase repository](https://github.com/gamarino/ProtoDB)); it reads and writes
@@ -45,6 +46,21 @@ code you read here runs. The prose is not checked by a machine.
 | 10 | [Crashes and reopening](10-crash-recovery.md) | `10_crash_recovery.st` |
 | 11 | [One directory, two languages](11-python-interop.md) | `11_python_interop.sh` |
 | 12 | [What is refused, and why](12-refusals.md) | `12_refusals.st` |
+
+### Cluster mode (0.2.0, unreleased)
+
+Several protoST processes sharing one database directory: a peer lease elects an owner, the owner
+issues write permissions, commits are acknowledged by a majority, faulty nodes are fenced, and a
+node that lost its disk rejoins by a ballot, and each node's persister writes the committed root
+to `space.root` afterwards (`sync:` waits for it). Chapter 13 needs no code; every program of
+chapters 14 to 16 runs. What a cluster costs, measured on one machine, is in chapter 16.
+
+| # | Chapter | Programs (in `examples/cluster/`) |
+|---|---|---|
+| 13 | [The ideas behind cluster mode](13-cluster-concepts.md) | `13_terms_and_majorities.st` |
+| 14 | [A three-node cluster](14-a-three-node-cluster.md) | `14_three_nodes.st`, `14_three_nodes_tcp.st`, `14_cluster_commits.st` |
+| 15 | [Failures and recovery](15-failures-and-recovery.md) | `15_losing_members.st`, `15_wiped_disk.st`, `15_majority_loss.st` |
+| 16 | [Operating a cluster](16-operating-a-cluster.md) | `16_configuration.st` |
 
 ## Running the programs
 

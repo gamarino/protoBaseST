@@ -5,7 +5,8 @@
  then B commits, then A commits (plan call C12's order). Each step is a send whose Future the
  driver waits on before the next one, so the interleaving is fixed and nothing depends on
  timing; the driver is the script itself and never waits inside an actor, and an actor waits
- only on the publisher (open question K23, ruling R19). The outcomes and the final contents must be ProtoBase's
+ only on its commit's Future, settled by the space's round runner (open question K23, ruling
+ R19, CC10). The outcomes and the final contents must be proto_db's
  reference, as the JSON records it, except for the blind write onto an indexed root, where
  both commits end in protoBaseST's documented PBNotSupportedError (design spec 7.4; the JSON's
  'protobasest' entry). The table also holds the swapped variant of row 7 (fix round 1) and 13 counted set cases

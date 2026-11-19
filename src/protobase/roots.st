@@ -7,7 +7,7 @@ proto_db/transactions.py (SpaceRoot, DatabaseRoot) at the tag.
                    to: databases (a PBDictionary from database name to its
                    current PBDatabaseRoot); clusterTerm, clusterEpoch and
                    clusterPrevious are optional (absent: nil), written only under
-                   a cluster lease
+                   a cluster lease (databases:term:epoch:previous:)
   PBDatabaseRoot   proto_db.transactions.DatabaseRoot, one version of a database:
                    objects and mutables (PBDictionary), version, committedAt (an
                    aware UTC DateTime), previous (the previous version, nil for
@@ -48,6 +48,32 @@ PBSpaceRoot class >> databases: aDictionary
   (aDictionary isKindOf: PBDictionary) ifFalse: [
     ^ PBValidationError signal: 'PBSpaceRoot databases: a PBDictionary was expected, not ' , aDictionary printString].
   ^ self _unsavedWithState: (PBFrozenDict withAssociations: { 'databases' -> aDictionary }).
+
+"A new, unsaved space root committed under a cluster lease, as proto_db's
+ SpaceRoot(databases=..., cluster=stamp, previous=...): the state keys in the
+ order databases, cluster_term, cluster_epoch, cluster_previous (the order the
+ cluster segment vector shows). anInteger term and epoch are Integers >= 0;
+ aSpaceRootOrNil is the space root it was built on, or nil (written as nil, as
+ proto_db writes a None history link)."
+PBSpaceRoot class >> databases: aDictionary term: aTerm epoch: anEpoch previous: aSpaceRootOrNil
+  (aDictionary isKindOf: PBDictionary) ifFalse: [
+    ^ PBValidationError signal: 'PBSpaceRoot databases: a PBDictionary was expected, not ' , aDictionary printString].
+  ((aTerm isInteger and: [aTerm >= 0]) and: [anEpoch isInteger and: [anEpoch >= 0]]) ifFalse: [
+    ^ PBValidationError signal: 'PBSpaceRoot: the cluster term and epoch are Integers >= 0, not '
+      , { aTerm. anEpoch } printString].
+  (aSpaceRootOrNil isNil or: [aSpaceRootOrNil isKindOf: PBSpaceRoot]) ifFalse: [
+    ^ PBValidationError signal: 'PBSpaceRoot: previous is a PBSpaceRoot or nil, not ' , aSpaceRootOrNil printString].
+  ^ self _unsavedWithState: (PBFrozenDict withAssociations: {
+    'databases' -> aDictionary. 'cluster_term' -> aTerm. 'cluster_epoch' -> anEpoch.
+    'cluster_previous' -> aSpaceRootOrNil }).
+
+"The new, unsaved space root over aDictionary built on aSpaceRootOrNil: without a stamp (nil, a
+ standalone commit) databases: aDictionary, no cluster field, nothing else; with aStamp
+ ({ term. epoch }, a cluster commit, proto_db _new_space_root with a _ClusterStamp)
+ databases:term:epoch:previous: with aSpaceRootOrNil as the previous root."
+PBSpaceRoot class >> databases: aDictionary stamp: aStampOrNil previous: aSpaceRootOrNil
+  aStampOrNil isNil ifTrue: [^ self databases: aDictionary].
+  ^ self databases: aDictionary term: aStampOrNil first epoch: aStampOrNil last previous: aSpaceRootOrNil.
 
 "The term of the cluster lease the root was committed under, or nil."
 PBSpaceRoot >> clusterTerm

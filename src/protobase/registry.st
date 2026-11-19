@@ -13,7 +13,7 @@ types (D59)' and 'Built-in type aliases', with ProtoBase's proto_db/core/atom.py
   PBTypeRegistry canonicalTag: aTag   the tag a writer puts for the type aTag names
   PBTypeRegistry writerTag: aTag      the same, refusing (PBValidationError) a
                                       name every reader must refuse
-  PBTypeRegistry builtinNames         the normative table of the 22 built-in aliases
+  PBTypeRegistry builtinNames         the normative table of the 24 built-in aliases
 
   PBAtom          the abstract base of every persistent object: oid, pointer,
                   storage and the lazy-load memo
@@ -70,10 +70,19 @@ PBTypeRegistry class >> _builtinTable
       'proto_db.indexing.RangeIndex' 'proto_db.indexing.VectorIndex'
       'proto_db.transactions.SpaceRoot' 'proto_db.transactions.DatabaseRoot'
       'proto_db.core.dbobject.DBObject' 'proto_db.avl._Node'
-      'proto_db.avl.CountedKeyNode').
+      'proto_db.avl.CountedKeyNode'
+      'proto_db.registry.ModuleList' 'proto_db.registry.Catalog').
 
+"22 and 23 are the runtime registry's types (format 5, feature registry, proto_db 2.0.0rc4):
+ named here, as the table is append-only, with no class, so a record of either is
+ PBNotSupportedError (docs/deviations.md, 'Reading')."
 PBTypeRegistry class >> builtinCount
-  ^ 22.
+  ^ 24.
+
+"The aliases of the runtime registry's types (proto_db REGISTRY_TYPES): a record of either is
+ format 5, never written here."
+PBTypeRegistry class >> registryAliases
+  ^ #(22 23).
 
 "The alias Integer of a built-in type name, or nil (constant time)."
 PBTypeRegistry class >> aliasOf: aName
@@ -124,7 +133,8 @@ PBTypeRegistry class >> _entryFor: aName
 
 "Registers aClass under aClass typeName and each of aClass typeAliases. The
  name must follow the grammar, and a name of the reserved proto_db. namespace
- must be in the built-in table; an alias is any non-empty String that is not a
+ must be in the built-in table and not one of the runtime registry's types (22, 23:
+ format 5, which protoBaseST does not write); an alias is any non-empty String that is not a
  built-in name (see the module comment). A name or an
  alias already registered by another class is PBValidationError. Registering
  the same class again is a no-op. The class's record shape is built here: a
@@ -179,6 +189,8 @@ PBTypeRegistry class >> _checkDeclaredName: aName of: aClass
       , aName printString].
   ((aName beginsWith: 'proto_db.') and: [(self aliasOf: aName) isNil]) ifTrue: [
     ^ PBValidationError signal: 'PBTypeRegistry: ' , aName , ' is in the reserved proto_db. namespace but is not a built-in type'].
+  (self registryAliases includes: (self aliasOf: aName)) ifTrue: [
+    ^ PBValidationError signal: 'PBTypeRegistry: ' , aName , ' is a format-5 type of the runtime registry; protoBaseST writes format 4'].
 
 "Whether a class is registered under aName (a declared name or an alias)."
 PBTypeRegistry class >> isRegistered: aName
@@ -674,8 +686,8 @@ PBAtom >> printOn: aStream
  aStorage is what a record is written to: it answers pushAtom: aPBAtomEnvelope
  with the PBAtomPointer of the ATOM record it appended (ProtoBase's
  storage.push_atom). PBFileStorage answers it by appending to the segment it
- owns (store.st); saves run on the space's publisher (publisher.st), one at a
- time."
+ owns (store.st); saves run on the space's round runner (round.st), through
+ its publisher (publisher.st), one round at a time."
 
 "A saved atom's place: its pointer and the storage it was written to (an
  immutable pair, what the saved cell of an atom holds)."

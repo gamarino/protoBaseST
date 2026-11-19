@@ -1,0 +1,98 @@
+"EXPECT: 15 majority loss ok (7 checks)"
+"Cluster lesson 15, third program: a minority cannot commit, and a majority of lost logs needs
+ an operator.
+ Tutorial chapter: docs/tutorial/15-failures-and-recovery.md
+
+ What it teaches:
+ - a commit on the minority side of a partition ends PBTimeoutError: it never got a write
+   permission, nothing left the node, and run: does not retry it (a timeout is not a conflict);
+ - the majority side goes on committing meanwhile, and the minority learns its commits after
+   the partition heals;
+ - when the acceptor logs of a majority of voters are lost, the wiped members cannot rejoin by
+   themselves: each plain round finds one witness (the survivor) where two are needed, so no
+   ballot round starts, and each asks again. They stay rejoining; rejoin_blocked stays nil,
+   because it names why a rejoin that has its answers cannot complete, and these never have
+   them. Losing a majority of logs is outside the failure model;
+ - forceRejoin is the operator's decision: the wiped members complete their rejoin with the
+   answers of the members that are left, and the cluster serves again. A commit acknowledged
+   only by the lost logs may be gone: that is the price, and why it is a decision.
+
+ Every wait is a condition with a deadline of 60 s; no duration is asserted. One watch looks,
+ for 2 s (20 request timeouts), for a rejoin that must not happen: a correct implementation passes
+ it whatever the timing, and the window only bounds how long the program looks.
+
+ Run it: STPATH=<repository>/src protost 15_majority_loss.st"
+Import from: 'protobase'.
+Import from: '../tutorial/_lesson'.
+
+| lesson dir ids peers network make nodes spaces until watch dbs outcome tr fresh |
+lesson := Lesson named: '15 majority loss'.
+dir := FileSystem temp / ('pbst-cluster-15m-' , Smalltalk pid printString).
+dir deleteAll.
+until := [:aBlock | | deadline |
+  deadline := Time millisecondClockValue + 60000.
+  [aBlock value or: [Time millisecondClockValue > deadline]] whileFalse: [(Future after: 10) wait].
+  aBlock value].
+"The same poll for ms milliseconds: whether aBlock became true within the window."
+watch := [:ms :aBlock | | deadline |
+  deadline := Time millisecondClockValue + ms.
+  [aBlock value or: [Time millisecondClockValue > deadline]] whileFalse: [(Future after: 10) wait].
+  aBlock value].
+ids := #('n0' 'n1' 'n2').
+peers := ids collect: [:id | PBPeer nodeId: id host: '127.0.0.1' port: 7400].
+network := PBInProcessNetwork new.
+make := [:id | PBClusterCoordinator nodeId: id peers: peers options: (Dictionary new
+  at: #leaseDuration put: 3000;
+  at: #requestTimeout put: 100;
+  at: #acquireTimeout put: 8000;
+  at: #transport put: network endpoint;
+  yourself)].
+nodes := ids collect: [:id | make value: id].
+nodes do: [:node | node start].
+spaces := nodes collect: [:node |
+  PBObjectSpace storage: (PBFileStorage clusterPath: dir pathString) coordinator: node].
+until value: [nodes allSatisfy: [:node | (node stats at: 'rejoining') not]].
+((spaces at: 1) newDatabase: 'shop') run: [:t | t setRootObject: 'counter' value: 0].
+(spaces at: 2) newDatabase: 'n1-scratch'.
+(spaces at: 3) newDatabase: 'n2-scratch'.
+dbs := spaces collect: [:space | space openDatabase: 'shop'].
+
+"n2 is cut off. Its commit cannot get a permission; n0 and n1 go on."
+network partition: #(#('n0' 'n1') #('n2')).
+outcome := [(dbs at: 3) run: [:t | t setRootObject: 'counter' value: (t getRootObject: 'counter') + 100]. #committed]
+  on: PBTimeoutError do: [:e | e return: #timeout].
+lesson check: 'the minority''s commit ends PBTimeoutError' is: outcome equals: #timeout.
+(dbs at: 1) run: [:t | t setRootObject: 'counter' value: (t getRootObject: 'counter') + 1].
+network heal.
+(dbs at: 3) run: [:t | t setRootObject: '_read_barrier' value: true].
+tr := (dbs at: 3) newTransaction.
+lesson check: 'after the heal n2 sees the majority''s commit, not its own'
+  is: (tr getRootObject: 'counter') equals: 1.
+tr abort.
+
+"n1 and n2 lose their disks: two of three logs are gone."
+#(2 3) do: [:k | (nodes at: k) stop waitWithin: 60000. (spaces at: k) close].
+#('n1' 'n2') do: [:id | (dir / 'cluster' / (id , '.roots')) renameTo: id , '.roots.lost'].
+fresh := #('n1' 'n2') collect: [:id | make value: id].
+fresh do: [:node | node start].
+#(2 3) with: fresh do: [:k :node |
+  spaces at: k put: (PBObjectSpace storage: (PBFileStorage clusterPath: dir pathString) coordinator: node)].
+lesson check: 'the wiped members do not rejoin by themselves'
+  isTrue: (watch value: 2000 value: [fresh anySatisfy: [:node | (node stats at: 'rejoins') > 0]]) not.
+lesson check: 'they are still gathering: rejoining, nothing blocked, no ballot rejoin'
+  isTrue: (fresh allSatisfy: [:node |
+    (node stats at: 'rejoining') and: [(node stats at: 'rejoin_blocked') isNil and: [(node stats at: 'rejoin_ballots') = 0]]]).
+
+"The operator decides."
+fresh do: [:node | node forceRejoin].
+lesson check: 'forced, they rejoin' isTrue: (until value: [fresh allSatisfy: [:node | (node stats at: 'rejoining') not]]).
+(dbs at: 1) run: [:t | t setRootObject: 'counter' value: (t getRootObject: 'counter') + 1].
+lesson check: 'the cluster commits again' isTrue: (spaces at: 1) committedEpoch > 0.
+tr := ((spaces at: 2) openDatabase: 'shop') newTransaction.
+lesson check: 'n0''s commits survived on its log' is: (tr getRootObject: 'counter') equals: 2.
+tr abort.
+
+spaces do: [:space | space close].
+{ nodes at: 1 } , fresh do: [:node | node stop waitWithin: 60000].
+dir deleteAll.
+lesson finish.

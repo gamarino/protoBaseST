@@ -1,23 +1,72 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-19)
 
-- A tutorial example suite, `examples/tutorial/`: twelve small protoST programs, one concept each
-  (a first commit, values and versions, records, collections and queries, transactions and
-  conflicts, blind-write merges, mutable cells and history, bytes, actors, crash recovery, sharing
-  a directory with Python's `proto_db`, the refusals). Each prints a line per check and ends with
-  `<lesson> ok (N checks)`; a failed check exits 1. They run with the other tests; lesson 11 is
-  skipped without the interop venv.
-- A chaptered tutorial, `docs/tutorial/`, one chapter per program, quoting it; and two orientation
-  chapters, "Coming from GemStone/S" and "Coming from Soil", which map each system's concepts to
-  protoBaseST's, cite GemTalk's programmer's guide, Soil's repository and Norbert Hartl's blog
-  series, and list what could not be verified.
-- The ERP walk-through moved from `docs/tutorial.md` to `docs/tutorial/erp.md` (content
-  unchanged apart from its relative links), so that the repository has one tutorial directory;
-  every link and `tests/docs/tutorial_sync.sh` follow it. `examples/erp/` is unchanged.
-- `tests/docs/tutorial_chapters_sync.sh` fails when a chapter's code differs from its program;
-  `tests/docs/reference_selectors.sh` now also checks the selectors cited by the chapters and by
-  `examples/tutorial/README.md` (GemStone and Soil selectors are allowed only in `docs/tutorial/`).
+The detailed, task-by-task log of this release is
+[docs/changelog-0.2.0-development.md](docs/changelog-0.2.0-development.md).
+
+### Cluster mode (new)
+
+protoBaseST members can now share one database as a cluster, following `proto_db` 2.0.0rc4's
+cluster protocol 14 at storage format 4. A commit is acknowledged once a majority of the voters
+accepted it, so a cluster of three survives the loss of any one member. See tutorial chapters
+13-16 and `examples/cluster/`.
+
+- **Starting a member:** `PBClusterCoordinator nodeId:peers:options:` (options in milliseconds,
+  validated at construction: `PBClusterConfig`), then `PBObjectSpace storage: (PBFileStorage
+  clusterPath: dir) coordinator: aCoordinator`. Members talk over TCP (`PBTcpTransport`), or over
+  `PBInProcessNetwork` in tests. The optional `#authKey` authenticates every frame with HMAC; the
+  transport is not encrypted.
+- **Committing and reading** work as in standalone mode: `run:`, `commit`, `listDatabases` and
+  `openDatabase:`. A commit may end in `PBOutcomeUnknownError` when its root left the node and its
+  fate could not be learnt; `run:` never retries it. A member left in a minority gets
+  `PBTimeoutError`.
+- **Durability and state:** `committedEpoch`, `persistedEpoch`, `sync:` (a durability barrier) and
+  `persisterStats` on the space. On the coordinator: `stats`, `isHealthy`, `owner`,
+  `clusterSize`, `voters`, `isVoter`, `majority`, and `forceRejoin` for the operator's decision
+  when a majority of acceptor logs is lost.
+- **Failures:** a member restarted on its disk keeps its promises and waits out its startup grace.
+  A member whose acceptor log was lost rejoins by a ballot. An internal error fences the member
+  until its process restarts. A failed start leaves the coordinator stopped and signals the
+  cause.
+- **An existing standalone database can be brought into a cluster** by opening its directory with
+  `clusterPath:`. The move is one way: `PBFileStorage path:` refuses the directory afterwards
+  (chapter 16).
+- **Interoperability:** `proto_db` reads a space a protoBaseST cluster wrote, and the acceptor
+  logs round-trip both ways. Mixed clusters of protoBaseST and `proto_db` members are not a goal.
+- **Not included:** tiered storage (its options are refused), pipelined permissions (one
+  permission at a time across the cluster), dynamic membership, and storage format 5, which is
+  refused with `PBNotSupportedError`. Every difference from `proto_db` is in
+  `docs/deviations.md`, and `docs/not-done.md` states the cluster's cuts and what is unproven
+  (the final verification: the long soak ran every simulator family at commit 02d9826 on protoCore
+  3.6.0 and protoST 0.12.0: sim_harness, sim_base_choice, sim_rejoin, sim_base_seeds_a,
+  sim_base_seeds_b and sim_grants at 5000 seeds each, sim_leases_terms_a and sim_leases_terms_b at
+  2000, sim_acceptance and sim_permits at 1000, sim_round_rules at 400 and sim_leases at 100 (five
+  families one after another, then the other seven at once; each run is deterministic per seed), and
+  every one passed; the full timer audit (81 parts, 3420 simulator runs) ran twice at the final
+  code: the first run had no violation but missed 36 floors by 1 to 7 commits, because 02d9826
+  changes every schedule (bisected), so the floors were re-measured from it (7cbac4a); the second
+  run passed whole at 7cbac4a in 2 h 22 min, serially).
+- **Costs:** on one machine, a cluster commits at about half the standalone rate for small commits
+  on disjoint roots, and a third on a hot key (`bench/run_cluster.sh`; indicative figures in
+  `docs/deviations.md`, Performance).
+
+### Standalone mode
+
+- **Group commit:** the commits queued on one space are published together, with one root lock,
+  one flush and one publish per round (`proto_db` D52). A single commit runs the same protocol as
+  before.
+- **Format:** follows `proto_db` 2.0.0rc4 at format 4. Format 5 segments, roots and logs are
+  refused with `PBNotSupportedError`.
+
+### Documentation
+
+- A tutorial suite: twelve small programs in `examples/tutorial/`, each with a chapter in
+  `docs/tutorial/`, plus "Coming from GemStone/S" and "Coming from Soil". The ERP walk-through
+  moved to `docs/tutorial/erp.md`.
+- Cluster chapters 13-16 and their programs in `examples/cluster/`.
+- `docs/reference.md` covers the cluster API and its timer table. The documentation tests check
+  that the chapters quote their programs exactly and that every selector they cite exists.
 
 ## 0.1.0 (2026-11-13)
 

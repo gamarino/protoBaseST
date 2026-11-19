@@ -5,7 +5,8 @@ A perennial object database for protoST, in the tradition GemStone opened.
 protoBaseST is a Smalltalk implementation, on protoST, of the Python object database `proto_db`
 (developed in the [protoBase repository](https://github.com/gamarino/ProtoDB)). It reads and
 writes the **same on-disk format** (format 4, frozen at `v2.0.0rc1`, with the value nesting limit
-of `v2.0.0rc2`), so one database directory can be shared
+of `v2.0.0rc2`; the reference is now `proto_db` `v2.0.0rc4` at format 4, whose format 5 is
+refused), so one database directory can be shared
 by Python and Smalltalk programs. It has `proto_db`'s API translated to Smalltalk, and `proto_db`'s
 transaction semantics: snapshot isolation, read sets checked at commit, merges of blind writes,
 mutable cells, retries.
@@ -17,11 +18,27 @@ It is shown to start a conversation and to collect criticism. It is small and me
 it is not fast and not complete. Read [docs/not-done.md](docs/not-done.md) first: it states what
 is missing and what has not been proven.
 
-What was checked, against `proto_db` at `v2.0.0rc2`: the conformance vectors, a round trip in both
+What was checked, against `proto_db` at `v2.0.0rc2` and, since the cluster branch, `v2.0.0rc4` (its vectors and its interop venv): the conformance vectors, a round trip in both
 directions (a space written by `proto_db` is dumped identically by protoBaseST, and a space
 written by protoBaseST passes the `proto_db` verifier with an identical dump), the shapes of AVL trees node by node, 27 concurrent-commit scenarios with both
 languages as first and second committer, and a small ERP demo. What was not: anything outside
 those scenarios, speed, long runs, and review by anyone but the people who wrote it.
+
+**Cluster mode (0.2.0).** Several protoBaseST processes can share one database
+directory as a cluster: `proto_db`'s protocol, rule by rule (a majority lease with numbered
+terms, write permissions, a commit point of a majority of synced acceptances), at `v2.0.0rc4`,
+protocol 14. It runs over one shared directory only, one permission at a time, on a trusted
+network. It is tested in a seeded simulator with planted defects, in one process, and with real
+processes killed with `kill -9`; `proto_db`'s 298 cluster tests are each ported or justified
+(`tests/unit/cluster_checklist.tsv`). The final verification passed: the long soak (every
+simulator family at 100 to 5000 seeds, commit 02d9826) and the whole timer audit (81 parts, 0
+violations, commit 7cbac4a); the counts are under Tests below and in
+[docs/not-done.md](docs/not-done.md). That is evidence from one simulator and one machine, not a
+proof. Measured on one machine, indicatively: three
+members commit about half as many small transactions per second as one standalone process on
+disjoint roots, and a third as many on one hot key ([docs/deviations.md](docs/deviations.md#cluster-mode-commits-per-second)). Start with
+[chapter 13](docs/tutorial/13-cluster-concepts.md); what it does not do is in
+[docs/not-done.md](docs/not-done.md).
 
 ## What it shows
 
@@ -74,14 +91,18 @@ those scenarios, speed, long runs, and review by anyone but the people who wrote
 | Component | Version | Source |
 |---|---|---|
 | protoCore | v3.6.0 | https://github.com/numaes/protoCore |
-| protoIO | v0.5.0 | https://github.com/gamarino/protoIO |
-| protoST | v0.10.0 | https://github.com/gamarino/protoST |
+| protoIO | v0.7.0 | https://github.com/gamarino/protoIO |
+| protoST | v0.12.0 | https://github.com/gamarino/protoST |
 
-Build protoST 0.10.0 against protoCore 3.6.0 and protoIO 0.5.0 (see its own README); it provides
-`lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st` and the fixes for protoST issues S37 to S40
-that this code relies on. The Python interop tests and the ERP demo also need a checkout of the
-[protoBase repository](https://github.com/gamarino/ProtoDB), at the tag `v2.0.0rc2`, and Python
-3.11 or newer (tested with 3.14):
+These are the minimum versions; the full test suite also passes on protoCore 3.6.1 with protoST
+0.13.0 (the soak and the timer audit ran on the minimum versions).
+
+Build protoST 0.12.0 against protoCore 3.6.0 and protoIO 0.7.0 (see its own README); it provides
+`lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S40 and
+`BinaryFile >> linkCount` and `FileReference >> realPath` (the hard-link refusal and the lock
+naming of the cluster logs), which this code relies on. The Python interop tests and the ERP demo also need a checkout of the
+[protoBase repository](https://github.com/gamarino/ProtoDB), at the tag `v2.0.0rc4` (`v2.0.0rc2`
+before the cluster branch), and Python 3.12 or newer (3.11 before it; tested with 3.14):
 
 ```sh
 git clone https://github.com/gamarino/ProtoDB ../ProtoBase    # default location; or set PROTOBASE_REPO
@@ -116,15 +137,25 @@ db history size.                               "=> 3"
 space close.
 ```
 
-A fuller walk-through, with the reasoning behind each design choice, is
-[docs/tutorial/erp.md](docs/tutorial/erp.md). The chaptered tutorial, [docs/tutorial/](docs/tutorial/README.md),
-walks twelve small self-checking programs ([examples/tutorial/](examples/tutorial/README.md)), one
-concept each, and has two orientation chapters: [Coming from GemStone/S](docs/tutorial/gemstone.md)
-and [Coming from Soil](docs/tutorial/soil.md).
+
+## Tutorials
+
+Start here. Every chapter is short, explains why the design is what it is, and quotes a small
+program that checks its own results and is run by the tests.
+
+| Read | What you learn |
+|---|---|
+| [The tutorial, chapters 1-12](docs/tutorial/README.md) | A single process: first commit, values and versions, records, collections and queries, transactions and conflicts, blind writes, mutables and history, bytes, actors, crash recovery, Python interop, refusals. |
+| [Cluster mode, chapters 13-16](docs/tutorial/13-cluster-concepts.md) | Several processes sharing one database: [the ideas](docs/tutorial/13-cluster-concepts.md), [a three-node cluster](docs/tutorial/14-a-three-node-cluster.md), [failures and recovery](docs/tutorial/15-failures-and-recovery.md), [operating a cluster](docs/tutorial/16-operating-a-cluster.md). |
+| [A small ERP](docs/tutorial/erp.md) | A guided build of a real application, with the reasoning at each step. |
+| [Coming from GemStone/S](docs/tutorial/gemstone.md), [Coming from Soil](docs/tutorial/soil.md) | Orientation for readers who know those systems. |
+
+The programs are in [examples/tutorial/](examples/tutorial/README.md) and
+[examples/cluster/](examples/cluster/README.md).
 
 ## The API, mapped from `proto_db`
 
-Names are `proto_db`'s public names at `v2.0.0rc2`, prefixed `PB` in place of a namespace, in
+Names are `proto_db`'s public names at `v2.0.0rc4`, prefixed `PB` in place of a namespace, in
 Smalltalk camelCase. Python keyword arguments become keyword parts. Timeouts and backoffs are
 SmallInteger milliseconds, not float seconds.
 
@@ -186,7 +217,8 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 | | |
 |---|---|
 | [docs/tutorial/erp.md](docs/tutorial/erp.md) | A guided build of a small ERP, with the reasoning at each step. Every snippet is run by the tests. |
-| [docs/tutorial/](docs/tutorial/README.md) | The chaptered tutorial: twelve chapters, one concept each, quoting the programs of `examples/tutorial/`; and two orientation chapters, coming from GemStone/S and coming from Soil, with their sources. |
+| [docs/tutorial/](docs/tutorial/README.md) | The chaptered tutorial: chapters 1-12 on a single process, chapters 13-16 on cluster mode, each quoting a program of `examples/tutorial/` or `examples/cluster/`; and two orientation chapters, coming from GemStone/S and coming from Soil, with their sources. |
+| [examples/cluster/](examples/cluster/README.md) | The cluster chapters' programs, run by the tests; `pending/` is for those that need API still being built (none today). |
 | [examples/tutorial/](examples/tutorial/README.md) | Twelve small programs, one concept each, each checking its own results; run by the tests. |
 | [docs/reference.md](docs/reference.md) | Every public class and message. |
 | [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from `proto_db`. |
@@ -194,32 +226,63 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 | [docs/decisions.md](docs/decisions.md) | The choices, with what each costs if it is wrong. |
 | [examples/erp/](examples/erp/README.md) | A demo in which Python and protoST work on one directory. |
 | [docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md](docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md) | The design. |
-| [CHANGELOG.md](CHANGELOG.md) | What changed, task by task. |
+| [CHANGELOG.md](CHANGELOG.md) | What changed, release by release; the detailed log of 0.2.0 is [docs/changelog-0.2.0-development.md](docs/changelog-0.2.0-development.md). |
 
 ## Running the tests
 
-The tests need protoST 0.10.0 or newer (see Requirements). Point `PROTOST` at the binary:
+The tests need protoST 0.12.0 or newer (see Requirements). Point `PROTOST` at the binary:
 
 ```sh
 export PROTOST=../protoST/build_release/protost      # default: protost from PATH
 tests/conformance/fetch_vectors.sh                    # only to re-vendor the format-4 vectors (they are already in the repository)
 PYTHON=python3.14 tests/interop/setup_venv.sh         # Python side of the interop tests (needs the checkout above)
-tests/run_tests.sh                                    # everything under tests/ and examples/
+tests/run_tests.sh                                    # everything under tests/ and examples/, less tests/audit
 tests/run_tests.sh tests/unit tests/docs              # or chosen paths
+tests/run_tests.sh tests/audit                        # the cluster's timer audit alone (measured: 2 h 22 min)
+tests/run_tests.sh --audit                            # the default set and the timer audit
 ```
+
+`tests/cluster/` runs cluster members as separate protost processes over TCP on 127.0.0.1
+(`_node.st`, driven by `_cluster.sh`): three members committing concurrently, and `kill -9` of the
+owner, of a voter, and of two owners in turn in a five-voter cluster, while they commit;
+`kill -9` of a permission holder mid-round (its root built, its replicate sent, its done sent),
+each restarted on its disk, then the whole cluster killed before its commits were persisted and
+restarted on its disks; a voter killed, its acceptor log lost, rejoining by ballot. Each run
+starts four to six processes; every one is killed and reaped when the test ends, on every exit
+path. `verify_rules.sh` checks the verifier's rules on synthetic files, with no process.
+
+`tests/audit/` holds the cluster's timer audit: every timer of the coordination at 1/10, 10 times
+and skewed per member, 3420 simulator runs, a run of its own. Only a path that names it, or
+`--audit`, runs it; its index `tests/unit/sim_timer_audit.st` stays in the default run (the audit's
+configuration and one run per mode) and fails when an audit file is missing, extra or stale. Each
+audit file fails on a violation, and also when its runs fall below their declared floors of strict
+runs and acknowledged commits, or when a timer's probe (acquireTimeout, gatherAttempts,
+retryHold) leaves its bounds; the safety-only row-modes and the rows not exercised yet (persist,
+until Task 20) are declared and listed by the index. In the final verification the full timer audit
+(81 parts, 3420 simulator runs) ran twice at the final code: the first run had no violation but
+missed 36 floors by 1 to 7 commits, because 02d9826 changes every schedule (bisected), so the floors
+were re-measured from it (7cbac4a); the second run passed whole at 7cbac4a in 2 h 22 min, serially.
 
 The runner prints `PASS`, `FAIL` or `SKIP` per test and ends with `passed N, failed N, skipped N`.
 A `.st` test starts with an `"EXPECT: <last line>"` or `"EXPECT-ERROR: <text>"` directive; a
 `.sh` test passes with exit 0 and is skipped with exit 77. `PROTOBASE_REPO` (default `../ProtoBase`)
 names the protoBase checkout used by the two setup scripts. `tests/docs/` checks the snippets of
 the README and the tutorial against the code, the code quoted by the chapters of `docs/tutorial/`
-against the programs of `examples/tutorial/`, and the selectors the documents cite against
-`src/protobase`.
+against the programs of `examples/tutorial/` and `examples/cluster/`, the selectors the documents
+cite against `src/protobase`, and the reference's timer table against `PBClusterConfig timerTable`.
+
+## Benchmarks
+
+`bench/` holds the measurements; none runs in the test suite. `run_avl.sh` and `run_tx.sh` compare
+the single process with `proto_db`; `run_cluster.sh` measures standalone mode and clusters of one
+and three member processes on one machine. Each run reports the work it did and a verifier's
+count, and the runner refuses a run whose counts differ. The dated figures, with the machine and
+the commit, are in [docs/deviations.md](docs/deviations.md#performance): indicative only.
 
 ## License
 
 MIT. Copyright (c) 2026 Gustavo Marino.
 
 Third-party material: `tests/conformance/` (the vectors, `manifest.json`, `vectors.sha256`) is
-vendored from `proto_db` at `v2.0.0rc2`, MIT, Copyright (c) 2023 ProtoBase Team. Its notice is in
+vendored from `proto_db` at `v2.0.0rc4` (`v2.0.0rc2` before the cluster branch), MIT, Copyright (c) 2023 ProtoBase Team. Its notice is in
 [tests/conformance/LICENSE](tests/conformance/LICENSE).

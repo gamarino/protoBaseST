@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Guards docs/reference.md, the README, the chapters of docs/tutorial/ and examples/tutorial/README.md
 # against invented API: every backticked selector in them
-# must be defined in src/protobase/*.st (as `Class >> selector` or `Class class >> selector`), or be
+# must be defined in src/protobase/*.st and src/protobase/cluster/*.st (as `Class >> selector` or `Class class >> selector`), or be
 # on the short allow-list of names that are not protoBaseST's (Python names, protoST kernel
 # selectors, words that are not selectors). Keyword selectors are checked part by part
 # (`setAt:value:` needs both `setAt:` and `value:` to exist in one defined selector's parts, and the
@@ -19,7 +19,7 @@ python3 -I - "$REPO" <<'PY'
 import re, sys, glob, os
 repo = sys.argv[1]
 defined = set()
-for f in glob.glob(repo + "/src/protobase/*.st") + [repo + "/src/protobase.st"]:
+for f in glob.glob(repo + "/src/protobase/*.st") + glob.glob(repo + "/src/protobase/cluster/*.st") + [repo + "/src/protobase.st"]:
     for line in open(f, encoding="utf-8"):
         m = re.match(r"^\S+(?: class)? >> (.+)$", line.rstrip())
         if not m:
@@ -42,11 +42,12 @@ get_root_object set_root_object remove_root_object root_names new_mutable get_mu
 set_mutable remove_mutable mutable_names new_list new_dictionary new_hash_dictionary new_set
 new_counted_set new_object new_database open_database list_databases new_transaction
 snapshot_at with_ has_defined_attr get_at set_at insert_at remove_at append_first append_last
+recover_root bind_root force_rejoin rejoin_blocked
 extend slice head tail has union intersection difference count_of index_names get_index items
 register_atom_class is_active committed_at lock_timeout retries backoff keys values
 asFrozenDict asOf: tr: asActor wait EXPECT: protost bytes date ensure:
 flock fsync nil true false proto_db remove aName atom_pointer context cluster_term current pair n i v repr
-avl calendar codec collections decimal errors framing notation publisher registry roots store transactions uuid zonekeys
+avl calendar codec collections decimal errors framing net notation publisher registry roots round store transactions uuid zonekeys
 """.split())
 # selectors of GemStone/S and Soil, cited from their documentation by the chapters of
 # docs/tutorial/ (mainly gemstone.md and soil.md) to compare them; they are not protoBaseST's and

@@ -23,7 +23,7 @@
                                     'committed' or the class name of the PBDBError signalled
 
 A CaseSide is also driven as an actor (concurrency_actors.st): start:in: and commit wait only on
-the publisher's Futures, never on another side."
+the Futures of the space's round runner, never on another side."
 Import from: 'protobase'.
 
 Object subclass: #CaseTable.

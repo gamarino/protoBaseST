@@ -1,21 +1,36 @@
 #!/usr/bin/env bash
 # protoBaseST test runner.
 #
-# Usage: tests/run_tests.sh [path...]     (default: tests/ and examples/)
+# Usage: tests/run_tests.sh [--audit] [path...]     (default: tests/ and examples/, less tests/audit)
+#
+# tests/audit holds the cluster's timer audit (every timer row at 1/10, 10x and skewed, 3420
+# simulator runs, some three hours serially): a run of its own. It runs only when a path names it
+# or a file in it (tests/run_tests.sh tests/audit), or with --audit, which adds tests/audit to the
+# paths run (the default set when no path is given). Every other run skips it; its index,
+# tests/unit/sim_timer_audit.st, stays in the default run and fails when an audit file is missing,
+# stale or extra. The audit's files run with tests/unit on STPATH (they import the simulator's
+# helpers, _sim and _round, by name); by hand: cd tests/audit and
+# STPATH=<repo>/src:<repo>/tests/unit protost --print-last <file>.
 #
 # Environment:
 #   PROTOST         the protost binary (default: protost)
-#   PROTOBASE_REPO  a ProtoBase checkout (default: ../ProtoBase), used by the vector fetch
-#   RUN_TIMEOUT     seconds allowed per test (default 120)
+#   PROTOBASE_REPO  a ProtoBase checkout (default: ../ProtoBase), used by the vector fetch and by
+#                   tests/unit/cluster_checklist.sh. The runner always exports it (the default
+#                   when unset), and records in PROTOBASE_REPO_EXPLICIT whether the caller set it
+#                   (1) or not (empty): a test that needs the checkout skips (exit 77) when the
+#                   default path is missing and nobody named one, and fails when the checkout was
+#                   named explicitly but is missing or wrong. A caller may set
+#                   PROTOBASE_REPO_EXPLICIT itself; the runner keeps a value it is given.
+#   RUN_TIMEOUT     seconds allowed per test (default 600: the simulator tests of the cluster
+#                   take up to about 4 minutes each on a loaded machine)
 #
 # Each *.st file is a protoST program run with its own directory as the working directory and
 # STPATH=<repo>/src. Its first line (second after a "#!" line) is a directive:
 #   "EXPECT: <text>"        exit 0, and the last non-empty stdout line equals <text>
 #   "EXPECT-ERROR: <text>"  non-zero exit, and the error output contains <text> (text optional)
 # A successful run whose last line starts with "SKIP: " counts as skipped. A passing test may also
-# print justified per-item skips (lines starting with "SKIP: " before its last line, such as the
-# cluster vectors of tests/conformance/cluster.st): they are shown under its PASS line, so a skip is
-# always visible where the run is read.
+# print justified per-item skips (lines starting with "SKIP: " before its last line): they are
+# shown under its PASS line, so a skip is always visible where the run is read.
 # Each *.sh file passes with exit 0, is skipped with exit 77, and fails otherwise. The lines of a
 # passing *.sh file's output that start with "NOTE: " or "SKIP: " are shown under its PASS line (a workaround
 # a test relies on is stated where the run is read, never hidden).
@@ -42,14 +57,21 @@ if [[ ! -x "$PROTOST" ]]; then
     exit 1
 fi
 export PROTOST
+export PROTOBASE_REPO_EXPLICIT="${PROTOBASE_REPO_EXPLICIT-${PROTOBASE_REPO:+1}}"
 export PROTOBASE_REPO="${PROTOBASE_REPO:-$REPO/../ProtoBase}"
 export STPATH="$REPO/src${STPATH:+:$STPATH}"
-TIMEOUT="${RUN_TIMEOUT:-120}"
+TIMEOUT="${RUN_TIMEOUT:-600}"
 
+AUDIT="$REPO/tests/audit"
+with_audit=0
+if [[ "${1:-}" == --audit ]]; then
+    with_audit=1; shift
+fi
 if [[ $# -eq 0 ]]; then
     set -- "$REPO/tests"
     [[ -d "$REPO/examples" ]] && set -- "$@" "$REPO/examples"
 fi
+[[ $with_audit -eq 1 ]] && set -- "$@" "$AUDIT"
 
 files=()
 missing=0
@@ -58,9 +80,13 @@ for p in "$@"; do
         echo "FAIL: no such path: $p"; missing=$((missing + 1)); continue
     fi
     p="$(cd "$(dirname "$p")" && pwd)/$(basename "$p")"
+    p="${p%/.}"
     if [[ -d "$p" ]]; then
+        # tests/audit only when this path is tests/audit or inside it (--audit adds it as a path).
+        skip_audit="$AUDIT"
+        [[ "$p" == "$AUDIT" || "$p" == "$AUDIT"/* ]] && skip_audit=""
         while IFS= read -r f; do files+=("$f"); done < <(
-            find "$p" \( -name .venv -o -name out -o -name fixtures \) -prune -o -type f \
+            find "$p" \( -name .venv -o -name out -o -name fixtures -o -path "${skip_audit:-/nonexistent}" \) -prune -o -type f \
                 \( -name '*.st' -o -name '*.sh' \) ! -name '_*' \
                 -print | sort)
     else
@@ -72,7 +98,11 @@ kept=()
 for f in "${files[@]}"; do
     [[ "$TOOLING" == *" ${f#"$REPO"/} "* ]] || kept+=("$f")
 done
-files=("${kept[@]}")
+files=()
+for f in "${kept[@]}"; do
+    # Each test once, in order, when paths overlap (--audit tests/audit).
+    [[ " ${files[*]} " == *" $f "* ]] || files+=("$f")
+done
 
 passed=0; failed=0; skipped=0
 rel() { printf '%s' "${1#"$REPO"/}"; }
@@ -95,7 +125,11 @@ run_st() {
         *) echo "FAIL: $(rel "$file"): no directive on the first line"; return 1 ;;
     esac
     err="$(mktemp)"
-    out="$(cd "$dir" && timeout "$TIMEOUT" "$PROTOST" --print-last "$base" </dev/null 2>"$err")"
+    # The audit's files import the simulator's helpers by name from tests/unit (one name per
+    # helper, so a module is loaded once).
+    local path="$STPATH"
+    [[ "$dir" == "$AUDIT" || "$dir" == "$AUDIT"/* ]] && path="$STPATH:$REPO/tests/unit"
+    out="$(cd "$dir" && STPATH="$path" timeout "$TIMEOUT" "$PROTOST" --print-last "$base" </dev/null 2>"$err")"
     rc=$?
     local errtext; errtext="$(tr -d '\000' < "$err")"; rm -f "$err"
     last="$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1)"

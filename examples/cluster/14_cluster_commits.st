@@ -1,0 +1,101 @@
+"EXPECT: 14 cluster commits ok (8 checks)"
+"Cluster lesson 14, third program: commits and reads on three nodes.
+ Tutorial chapter: docs/tutorial/14-a-three-node-cluster.md
+
+ What it teaches:
+ - in cluster mode newDatabase: and every commit go through the coordinator: a write permission
+   from the owner, the build, a majority of synced acceptances (the commit point), then done;
+ - a local read takes the newest root its node knows committed: it never waits, and it may miss
+   a commit another node acknowledged a moment ago;
+ - a commit that writes something and returns normally is a barrier: once it returns, its node
+   has seen every commit acknowledged before it started (a run: that writes '_read_barrier';
+   newDatabase: is one, as in proto_db, and the check below shows it);
+ - a commit has three outcomes: committed, PBConflictError (nothing left the node: run: retries
+   it) and PBOutcomeUnknownError (run: never retries it); a unique token per commit settles an
+   unknown one later;
+ - committedEpoch never goes backwards (forceRejoin on a survivor aside); sync: waits until the persister has written space.root
+   up to it, a durability barrier, not a visibility barrier.
+
+ Every wait is a condition with a deadline of 60 s; no duration is asserted.
+
+ Run it: STPATH=<repository>/src protost 14_cluster_commits.st"
+Import from: 'protobase'.
+Import from: '../tutorial/_lesson'.
+
+| lesson dir ids peers network nodes spaces until shop dbs acked unknown token epochs tr counter tokens |
+lesson := Lesson named: '14 cluster commits'.
+dir := FileSystem temp / ('pbst-cluster-14c-' , Smalltalk pid printString).
+dir deleteAll.
+until := [:aBlock | | deadline |
+  deadline := Time millisecondClockValue + 60000.
+  [aBlock value or: [Time millisecondClockValue > deadline]] whileFalse: [(Future after: 10) wait].
+  aBlock value].
+ids := #('n0' 'n1' 'n2').
+peers := ids collect: [:id | PBPeer nodeId: id host: '127.0.0.1' port: 7400].
+network := PBInProcessNetwork new.
+nodes := ids collect: [:id | PBClusterCoordinator nodeId: id peers: peers options: (Dictionary new
+  at: #leaseDuration put: 3000;
+  at: #requestTimeout put: 100;
+  at: #transport put: network endpoint;
+  yourself)].
+nodes do: [:node | node start].
+spaces := nodes collect: [:node |
+  PBObjectSpace storage: (PBFileStorage clusterPath: dir pathString) coordinator: node].
+until value: [nodes allSatisfy: [:node | (node stats at: 'rejoining') not]].
+
+"n0 creates the database: a commit like any other."
+shop := (spaces at: 1) newDatabase: 'shop'.
+shop run: [:t |
+  t setRootObject: 'counter' value: 0.
+  t setRootObject: 'tokens' value: t newDictionary].
+lesson check: 'n0 committed under a permission' isTrue: ((nodes at: 1) stats at: 'permits_issued') + ((nodes at: 2) stats at: 'permits_issued') + ((nodes at: 3) stats at: 'permits_issued') >= 2.
+
+"newDatabase: on n1 is a barrier (a commit under a permission, as in proto_db): afterwards n1
+ knows every commit acknowledged before it."
+(spaces at: 2) newDatabase: 'n1-scratch'.
+lesson check: 'after its own commit n1 sees the database n0 made'
+  isTrue: ((spaces at: 2) listDatabases includes: 'shop').
+(spaces at: 3) newDatabase: 'n2-scratch'.
+
+"Every node increments the counter and records a token unique to the commit."
+dbs := spaces collect: [:space | space openDatabase: 'shop'].
+acked := OrderedCollection new.
+unknown := OrderedCollection new.
+epochs := OrderedCollection new.
+1 to: 10 do: [:i |
+  (1 to: 3) do: [:k |
+    token := (ids at: k) , '-' , i printString.
+    [(dbs at: k) run: [:t |
+        t setRootObject: 'counter' value: (t getRootObject: 'counter') + 1.
+        t setRootObject: 'tokens' value: ((t getRootObject: 'tokens') setAt: token value: k)]
+       retries: 100.
+     acked add: token]
+      on: PBOutcomeUnknownError do: [:e | unknown add: token. e return: nil].
+    epochs add: (spaces at: k) committedEpoch]].
+lesson say: acked size printString , ' acknowledged, ' , unknown size printString , ' unknown'.
+lesson check: 'every node committed' isTrue: (ids allSatisfy: [:id | acked anySatisfy: [:t | t beginsWith: id , '-']]).
+
+"A barrier on n2, then a read: every acknowledged token is there, and only known commits."
+(dbs at: 3) run: [:t | t setRootObject: '_read_barrier' value: true].
+tr := (dbs at: 3) newTransaction.
+counter := tr getRootObject: 'counter'.
+tokens := tr getRootObject: 'tokens'.
+tr abort.
+lesson check: 'every acknowledged commit is present' isTrue: (acked allSatisfy: [:t | (tokens getAt: t) notNil]).
+lesson check: 'acknowledged <= counter <= acknowledged + unknown'
+  isTrue: (counter >= acked size and: [counter <= (acked size + unknown size)]).
+lesson check: 'the counter is the number of tokens: no commit applied twice' is: counter equals: tokens count.
+
+lesson check: 'committedEpoch never goes backwards on a node'
+  isTrue: ((1 to: 3) allSatisfy: [:k | | own | own := (1 to: epochs size) select: [:j | j - 1 \\ 3 + 1 = k].
+    (2 to: own size) allSatisfy: [:j | (epochs at: (own at: j)) >= (epochs at: (own at: j - 1))]]).
+
+"sync: is a durability barrier: space.root now holds a root at least as new as committedEpoch."
+(spaces at: 1) sync: 10000.
+lesson check: 'after sync: the persisted epoch reached the committed one'
+  isTrue: (spaces at: 1) persistedEpoch >= (spaces at: 1) committedEpoch.
+
+spaces do: [:space | space close].
+nodes do: [:node | node stop waitWithin: 60000].
+dir deleteAll.
+lesson finish.

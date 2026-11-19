@@ -42,7 +42,9 @@ Attribute names are checked as the format spec's 'Atom records' requires, with
 PBValidationError: a non-empty String that does not start with _, is not oid,
 atom_pointer or context, nor a behaviour name of DBObject (with_,
 has_defined_attr) or of the class (reservedAttributeNames); a name given twice
-in one call is refused too. A class need not be registered to build records;
+in one call is refused too, and so is a change naming parents or with_parents
+(parentsApiNames: reserved for new fields from proto_db 2.0.0rc4, R157; a stored
+field of either name still loads and is carried unchanged). A class need not be registered to build records;
 its records are refused when saved until it is (PBObjectSpace
 registerAtomClass:), as ProtoBase refuses a class with no declared type name.
 
@@ -72,6 +74,13 @@ PBObject class >> persistedFields
  any subclass: the check reads them from PBObject, so no override drops them."
 PBObject class >> dbObjectBehaviourNames
   ^ #('with_' 'has_defined_attr').
+
+"The names of DBObject's parents API (proto_db 2.0.0rc4, format spec 'Reserved names', R157,
+ R158): no change may create or set a field of either name. The reservation is write-only: a
+ stored field of either name (written before format 5) still loads, reads and is carried
+ unchanged by a new version, so the read path (_checkPersistedNames:at:) never checks them."
+PBObject class >> parentsApiNames
+  ^ #('parents' 'with_parents').
 
 "The names an application class reserves besides DBObject's: none by default."
 PBObject class >> reservedAttributeNames
@@ -103,17 +112,25 @@ PBObject class >> new
 
 "The PBFrozenDict of the attributes anArrayOfAssociations (a record's state, in
  order) updated by the changes aChanges: an existing name keeps its place, a
- new one is appended, each value canonical, each name checked."
+ new one is appended, each value canonical, each name checked. A stored field
+ named parents or with_parents (R157) is carried unchanged and placed last, in
+ the order of parentsApiNames, as proto_db 2.0.0rc4's with_ does (_take_legacy
+ takes them out, _carry puts them back after the other attributes), so the new
+ version's bytes are rc4's."
 PBObject class >> _state: anArrayOfAssociations with: aChanges
-  | names values given |
+  | names values given legacy |
   ((aChanges isKindOf: Array) or: [aChanges isKindOf: OrderedCollection]) ifFalse: [
     ^ PBValidationError signal: self name , ': the attributes are an Array of Associations (name -> value), not '
       , (PBKeys _preview: aChanges)].
   names := OrderedCollection new.
   values := OrderedCollection new.
+  legacy := Dictionary new.
   anArrayOfAssociations do: [:each |
-    names addLast: (self _checkAttributeName: each key).
-    values addLast: each value].
+    | name |
+    name := self _checkAttributeName: each key.
+    (PBObject parentsApiNames includes: name)
+      ifTrue: [legacy at: name put: each value]
+      ifFalse: [names addLast: name. values addLast: each value]].
   given := Set new.
   aChanges do: [:each |
     | name i |
@@ -121,6 +138,9 @@ PBObject class >> _state: anArrayOfAssociations with: aChanges
       ^ PBValidationError signal: self name , ': an attribute is an Association (name -> value), not '
         , (PBKeys _preview: each)].
     name := self _checkAttributeName: each key.
+    (PBObject parentsApiNames includes: name) ifTrue: [
+      ^ PBValidationError signal: self name , ': the attribute name ' , name printString
+        , ' is reserved for the parents API of DBObject (format spec, Reserved names): a change never writes it'].
     (given includes: name) ifTrue: [
       ^ PBValidationError signal: self name , ': the attribute ' , name printString , ' is given twice'].
     given add: name.
@@ -128,6 +148,8 @@ PBObject class >> _state: anArrayOfAssociations with: aChanges
     i = 0
       ifTrue: [names addLast: name. values addLast: (self _canonical: each value field: name)]
       ifFalse: [values at: i put: (self _canonical: each value field: name)]].
+  PBObject parentsApiNames do: [:name |
+    (legacy includesKey: name) ifTrue: [names addLast: name. values addLast: (legacy at: name)]].
   ^ PBFrozenDict withAssociations: ((1 to: names size) asArray collect: [:i | (names at: i) -> (values at: i)]).
 
 "aValue canonical, a PBValidationError of the codec naming the field aName

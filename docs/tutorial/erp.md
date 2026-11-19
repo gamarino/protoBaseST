@@ -31,7 +31,7 @@ Contents:
 
 ## 1. Before you start
 
-You need a protoST binary, version 0.10.0 or newer
+You need a protoST binary, version 0.12.0 or newer
 ([release](https://github.com/gamarino/protoST); it adds `Decimal`, `CalendarDate`, `UUID`, random
 bytes and the UTC clock), and this repository's `src/` on the module path:
 
@@ -446,7 +446,7 @@ accepts what protoBaseST writes:
 python -m proto_db.tools.verify DIR
 ```
 
-Its prerequisites: `proto_db` at `v2.0.0rc2` importable (`tests/interop/setup_venv.sh` builds a venv
+Its prerequisites: `proto_db` at `v2.0.0rc4` importable (`v2.0.0rc2` before the cluster branch; `tests/interop/setup_venv.sh` builds a venv
 with it), `msgpack` 1.2.0 or newer, and `DIR` the path the script's `dir` holds
 (`dir pathString`, under `FileSystem temp`). Run it **before the last block of section 15**: that
 block closes the space and deletes the directory.
@@ -459,7 +459,9 @@ and concurrent commits from both get `proto_db`'s outcomes in 27 scenarios.
 and renames a customer, a blind write from each language merges, and both print the same as-of
 report. See [examples/erp/README.md](../../examples/erp/README.md).
 
-Not proven: anything outside those scenarios, any `proto_db` release other than `v2.0.0rc2`, and
+Not proven: anything outside those scenarios, any `proto_db` release other than `v2.0.0rc2` (the cluster
+branch moves the venv to `v2.0.0rc4`; the cluster's data interop is tested at rc4, and the whole
+interop suite runs against it in the final verification, cluster Task 30), and
 behaviour under load (the AVL structures are many times slower than `proto_db`'s; the dated figures
 are in [deviations.md](../deviations.md#performance)).
 

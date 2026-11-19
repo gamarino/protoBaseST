@@ -17,6 +17,11 @@
   `proto_db/storage/tiered.py` and `tests/conformance/vectors/` are unchanged
   (`git diff --stat v2.0.0rc2 HEAD` over those paths is empty), and `PROTOCOL_VERSION` is 13 in
   both. Everything below holds for both tags.
+- **Normative tag since 2026-11-15:** `v2.0.0rc4` (`8e6127f`). Its delta from rc3 is
+  `docs/superpowers/specs/2026-11-15-rc4-delta.md`: protocol 14 (`unknown` on `fetched` and
+  `commit_info`, the five-item root), format 5 (the runtime registry, D62), which protoBaseST
+  refuses with `PBNotSupportedError` while it keeps writing format 4 and log format 2, and the C3
+  rule (R212, R231, R233). Where this spec names rc3, rc4 holds unless the delta says otherwise.
 - **protoBaseST** at `7ef11d7` (branch `feat/prototype`). **protoST** at `bc0ce63` (branch
   `feat/protobase-support`). **protoIO** at `fe9130b` (0.5.0).
 
@@ -162,6 +167,9 @@ are deliberately **not** invariants.
    in root order is the **phase-1 value** (`lease.root`). The lease is *certain* when every granter
    knows a root, none is suspect and the requester is not suspect.
 6. **Losing**: cancel (`release`, `held=False`), jittered back-off, ended early by any release.
+   *Erratum (Task 11):* `proto_db`'s code (`coordinator.py` `_back_off`, N7/M2) ends the back-off
+   itself only on progress (a held release, a newly learnt owner); any release ends only its busy
+   extension. protoBaseST follows the code, as the ruling of Task 5 (code over spec wording).
 7. **Owning**: an ownership thread renews at half the belief while there is demand (`renew`; no
    log write: the promise is already durable).
 8. **Releasing**: idle for `lease_duration / 4`; the release closes the term at every receiver and
@@ -348,7 +356,7 @@ amendments, rulings), the design guide (`docs/source/design-guide/coordinator.rs
 | L10 | **D-SAFE-2**: acceptor log synced only in `fsync` mode | A power loss could make a node forget a promise while its rejoined marker survived; one-holder-per-term void (reasoned) | Acceptor log `fsync`-ed in every mode, file, directory and parent directory | protoBaseST has only `fsync` today; the acceptor log syncs unconditionally anyway, and its directory on creation. |
 | L11 | **D-AVAIL-1**: a durable root whose records were lost | Majority power loss in `flush`/`none` left the cluster stuck | One self-describing append (kind 5): root and records together | Shared storage (Phase C): records are `fsync`-ed in the shared segment **before** the acceptance is logged (`flush_local` before `replicate`). Phase D: kind 5 from the start. |
 | L12 | Owner rule "issue on request" without incarnations | A `done` from a restarted holder's new incarnation retired a permission it never held (8.3f review C1, `0422502`) | `inc` in every request; replies and dones of another incarnation dropped; protocol 9-12 | `inc` from the start; every handler checks it. |
-| L13 | **Rejoin by waiting** `restart_grace` | Lost an acknowledged commit with the wiped node's timer 1.3x fast (R78a; design-guide `coordinator.rst` "A mistake") | Rejoin is a **ballot** (`9ef6307`) | Rejoin ballot only. No code path waits for time to make something safe. |
+| L13 | **Rejoin by waiting** `restart_grace` | Lost an acknowledged commit with the wiped node's timer 1.3x fast (R78a; design-guide `coordinator.rst` "A mistake"; 1.3x under the margin of the time, about (D + m)/(D - m) = 11/9 with m = D/10; under R78b's margin m >= 2/3 D the boundary is 5x with the holder's clock running, and every rate with the holder's clock stalled, P5) | Rejoin is a **ballot** (`9ef6307`) | Rejoin ballot only. No code path waits for time to make something safe. |
 | L14 | Replication under a term the node promised to refuse | A rejoined node could replicate below its rejoin ballot (`af2f837`, `9164a4d`) | Refuse to replicate below `rejoinBallot` | Same guard in the holder's send step. |
 | L15 | **Recovery round ended at a majority** (8.3n round 3, `1b3a188`) | Lost an acknowledged root R' with a slow timer and a delayed message (finding C1; coordinator-protocol.rst:725-780) | **Phase-1 floor** (R127, `276a256`): base = max(phase-1 value, recovery result) | Floor from the first version; the C1 schedule is a deterministic simulator test (5.8). |
 | L16 | Floor root whose records live only on dead members | Stalled every round of the term (re-review 3, I1) | Abandon the term (R133, `db1a4c8`) | Same, as a retryable conflict plus `unknown` permission. |

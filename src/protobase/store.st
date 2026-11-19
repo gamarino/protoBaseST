@@ -22,8 +22,9 @@ v2.0.0rc1; format spec v2.0.0rc1, 'Segments and records' and 'Root records'):
 
 Opening checks what ProtoBase checks: a path that exists and is not a
 directory is PBValidationError; a directory holding cluster/ (a cluster
-node's space) is PBNotSupportedError, since clusters are outside the
-prototype (design spec 10.5); a corrupt space.root, a missing segment or a
+node's space) is PBNotSupportedError for path:, since such a space is written
+only by cluster nodes, which open it with clusterPath: (cluster mode, below);
+a corrupt space.root, a missing segment or a
 damaged record at the root pointer is PBCorruptionError. A missing space.root
 is an empty space.
 
@@ -72,6 +73,8 @@ storage)'; ProtoBase FileStorage push_atom, flush and publish_root):
   PBFileStorage path: p segmentMaxBytes: n
                                         a storage whose segments roll over
                                         before n bytes (default 256 MiB)
+  PBFileStorage clusterPath: p          the storage of a cluster node (CC20):
+                                        cluster mode, isClusterMode
 
 The owned segments. A storage writes only into segments it created: the first
 record pushed creates <uuid hex>.seg, named by a fresh UUID4 (newSegmentId),
@@ -100,10 +103,14 @@ the reader does not know is an error, never a reason to overwrite); the new
 epoch, the epoch of the root the commit was validated against and built on
 plus one (1 for a space that had none; replaceRoot: says which root that is),
 must be the current one plus one, PBConflictError otherwise (a commit built on
-a root that moved since is stale); a space that belongs to a cluster (a cluster/
-directory, or a current SpaceRoot with a cluster_term) is PBNotSupportedError,
-since such a space is written only through the cluster and clusters are
-outside the prototype (design spec 10.5). Then space.root.tmp is written and
+a root that moved since is stale); a plain storage refuses a space that
+belongs to a cluster (a cluster/ directory, or a current SpaceRoot with a
+cluster_term) with PBNotSupportedError, since such a space is written only
+through the cluster. A storage in cluster mode (clusterPath:, the one a
+cluster node writes through its coordinator and its tier, cluster/tier.st)
+accepts cluster/ and cluster roots, and publishes only a SpaceRoot that
+carries a cluster_term (PBValidationError otherwise); every other check is
+the same. The mode is fixed when the storage opens. Then space.root.tmp is written and
 synced, renamed over space.root (FileSystem replace:with:), and the directory
 is synced. The publish is durable once replaceRoot: returns.
 
@@ -117,8 +124,8 @@ directory sync that follows it, the outcome of that publish is unknown until
 space.root is read again (the publisher's step 8, publisher.st).
 
 One writer at a time. The write operations (pushAtom:, flushSegment,
-replaceRoot:) are made by one actor, the space's publisher (publisher.st),
-one at a time; the storage takes no lock to serialise them. A write operation
+replaceRoot:) are made by one actor, the space's round runner (round.st),
+through its publisher (publisher.st), one round at a time; the storage takes no lock to serialise them. A write operation
 that starts while another is in progress on the same storage is refused at
 once with PBUserError and writes nothing (the storage state, an Atom changed
 by compare-and-swap: a refusal, never a wait). close never waits either, and
@@ -355,7 +362,7 @@ PBSegmentWriter >> printOn: aStream
  synced yet; failed over nil or the text of the write failure that ended
  writing; rootLock over nil or the open BinaryFile of space.lock whose OS lock
  this storage holds."
-Object subclass: #PBFileStorage instanceVariableNames: 'directory segmentMax readers state writer sealed failed rootLock lastPush atomCache'.
+Object subclass: #PBFileStorage instanceVariableNames: 'directory segmentMax readers state writer sealed failed rootLock lastPush atomCache clusterMode'.
 
 PBFileStorage class >> rootFileName
   ^ 'space.root'.
@@ -415,6 +422,24 @@ PBFileStorage class >> path: aPath segmentMaxBytes: anInteger atomCacheEntries: 
 "As path:segmentMaxBytes:, with an atom cache of at most cacheEntries records
  and cacheBytes bytes of record payload (Integers >= 0; either 0: no cache)."
 PBFileStorage class >> path: aPath segmentMaxBytes: anInteger atomCacheEntries: cacheEntries atomCacheBytes: cacheBytes
+  ^ self _path: aPath segmentMaxBytes: anInteger atomCacheEntries: cacheEntries atomCacheBytes: cacheBytes clusterMode: false.
+
+"The storage of the space directory aPath in cluster mode (CC20): the storage a cluster node
+ writes through its coordinator (PBObjectSpace storage:coordinator:). The directory may hold
+ cluster/ (the nodes' acceptor logs, cluster/tier.st) and a SpaceRoot with a cluster_term;
+ replaceRoot: publishes only a SpaceRoot that carries a cluster_term (isClusterMode). Every
+ other check of path: stays. The mode is fixed when the storage opens."
+PBFileStorage class >> clusterPath: aPath
+  ^ self clusterPath: aPath segmentMaxBytes: self defaultSegmentMaxBytes.
+
+"As clusterPath:, with segments rolled over before they exceed anInteger bytes."
+PBFileStorage class >> clusterPath: aPath segmentMaxBytes: anInteger
+  ^ self _path: aPath segmentMaxBytes: anInteger atomCacheEntries: self defaultAtomCacheEntries
+    atomCacheBytes: self defaultAtomCacheBytes clusterMode: true.
+
+"The storage of aPath, in cluster mode when aBoolean (clusterPath:), else a plain storage
+ (path:), which refuses a directory holding cluster/."
+PBFileStorage class >> _path: aPath segmentMaxBytes: anInteger atomCacheEntries: cacheEntries atomCacheBytes: cacheBytes clusterMode: aBoolean
   | dir storage ok |
   ((_PBFrame isInt: cacheEntries) and: [cacheEntries >= 0]) ifFalse: [
     ^ PBValidationError signal: 'PBFileStorage: atomCacheEntries must be an Integer >= 0, not ' , cacheEntries printString].
@@ -428,20 +453,22 @@ PBFileStorage class >> path: aPath segmentMaxBytes: anInteger atomCacheEntries: 
   dir := aPath isString ifTrue: [aPath asFileReference] ifFalse: [aPath].
   (dir exists and: [dir isDirectory not]) ifTrue: [
     ^ PBValidationError signal: 'PBFileStorage: ' , dir pathString , ' exists and is not a directory'].
-  (dir / self clusterDirectoryName) exists ifTrue: [
+  (aBoolean not and: [(dir / self clusterDirectoryName) exists]) ifTrue: [
     ^ PBNotSupportedError signal: 'PBFileStorage: ' , dir pathString
-      , ' holds cluster/, the space of a cluster node: clusters are not supported by protoBaseST'].
+      , ' holds cluster/, the space of a cluster node: it is opened only with clusterPath:, by a cluster node'].
   [dir ensureCreateDirectory] on: FileSystemError do: [:e |
     ^ PBUnexpectedError signal: 'PBFileStorage: cannot create the space directory ' , dir pathString , ': ' , e messageText].
-  storage := self basicNew _setDirectory: dir segmentMaxBytes: anInteger atomCacheEntries: cacheEntries atomCacheBytes: cacheBytes.
+  storage := self basicNew _setDirectory: dir segmentMaxBytes: anInteger atomCacheEntries: cacheEntries
+    atomCacheBytes: cacheBytes clusterMode: aBoolean.
   ok := false.
   [storage _validateRoot. ok := true] ensure: [ok ifFalse: [storage close]].
   ^ storage.
 
-PBFileStorage >> _setDirectory: aFileReference segmentMaxBytes: anInteger atomCacheEntries: cacheEntries atomCacheBytes: cacheBytes
+PBFileStorage >> _setDirectory: aFileReference segmentMaxBytes: anInteger atomCacheEntries: cacheEntries atomCacheBytes: cacheBytes clusterMode: aBoolean
   "Runs once, on a fresh instance."
   directory isNil ifFalse: [^ PBUserError signal: 'PBFileStorage is initialised once'].
   directory := aFileReference.
+  clusterMode := aBoolean.
   segmentMax := anInteger.
   readers := Atom on: (PBFrozenDict withAssociations: #()).
   state := Atom on: #idle.
@@ -629,7 +656,7 @@ PBFileStorage >> refTo: aSegmentBytes offset: anOffset tag: aTag
  past the rename a publish completes and is reported. The token identifies the
  write operation, not an actor: protoST has no actor identity, so the root
  lock, like the writes, belongs to the storage; one actor (the space's
- publisher) makes its writes."
+ round runner, through its publisher) makes its writes."
 
 "Saves anAtom into this storage, with every atom it refers to that is not
  saved yet, dependents first (PBAtom >> _saveInto:), and answers its
@@ -763,6 +790,20 @@ PBFileStorage >> isCluster
   self _checkOpen.
   ^ (self _clusterReasonAt: self readRoot) notNil.
 
+"Whether the storage was opened in cluster mode (clusterPath:): fixed for its life."
+PBFileStorage >> isClusterMode
+  ^ clusterMode.
+
+"The cluster_term of the SpaceRoot at aPointer, nil when it has none. Its state is the atom
+ cache's when it holds the record (decoded or written by this storage, so a decode by
+ loadAt:expecting: would answer that state), else the record decoded by loadAt:expecting:."
+PBFileStorage >> _clusterTermAt: aPointer
+  | cached |
+  cached := atomCache valueAt: aPointer class: PBSpaceRoot.
+  ^ (cached isNil
+    ifTrue: [(self loadAt: aPointer expecting: self class spaceRootTag) state]
+    ifFalse: [cached state]) at: 'cluster_term' ifAbsent: [nil].
+
 "Why the space is a cluster node's, with the root record aRootRecord current
  (nil: none), or nil when it is not. The SpaceRoot's state is the atom cache's
  when it holds the record (decoded or written by this storage, so a decode by
@@ -770,14 +811,11 @@ PBFileStorage >> isCluster
  loadAt:expecting:, as before: no class check of PBSpaceRoot is added, so a
  malformed SpaceRoot is reported as it was."
 PBFileStorage >> _clusterReasonAt: aRootRecord
-  | term cached |
+  | term |
   (directory / self class clusterDirectoryName) exists ifTrue: [
     ^ 'its directory holds ' , self class clusterDirectoryName , '/'].
   aRootRecord isNil ifTrue: [^ nil].
-  cached := atomCache valueAt: aRootRecord pointer class: PBSpaceRoot.
-  term := (cached isNil
-    ifTrue: [(self loadAt: aRootRecord pointer expecting: self class spaceRootTag) state]
-    ifFalse: [cached state]) at: 'cluster_term' ifAbsent: [nil].
+  term := self _clusterTermAt: aRootRecord pointer.
   term isNil ifTrue: [^ nil].
   ^ 'its SpaceRoot at ' , aRootRecord pointer printString , ' carries the cluster_term ' , term printString.
 
@@ -833,6 +871,10 @@ PBFileStorage >> replaceRoot: aPBRootRecord
       ^ PBUserError signal: 'PBFileStorage replaceRoot: needs the root lock (tryLockRoot)'].
     self _syncSegments.
     self _checkRootRecordAt: aPBRootRecord pointer.
+    clusterMode ifTrue: [
+      (self _clusterTermAt: aPBRootRecord pointer) isNil ifTrue: [
+        ^ PBValidationError signal: 'PBFileStorage replaceRoot: a cluster-mode storage publishes only a SpaceRoot with a cluster_term, and the one at '
+          , aPBRootRecord pointer printString , ' has none']].
     current := self readRoot.
     expected := current isNil ifTrue: [1] ifFalse: [current epoch + 1].
     aPBRootRecord epoch = expected ifFalse: [
@@ -840,10 +882,11 @@ PBFileStorage >> replaceRoot: aPBRootRecord
         , (current isNil ifTrue: ['none'] ifFalse: [current epoch printString])
         , ', so a commit built on it publishes epoch ' , expected printString , ', not '
         , aPBRootRecord epoch printString , ': the commit was built on another root'].
-    reason := self _clusterReasonAt: current.
-    reason isNil ifFalse: [
-      ^ PBNotSupportedError signal: 'PBFileStorage: ' , directory pathString , ' is the space of a cluster node ('
-        , reason , '): it is written only through the cluster, and clusters are not supported by protoBaseST'].
+    clusterMode ifFalse: [
+      reason := self _clusterReasonAt: current.
+      reason isNil ifFalse: [
+        ^ PBNotSupportedError signal: 'PBFileStorage: ' , directory pathString , ' is the space of a cluster node ('
+          , reason , '): it is written only through the cluster (PBFileStorage clusterPath: and a coordinator)']].
     self _write: [self _writeRootTemp: aPBRootRecord encode]
       what: 'writing ' , self class rootTempFileName.
     self _stopIfCloseRequested: 'before replacing ' , self class rootFileName , ': nothing was published'.
@@ -946,7 +989,7 @@ PBFileStorage >> _writeOperation: aBlock
   s := state value.
   (s == #idle and: [state value: mine ifCurrent: s]) ifFalse: [
     self _checkOpen.
-    ^ PBUserError signal: 'PBFileStorage: a write is in progress on this storage: its writes are made by one actor at a time (the space''s publisher)'].
+    ^ PBUserError signal: 'PBFileStorage: a write is in progress on this storage: its writes are made by one actor at a time (the space''s round runner)'].
   ^ [self _checkNotFailed. aBlock value] ensure: [self _endWrite: mine].
 
 "Ends the write operation whose state is aState: back to #idle, or, when a

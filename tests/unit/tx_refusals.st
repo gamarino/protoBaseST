@@ -1,7 +1,9 @@
-"EXPECT: ok 27"
+"EXPECT: ok 29"
 "Refusals of the write side (plan Task 18, design spec 7.1 and 10.5; ProtoBase
  set_root_object, new_mutable, set_mutable and canonical_for): a root name starting with
- '__' is reserved for the format (PBValidationError); a Symbol (a long one: a short Symbol
+ '__' is reserved for the format (PBValidationError), for setRootObject: and, since proto_db
+ 2.0.0rc4 (_check_not_reserved in remove_root_object), for removeRootObject: too, checked
+ after the name and before the transaction's state; a Symbol (a long one: a short Symbol
  literal is the String itself in protoST, STATUS D35), a Dictionary or a Fraction
  as a value is PBValidationError naming the root or cell it was going to (holder
  Root 'name' or Mutable 'name'); so is a value deeper than MAX_VALUE_DEPTH; replace: must
@@ -32,6 +34,8 @@ c that: 'an empty root name' signals: PBValidationError during: [tx setRootObjec
 c that: 'a Symbol root name' signals: PBValidationError during: [tx setRootObject: #foobarbaz value: 1].
 c that: 'an empty cell name' signals: PBValidationError during: [tx newMutable: '' value: 1].
 c that: 'a removal: an empty name' signals: PBValidationError during: [tx removeRootObject: ''].
+c that: 'a removal of a __ root name' signals: PBValidationError containing: 'reserved for the format' during: [
+  tx removeRootObject: '__catalog'].
 
 "The holder quotes the name as Python's repr does (ProtoBase f'{name!r}')."
 c that: 'a name with a single quote: double quotes' signals: PBValidationError containing: 'Root "it''s": ' during: [
@@ -57,6 +61,8 @@ c that: 'setMutable: deeper than the limit' signals: PBValidationError containin
 c that: 'the transaction is still active' is: tx isActive equals: true.
 c that: 'nothing was written' is: { tx rootNames asArray. tx mutableNames asArray } equals: { #(). #() }.
 tx commit.
+c that: 'a removal of a __ root name is refused before the state check' signals: PBValidationError
+  containing: 'reserved for the format' during: [tx removeRootObject: '__currentModules'].
 c that: 'so the commit publishes nothing' is: db history size equals: size.
 c that: 'the refused writes are absent' is: db newTransaction rootNames asArray equals: #().
 

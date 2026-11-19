@@ -59,8 +59,9 @@ ProtoBase's order: the name, then the value, then the state.
 
 Ending:
 
-  aTransaction commit             publishes the writes through the space's
-                                  publisher (publisher.st) and waits for it;
+  aTransaction commit             queues the commit on the space's round
+                                  runner (round.st) and waits for its
+                                  outcome;
                                   with no writes, publishes nothing (plan call
                                   C16); the transaction ends either way:
                                   committed, or aborted after a failure
@@ -81,7 +82,8 @@ invalid name is PBValidationError in any state.
 
 The commit (design spec 7.3; ProtoBase _build_root, _merged and
 _check_mutables), built by the publisher under the root lock with
-_buildOn:. When the root read under the lock is the transaction's snapshot,
+_buildOn:, on the root the previous commit of its group produced (group
+commit, proto_db D52). When the root read under the lock is the transaction's snapshot,
 nothing changed. Otherwise every read token must equal the token of the same
 name in the current version, every blindly set cell must still exist, and
 the database must still exist: PBConflictError otherwise. The new version
@@ -120,6 +122,7 @@ Import from: 'protobase/registry'.
 Import from: 'protobase/collections'.
 Import from: 'protobase/roots'.
 Import from: 'protobase/space'.
+Import from: 'protobase/round'.
 
 "=== _PBNameMap, _PBReadMap, _PBWriteMap ======================================="
 
@@ -329,7 +332,7 @@ PBTxState _initializeMarks.
 "=== PBTransaction ============================================================="
 
 Object subclass: #PBTransaction
-  instanceVariableNames: 'database snapshotPointer spaceRoot dbRoot objects mutables bookkeeping'.
+  instanceVariableNames: 'database snapshotPointer spaceRoot dbRoot objects mutables bookkeeping retry'.
 
 "A transaction on aDatabase's current version (PBDatabase >> newTransaction)."
 PBTransaction class >> _on: aDatabase
@@ -355,7 +358,14 @@ PBTransaction >> _setDatabase: aDatabase record: aRootRecord spaceRoot: aSpaceRo
   objects := aDatabaseRoot objects.
   mutables := aDatabaseRoot mutables.
   bookkeeping := Atom on: PBTxState initial.
+  retry := Atom on: nil.
   ^ self.
+
+"Database.run's attempt this transaction is (cluster/round.st's held retries): aCaller, the one
+ object of that run:, and whether a conflict will be retried. Set once, before the block runs."
+PBTransaction >> _runAs: aCaller willRetry: aBoolean
+  (retry value: { aCaller. aBoolean } ifCurrent: nil) ifFalse: [
+    ^ PBUserError signal: 'PBTransaction: the attempt of a run: is set once'].
 
 "The PBDatabase this transaction works on."
 PBTransaction >> database
@@ -429,6 +439,13 @@ PBTransaction >> mutableNames
 
 "=== writes ==================================================================="
 
+"PBValidationError when the root name aName starts with '__': those roots are reserved for
+ the format (the runtime registry's, proto_db _check_not_reserved): an application never
+ writes nor removes one."
+PBTransaction >> _checkNotReserved: aName
+  (aName beginsWith: '__') ifTrue: [
+    ^ PBValidationError signal: 'Root names starting with ''__'' are reserved for the format, not ' , (PBCodec repr: aName)].
+
 "Sets the root aName to aValue at commit (ProtoBase set_root_object): merged
  into the current value when the root was neither read nor replaced and the
  value is a collection with a complete log (design spec 7.3 step 4)."
@@ -443,17 +460,19 @@ PBTransaction >> setRootObject: aName value: aValue
 PBTransaction >> setRootObject: aName value: aValue replace: aBoolean
   | value |
   _PBNameCheck check: aName what: 'root'.
-  (aName beginsWith: '__') ifTrue: [
-    ^ PBValidationError signal: 'Root names starting with ''__'' are reserved for the format, not ' , (PBCodec repr: aName)].
+  self _checkNotReserved: aName.
   (aBoolean == true or: [aBoolean == false]) ifFalse: [
     ^ PBValidationError signal: 'replace must be a Boolean, not ' , aBoolean printString].
   value := PBCodec canonical: aValue for: ['Root ' , (PBCodec repr: aName)].
   bookkeeping swap: [:st | st checkActive withWrite: aName value: value replace: aBoolean].
 
 "Removes the root aName at commit (a no-op if it is absent then); a later set
- of the name in this transaction replaces (ProtoBase remove_root_object)."
+ of the name in this transaction replaces (proto_db remove_root_object). As in
+ proto_db 2.0.0rc4, the name is checked, then the '__' prefix the format
+ reserves, then the state."
 PBTransaction >> removeRootObject: aName
   _PBNameCheck check: aName what: 'root'.
+  self _checkNotReserved: aName.
   bookkeeping swap: [:st | st checkActive withWrite: aName value: PBTxState removed replace: true].
 
 "Creates the mutable cell aName holding aValue at commit and answers its
@@ -546,22 +565,31 @@ PBTransaction >> abort
   bookkeeping swap: [:st | st checkActive withState: #aborted].
 
 "Commits the writes (design spec 7.3): the space's publisher validates the
- reads against the newest root, merges, saves and publishes. This call sends
- it attempts and waits for each (PBObjectSpace >> _untilPublished:): while the
- root lock is held by another holder, it waits and tries again, the publisher
- never does (ruling R19). Inside an actor these waits are nested in ensure:,
- so they block the actor's worker, which helps other actors meanwhile; they do
- not suspend the actor. A transaction with no writes publishes nothing (plan
- call C16). PBConflictError when a root or cell it read changed, or a merge
- conflicts; PBTimeoutError when the root lock is not taken within the space's
- lockTimeout; PBOutcomeUnknownError when the publish failed and its outcome
- could not be decided. The transaction ends either way: committed, or aborted
- after a failure (ProtoBase commit)."
+ reads against the newest root, merges, saves and publishes. This call queues
+ the commit on the space's round runner as a PBCommitEntry (round.st) and
+ waits for its Future (PBObjectSpace >> _commitEntry:): the runner decides
+ the commits queued together as one group (proto_db D52) and, while the root
+ lock is held by another holder, retries with timers until the commit's
+ deadline, lockTimeout after it was queued (CC10); it never waits (ruling
+ R19). Inside an actor the wait here is nested in ensure:, so it blocks the
+ actor's worker, which helps other actors meanwhile; it does not suspend the
+ actor. willRetry is false, and the entry its own caller, unless the
+ transaction is an attempt of run: (the cluster round's held retries,
+ cluster/round.st; the standalone round reads neither). A transaction with no writes publishes
+ nothing (plan call C16). PBConflictError when a root or cell it read
+ changed, or a merge conflicts; PBTimeoutError when the root lock is not
+ taken within the space's lockTimeout; PBOutcomeUnknownError when the
+ publish failed and its outcome could not be decided. The transaction ends
+ either way: committed, or aborted after a failure (proto_db commit)."
 PBTransaction >> commit
-  | st committed |
+  | st committed space |
   bookkeeping swap: [:current | st := current checkActive. current withState: #committing].
   committed := false.
-  [st hasNoWrites ifFalse: [database space _untilPublished: [:publisher | publisher commit: self]].
+  space := database space.
+  [st hasNoWrites ifFalse: [
+     space _commitEntry: (retry value isNil
+       ifTrue: [PBCommitEntry transaction: self willRetry: false deadline: space _deadline]
+       ifFalse: [PBCommitEntry transaction: self willRetry: retry value last caller: retry value first deadline: space _deadline])].
    committed := true]
     ensure: [bookkeeping swap: [:current | current withState: (committed ifTrue: [#committed] ifFalse: [#aborted])]].
 
@@ -573,6 +601,13 @@ PBTransaction >> commit
  steps 3 and 4). PBConflictError when a root or cell read changed, a blindly
  set cell was removed, or the database no longer exists."
 PBTransaction >> _buildOn: aRootRecord
+  ^ self _buildOn: aRootRecord stamp: nil.
+
+"As _buildOn:, with aStampOrNil: nil for a standalone commit (the same root, byte for byte),
+ { term. epoch } for a cluster commit, whose space root carries the stamp and the root it was
+ built on as its previous (PBSpaceRoot databases:stamp:previous:, proto_db _build_root with a
+ _ClusterStamp)."
+PBTransaction >> _buildOn: aRootRecord stamp: aStampOrNil
   | st space current root newObjects currentObjects cells newRoot |
   st := bookkeeping value.
   st state == #committing ifFalse: [
@@ -605,7 +640,7 @@ PBTransaction >> _buildOn: aRootRecord
       ifFalse: [cells := cells setAt: name value: value]].
   newRoot := PBDatabaseRoot objects: newObjects mutables: cells version: root version + 1
     committedAt: (PBDatabaseRoot committedAfter: root committedAt) origin: root origin previous: root.
-  ^ PBSpaceRoot databases: (current databases setAt: database name value: newRoot).
+  ^ PBSpaceRoot databases: (current databases setAt: database name value: newRoot) stamp: aStampOrNil previous: current.
 
 "PBConflictError unless every token of aReadMap is the token of the same name
  in aDictionary now (ProtoBase _same_token)."
@@ -741,8 +776,14 @@ PBMutableObject >> get: aTransaction
  exactly when an exception unwinds the block, and committed otherwise,
  including a ^ taken after a resumed exception."
 PBDatabase >> newTransactionDo: aBlock
+  ^ self _transactionDo: aBlock caller: nil willRetry: false.
+
+"newTransactionDo: aBlock as an attempt of run: by aCaller (nil: not one) that retries a conflict
+ when aBoolean (PBTransaction >> _runAs:willRetry:)."
+PBDatabase >> _transactionDo: aBlock caller: aCaller willRetry: aBoolean
   | tr inFlight |
   tr := self newTransaction.
+  aCaller isNil ifFalse: [tr _runAs: aCaller willRetry: aBoolean].
   inFlight := false.
   ^ [[aBlock value: tr] on: Exception do: [:e | | answer |
        e isResumable ifFalse: [
@@ -777,12 +818,17 @@ PBDatabase >> run: aBlock retries: aCount
  fresh transaction, at most aCount more times, after waiting backoffFor:low:high:random: milliseconds
  ((Future after: d) wait; aBackoff is any two-element sequenceable collection (low high) in milliseconds, ProtoBase's seconds pair scaled). After
  the last retry the conflict is signalled again. Any other exception aborts the attempt and goes on
- unretried; notably PBOutcomeUnknownError, because the commit may have been applied. A block that ends its
+ unretried; notably PBOutcomeUnknownError, because the commit may have been applied. In cluster mode
+ (cluster/round.st) every attempt commits as one caller, an Object made for this run:, with willRetry
+ while retries are left; a conflict the commit round marks permitHeld (its permission kept for this
+ retry, D50 held retries) is retried at once, without the backoff, and counts as an attempt; after
+ any attempt that is not such a retry (success, another conflict, any error) the round is told that
+ this caller's held retry is not coming (PBObjectSpace >> _dropKept:, proto_db _drop_kept). A block that ends its
  transaction itself is not committed again (newTransactionDo: commits only an active one). The checks of
  ProtoBase run first: aCount a non-negative Integer, aBackoff a pair of numbers 0 <= low <= high
  (PBValidationError)."
 PBDatabase >> run: aBlock retries: aCount backoff: aBackoff
-  | low high random |
+  | low high random caller |
   (aCount isInteger and: [aCount >= 0]) ifFalse: [
     ^ PBValidationError signal: 'run: retries must be a non-negative Integer, not ' , aCount printString].
   ((aBackoff isKindOf: SequenceableCollection) and: [aBackoff size = 2]) ifFalse: [
@@ -793,14 +839,18 @@ PBDatabase >> run: aBlock retries: aCount backoff: aBackoff
   ((low isNumber and: [high isNumber]) and: [low >= 0 and: [high >= low]]) ifFalse: [
     ^ PBValidationError signal: 'run: backoff must satisfy 0 <= low <= high, not ' , aBackoff printString].
   random := Random new.
-  0 to: aCount do: [:attempt | | failed value |
+  caller := Object new.
+  0 to: aCount do: [:attempt | | failed held value |
     failed := false.
-    value := [self newTransactionDo: aBlock] on: PBConflictError do: [:conflict |
-      attempt = aCount ifTrue: [conflict pass].
-      failed := true.
-      nil].
+    held := false.
+    value := [[self _transactionDo: aBlock caller: caller willRetry: attempt < aCount] on: PBConflictError do: [:conflict |
+        attempt = aCount ifTrue: [conflict pass].
+        failed := true.
+        held := conflict permitHeld.
+        nil]]
+      ensure: [held ifFalse: [space _dropKept: caller]].
     failed ifFalse: [^ value].
-    (Future after: (PBDatabase backoffFor: attempt low: low high: high random: random)) wait].
+    held ifFalse: [(Future after: (PBDatabase backoffFor: attempt low: low high: high random: random)) wait]].
   ^ PBUnexpectedError signal: 'run: the retry loop always answers or signals'.
 
 "Sets this cell to aValue in aTransaction (ProtoBase MutableObject.set):
