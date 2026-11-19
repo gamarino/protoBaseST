@@ -1,17 +1,12 @@
 # 17. Indexes
 
-<!-- example: examples/queries/pending/17_indexes.st.pending -->
-Program, pending: [examples/queries/pending/17_indexes.st.pending](../../examples/queries/pending/17_indexes.st.pending).
+<!-- example: examples/tutorial/17_indexes.st -->
+Program: [examples/tutorial/17_indexes.st](../../examples/tutorial/17_indexes.st).
 Previous: [16. Operating a cluster](16-operating-a-cluster.md). Next: [18. Queries and the planner](18-queries-and-plans.md).
 
-> **Draft: the API in this chapter is not implemented.** Indexed queries are planned for
-> protoBaseST 0.3.0 by the approved
-> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md). Today a
-> collection with an index refuses every change (chapter 4). Every block below comes from a
-> program written against the spec's API that **has never run**. Figures marked
-> `[measured in T<n>: ...]` do not exist yet; they will come from the benchmarks of spec
-> section 7.3, task T<n>. Read this chapter as the design explained, not as a description of
-> working code.
+> **In progress for protoBaseST 0.3.0** (the approved
+> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md)). Every block
+> below comes from the chapter's program, which runs as a test and checks what it shows.
 
 Chapter 4 answered questions in two ways: a walk over the collection, or a second collection the
 program keeps itself. This chapter shows why both stop working as the data and the number of
@@ -33,8 +28,10 @@ lesson check: 'a walk finds the people in Oslo' is: (walk value: (db newTransact
 It is correct, and it is the right answer for 600 elements read once. Its cost is the size of the
 collection, whatever the answer: finding one person among a million reads a million records.
 In protoBaseST each record read is a lazy load and a decode, so the cost per element is not
-small. [measured in T8: bench Q1, the time of one point lookup against collection size, 10^2 to
-10^5 elements, by a walk and by an equality index, RUNS=5 interleaved, minimum and median.]
+small. Measured in T8 (bench Q1, RUNS=5 interleaved, the minimum,
+[deviations.md](../deviations.md#q1-q4-queries-indexed-against-a-forced-scan)): one lookup by a
+walk took 5.5 ms at 10^2 elements, 59 ms at 10^3 and 565 ms at 10^4; by an equality index, about
+1 ms at every one of those sizes.
 
 ## The next obvious solution: keep the lookup yourself
 

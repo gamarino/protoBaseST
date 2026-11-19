@@ -1,9 +1,6 @@
 "_indexed_change.st: protoST's step of the indexed part of lesson 11 (a helper, run by
  11_indexed_interop.sh).
 
- PENDING with the rest of the lesson: runs once Task T4 (and T8, for the queries) of the
- indexed-queries plan lands; it has never run.
-
  Usage: protost _indexed_change.st <directory>
  Changes the collection Python indexed, through its mutators and through a merge of a blind
  write. The last line is the lesson's: '11 indexed interop ok (N checks)'."

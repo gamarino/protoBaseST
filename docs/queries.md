@@ -1,16 +1,16 @@
 # Indexed queries and the query planner
 
-<!-- example: examples/queries/pending/reading_plans.st.pending -->
+<!-- example: examples/queries/reading_plans.st -->
 
-> **Draft: planned for protoBaseST 0.3.0, not implemented.** This guide explains the design of the
-> approved [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md). Today
-> protoBaseST reads `proto_db`'s indexes and maintains them on every write, but merges onto an indexed collection
-> are still refused ([deviations.md](deviations.md#collections-and-records)). Everything below about `proto_db` is
-> read from its code and documentation at `v2.0.0rc4` and cited by file; everything about
-> protoBaseST is what the spec plans, and nothing of it has run. Every code block comes from
-> [examples/queries/pending/reading_plans.st.pending](../examples/queries/pending/reading_plans.st.pending),
-> a program written against the planned API. Figures marked `[measured in T<n>: ...]` do not exist
-> yet: each names the task of spec section 11 whose benchmark (spec 7.3) will measure it.
+> **In progress for protoBaseST 0.3.0.** This guide explains the design of the approved
+> [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md). Indexes, their
+> maintenance in every write and merge, the expression language, the planner and the query front
+> end (`PBQuery`, `PBField`) are implemented; pagers (plan Task 9) are not yet. Everything below
+> about `proto_db` is read from its code and documentation at `v2.0.0rc4` and cited by file. Every
+> code block comes from a program of [examples/queries/](../examples/queries/README.md) that runs
+> as a test and checks what it shows; the section that quotes one names it. Figures marked
+> `[measured in T<n>: ...]` do not exist yet: each names the task of spec section 11 whose
+> benchmark (spec 7.3) will measure it.
 
 This is the conceptual guide. The tutorial teaches the same ground by example, in
 [chapter 17](tutorial/17-indexes.md) (indexes), [chapter 18](tutorial/18-queries-and-plans.md)
@@ -48,9 +48,11 @@ load and a decode, so the constant is not small.
 
 An index changes what a question costs from "what is stored" to "what is returned": a lookup costs
 a descent of a tree, about log2 of the number of distinct keys, plus the rows it answers.
-[measured in T8: bench Q1, the time of one point lookup against collection size, 10^2 to 10^5
-elements, indexed and by a forced scan (the same collection without indexes), RUNS=5 interleaved,
-minimum and median; and the same for `proto_db` on the same seed and data.]
+Measured in T8 (bench Q1, RUNS=5 interleaved, the minimum; [deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)): a point lookup
+by an equality index took about 1 ms in protoBaseST at 10^2, 10^3 and 10^4 elements (`proto_db`
+about 0.1 ms), while a forced scan of the same collection without indexes took 5.5 ms, 59 ms and
+565 ms (`proto_db` 0.3, 2.8 and 28 ms). 10^5 elements was not measured: protoST's indexed build of
+it is too slow for the bench.
 
 The hand-made alternative of chapter 4, a second root kept by the program, fails differently: it
 is only as good as every writer's memory, in both languages, and nothing checks that it agrees with
@@ -105,6 +107,21 @@ Both built-in kinds are key-group indexes (`proto_db`, `indexing/keyed.py:1-41`)
 | `PBEqualityIndex` | `==`, `'in'`, `!=`, `?N`, `?!N` | `IndexLookup` (`==`, `'in'`, `?N`), `IndexRange` (`?!N`), `IndexComplement` (`!=`) | |
 | `PBRangeIndex` | the same, and `<`, `<=`, `>`, `>=`, the four `'between'` forms | the same, and `IndexRange` for the comparisons | ordered iteration: `IndexOrderedScan` |
 
+<!-- example: examples/queries/lookups.st -->
+
+What each kind answers, and how, from [examples/queries/lookups.st](../examples/queries/lookups.st)
+(the block planOf names the plan of a query by its nodes, from the root down its first children):
+
+```smalltalk
+people := people addIndex: (PBEqualityIndex name: 'by_city' path: 'city').
+city := PBField path: 'city'.
+lesson check: 'a lookup' is: (planOf value: (city eq: 'Oslo')) equals: 'IndexLookup'.
+lesson check: 'in: is one lookup of several keys' is: (planOf value: (city in: #('Oslo' 'Rome'))) equals: 'IndexLookup'.
+lesson check: 'isNone looks up nil and MISSING' is: (planOf value: city isNone) equals: 'IndexLookup'.
+lesson check: 'notNone is a range over the present keys' is: (planOf value: city notNone) equals: 'IndexRange'.
+lesson check: 'ne: is the complement of a group' is: (planOf value: (city ne: 'Oslo')) equals: 'IndexComplement'.
+```
+
 Every node of both trees carries a *weight*, the number of occurrences below it, so occurrence *r*
 is found by one descent. That is what gives windows and pages their O(log n + page size) cost
 ([below](#ordered-reads-windows-and-pages)).
@@ -117,10 +134,9 @@ built.
 
 ## Key specs, MISSING and nil
 
-<!-- pending example: examples/queries/keys.st (plan task 8) -->
+<!-- example: examples/queries/keys.st -->
 
-> The runnable program of this section, `examples/queries/keys.st`, is written by plan task 8
-> (pre-flight ruling F4); until then the section quotes no code.
+The program of this section is [examples/queries/keys.st](../examples/queries/keys.st).
 
 An index is defined by its name and its *key spec*, a persistable `(kind, arg)` description of the
 key (`proto_db`, `indexing/keyspec.py:165-267`):
@@ -153,17 +169,48 @@ at all. They are two different keys, and the operators treat them differently (d
 | `?!N` / `notNone` | no | no |
 | `?T`, `?!T`, `'contains'` | by the value | never |
 
+Four contacts: Ada's zip is `'1010'`, Bob's is an explicit `nil`, Cy has an address without a zip,
+and Di has no address at all:
+
+```smalltalk
+spec := PBKeySpec path: 'address.zip'.
+lesson check: 'a present zip is its value' is: (spec extract: (contacts getAt: 0)) equals: '1010'.
+lesson check: 'an explicit nil stays nil' is: (spec extract: (contacts getAt: 1)) equals: nil.
+lesson check: 'an absent zip is MISSING' is: (spec extract: (contacts getAt: 2)) equals: PBMissing default.
+lesson check: 'no address at all is MISSING too' is: (spec extract: (contacts getAt: 3)) equals: PBMissing default.
+lesson check: 'at: cannot tell absence from nil' is: ((contacts getAt: 3) at: 'address') equals: nil.
+```
+
+```smalltalk
+zip := PBField path: 'address.zip'.
+count := [:condition | ((PBQuery from: contacts) where: condition) count].
+lesson check: 'eq: nil finds the explicit nil only' is: (count value: (zip eq: nil)) equals: 1.
+lesson check: 'ne: matches a present key only' is: (count value: (zip ne: '1010')) equals: 1.
+lesson check: 'isNone finds nil and MISSING' is: (count value: zip isNone) equals: 3.
+lesson check: 'notNone finds the rest' is: (count value: zip notNone) equals: 1.
+lesson check: 'a range compares keys of its own rank only' is: (count value: zip > 5) equals: 0.
+```
+
 A key that cannot be ordered (a list, a map, NaN) matches only `!=`, `?!N`, `'contains'`, `?T` and
 `?!T`. Ordering operators compare only keys of the operand's type rank: `nil < 5` is false and
 `'a' > 1` is false, rather than an error.
 
 `proto_db` persists the key spec as the tuple `('path' 'address.zip')`, `('element' nil)` or
 `('extractor' 'name_length')`. In protoBaseST `PBIndex >> keySpec` keeps answering that tuple, as
-it does in 0.1.0 (plan call IP3); the planned `PBIndex >> keySpecObject` answers it as a
+it does in 0.1.0 (plan call IP3); `PBIndex >> keySpecObject` answers it as a
 `PBKeySpec`. An index is built from a `PBKeySpec`, as in
 `PBEqualityIndex name: 'by_zip' keySpec: (PBKeySpec path: 'address.zip')`, or, for one path, with
 the convenience `PBEqualityIndex name: 'by_city' path: 'city'`; a String given as a key spec is
-`PBValidationError` (ruling CR3).
+`PBValidationError` (ruling CR3):
+
+```smalltalk
+byZip := (contacts addIndex: (PBEqualityIndex name: 'by_zip' keySpec: spec)) getIndex: 'by_zip'.
+lesson check: 'keySpec answers the persisted tuple' is: byZip keySpec asArray equals: #('path' 'address.zip').
+lesson check: 'keySpecObject answers the key spec' is: byZip keySpecObject equals: spec.
+lesson check: 'a String is not a key spec'
+    signals: PBValidationError containing: 'must be a PBKeySpec'
+    during: [PBEqualityIndex name: 'by_zip' keySpec: 'address.zip'].
+```
 
 ## Extractors and their purity contract
 
@@ -205,10 +252,10 @@ exception appears at the mutator call, in the transaction's own thread.
 
 ## The expression language
 
-<!-- pending example: examples/queries/expressions.st (plan task 8) -->
+<!-- example: examples/queries/expressions.st -->
 
-> The runnable program of this section, `examples/queries/expressions.st`, is written by plan
-> task 8 (pre-flight ruling F4); the one block below comes from `reading_plans.st.pending`.
+The program of this section is [examples/queries/expressions.st](../examples/queries/expressions.st);
+the block on the list syntax comes from [reading_plans.st](../examples/queries/reading_plans.st).
 
 A condition is a *term* `(path, op, value)` or a combination of conditions. The operators are
 `proto_db`'s strings, so a condition, its list form and its `explain` read the same in both
@@ -226,11 +273,28 @@ languages (call IC3):
 
 A field is `PBField path: 'city'`, `PBField element` or `PBField extractor: 'name_length'`.
 
+```smalltalk
+city := PBField path: 'city'.
+age := PBField path: 'age'.
+lesson check: 'eq: builds a term' is: (city eq: 'Oslo') equals: (PBTerm path: 'city' op: '==' value: 'Oslo').
+lesson check: 'between:and: includes both bounds' is: (age between: 30 and: 35) op equals: 'between[]'.
+lesson check: '& builds a PBAnd' is: ((city eq: 'Oslo') & (age > 70)) class equals: PBAnd.
+lesson check: 'not not is the condition itself' is: (age > 70) not not equals: age > 70.
+lesson check: 'a field compared with = is a Boolean, not a condition' is: city = 'Oslo' equals: false.
+```
+
 **The list syntax.** `proto_db`'s 0.1 prefix syntax is accepted by `PBPlanner` (and by
 `PBExpression class >> compile:`), from an `Array`: `{ 'city'. '=='. 'Oslo' }`; several terms in one
 array are joined by an implicit AND; `'&'`, `'|'` (binary, prefix) and `'!'` (unary) combine them
 (`proto_db/query/expressions.py`, module docstring). It is language neutral, which is why the query
 vectors of spec 6.2 are written in it.
+
+```smalltalk
+lesson check: 'the list syntax compiles to the same condition'
+    is: (PBExpression compile: { 'city'. '=='. 'Oslo'. 'age'. '>'. 70 })
+    equals: (city eq: 'Oslo') & (age > 70).
+lesson check: 'asList answers the list syntax' is: (city eq: 'Oslo') asList equals: #('city' '==' 'Oslo').
+```
 
 ```smalltalk
 lesson check: 'PBPlanner with the list syntax plans the same tree'
@@ -243,6 +307,12 @@ previous section; `&` and `|` short-circuit left to right; `not` is the logical 
 `(age < 5) not` is **true** for an element without an age. Ask for presence explicitly (`notNone`)
 when that matters.
 
+```smalltalk
+lesson check: 'age < 5 is false for an element without an age' is: ((age < 5) evaluate: ageless) equals: false.
+lesson check: 'so (age < 5) not is true for it' is: ((age < 5) not evaluate: ageless) equals: true.
+lesson check: 'notNone asks for presence' is: (age notNone evaluate: ageless) equals: false.
+```
+
 **Blocks.** A plain block enters a query only through `where:`
 (`q where: [:p | (p at: 'age') \\ 7 = 0]`); `&`, `|` and `not` take expressions only, and chained
 `where:` calls combine with AND (ruling CR5). `where:` given anything else, a Boolean included,
@@ -254,6 +324,20 @@ rule is `proto_db`'s (`linq.py:48-61`): in a top-level conjunction the condition
 go to the planner and each block becomes its own filter on top; an `|` or a `not` holding a
 `PBBlockPredicate` (a block with a description, itself an expression) is one block filter for the
 whole condition.
+
+```smalltalk
+q := PBQuery from: people.
+lesson check: 'where: refuses a Boolean'
+    signals: PBValidationError containing: 'where: expects a PBExpression or a one-argument block, got a Boolean'
+    during: [q where: city = 'Oslo'].
+sevens := q where: [:p | (p at: 'age') \\ 7 = 0].
+lesson check: 'a block is a BlockFilter over a scan' is: (planOf value: sevens) equals: 'BlockFilter <- CollectionScan'.
+oldSevens := (q where: age > 70) where: [:p | (p at: 'age') \\ 7 = 0].
+lesson check: 'chained where: is AND: the block filters on top' is: (planOf value: oldSevens) equals: 'BlockFilter <- IndexRange'.
+inOslo := PBBlockPredicate block: [:p | (p at: 'city') = 'Oslo'] description: 'city is Oslo'.
+lesson check: 'an OR holding a block is one BlockFilter for the whole condition'
+    is: ((q where: (age > 70) | inOslo) explain at: 'description') equals: '(age > 70) | (city is Oslo)'.
+```
 
 **Selection blocks are not in the first release** (ruling IQ2). Translating
 `[:p | (p at: 'city') = 'Oslo']` into a term by running it on a recording object reads like
@@ -324,6 +408,24 @@ is deterministic.
 an index-only plan; otherwise the only plan is the scan filtered by the whole `|`, because a union
 that includes a scan always costs more than the scan alone. A union keeps each element with its
 largest multiplicity over its branches, so it equals the scan's multiset.
+
+<!-- example: examples/queries/compound.st -->
+
+Compound conditions over chapter 18's 600 people, indexed by city and by age, from
+[examples/queries/compound.st](../examples/queries/compound.st):
+
+```smalltalk
+both := q where: (city eq: 'Oslo') & (age > 70).
+lesson check: 'AND: one access path, the other conjunct a residual filter' is: (planOf value: both) equals: 'Filter <- IndexRange'.
+lesson check: 'the filter holds the city term' is: ((both explain at: 'predicate') at: 'path') equals: 'city'.
+either := q where: (city eq: 'Oslo') | (age > 70).
+lesson check: 'OR of two indexed branches: a union' is: (planOf value: either) equals: 'Union <- IndexLookup'.
+lesson check: 'the union keeps each person once' is: either count equals: 200.
+unindexed := q where: (city eq: 'Oslo') | ((PBField path: 'name') contains: '7').
+lesson check: 'OR with an unindexed branch: one scan for the whole condition' is: (planOf value: unindexed) equals: 'Filter <- CollectionScan'.
+notOslo := q where: (city eq: 'Oslo') not.
+lesson check: 'NOT of a term: a residual filter over a scan' is: (planOf value: notOslo) equals: 'Filter <- CollectionScan'.
+```
 
 **6. Order** (`planner.py:263-275`). For an order on one key, each index that yields that key in
 order contributes an ordered scan with the whole condition as a residual filter, competing with a
@@ -543,6 +645,25 @@ A plan may offer `windowFrom:to:`, rows `start` to `stop − 1` without producin
 
 Anything else (a block key, two sort keys, a filter of several terms, a union) has no rank access.
 
+<!-- example: examples/queries/ranges.st -->
+
+Ranges and ordered reads over a range index on the age of chapter 18's 600 people (ten of each age,
+18 to 77), from [examples/queries/ranges.st](../examples/queries/ranges.st):
+
+```smalltalk
+lesson check: 'a comparison is a range of the index' is: (planOf value: (q where: age > 70)) equals: 'IndexRange'.
+lesson check: 'seven ages of ten people' is: (q where: age > 70) count equals: 70.
+lesson check: 'counted by rank' is: ((PBCountPlan source: (q where: age > 70) plan) explain at: 'by_rank') equals: true.
+youngest := (q orderBy: 'age') take: 5.
+lesson check: 'an ordered read streams the index' is: (planOf value: youngest) equals: 'Limit <- IndexOrderedScan'.
+lesson check: 'and seeks its window by rank' is: (youngest explain at: 'by_rank') equals: true.
+lesson check: 'the five youngest' is: (youngest asArray collect: [:p | p at: 'age']) equals: #(18 18 18 18 18).
+oldest := (q orderBy: 'age' descending: true) take: 3.
+lesson check: 'descending reads the index backwards' is: (oldest asArray collect: [:p | p at: 'age']) equals: #(77 77 77).
+lesson check: 'a window of any plan with rank access'
+    is: (((q orderBy: 'age') plan windowFrom: 100 to: 103) collect: [:p | p at: 'age']) equals: #(28 28 28).
+```
+
 **Windows.** A `Limit` over a plan with rank access seeks its window in O(log n + its size)
 (`'by_rank'` in `explain`). A `Count` over one reads the count.
 
@@ -554,8 +675,10 @@ whatever commits meanwhile, because the snapshot's versions do not change. It li
 computed over Python's `repr` of the plan.
 
 [measured in T9: bench Q5, the time of page k for every k, by rank and materialised, and `count` by
-rank.] [measured in T8: bench Q4, `orderBy:` with `take:` by an ordered index scan against a `Sort`
-over a lookup, selective and unselective.]
+rank.] Measured in T8 (bench Q4, 2000 elements, 20 queries of `take: 5`, the minimum;
+[deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)): the ordered index scan answered in 0.9 ms per query against 180 ms for a
+`Sort` over a scan; with a condition the planner sorts over a lookup, 2.5 ms per query for ten
+rows and 58 ms for 500. `proto_db`: 0.12, 5.0, 0.23 and 1.7 ms.
 
 ## Index maintenance under immutability and the commit
 
@@ -595,11 +718,38 @@ replays the intents through **the public mutators of the current version**, whic
 current version's indexes (`proto_db`, `collections/base.py:594-631`); it needs no index-specific
 rule.
 
+<!-- example: examples/queries/merge_indexed.st -->
+
+From [examples/queries/merge_indexed.st](../examples/queries/merge_indexed.st): two blind writes
+onto a dictionary of 600 people indexed by city, committed one after the other.
+
+```smalltalk
+mine setRootObject: 'people' value: (mine newDictionary
+    setAt: 700 value: (mine newObject: { 'name' -> 'person700'. 'city' -> 'Oslo' })).
+theirs setRootObject: 'people' value: (theirs newDictionary
+    setAt: 701 value: (theirs newObject: { 'name' -> 'person701'. 'city' -> 'Oslo' })).
+mine commit.
+theirs commit.
+people := db newTransaction getRootObject: 'people'.
+lesson check: 'both blind writes merged, and the index counts them' is: (inOslo value: people) equals: 152.
+lesson check: 'the merged version keeps its index' is: people indexNames equals: #('by_city').
+lesson check: 'and the index equals a scan'
+    is: ([people validate. 'clean'] on: PBCorruptionError do: [:e | e messageText]) equals: 'clean'.
+```
+
 Index definitions are logged too: `addIndex:` logs `('@index_add' name index)` and `removeIndex:`
 logs `('@index_remove' name)`, on every logged collection class, never on `PBList`
 (`base.py:572-573`). A merge replays the element operations first, then the index-definition
 operations per name. An index that this log created and that the current version also has is a
 concurrent creation: that commit is `PBConflictError`.
+
+```smalltalk
+one setRootObject: 'tags' value: (one newDictionary addIndex: (PBEqualityIndex name: 'by_tag' path: 'tag')).
+two setRootObject: 'tags' value: (two newDictionary addIndex: (PBEqualityIndex name: 'by_tag' path: 'tag')).
+one commit.
+lesson check: 'the second creation of the same index is a conflict'
+    signals: PBConflictError containing: 'by_tag' during: [two commit].
+```
 
 Three consequences follow, each explicit:
 
@@ -652,10 +802,10 @@ same rows, checksum and plan. None exists yet.
 
 | What | Bench | Task |
 |---|---|---|
-| A point lookup against collection size, indexed and scanned | Q1 | [measured in T8: Q1, sizes 10^2 to 10^5] |
-| `'in'` of 1, 10, 100 values; ranges of 0.1 % to 50 % selectivity | Q2 | [measured in T8: Q2] |
-| AND, OR of two indexed branches and of an indexed and an unindexed one, NOT | Q3 | [measured in T8: Q3] |
-| Ordered scan against sort, with `take:` | Q4 | [measured in T8: Q4] |
+| A point lookup against collection size, indexed and scanned | Q1 | Measured in T8, sizes 10^2 to 10^4: about 1 ms per lookup at every size against a scan of 5.5 to 565 ms; `proto_db` 0.1 ms against 0.3 to 28 ms ([deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)) |
+| `'in'` of 1, 10, 100 values; ranges of 0.1 % to 50 % selectivity | Q2 | Measured in T8: the index wins at every point, 1.4 to 49 ms per query against 130 to 430 ms for the scan; 11x to 26x `proto_db`'s time ([deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)) |
+| AND, OR of two indexed branches and of an indexed and an unindexed one, NOT | Q3 | Measured in T8: AND 2.5 ms against a 168 ms scan; the Union of two lookups is slower than the scan in protoBaseST (313 ms against 251 ms), an open item; the other two plan a scan ([deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)) |
+| Ordered scan against sort, with `take:` | Q4 | Measured in T8: an ordered index scan 0.9 ms per query against 180 ms for a sort over a scan ([deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)) |
 | Page k by rank against materialised; `count` by rank | Q5 | [measured in T9: Q5] |
 | Commits per second with 0, 1 and 3 indexes | M1 | Measured in T4a: protoBaseST 38, 11.9 and 5.2 commits/s, `proto_db` 150, 115 and 83; about 55 ms per index per commit against 2 ms ([deviations.md](deviations.md#m1-commits-per-second-with-0-1-and-3-indexes)) |
 | Bulk `addIndex:` against the fold of single additions | M2 | Measured in T3: build 3.1x faster than the fold at 10^4, protoBaseST 16.7x (10^2) to 38.3x (10^4) slower than `proto_db` ([deviations.md](deviations.md#m2-the-bulk-build-against-the-fold-of-single-additions)) |

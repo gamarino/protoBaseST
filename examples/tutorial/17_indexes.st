@@ -1,12 +1,5 @@
 "EXPECT: 17 indexes ok (24 checks)"
-"PENDING: runs once Tasks T2 (key specs and extractors), T3 (the key-group indexes), T4
- (collections with indexes) and T8 (PBQuery, PBField) of the indexed-queries plan land. Written
- against the API of docs/superpowers/specs/2026-11-18-indexed-queries-design.md, section 5; it has
- never run. The test runner does not run it (the .st.pending extension). When those tasks are
- merged, move it to examples/tutorial/17_indexes.st, run it, correct the EXPECT count, and fix the
- program and docs/tutorial/17-indexes.md together wherever the built API differs from the spec.
-
- Lesson 17: indexes.
+"Lesson 17: indexes.
  Tutorial chapter: docs/tutorial/17-indexes.md
 
  What it teaches:
@@ -22,7 +15,7 @@
    fails during a merge fails only that commit, with the block's own exception passed through
    unchanged (ruling IQ1 as corrected, plan call IP2: exactly as proto_db).
 
- Run it (from examples/tutorial, once moved): STPATH=<repository>/src protost 17_indexes.st"
+ Run it (from examples/tutorial): STPATH=<repository>/src protost 17_indexes.st"
 Import from: 'protobase'.
 Import from: '_lesson'.
 
@@ -114,7 +107,7 @@ lesson check: 'and the merged version keeps its indexes' is: after indexNames eq
 
 "Key specs: MISSING is not nil."
 db run: [:t |
-    t setRootObject: 'contacts' value: ((((t newList
+    t setRootObject: 'contacts' value: (((((t newList
         appendLast: (t newObject: { 'name' -> 'Ada'. 'address' -> (PBFrozenDict withAssociations: { 'zip' -> '1010' }) }))
         appendLast: (t newObject: { 'name' -> 'Bob'. 'address' -> (PBFrozenDict withAssociations: { 'zip' -> nil }) }))
         appendLast: (t newObject: { 'name' -> 'Cy'. 'address' -> (PBFrozenDict withAssociations: {}) }))

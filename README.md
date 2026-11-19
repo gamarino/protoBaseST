@@ -147,7 +147,7 @@ program that checks its own results and is run by the tests.
 |---|---|
 | [The tutorial, chapters 1-12](docs/tutorial/README.md) | A single process: first commit, values and versions, records, collections and queries, transactions and conflicts, blind writes, mutables and history, bytes, actors, crash recovery, Python interop, refusals. |
 | [Cluster mode, chapters 13-16](docs/tutorial/13-cluster-concepts.md) | Several processes sharing one database: [the ideas](docs/tutorial/13-cluster-concepts.md), [a three-node cluster](docs/tutorial/14-a-three-node-cluster.md), [failures and recovery](docs/tutorial/15-failures-and-recovery.md), [operating a cluster](docs/tutorial/16-operating-a-cluster.md). |
-| [Queries, chapters 17-19](docs/tutorial/17-indexes.md) **(draft, not implemented)** | Planned for 0.3.0, written before the code: [indexes](docs/tutorial/17-indexes.md), [queries and the planner](docs/tutorial/18-queries-and-plans.md), [ordered reads and pages](docs/tutorial/19-ordered-reads-and-pages.md). Most of the API they use does not exist yet; indexed collections can be written (0.3.0 in progress), not yet queried. |
+| [Queries, chapters 17-19](docs/tutorial/17-indexes.md) **(0.3.0, in progress)** | [Indexes](docs/tutorial/17-indexes.md) and [queries and the planner](docs/tutorial/18-queries-and-plans.md) run; [ordered reads and pages](docs/tutorial/19-ordered-reads-and-pages.md) is a draft until pagers land. |
 | [A small ERP](docs/tutorial/erp.md) | A guided build of a real application, with the reasoning at each step. |
 | [Coming from GemStone/S](docs/tutorial/gemstone.md), [Coming from Soil](docs/tutorial/soil.md) | Orientation for readers who know those systems. |
 
@@ -172,6 +172,9 @@ SmallInteger milliseconds, not float seconds.
 | `EqualityIndex`, `RangeIndex`, `VectorIndex` | `PBEqualityIndex`, `PBRangeIndex`, `PBVectorIndex` (read only) |
 | `FrozenList`, `FrozenDict`, `MISSING`, a Python tuple | `PBFrozenList`, `PBFrozenDict`, `PBMissing`, `PBTuple` |
 | `OpaqueAtom` | `PBOpaqueAtom` |
+| `KeySpec`, `Term`, `And`, `Or`, `Not`, `PythonPredicate` | `PBKeySpec`, `PBTerm`, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate` |
+| `F`, `Field`; `Queryable` | `PBField`; `PBQuery` (0.3.0, in progress) |
+| `PythonFilter` (an `explain` node) | `BlockFilter` (`PBBlockFilter`) |
 | `ProtoValidationError`, `ProtoCorruptionError`, `ProtoNotSupportedError`, `ProtoConflictError`, `ProtoTimeoutError`, `ProtoOutcomeUnknownError`, `ProtoUserError`, `ProtoClosedError` | `PBValidationError`, `PBCorruptionError`, `PBNotSupportedError`, `PBConflictError`, `PBTimeoutError`, `PBOutcomeUnknownError`, `PBUserError`, `PBClosedError` |
 
 ### Messages
@@ -200,6 +203,16 @@ SmallInteger milliseconds, not float seconds.
 | `Set.add`, `remove`, `has`, `union`, `intersection`, `difference` | `add:`, `remove:`, `has:`, `union:`, `intersection:`, `difference:` |
 | `CountedSet.add`, `remove`, `count_of(e)` | `add:`, `remove:`, `countOf:` |
 | `IndexedCollection.index_names()`, `get_index(n)` | `indexNames`, `getIndex:` |
+| `add_index(EqualityIndex("by_city", "city"))`, `remove_index(n)`, `validate()` | `addIndex: (PBEqualityIndex name: 'by_city' path: 'city')`, `removeIndex:`, `validate` |
+| `F.city == v`, `!=`, `<`, `<=`, `>`, `>=` | `(PBField path: 'city') eq: v`, `ne:`, `<`, `<=`, `>`, `>=` (`=` is not overridden: it answers a Boolean) |
+| `F.a.in_(vs)`, `F.a.between(a, b)`, `F.a.between_open(a, b)`, `F.a.between_left_open(a, b)`, `F.a.between_right_open(a, b)` | `in:`, `between:and:`, `betweenOpen:and:`, `betweenLeftOpen:and:`, `betweenRightOpen:and:` |
+| `F.a.is_none()`, `not_none()`, `is_true()`, `not_true()`, `contains(v)`; `F()`, `F["@name"]` | `isNone`, `notNone`, `isTrue`, `notTrue`, `contains:`; `PBField element`, `PBField extractor: 'name'` |
+| `p & q`, `p \| q`, `~p` | `p & q`, `p \| q`, `p not` (expressions only; a block enters a query only through `where:`) |
+| `from_collection(c)`, `.where(p)`, `.where(fn)` | `PBQuery from: c`, `where: aCondition`, `where: [:e \| ...]` (chained `where:` is AND) |
+| `.select([paths])`, `.select(fn)` | `project: #('name' 'age')`, `collect: aBlock` (no `select:`: Smalltalk's `select:` filters) |
+| `.order_by(k, descending=)`, `.then_by(k, descending=)`, `.skip(n)`, `.take(n)`, `.distinct()` | `orderBy:`, `orderBy:descending:`, `thenBy:`, `thenBy:descending:`, `skip:`, `take:`, `distinct` |
+| `.to_list()`, `.count()`, `.first()`, `.first_or_none()`, `.explain()`, `.plan()` | `asArray`, `count`, `first`, `firstOrNil`, `explain`, `plan` |
+| `plan_query(source, where, order_by, limit, offset)` | `PBPlanner plan:where:orderBy:limit:offset:` |
 | iteration (`for x in coll`) | `do:`; `keysAndValuesDo:` on the dictionaries |
 
 The complete list of what exists is [docs/reference.md](docs/reference.md). There is no `asOf:`
@@ -222,8 +235,8 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 | [examples/cluster/](examples/cluster/README.md) | The cluster chapters' programs, run by the tests; `pending/` is for those that need API still being built (none today). |
 | [examples/tutorial/](examples/tutorial/README.md) | Twelve small programs, one concept each, each checking its own results; run by the tests. |
 | [docs/reference.md](docs/reference.md) | Every public class and message; the indexed-query API in a section marked planned. |
-| [docs/queries.md](docs/queries.md) | **Draft, not implemented:** indexed queries and the query planner (0.3.0), the conceptual guide, including how to read `explain`. |
-| [examples/queries/](examples/queries/README.md) | **Draft:** the programs of the guide and the query chapters; those written so far are in `pending/`, written before their API, and none has run. |
+| [docs/queries.md](docs/queries.md) | **0.3.0, in progress:** indexed queries and the query planner, the conceptual guide, including how to read `explain`. |
+| [examples/queries/](examples/queries/README.md) | **0.3.0, in progress:** the programs of the guide, run as tests; the one that needs pagers is still in `pending/`. |
 | [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from `proto_db`. |
 | [docs/not-done.md](docs/not-done.md) | What is not done, and what is not proven. |
 | [docs/decisions.md](docs/decisions.md) | The choices, with what each costs if it is wrong. |

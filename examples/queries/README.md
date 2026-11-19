@@ -1,8 +1,7 @@
 # The query examples
 
-> **Draft: indexed queries are planned for protoBaseST 0.3.0 and not implemented.** No program of
-> this directory runs yet. The programs written so far are in [pending/](pending/README.md) and
-> have never run.
+> **In progress for protoBaseST 0.3.0.** Every program of this directory runs as a test. The one
+> program that needs pagers (plan Task 9) is still in [pending/](pending/README.md).
 
 Programs for indexed queries: the guide [docs/queries.md](../../docs/queries.md) quotes the ones
 in this directory, and the query chapters of the tutorial (17-19, and chapter 11's section
@@ -12,22 +11,25 @@ once they run. Each one checks what it shows in the house style of the tutorial 
 line `<lesson> ok (N checks)`; a failed check exits with status 1. Once they run they are tests,
 run by `tests/run_tests.sh`.
 
-## What is planned here
+## The programs
 
-Each program is written by the plan task named (the indexed-queries plan,
+Each program was written by the plan task named (the indexed-queries plan,
 `docs/superpowers/plans/2026-11-18-indexed-queries.md`), fail-first through
-`tests/docs/tutorial_chapters_sync.sh`: the guide quotes it before it exists.
+`tests/docs/tutorial_chapters_sync.sh`: the guide quoted it before it existed.
 
-| Program | Shows | Written or moved here by |
-|---|---|---|
-| `reading_plans.st` | the three worked plans of the guide's "Reading a plan" | Task 8 (moved from `pending/`) |
-| `keys.st` | key specs, `MISSING` and `nil` (the guide's section "Key specs, MISSING and nil") | Task 8 |
-| `expressions.st` | the expression language and the list syntax (the guide's section "The expression language") | Task 8 |
-| `lookups.st` | indexes and lookups | Task 8 |
-| `ranges.st` | ranges and ordered reads | Task 8 |
-| `compound.st` | AND, OR and NOT, with `explain` | Task 8 |
-| `merge_indexed.st` | a blind write merged onto an indexed root | Task 8 |
-| `paging.st` | pagers, by rank and materialised | Task 9 |
+| Program | Shows | Guide section | Written or moved here by |
+|---|---|---|---|
+| [reading_plans.st](reading_plans.st) | the three worked plans, their model estimates equal to `proto_db`'s | "Reading a plan" | Task 8 (moved from `pending/`) |
+| [keys.st](keys.st) | key specs, `MISSING` and `nil`, the persisted key spec | "Key specs, MISSING and nil" | Task 8 |
+| [expressions.st](expressions.st) | the builder, the list syntax, two-valued evaluation, blocks and the mixing rule | "The expression language" | Task 8 |
+| [lookups.st](lookups.st) | what an equality index answers, by which plan | "Equality and range indexes" | Task 8 |
+| [compound.st](compound.st) | AND, OR and NOT, with `explain` | "How the planner chooses" | Task 8 |
+| [ranges.st](ranges.st) | ranges, ordered reads and windows by rank | "Ordered reads, windows and pages" | Task 8 |
+| [merge_indexed.st](merge_indexed.st) | blind writes merged onto an indexed root; a concurrent index creation | "Merges of blind writes" | Task 8 |
+| `paging.st` | pagers, by rank and materialised | "Ordered reads, windows and pages" | Task 9 |
+
+Run one with `STPATH=<repository>/src protost <program>` from this directory, or all of them with
+`tests/run_tests.sh examples/queries`.
 
 The guide marks each section whose program is not written yet with a line
 `<!-- pending example: examples/queries/X (plan task N) -->`, which the sync test checks: the

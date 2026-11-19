@@ -1,13 +1,14 @@
 # The tutorial examples
 
-Twelve small programs, one concept each, in the order of the chapters of
+Small programs, one concept each, in the order of the chapters of
 [docs/tutorial/](../../docs/tutorial/README.md). Each one starts with a comment that says what it
 teaches and which chapter explains it. Each one **proves what it shows**: it prints a line per check
 (`ok - ...`) and ends with `<lesson> ok (N checks)`. A failed check prints `FAIL - ...`, ends with
 `<lesson> FAILED` and exits with status 1, so an example cannot fail silently.
 
 protoBaseST is a proposal prototype for the FAST Smalltalk workshop (2026-12-03), not a product.
-The examples use only what v0.1.0 does; where something is not supported, the example says so and
+Lessons 01 to 12 use only what v0.1.0 does; lessons 17 and 18 and lesson 11's indexed part use the
+indexed-query API of 0.3.0 (in progress). Where something is not supported, the example says so and
 checks the refusal.
 
 ## Run them
@@ -42,10 +43,14 @@ check; a lesson that stops on an unexpected error leaves that directory behind.
 | 10 | [10_crash_recovery.st](10_crash_recovery.st) | A torn tail, a torn `space.root.tmp`, and a writer killed with `SIGKILL` | [10](../../docs/tutorial/10-crash-recovery.md) |
 | 11 | [11_python_interop.sh](11_python_interop.sh) | protoST and Python's `proto_db` on one directory | [11](../../docs/tutorial/11-python-interop.md) |
 | 12 | [12_refusals.st](12_refusals.st) | What is refused, and what each refusal protects | [12](../../docs/tutorial/12-refusals.md) |
+| 11 | [11_indexed_interop.sh](11_indexed_interop.sh) | Indexes written by Python, changed and merged onto by protoST, validated by Python (0.3.0, in progress) | [11](../../docs/tutorial/11-python-interop.md#indexes-from-both-sides) |
+| 17 | [17_indexes.st](17_indexes.st) | Indexes are part of the collection version; key specs; extractors (0.3.0, in progress) | [17](../../docs/tutorial/17-indexes.md) |
+| 18 | [18_queries_and_plans.st](18_queries_and_plans.st) | `PBQuery`, `PBField`, `explain`, and why the planner sometimes scans (0.3.0, in progress) | [18](../../docs/tutorial/18-queries-and-plans.md) |
 
 Helpers (never run as tests, because their names start with `_`): `_lesson.st` (the checks),
 `_crash_writer.st` (the process lesson 10 kills), `_interop_write.st` and `_interop_read.st` (the
-protoST steps of lesson 11). `11_python_side.py` is lesson 11's Python step.
+protoST steps of lesson 11), `_indexed_change.st` (the protoST step of lesson 11's indexed part).
+`11_python_side.py` and `11_indexed_python_side.py` are lesson 11's Python steps.
 
 Lesson 10 starts a second protoST process; it finds the binary through the `PROTOST` environment
 variable (the test runner sets it), or `protost` on the `PATH`.

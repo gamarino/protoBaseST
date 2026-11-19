@@ -2,14 +2,16 @@
 # Runs bench/query_workload.st (protoBaseST, on $PROTOST) and bench/py_query_workload.py (proto_db,
 # the interop venv) on the same workloads, verifies the work and prints the timings (spec 7.3).
 #
-# Usage: bench/run_query.sh [ids...]          (default: M1 M2 M3; the planner workloads P1 P2 P3 by name)
+# Usage: bench/run_query.sh [ids...]          (default: M1 M2 M3; the planner workloads P1 P2 P3 and the query workloads Q1-Q4 by name)
 #
 # A workload is split into units, <id>:<size>:<plan> (M1: 600:idx0, 600:idx1, 600:idx3; M2: <n>:build
 # and <n>:fold for each size of QUERY_M2_SIZES, default "100 1000 10000 100000"), and every unit runs
 # M3: 600:idx0, 600:idx1, 600:idx3 standalone, and 600:idx0-c3, 600:idx1-c3, 600:idx3-c3 in a
 # three-member cluster; P1: <conjuncts>:idx<k> for 1, 8 and 32 conjuncts and 0, 2 and 8 indexes; P2:
 # 2000:<point>-index and 2000:<point>-scan for each point; P3: 2000:intersect and 2000:filter; see
-# bench/_query_bench.st PlannerBench) and every unit runs
+# bench/_query_bench.st PlannerBench; Q1: <n>:index and <n>:scan for each size of QUERY_Q1_SIZES, default
+# "100 1000 10000" (10^5 is not run by default: protoST's indexed build of it took over 5 CPU minutes
+# and 5 GB before its first query); Q2, Q3, Q4: 2000:<point>-index and 2000:<point>-scan, see QueryUnits) and every unit runs
 # in a process of its own, so one size's live set never weighs on another's and the peak memory of
 # each process is its own. Each implementation prints, per unit, a WORK line (plan call IP10: id,
 # impl, size, rows, queries, plan, checksum) and a TIME line (us). The runs interleave: RUNS rounds
@@ -66,6 +68,10 @@ for id in "${@:-M1 M2 M3}"; do
             P2) for p in r0001 r0010 r0100 r0500 r0900 r0990 r1000 ne-few ne-many; do
                     units+=("P2:2000:$p-index" "P2:2000:$p-scan"); done ;;
             P3) units+=(P3:2000:intersect P3:2000:filter) ;;
+            Q1) for n in ${QUERY_Q1_SIZES:-100 1000 10000}; do units+=("Q1:$n:index" "Q1:$n:scan"); done ;;
+            Q2) for p in in1 in10 in100 r0001 r0010 r0100 r0500; do units+=("Q2:2000:$p-index" "Q2:2000:$p-scan"); done ;;
+            Q3) for p in and or2 ormix not; do units+=("Q3:2000:$p-index" "Q3:2000:$p-scan"); done ;;
+            Q4) for p in all sel unsel; do units+=("Q4:2000:$p-index" "Q4:2000:$p-scan"); done ;;
             *) fail "unknown workload $one" ;;
         esac
     done

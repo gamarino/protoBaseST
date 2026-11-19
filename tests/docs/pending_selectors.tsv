@@ -7,28 +7,6 @@
 # Task 4a: collections maintain their indexes (4a and 4b share the spec's T4)
 # Task 5: terms and expressions
 # Task 7: the planner
-# Task 8: PBQuery and PBField
-between:and:	8
-betweenLeftOpen:and:	8
-betweenOpen:and:	8
-betweenRightOpen:and:	8
-contains:	8
-distinct	8
-eq:	8
-firstOrNil	8
-isNone	8
-isTrue	8
-ne:	8
-notNone	8
-notTrue	8
-orderBy:	8
-orderBy:descending:	8
-plan	8
-project:	8
-skip:	8
-thenBy:	8
-thenBy:descending:	8
-where:	8
 # Task 9: PBPager
 on:pageSize:	9
 page:	9

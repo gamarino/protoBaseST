@@ -17,11 +17,13 @@ from proto_db.core.dbobject import DBObject
 from proto_db.collections.lists import List
 from proto_db.indexing import EqualityIndex, KeySpec, RangeIndex, register_extractor
 from proto_db.query.expressions import Expression
+from proto_db.query.linq import F, from_collection
 from proto_db.query.planner import plan_query
 from proto_db.query.plans import Filter, Intersect
 
 P = (1 << 61) - 1
-ALL = ["M1", "M2", "M3", "P1", "P2", "P3"]
+ALL = ["M1", "M2", "M3", "P1", "P2", "P3", "Q1", "Q2", "Q3", "Q4"]
+Q1_SIZES = [int(n) for n in os.environ.get("QUERY_Q1_SIZES", "100 1000 10000").split()]
 SIZES = [int(n) for n in os.environ.get("QUERY_M2_SIZES", "100 1000 10000 100000").split()]
 COMMITS = int(os.environ.get("QUERY_M1_COMMITS", "200"))
 BLIND_COMMITS = int(os.environ.get("QUERY_M3_COMMITS", "120"))
@@ -236,8 +238,88 @@ def p3(n, plan):
             f"intersect_cost={round(hand.estimate().cost * 1000)} filter_cost={round(chosen.estimate().cost * 1000)}")
 
 
+def q_units(id_):
+    points = {"Q2": ["in1", "in10", "in100", "r0001", "r0010", "r0100", "r0500"],
+              "Q3": ["and", "or2", "ormix", "not"], "Q4": ["all", "sel", "unsel"]}
+    if id_ == "Q1":
+        return [("Q1", n, p) for n in Q1_SIZES for p in ("index", "scan")]
+    return [(id_, 2000, f"{p}-{f}") for p in points[id_] for f in ("index", "scan")]
+
+
+def q_records(n, indexed):
+    groups = max(n // 10, 1)
+    coll = List()
+    for i in range(n):
+        coll = coll.append_last(DBObject(id=i, g=i % groups, r=i, few=i % 4, x=i % 10))
+    if not indexed:
+        return coll
+    return (coll.add_index(EqualityIndex("by_g", KeySpec.path("g")))
+            .add_index(RangeIndex("by_r", KeySpec.path("r")))
+            .add_index(EqualityIndex("by_few", KeySpec.path("few"))))
+
+
+def q_run(query, coll, plan, ordered):
+    t0 = time.perf_counter_ns()
+    answers = [query(from_collection(coll), q).to_list() for q in range(20)]
+    us = (time.perf_counter_ns() - t0) // 1000
+    rows = check = 0
+    for q, answer in enumerate(answers, 1):
+        rows += len(answer)
+        for pos, e in enumerate(answer, 1):
+            check = (check + q * (pos if ordered else 1) * (e.id + 1)) % P
+    return rows, 20, plan, check, us, shape(query(from_collection(coll), 19).explain()), None
+
+
+def q_split(plan):
+    forced = "scan" if plan == "scan" or plan.endswith("-scan") else "index"
+    return forced, plan[:len(plan) - len(forced) - 1]
+
+
+def q1(n, plan):
+    if plan not in ("index", "scan"):
+        raise SystemExit(f"Q1: unknown plan {plan}")
+    coll, groups = q_records(n, plan == "index"), max(n // 10, 1)
+    return q_run(lambda query, q: query.where(F.g == 37 * q % groups), coll, plan, False)
+
+
+def q2(n, plan):
+    forced, point = q_split(plan)
+    coll = q_records(n, forced == "index")
+    if point.startswith("in"):
+        k = int(point[2:])
+        query = lambda query, q: query.where(F.g.in_([(7 * j + q) % 200 for j in range(k)]))
+    else:
+        w = max(n * int(point[1:]) // 1000, 1)
+        query = lambda query, q: query.where(F.r.between_right_open(q, q + w))
+    return q_run(query, coll, plan, False)
+
+
+def q3(n, plan):
+    forced, point = q_split(plan)
+    coll = q_records(n, forced == "index")
+    cond = {"and": lambda q: (F.g == 13 * q % 200) & (F.x < 5),
+            "or2": lambda q: (F.g == 13 * q % 200) | (F.few == q % 4),
+            "ormix": lambda q: (F.g == 13 * q % 200) | (F.x == 3),
+            "not": lambda q: ~(F.few == q % 4)}.get(point)
+    if cond is None:
+        raise SystemExit(f"Q3: unknown plan {plan}")
+    return q_run(lambda query, q: query.where(cond(q)), coll, plan, False)
+
+
+def q4(n, plan):
+    forced, point = q_split(plan)
+    coll = q_records(n, forced == "index")
+    if point == "all":
+        return q_run(lambda query, q: query.order_by("r", descending=True).take(5), coll, plan, True)
+    cond = {"sel": lambda q: F.g == 13 * q % 200, "unsel": lambda q: F.few == q % 4}.get(point)
+    if cond is None:
+        raise SystemExit(f"Q4: unknown plan {plan}")
+    return q_run(lambda query, q: query.where(cond(q)).order_by("r", descending=True).take(5), coll, plan, True)
+
+
 def planner_unit(id_, n, plan):
-    rows, queries, plan, check, us, model, line = {"P1": p1, "P2": p2, "P3": p3}[id_](n, plan)
+    rows, queries, plan, check, us, model, line = {"P1": p1, "P2": p2, "P3": p3,
+                                                   "Q1": q1, "Q2": q2, "Q3": q3, "Q4": q4}[id_](n, plan)
     print(f"WORK id={id_} impl=py size={n} rows={rows} queries={queries} plan={plan} checksum={check} model={model}")
     print(f"TIME id={id_} impl=py size={n} plan={plan} us={us}")
     if line is not None:
@@ -255,6 +337,8 @@ def main():
                 units += [(parts[0], 600, plan) for plan in ("idx0", "idx1", "idx3")]
             elif parts[0] == "M2":
                 units += [("M2", n, None) for n in SIZES]
+            elif parts[0].startswith("Q"):
+                units += q_units(parts[0])
             else:
                 units += {"P1": P1_UNITS, "P2": P2_UNITS, "P3": P3_UNITS}[parts[0]]
         elif len(parts) == 3:
@@ -266,7 +350,7 @@ def main():
             m1(n, plan)
         elif id_ == "M3":
             m1(n, plan, "M3", BLIND_COMMITS, True)
-        elif id_.startswith("P"):
+        elif id_[0] in "PQ":
             planner_unit(id_, n, plan)
         else:
             m2(n, ["build", "fold"] if plan is None else [plan])

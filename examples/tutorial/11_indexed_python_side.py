@@ -1,10 +1,9 @@
-"""Lesson 11, indexed part, Python's two steps (see 11_indexed_interop.sh.pending).
+"""Lesson 11, indexed part, Python's two steps (see 11_indexed_interop.sh).
 
 Usage: python 11_indexed_python_side.py write|check <directory>
 
-PENDING with the rest of the lesson: the check step needs protoBaseST to maintain indexes
-(Task T4 of the indexed-queries plan). Every read is asserted, so a wrong value stops the
-script with an AssertionError and a non-zero exit.
+Every read is asserted, so a wrong value stops the script with an AssertionError and a non-zero
+exit.
 """
 import sys
 

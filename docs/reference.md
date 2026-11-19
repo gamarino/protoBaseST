@@ -27,7 +27,7 @@ Contents:
 [Values](#values) |
 [Errors](#errors) |
 [Lower layers](#lower-layers) |
-[Indexed queries (planned)](#indexed-queries-in-progress-030) |
+[Indexed queries (in progress)](#indexed-queries-in-progress-030) |
 [The module and its files](#the-module-and-its-files)
 
 ## Mapping from `proto_db`
@@ -285,7 +285,7 @@ out; an absent element answers a new version with the same content), `countOf:`,
 **PBRepeatedKeysDictionary**: `getAt:`, `has:`, `keys`, `values`, `items`, `keysAndValuesDo:`,
 `totalCount`. Read only; its writes are a non-goal.
 
-**Indexes** are decoded, kept and maintained, not yet queried (queries are planned for 0.3.0: [Indexed queries](#indexed-queries-in-progress-030)): `PBEqualityIndex`, `PBRangeIndex`
+**Indexes** are decoded, kept, maintained and queried (0.3.0, in progress: [Indexed queries](#indexed-queries-in-progress-030)): `PBEqualityIndex`, `PBRangeIndex`
 (`PBKeyGroupIndex`), `PBVectorIndex` (`dim`, `metric`, `backend`, `params`, `centroids`,
 `trainedSize`, `storeEntries`). On all: `name`, `keySpec`, `hasMemberTokens` (false for an index
 written by format 3), `totalCount`. `PBIndexSet` (`names`, `get:`, `size`, `isEmpty`) holds a
@@ -1058,8 +1058,9 @@ For tests, tools and readers of the format. An application does not need them.
 > (`src/protobase/keyspec.st`), `PBMemberKeys` and `PBMisfiledError`, "Indexes" (Task 3), the
 > collection messages of "Collections gain" (Tasks 4a and 4b), "Terms and expressions" (Task 5,
 > `src/protobase/terms.st`), and "Plans and explain" with the indexes' access paths and rank access
-> (Task 6, `src/protobase/plans.st`), and `PBPlanner` (Task 7, `src/protobase/planner.st`); every
-> other message of this section is not implemented yet. It is the API of
+> (Task 6, `src/protobase/plans.st`), `PBPlanner` (Task 7, `src/protobase/planner.st`), and
+> `PBField` and `PBQuery` (Task 8, `src/protobase/query.st`); `pagerSize:` and "Pagers" (Task 9)
+> are not implemented yet. It is the API of
 > the approved [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md)
 > (sections 5.2 and 5.5) and of its implementation plan's interfaces, written early so the
 > chapters can cite it. Until each task lands, the messages below are listed as pending in the
@@ -1076,7 +1077,7 @@ For tests, tools and readers of the format. An application does not need them.
 | `F.city == "Oslo"`, `F.age > 70`, `&`, `\|`, `~` | `(PBField path: 'city') eq: 'Oslo'`, `(PBField path: 'age') > 70`, `&`, `\|`, `not` |
 | `from_collection(c).where(p).order_by(k).skip(n).take(n)` | `((((PBQuery from: c) where: p) orderBy: k) skip: n) take: n` |
 | `select(...)` | `project:`, `collect:` (`select:` is **not** defined on `PBQuery`) |
-| `count()`, `first()`, `first_or_none()`, `to_list()`, `explain()`, `plan()`, `pager(n)` | `count`, `first`, `firstOrNil`, `asArray`, `explain`, `plan`, `pagerSize:` |
+| `count()`, `first()`, `first_or_none()`, `to_list()`, `explain()`, `plan()`, `pager(n)` | `count`, `first`, `firstOrNil`, `asArray`, `explain`, `plan`, `pagerSize:` (Task 9) |
 | `plan_query(source, where, order_by, limit, offset)` | `PBPlanner plan:where:orderBy:limit:offset:` |
 | `PythonFilter` (an `explain` node) | `BlockFilter` |
 
@@ -1195,26 +1196,28 @@ the vector parts). Every condition is a frozen value: no message changes it.
 
 | Message | Answers |
 |---|---|
-| `PBField path: aString`, `element`, `extractor: aName` | A field. |
-| `eq: v`, `ne: v`, `< v`, `<= v`, `> v`, `>= v`, `in: aCollection` | The term of `'=='`, `'!='`, `'<'` ... `'in'`. `=` is **not** overridden: `aField = v` is a Boolean. |
+| `PBField path: aString`, `element`, `extractor: aName` | A field: a dotted path (a non-empty String; a malformed one is `PBValidationError`), the element itself, or a registered extractor. A field is not a condition: `where:` refuses it. Implemented (Task 8, `src/protobase/query.st`). |
+| `eq: v`, `ne: v`, `< v`, `<= v`, `> v`, `>= v`, `in: aCollection` | The term of `'=='`, `'!='`, `'<'` ... `'in'`. `=` is **not** overridden: `aField = v` is a Boolean. `in:` refuses a map, a String and a `ByteArray` (`PBValidationError`) and reads any other collection as a sequence. |
 | `between: a and: b`, `betweenOpen:and:`, `betweenLeftOpen:and:`, `betweenRightOpen:and:` | `'between[]'`, `'between()'`, `'between(]'`, `'between[)'`. |
 | `isNone`, `notNone`, `isTrue`, `notTrue`, `contains: v` | `'?N'`, `'?!N'`, `'?T'`, `'?!T'`, `'contains'`. |
 
 ### Queries
 
-**`PBQuery`** is immutable: every message but the ones that run it answers a new query. A cascade
+**`PBQuery`** (Task 8, `src/protobase/query.st`, a port of `proto_db`'s `query/linq.py`) is
+immutable: every message but the ones that run it answers a new query. A cascade
 (`q where: p; take: 5`) sends every message to the first receiver and keeps only the last answer.
+A query keeps the collection version it was built from: later writes do not change its answer.
 
 | Message | Meaning |
 |---|---|
-| `PBQuery from: aCollectionOrPlan` | A query over a collection (its indexes are consulted) or a plan. |
-| `where: aConditionOrBlock` | Adds a condition; chained `where:` calls combine with AND. A one-argument block is opaque (a `BlockFilter`) and enters a query only here: `&`, `\|` and `not` take expressions only. Anything else, a Boolean included, is `PBValidationError` with the text `where: expects a PBExpression or a one-argument block, got a <class name>` (for `true`: `got a Boolean`). |
-| `orderBy: aKey`, `orderBy: aKey descending: aBoolean`, `thenBy:`, `thenBy:descending:` | A key is a path String, a `PBField` or a block (a block key always sorts with `Sort`). |
-| `skip: n`, `take: n`, `distinct` | The window; first occurrences only. |
-| `project: anArrayOfPaths`, `collect: aBlock` | Each row as a `PBFrozenDict` of the paths (an absent field is left out), or through a block. |
+| `PBQuery from: aCollectionOrPlan` | A query over a collection (its indexes are consulted) or a plan; a `PBQuery` is answered as is. Anything else, a protoST collection included, is `PBValidationError`. |
+| `where: aConditionOrBlock` | Adds a condition; chained `where:` calls combine with AND. A one-argument block is opaque (a `BlockFilter`) and enters a query only here: `&`, `\|` and `not` take expressions only. Anything else, a Boolean and the 0.1 list syntax included (use `PBExpression compile:`), is `PBValidationError` with the text `where: expects a PBExpression or a one-argument block, got a <class name>` (for `true`: `got a Boolean`). The mixing rule of `linq.py`: a pure condition goes whole to the planner; in a top-level AND the pure conjuncts go to the planner and each block gets its own `BlockFilter` on top; an OR or NOT holding a block is one `BlockFilter` for the whole condition. |
+| `orderBy: aKey`, `orderBy: aKey descending: aBoolean`, `thenBy:`, `thenBy:descending:` | A key is a path String, a `PBField` or a block (a block key always sorts with `Sort`). `orderBy:` replaces the order; a `thenBy:` that does not directly follow `orderBy:` or `thenBy:` is `PBUserError`. |
+| `skip: n`, `take: n`, `distinct` | The window (composed like slicing; an Integer >= 0, else `PBValidationError`); first occurrences only. |
+| `project: anArrayOfPaths`, `collect: aBlock` | Each row as a `PBFrozenDict` of the paths (an Array of paths or `PBField`s, or a `PBFrozenDict` of output name to path; an absent field is left out), or through a one-argument block. |
 | `asArray`, `do: aBlock`, `count`, `first`, `firstOrNil` | Run it. `first` of an empty result is `PBUserError`. |
 | `explain`, `plan` | The plan that runs, explained; the plan itself. |
-| `pagerSize: n` | `PBPager on: self pageSize: n`. |
+| `pagerSize: n` | `PBPager on: self pageSize: n` (Task 9; not implemented yet). |
 
 `select:` is not defined on `PBQuery`: Smalltalk's `select:` filters, so `proto_db`'s
 projection name would read backwards (ruling IQ2).

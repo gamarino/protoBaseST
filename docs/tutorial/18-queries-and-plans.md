@@ -1,16 +1,14 @@
 # 18. Queries and the planner
 
-<!-- example: examples/queries/pending/18_queries_and_plans.st.pending -->
-Program, pending: [examples/queries/pending/18_queries_and_plans.st.pending](../../examples/queries/pending/18_queries_and_plans.st.pending).
+<!-- example: examples/tutorial/18_queries_and_plans.st -->
+Program: [examples/tutorial/18_queries_and_plans.st](../../examples/tutorial/18_queries_and_plans.st).
 Previous: [17. Indexes](17-indexes.md). Next: [19. Ordered reads and pages](19-ordered-reads-and-pages.md).
 
-> **Draft: the query API in this chapter (`PBQuery`, `PBField`) is not implemented yet.** It is
-> planned for protoBaseST 0.3.0 by the approved
-> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md). Every block
-> below comes from a program written against the spec's API that **has never run**. The planner
-> beneath it is implemented (`PBPlanner`, plan Task 7), a line for line port of `proto_db`'s
-> (spec 5.6), and its plans are `proto_db`'s node for node on the conformance vectors. Figures
-> marked `[measured in T<n>: ...]` do not exist yet.
+> **In progress for protoBaseST 0.3.0** (the approved
+> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md)). Every block
+> below comes from the chapter's program, which runs as a test and checks what it shows. The
+> planner beneath the query API is a line for line port of `proto_db`'s (spec 5.6), and its plans
+> are `proto_db`'s node for node on the conformance vectors.
 
 Chapter 17 made indexes part of the collection. This chapter asks questions of it: how to write a
 query, how to read the plan that answers it, and why the planner sometimes ignores an index that

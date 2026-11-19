@@ -55,12 +55,18 @@
  indexes, so every commit is a merge. The 120 keys (7919 j) mod 600 are distinct, so the final
  content is M1's after 120 commits whatever the order of the commits; rows, queries and checksum
  are M1's. bench/cluster_workload.st runs the same 120 commits in a three-member cluster (profiles
- m3-idx0, m3-idx1, m3-idx3), verified against this unit's proto_db checksum."
+ m3-idx0, m3-idx1, m3-idx3), verified against this unit's proto_db checksum.
+
+ Q1, Q2, Q3 and Q4, the queries (plan Task 8; bench/_query_bench.st QueryUnits states the data and
+ the units): point equality against size, in and ranges, compound conditions, and ordering, each
+ through the query front end, the planner's choice over the indexed records (-index) against the
+ same records without indexes (-scan). Their WORK lines carry model=, the plan's node names,
+ compared with proto_db's like the rest."
 Import from: 'protobase'.
 Import from: '_query_bench'.
 
 | all units time p records report sizes m1 m2 emit commits blindCommits |
-all := #('M1' 'M2' 'M3' 'P1' 'P2' 'P3').
+all := #('M1' 'M2' 'M3' 'P1' 'P2' 'P3' 'Q1' 'Q2' 'Q3' 'Q4').
 time := [:aBlock | | t0 | t0 := Time microsecondClockValue. aBlock value. Time microsecondClockValue - t0].
 p := (2 raisedTo: 61) - 1.
 sizes := (Smalltalk getenv: 'QUERY_M2_SIZES') ifNil: ['100 1000 10000 100000'].
@@ -79,7 +85,8 @@ units := OrderedCollection new.
       parts first = 'M2' ifTrue: [sizes do: [:n | units addLast: { 'M2'. n. nil }]].
       parts first = 'P1' ifTrue: [units addAll: PlannerBench p1Units].
       parts first = 'P2' ifTrue: [units addAll: PlannerBench p2Units].
-      parts first = 'P3' ifTrue: [units addAll: PlannerBench p3Units]]
+      parts first = 'P3' ifTrue: [units addAll: PlannerBench p3Units].
+      parts first first = $Q ifTrue: [units addAll: (QueryUnits unitsOf: parts first)]]
     ifFalse: [
       parts size = 3 ifFalse: [Error signal: 'query_workload: a unit is <id>:<size>:<plan>, not ' , arg].
       units addLast: { parts first. (parts at: 2) asInteger. parts at: 3 }]].
@@ -156,8 +163,9 @@ units do: [:unit |
   (unit at: 1) = 'M3' ifTrue: [m1 valueWithArguments: { 'M3'. unit at: 2. unit at: 3. blindCommits. true }].
   (unit at: 1) = 'M2' ifTrue: [
     m2 value: (unit at: 2) value: ((unit at: 3) isNil ifTrue: [#('build' 'fold')] ifFalse: [{ unit at: 3 }])].
-  ((unit at: 1) first = $P) ifTrue: [ | r |
-    r := PlannerBench perform: ((unit at: 1) asLowercase , ':plan:') asSymbol with: (unit at: 2) with: (unit at: 3).
+  ((unit at: 1) first = $P or: [(unit at: 1) first = $Q]) ifTrue: [ | r |
+    r := ((unit at: 1) first = $P ifTrue: [PlannerBench] ifFalse: [QueryUnits])
+      perform: ((unit at: 1) asLowercase , ':plan:') asSymbol with: (unit at: 2) with: (unit at: 3).
     ('WORK id=' , (unit at: 1) , ' impl=st size=' , (unit at: 2) printString , ' rows=' , (r at: 1) printString
       , ' queries=' , (r at: 2) printString , ' plan=' , (r at: 3) , ' checksum=' , (r at: 4) printString
       , ' model=' , (r at: 6)) displayNl.

@@ -3,12 +3,13 @@
 <!-- example: examples/tutorial/_interop_write.st -->
 <!-- example: examples/tutorial/11_python_side.py -->
 <!-- example: examples/tutorial/_interop_read.st -->
-<!-- example: examples/queries/pending/_indexed_change.st.pending -->
-<!-- example: examples/queries/pending/11_indexed_python_side.py.pending -->
+<!-- example: examples/tutorial/_indexed_change.st -->
+<!-- example: examples/tutorial/11_indexed_python_side.py -->
 Program: [examples/tutorial/11_python_interop.sh](../../examples/tutorial/11_python_interop.sh),
 which runs [_interop_write.st](../../examples/tutorial/_interop_write.st),
 [11_python_side.py](../../examples/tutorial/11_python_side.py) and
-[_interop_read.st](../../examples/tutorial/_interop_read.st) on one directory.
+[_interop_read.st](../../examples/tutorial/_interop_read.st) on one directory; and, for the
+indexed section, [examples/tutorial/11_indexed_interop.sh](../../examples/tutorial/11_indexed_interop.sh).
 Previous: [10. Crashes and reopening](10-crash-recovery.md). Next: [12. What is refused, and why](12-refusals.md).
 
 This is the reason protoBaseST exists. It is not a Smalltalk database with an export format: its
@@ -115,19 +116,17 @@ other `proto_db` release.
 
 Python's `proto_db` can do things this prototype cannot, on the same directory: maintain and query
 indexes, write `RepeatedKeysDictionary`, run a cluster. A directory that uses them is still read by
-protoST, which refuses only the changes it cannot make exactly. Index maintenance and queries are planned for
-0.3.0; the next section shows the planned interplay, as a draft.
+protoST, which refuses only the changes it cannot make exactly. Index maintenance and queries come
+with 0.3.0 (in progress); the next section shows the interplay.
 
-## Indexes, from both sides (draft)
+## Indexes, from both sides
 
-> **Draft: not implemented.** This section shows what protoBaseST 0.3.0 is planned to do (the
+> **In progress for protoBaseST 0.3.0** (the
 > [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md), chapter 17).
-> Today protoST reads Python's indexes and refuses every change to an indexed collection. The
-> code comes from pending programs that **have never run**:
-> [11_indexed_interop.sh.pending](../../examples/queries/pending/11_indexed_interop.sh.pending),
-> which runs [11_indexed_python_side.py.pending](../../examples/queries/pending/11_indexed_python_side.py.pending)
-> and [_indexed_change.st.pending](../../examples/queries/pending/_indexed_change.st.pending) on one
-> directory.
+> The code comes from [11_indexed_interop.sh](../../examples/tutorial/11_indexed_interop.sh),
+> which runs [11_indexed_python_side.py](../../examples/tutorial/11_indexed_python_side.py)
+> and [_indexed_change.st](../../examples/tutorial/_indexed_change.st) on one directory; it runs
+> as a test against the pinned `proto_db` (and is skipped, exit 77, without the interop venv).
 
 Python writes forty people and indexes them:
 
@@ -173,8 +172,9 @@ Python then checks every index against a scan, plans the same query with the sam
 
 For this to hold, protoBaseST must write the index trees `proto_db` would have written for the same
 changes, node for node: the same keys, the same tree shapes, the same order of index updates in
-every mutator (spec 5.4). That is checked by the planned interop tests of spec 6.1, which run the
-same seeded operations in both languages and compare the dumps.
+every mutator (spec 5.4). That is checked by the interop tests of spec 6.1, which run the same
+seeded operations in both languages and compare the dumps, and by this lesson's last step:
+`proto_db` validates every index protoST changed and its verifier accepts the directory.
 
 ## Running it
 

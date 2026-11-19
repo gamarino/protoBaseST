@@ -163,62 +163,62 @@ test_query_plans.py::test_estimate_is_frozen_and_validated	ported	tests/unit/qry
 test_query_plans.py::test_query_plan_is_abstract	ported	tests/unit/qry_plans.st	PBQueryPlan is abstract
 test_query_plans.py::test_collection_scan_plan	ported	tests/unit/qry_plans.st	a collection scan executes, estimates and explains as proto_db, empty or not
 test_query_plans.py::test_collection_scan_plan_on_empty_collection	ported	tests/unit/qry_plans.st	a collection scan executes, estimates and explains as proto_db, empty or not
-test_linq.py::test_regression_linq_over_a_collection_returns_the_rows_not_an_empty_list	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_sources_collection_plan_iterable_and_queryable	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_invalid_sources_raise	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_queryable_is_immutable	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_field_paths	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_field_predicates_are_pure_terms	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_combinators_build_expressions	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_predicates_evaluate_like_the_scan_oracle	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_indexed_equality_uses_the_index	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_indexed_in_uses_the_index	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_indexed_between_uses_a_range_and_executes	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_indexed_and_uses_one_index_and_a_residual	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_indexed_or_uses_a_union	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_consecutive_wheres_are_merged_into_one_planned_predicate	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_where_accepts_expressions_and_the_list_syntax	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_lambda_becomes_a_visible_python_filter	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_mixed_and_is_split_into_index_and_python_filter	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_mixed_and_with_several_parts	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_or_or_not_with_a_lambda_is_one_whole_python_filter	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_regression_linq_over_a_collection_returns_the_rows_not_an_empty_list	ported	tests/unit/qry_query.st	sources: a collection, its scan, another plan or a query (answered as is); anything else is PBValidationError; a query over a collection answers its rows
+test_linq.py::test_sources_collection_plan_iterable_and_queryable	ported	tests/unit/qry_query.st	sources: a collection, its scan, another plan or a query (answered as is); anything else is PBValidationError; a query over a collection answers its rows
+test_linq.py::test_invalid_sources_raise	ported	tests/unit/qry_query.st	sources: a collection, its scan, another plan or a query (answered as is); anything else is PBValidationError; a query over a collection answers its rows
+test_linq.py::test_queryable_is_immutable	ported	tests/unit/qry_query.st	a query is immutable: every message answers a new query and leaves the receiver and its explain unchanged
+test_linq.py::test_field_paths	ported	tests/unit/qry_field.st	a field names a dotted path, the element or an extractor; malformed names are PBValidationError
+test_linq.py::test_field_predicates_are_pure_terms	ported	tests/unit/qry_field.st	every builder message answers the pure term of its operator
+test_linq.py::test_combinators_build_expressions	ported	tests/unit/qry_field.st	& | and not build PBAnd, PBOr and PBNot over expressions only
+test_linq.py::test_predicates_evaluate_like_the_scan_oracle	ported	tests/unit/qry_field.st	built predicates evaluate as the scan oracle: an absent age satisfies no comparison and its negation does
+test_linq.py::test_indexed_equality_uses_the_index	ported	tests/unit/qry_query.st	equality, in:, a between, an AND and an OR use their indexes and answer the scan's rows
+test_linq.py::test_indexed_in_uses_the_index	ported	tests/unit/qry_query.st	equality, in:, a between, an AND and an OR use their indexes and answer the scan's rows
+test_linq.py::test_indexed_between_uses_a_range_and_executes	ported	tests/unit/qry_query.st	equality, in:, a between, an AND and an OR use their indexes and answer the scan's rows
+test_linq.py::test_indexed_and_uses_one_index_and_a_residual	ported	tests/unit/qry_query.st	equality, in:, a between, an AND and an OR use their indexes and answer the scan's rows
+test_linq.py::test_indexed_or_uses_a_union	ported	tests/unit/qry_query.st	equality, in:, a between, an AND and an OR use their indexes and answer the scan's rows
+test_linq.py::test_consecutive_wheres_are_merged_into_one_planned_predicate	ported	tests/unit/qry_query.st	chained where: is AND: (q where: a) where: b plans and answers as q where: a & b, a block included
+test_linq.py::test_where_accepts_expressions_and_the_list_syntax	ported	tests/unit/qry_query.st	where: takes an expression or a one-argument block; anything else, the list syntax and a Boolean included, is PBValidationError with the CR6 text
+test_linq.py::test_lambda_becomes_a_visible_python_filter	ported	tests/unit/qry_query.st	the mixing rule: a block is a BlockFilter; a top-level AND sends its pure conjuncts to the planner and each block to its own BlockFilter on top; an OR or NOT holding a block is one BlockFilter
+test_linq.py::test_mixed_and_is_split_into_index_and_python_filter	ported	tests/unit/qry_query.st	the mixing rule: a block is a BlockFilter; a top-level AND sends its pure conjuncts to the planner and each block to its own BlockFilter on top; an OR or NOT holding a block is one BlockFilter
+test_linq.py::test_mixed_and_with_several_parts	ported	tests/unit/qry_query.st	the mixing rule: a block is a BlockFilter; a top-level AND sends its pure conjuncts to the planner and each block to its own BlockFilter on top; an OR or NOT holding a block is one BlockFilter
+test_linq.py::test_or_or_not_with_a_lambda_is_one_whole_python_filter	ported	tests/unit/qry_query.st	the mixing rule: a block is a BlockFilter; a top-level AND sends its pure conjuncts to the planner and each block to its own BlockFilter on top; an OR or NOT holding a block is one BlockFilter
 test_linq.py::test_untranslatable_field_extras_become_python_filters	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_computed_values_follow_missing_and_none_semantics	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_near_without_a_vector_index_raises_instead_of_falling_back	n/a	excluded: vector	The near[] operator is excluded by spec 3.3, never ported.
-test_linq.py::test_errors_raised_by_user_code_propagate	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_between_inclusive_default	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_between_exclusive	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_between_sugars	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_between_range_bounds	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_errors_raised_by_user_code_propagate	ported	tests/unit/qry_query.st	errors raised by user code propagate from where:, collect: and orderBy: blocks, through every terminal
+test_linq.py::test_between_inclusive_default	ported	tests/unit/qry_query.st	between:and: includes both bounds, betweenOpen:and: neither, the half-open forms one
+test_linq.py::test_between_exclusive	ported	tests/unit/qry_query.st	between:and: includes both bounds, betweenOpen:and: neither, the half-open forms one
+test_linq.py::test_between_sugars	ported	tests/unit/qry_query.st	between:and: includes both bounds, betweenOpen:and: neither, the half-open forms one
+test_linq.py::test_between_range_bounds	ported	tests/unit/qry_query.st	between:and: includes both bounds, betweenOpen:and: neither, the half-open forms one
 test_linq.py::test_datetime_between	n/a	Python-only API	Uses Python datetime values, which have no protoST counterpart in this port.
-test_linq.py::test_order_by_then_by_stability_and_direction	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_then_by_needs_a_preceding_order_by	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_order_by_can_stream_an_ordered_index	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_skip_and_take_compose_like_slicing	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_where_after_take_is_applied_on_top	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_order_and_window_are_pushed_into_the_planner	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_select_forms	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_where_after_select_filters_the_projection	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_distinct_keeps_equal_but_distinct_values_apart	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_distinct_and_count	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_filter_projection_pagination	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_lambda_where_with_window	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_order_by_then_by_stability_and_direction	ported	tests/unit/qry_query.st	orderBy: and thenBy: sort stably by direction, a later orderBy: re-sorts, thenBy: needs a preceding orderBy:, and an ordered index streams
+test_linq.py::test_then_by_needs_a_preceding_order_by	ported	tests/unit/qry_query.st	orderBy: and thenBy: sort stably by direction, a later orderBy: re-sorts, thenBy: needs a preceding orderBy:, and an ordered index streams
+test_linq.py::test_order_by_can_stream_an_ordered_index	ported	tests/unit/qry_query.st	orderBy: and thenBy: sort stably by direction, a later orderBy: re-sorts, thenBy: needs a preceding orderBy:, and an ordered index streams
+test_linq.py::test_skip_and_take_compose_like_slicing	ported	tests/unit/qry_query.st	skip: and take: compose like slicing into one window, where: after take: filters the window, the leading order and window go into the planner
+test_linq.py::test_where_after_take_is_applied_on_top	ported	tests/unit/qry_query.st	skip: and take: compose like slicing into one window, where: after take: filters the window, the leading order and window go into the planner
+test_linq.py::test_order_and_window_are_pushed_into_the_planner	ported	tests/unit/qry_query.st	skip: and take: compose like slicing into one window, where: after take: filters the window, the leading order and window go into the planner
+test_linq.py::test_select_forms	ported	tests/unit/qry_query.st	project: answers maps of paths, collect: a block's answers, distinct the first of each identity, and PBQuery does not understand select:
+test_linq.py::test_where_after_select_filters_the_projection	ported	tests/unit/qry_query.st	project: answers maps of paths, collect: a block's answers, distinct the first of each identity, and PBQuery does not understand select:
+test_linq.py::test_distinct_keeps_equal_but_distinct_values_apart	ported	tests/unit/qry_query.st	project: answers maps of paths, collect: a block's answers, distinct the first of each identity, and PBQuery does not understand select:
+test_linq.py::test_distinct_and_count	ported	tests/unit/qry_query.st	project: answers maps of paths, collect: a block's answers, distinct the first of each identity, and PBQuery does not understand select:
+test_linq.py::test_filter_projection_pagination	ported	tests/unit/qry_query.st	project: answers maps of paths, collect: a block's answers, distinct the first of each identity, and PBQuery does not understand select:
+test_linq.py::test_lambda_where_with_window	ported	tests/unit/qry_query.st	skip: and take: compose like slicing into one window, where: after take: filters the window, the leading order and window go into the planner
 test_linq.py::test_join_inner_and_left	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_group_by_with_aggregates	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_group_by_defaults_and_raw_aggregations	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_select_many	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_select_many_top_n_per_category	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
-test_linq.py::test_count_first_and_first_or_none	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_iteration_executes_the_explained_plan	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_count_first_and_first_or_none	ported	tests/unit/qry_query.st	count, first, firstOrNil, asArray and do: run the plan explain describes; first of an empty query is PBUserError
+test_linq.py::test_iteration_executes_the_explained_plan	ported	tests/unit/qry_query.st	count, first, firstOrNil, asArray and do: run the plan explain describes; first of an empty query is PBUserError
 test_linq.py::test_values_scan_and_distinct_nodes	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_missing_is_public_api	n/a	Python-only API	Checks Python module exports or bound-method misuse, with no protoST equivalent.
 test_linq.py::test_builder_names_are_child_fields_not_internals	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_bound_builder_methods_are_rejected_as_keys_and_predicates	n/a	Python-only API	Checks Python module exports or bound-method misuse, with no protoST equivalent.
 test_linq.py::test_group_by_key_rename_keeps_any_aggregation_name	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
-test_linq.py::test_impure_leading_predicate_still_lets_the_planner_order	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_impure_leading_predicate_still_lets_the_planner_order	ported	tests/unit/qry_query.st	the mixing rule: a block is a BlockFilter; a top-level AND sends its pure conjuncts to the planner and each block to its own BlockFilter on top; an OR or NOT holding a block is one BlockFilter
 test_linq.py::test_near_and_lambda_split_like_two_wheres	n/a	excluded: vector	The near[] operator is excluded by spec 3.3, never ported.
-test_linq.py::test_in_rejects_a_mapping	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
-test_linq.py::test_queryable_of_a_queryable_keeps_its_operators	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_in_rejects_a_mapping	ported	tests/unit/qry_field.st	in: takes a collection of values, never a map or a String; any other collection is read as a sequence; a between needs bounds of one rank
+test_linq.py::test_queryable_of_a_queryable_keeps_its_operators	ported	tests/unit/qry_query.st	sources: a collection, its scan, another plan or a query (answered as is); anything else is PBValidationError; a query over a collection answers its rows
 test_pager.py::test_ranked_pages_equal_the_ordered_result	deferred	9	In-process paging by rank or materialised once, ported with Task 9.
 test_pager.py::test_unranked_pages_come_from_one_cached_result	deferred	9	In-process paging by rank or materialised once, ported with Task 9.
 test_pager.py::test_pages_are_stable_while_writers_insert_before_and_after_the_page	deferred	9	In-process paging by rank or materialised once, ported with Task 9.

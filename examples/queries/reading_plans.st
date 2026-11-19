@@ -1,16 +1,10 @@
 "EXPECT: reading plans ok (20 checks)"
-"PENDING: runs once Tasks T6 (plan operators and explain), T7 (the planner) and T8 (PBQuery,
- PBField) of the indexed-queries plan land, on top of T1 to T5. Written against the API of
- docs/superpowers/specs/2026-11-18-indexed-queries-design.md, sections 5.5 and 5.6; it has never
- run. The test runner does not run it (the .st.pending extension). When those tasks are merged,
- move it to examples/queries/reading_plans.st, run it, correct the EXPECT count, and fix the
- program and docs/queries.md (\"Reading a plan\") together wherever the built API differs.
-
- The worked plans of docs/queries.md. The expected estimates are model estimates, not
+"The worked plans of docs/queries.md ('Reading a plan'). The expected estimates are model estimates, not
  measurements: the output of proto_db's cost model (proto_db/indexing/keyed.py, KeyGroupIndex >>
  estimate; proto_db/query/plans.py, the estimate of each node) for this data. They were first
  worked out from those formulas; ruling CR10 requires them to equal proto_db's own planner output
- for the same data, generated from proto_db by a script, and plan task 7 checks that. The program
+ for the same data, generated from proto_db by a script (tests/interop/py_guide_plans.py), and
+ tests/docs/guide_plans.sh checks both the guide's figures and this program's. The program
  checks that protoBaseST's planner computes the same. Costs are compared within 1e-9, because
  protoST's log: is ln x / ln b and may differ from C's log2 in the last bit (deviation R2).
 

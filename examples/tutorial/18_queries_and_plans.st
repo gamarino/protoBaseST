@@ -1,13 +1,5 @@
 "EXPECT: 18 queries and plans ok (25 checks)"
-"PENDING: runs once Tasks T5 (terms and expressions), T6 (plan operators and explain), T7 (the
- planner) and T8 (PBQuery, PBField, block predicates) of the indexed-queries plan land, on top of
- T1 to T4. Written against the API of
- docs/superpowers/specs/2026-11-18-indexed-queries-design.md, section 5; it has never run. The
- test runner does not run it (the .st.pending extension). When those tasks are merged, move it to
- examples/tutorial/18_queries_and_plans.st, run it, correct the EXPECT count, and fix the program
- and docs/tutorial/18-queries-and-plans.md together wherever the built API differs.
-
- Lesson 18: queries and the planner.
+"Lesson 18: queries and the planner.
  Tutorial chapter: docs/tutorial/18-queries-and-plans.md
 
  What it teaches:
@@ -20,7 +12,7 @@
  - an OR uses a union only when every branch has an index;
  - a block predicate is opaque: it never uses an index, and it is named in explain.
 
- Run it (from examples/tutorial, once moved): STPATH=<repository>/src protost 18_queries_and_plans.st"
+ Run it (from examples/tutorial): STPATH=<repository>/src protost 18_queries_and_plans.st"
 Import from: 'protobase'.
 Import from: '_lesson'.
 

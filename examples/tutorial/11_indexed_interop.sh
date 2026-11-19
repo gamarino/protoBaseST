@@ -3,14 +3,6 @@
 # validated by Python. Tutorial chapter: docs/tutorial/11-python-interop.md ("Indexes, from both
 # sides").
 #
-# PENDING: runs once Task T4 (collections with indexes: maintenance in every mutator, merges onto
-# indexed currents) of the indexed-queries plan lands, with T8 for the queries it asserts. Written
-# against docs/superpowers/specs/2026-11-18-indexed-queries-design.md, sections 5.3 to 5.5; it has
-# never run. The test runner does not run it (the .sh.pending extension). When the tasks are
-# merged, move the three files to examples/tutorial/ (11_indexed_interop.sh,
-# _indexed_change.st, 11_indexed_python_side.py), run it, and fix the files and the chapter
-# together wherever the built API differs.
-#
 # What it teaches: Python's proto_db writes a collection with an equality and a range index;
 # protoST changes it through its mutators (a replaced element, a removed one, a new one) and a
 # blind write of its own merges onto it; proto_db then validates every index against a scan,

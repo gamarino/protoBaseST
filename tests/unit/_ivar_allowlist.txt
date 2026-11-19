@@ -158,3 +158,5 @@ PBLimit>>_setLimit:offset:
 _PBSetPlan>>_setSources:
 _PBCandidate>>_setPlan:names:scans:cost:
 PBPlanner>>_setBase:indexes:
+PBField>>_setPath:spec:
+PBQuery>>_setSource:ops:

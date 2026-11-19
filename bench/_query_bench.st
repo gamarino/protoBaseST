@@ -214,3 +214,129 @@ PlannerBench class >> p3: n plan: aPlan
   ^ { r at: 1. 5. aPlan. r at: 2. r at: 3. self shapeOf: chosen explain.
     'intersect_cost=' , (hand estimate cost * 1000) rounded printString
       , ' filter_cost=' , (chosen estimate cost * 1000) rounded printString }.
+
+"The query workloads Q1-Q4 (spec 7.3; indexed queries, plan Task 8), through the query front end
+ (PBQuery, proto_db's from_collection). The data: a PBList of n records, record i with id i,
+ g = i mod (n // 10) (ten records per value), r = i, few = i mod 4 and x = i mod 10. Plan -index
+ (Q1: index) queries it with an equality index by_g on g, a range index by_r on r and an equality
+ index by_few on few, and the planner chooses; plan -scan (Q1: scan) queries the same records
+ without indexes, so every plan is a scan (the forced scan of spec 7.3). Each unit builds its
+ collection untimed and times its queries, each one built, planned and run to an Array (asArray,
+ proto_db's to_list). Each answers { rows. queries. plan. checksum. us. model. nil }: rows the rows
+ of all queries; the checksum, mod 2^61 - 1, the sum over query q (from 0) and its rows of
+ (q + 1) * (id + 1), for Q4 of (q + 1) * (position + 1) * (id + 1) (the order is the answer);
+ model the node names of the last query's plan, depth first, compared with proto_db's like the
+ rest of the work.
+  Q1:<n>:index|scan     20 point lookups, g == (37 q) mod (n // 10), n in QUERY_Q1_SIZES
+                        (default 100 1000 10000)
+  Q2:2000:<p>-index|-scan  20 queries: in1, in10, in100, g in: the k values (7 j + q) mod 200,
+                        j < k; r0001, r0010, r0100, r0500, r in [q, q + w) (betweenRightOpen:and:)
+                        with w = n * permille / 1000 (at least 1)
+  Q3:2000:<c>-index|-scan  20 queries, v = (13 q) mod 200: and, g == v and x < 5 (an index and a
+                        residual); or2, g == v or few == q mod 4 (two indexed branches); ormix,
+                        g == v or x == 3 (an unindexed branch); not, not (few == q mod 4)
+  Q4:2000:<s>-index|-scan  20 queries, ordered by r descending, the first 5: all, no condition
+                        (the planner streams the range index); sel, where g == v (ten rows);
+                        unsel, where few == q mod 4 (a quarter of the rows)"
+Object subclass: #QueryUnits.
+
+QueryUnits class >> sizes
+  ^ (((Smalltalk getenv: 'QUERY_Q1_SIZES') ifNil: ['100 1000 10000']) substrings: ' ')
+    collect: [:each | each asInteger].
+
+QueryUnits class >> unitsOf: anId
+  | out |
+  out := OrderedCollection new.
+  anId = 'Q1' ifTrue: [self sizes do: [:n | out add: { 'Q1'. n. 'index' }; add: { 'Q1'. n. 'scan' }]].
+  anId = 'Q2' ifTrue: [#('in1' 'in10' 'in100' 'r0001' 'r0010' 'r0100' 'r0500') do: [:p |
+    out add: { 'Q2'. 2000. p , '-index' }; add: { 'Q2'. 2000. p , '-scan' }]].
+  anId = 'Q3' ifTrue: [#('and' 'or2' 'ormix' 'not') do: [:p |
+    out add: { 'Q3'. 2000. p , '-index' }; add: { 'Q3'. 2000. p , '-scan' }]].
+  anId = 'Q4' ifTrue: [#('all' 'sel' 'unsel') do: [:p |
+    out add: { 'Q4'. 2000. p , '-index' }; add: { 'Q4'. 2000. p , '-scan' }]].
+  ^ out asArray.
+
+QueryUnits class >> records: n indexed: aBoolean
+  | coll groups |
+  groups := n // 10 max: 1.
+  coll := PBList new.
+  0 to: n - 1 do: [:i |
+    coll := coll appendLast: (PBObject withAll: { 'id' -> i. 'g' -> (i \\ groups). 'r' -> i. 'few' -> (i \\ 4). 'x' -> (i \\ 10) })].
+  aBoolean ifFalse: [^ coll].
+  ^ ((coll addIndex: (PBEqualityIndex name: 'by_g' path: 'g'))
+    addIndex: (PBRangeIndex name: 'by_r' path: 'r'))
+    addIndex: (PBEqualityIndex name: 'by_few' path: 'few').
+
+"Runs the 20 (Q1: 20) queries aBlock answers for q (a PBQuery from q), timed, and answers the
+ unit's result."
+QueryUnits class >> run: aBlock on: aCollection plan: aPlan ordered: aBoolean
+  | answers us rows check last p |
+  p := QueryBench modulus.
+  us := PlannerBench time: [
+    answers := (0 to: 19) asArray collect: [:q | (aBlock value: (PBQuery from: aCollection) value: q) asArray]].
+  rows := 0. check := 0.
+  answers doWithIndex: [:answer :q |
+    rows := rows + answer size.
+    answer doWithIndex: [:e :pos |
+      check := (check + (q * (aBoolean ifTrue: [pos] ifFalse: [1]) * ((e at: 'id') + 1))) \\ p]].
+  last := aBlock value: (PBQuery from: aCollection) value: 19.
+  ^ { rows. 20. aPlan. check. us. PlannerBench shapeOf: last explain. nil }.
+
+QueryUnits class >> forced: aPlan
+  ^ (aPlan endsWith: '-scan') | (aPlan = 'scan')
+    ifTrue: ['scan'] ifFalse: ['index'].
+
+QueryUnits class >> point: aPlan
+  | forced |
+  forced := self forced: aPlan.
+  ^ aPlan copyFrom: 1 to: aPlan size - forced size - 1.
+
+QueryUnits class >> q1: n plan: aPlan
+  | coll g groups |
+  (#('index' 'scan') includes: aPlan) ifFalse: [^ Error signal: 'Q1: unknown plan ' , aPlan].
+  coll := self records: n indexed: aPlan = 'index'.
+  g := PBField path: 'g'.
+  groups := n // 10 max: 1.
+  ^ self run: [:query :q | query where: (g eq: 37 * q \\ groups)] on: coll plan: aPlan ordered: false.
+
+QueryUnits class >> q2: n plan: aPlan
+  | coll point g r block |
+  coll := self records: n indexed: (self forced: aPlan) = 'index'.
+  point := self point: aPlan.
+  g := PBField path: 'g'. r := PBField path: 'r'.
+  (point beginsWith: 'in')
+    ifTrue: [ | k |
+      k := (point copyFrom: 3 to: point size) asInteger.
+      block := [:query :q | query where: (g in: ((0 to: k - 1) asArray collect: [:j | 7 * j + q \\ 200]))]]
+    ifFalse: [ | w |
+      w := n * (point allButFirst) asInteger // 1000 max: 1.
+      block := [:query :q | query where: (r betweenRightOpen: q and: q + w)]].
+  ^ self run: block on: coll plan: aPlan ordered: false.
+
+QueryUnits class >> q3: n plan: aPlan
+  | coll point g x few cond |
+  coll := self records: n indexed: (self forced: aPlan) = 'index'.
+  point := self point: aPlan.
+  g := PBField path: 'g'. x := PBField path: 'x'. few := PBField path: 'few'.
+  cond := nil.
+  point = 'and' ifTrue: [cond := [:q | (g eq: 13 * q \\ 200) & (x < 5)]].
+  point = 'or2' ifTrue: [cond := [:q | (g eq: 13 * q \\ 200) | (few eq: q \\ 4)]].
+  point = 'ormix' ifTrue: [cond := [:q | (g eq: 13 * q \\ 200) | (x eq: 3)]].
+  point = 'not' ifTrue: [cond := [:q | (few eq: q \\ 4) not]].
+  cond isNil ifTrue: [^ Error signal: 'Q3: unknown plan ' , aPlan].
+  ^ self run: [:query :q | query where: (cond value: q)] on: coll plan: aPlan ordered: false.
+
+QueryUnits class >> q4: n plan: aPlan
+  | coll point g few cond |
+  coll := self records: n indexed: (self forced: aPlan) = 'index'.
+  point := self point: aPlan.
+  g := PBField path: 'g'. few := PBField path: 'few'.
+  cond := nil.
+  point = 'all' ifTrue: [cond := [:q | nil]].
+  point = 'sel' ifTrue: [cond := [:q | g eq: 13 * q \\ 200]].
+  point = 'unsel' ifTrue: [cond := [:q | few eq: q \\ 4]].
+  cond isNil ifTrue: [^ Error signal: 'Q4: unknown plan ' , aPlan].
+  ^ self run: [:query :q | | c |
+      c := cond value: q.
+      ((c isNil ifTrue: [query] ifFalse: [query where: c]) orderBy: 'r' descending: true) take: 5]
+    on: coll plan: aPlan ordered: true.

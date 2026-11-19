@@ -120,6 +120,21 @@
   every plan node for node and cost for cost `proto_db`'s, every result equal, 0 near ties). The
   guide's worked-plan figures are checked against `proto_db`'s planner by
   `tests/docs/guide_plans.sh` (`tests/interop/py_guide_plans.py`, ruling CR10).
+- **Queries** (plan Task 8, `src/protobase/query.st`, a port of `proto_db`'s `query/linq.py`):
+  `PBField` (`path:`, `element`, `extractor:`; `eq:`, `ne:`, `<` ... `>=`, `in:`, `between:and:`
+  and its open forms, `isNone`, `notNone`, `isTrue`, `notTrue`, `contains:`; `=` not overridden)
+  and `PBQuery` (`from:`, `where:` with an expression or a one-argument block, chained as AND,
+  `orderBy:`, `thenBy:`, `skip:`, `take:`, `project:`, `collect:`, `distinct`, `asArray`, `do:`,
+  `count`, `first`, `firstOrNil`, `explain`, `plan`), immutable, with `linq.py`'s mixing rule for
+  blocks (`BlockFilter`). No `select:` (ruling IQ2); `where:` refuses the list syntax
+  (`PBExpression compile:`) and anything else with ruling CR6's text. Tests
+  `tests/unit/qry_field.st` and `tests/unit/qry_query.st` (41 `test_linq.py` rows ported). The
+  programs of chapters 11 (indexed part), 17 and 18 and `examples/queries/` (`reading_plans`,
+  `lookups`, `keys`, `expressions`, `compound`, `ranges`, `merge_indexed`) run as tests.
+- **Benchmarks Q1-Q4** (`bench/run_query.sh Q1 Q2 Q3 Q4`, `QueryUnits` in `bench/_query_bench.st`):
+  point equality against size, `in` and ranges, compound conditions and ordering, the planner's
+  choice against a forced scan, through the query front end in both implementations; figures in
+  [deviations.md](docs/deviations.md#queries-and-indexes).
 - **Benchmark M1**: commits per second of single-record transactions on a 600-record dictionary
   with 0, 1 and 3 indexes. `bench/run_query.sh` now runs each unit (a size and a plan) in a
   process of its own with an explicit heap budget (`PROTOCORE_HEAP_LIMIT_CELLS`) and reports each
