@@ -233,7 +233,7 @@ index. Only the name is stored in the database, never the block.
 ```smalltalk
 PBKeySpec registerExtractor: 'name_length' block: [:p | | n |
     n := p at: 'name'.
-    n isNil ifTrue: [Error signal: 'a person without a name'].
+    n isNil ifTrue: [NamelessPerson signal: 'a person without a name'].
     n size] version: '1'.
 db run: [:t |
     t setRootObject: 'people' value: ((t getRootObject: 'people')
@@ -278,7 +278,7 @@ own and does not wrap it, because `proto_db`'s `KeySpec.extract` does not either
 nameless setRootObject: 'people' value: (nameless newDictionary setAt: 800 value: (nameless newObject: { 'city' -> 'Oslo' })).
 named setRootObject: 'people' value: (named newDictionary setAt: 801 value: (named newObject: { 'name' -> 'person801'. 'city' -> 'Oslo' })).
 lesson check: 'the commit whose merge ran the failing extractor fails with the block''s own error'
-    signals: Error containing: 'a person without a name' during: [nameless commit].
+    signals: NamelessPerson containing: 'a person without a name' during: [nameless commit].
 named commit.
 people := db newTransaction getRootObject: 'people'.
 lesson check: 'the other commit went through' isTrue: (people has: 801).
@@ -290,7 +290,10 @@ index. Only the merge onto the indexed root ran `'name_length'`, and only then d
 merge the same error appears earlier and more plainly: a mutator of an indexed collection runs the
 extractor in the transaction's own thread, at the call.
 
-Because the exception is the block's own, its text is all the caller learns. An extractor that can
+The check names the program's own class, `NamelessPerson` (an `Error` subclass the program
+defines), not `Error`: the commit signals exactly the block's exception, neither wrapped in a
+protoBaseST error nor replaced by one. Because the exception is the block's own, its class and its
+text are all the caller learns. An extractor that can
 fail should say in its message what it was extracting, as `'name_length'` does above ("a person
 without a name").
 

@@ -21,6 +21,13 @@
 # duplicate. With PENDING_FINAL=1 (the final task) any line left is an error. The marker
 # "[measured in T<n>: ...]" (tests/docs/measured_markers.sh) and a file citation
 # (`keyed.py:596-622`) are not selectors and are skipped.
+# Granularity limits of the pending list: a selector is listed once, under the first task whose
+# Interfaces block produces it (`describe` is Task 2's although Task 5 defines it on terms too;
+# `rows` is Task 6's although Task 9's pager answers it too), so the line goes when that first
+# definition lands, whatever class later ones are on. Keyword parts are matched separately, as
+# above: a span `name: n keySpec: k` is accepted because `name:` and `keySpec:` are each a part of
+# some defined or pending selector, without proving that `name:keySpec:` itself is either; only a
+# span written as one selector (`name:keySpec:`) is checked whole.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"

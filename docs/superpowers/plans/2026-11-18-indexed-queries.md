@@ -604,7 +604,9 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
     `'==' '!=' '<' '<=' '>' '>=' 'in' 'between[]' 'between()' 'between[)' 'between(]' '?N' '?!N'
     'contains' '?T' '?!T'`; `'near[]'` signals `PBNotSupportedError` containing `'vector'`;
     validation and canonical operands as `terms.py:152-213` (`in` over a set sorted by order key).
-  - `PBTerm >> path`, `op`, `value`, `keySpec`, `matches: anElement` (D28: `PBMissing` matches
+  - `PBTerm >> path`, `op`, `value`, `keySpecObject` (the `PBKeySpec` of its path; every selector
+    answering a `PBKeySpec` is named `keySpecObject`, ruling 2026-11-19; `PBTerm` has no
+    `keySpec`), `matches: anElement` (D28: `PBMissing` matches
     only `?N`; `!=` is not the complement of `==`), `describe`, `asList`, `=`, `hash`.
   - `PBExpression` (abstract): `evaluate: anElement`, `describe`, `asList`, `termsDo: aBlock`,
     `&`, `|`, `not`. `PBAnd class >> withAll: anArray`, `PBOr class >> withAll:` (flattened,
@@ -652,7 +654,11 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
     `limit`, `offset`, `by_rank`; `BlockFilter` has `description`), `estimate`,
     `windowFrom: start to: stop` (answers an `Array`; by rank where offered),
     `exactRows` (Integer or nil), `byRank` (Boolean).
-  - Classes and constructors: `PBCollectionScan class >> on: aCollection`;
+  - Classes and constructors: `PBCollectionScan class >> on: aCollection` (its explain's
+    `'collection'` is `proto_db`'s class name, `type(c).__name__`: the last segment of the
+    collection class's `typeName`, `'Dictionary'`, `'List'`, `'HashDictionary'`, `'Set'`,
+    `'CountedSet'`, `'RepeatedKeysDictionary'`, never the protoST class name; ruling 2026-11-19, so
+    explain output compares equal across the two languages);
     `PBIndexPlan class >> index: anIndex term: aTerm part: aPart` (parts: lookup, range,
     complement, ordered scan, as `IndexLookup`/`IndexRange`/`IndexComplement`/`IndexOrderedScan`);
     `PBFilter class >> source: aPlan terms: anArray`; `PBBlockFilter class >> source: aPlan
@@ -924,9 +930,9 @@ A failure found here is fixed in the owning module, fail-first.
    spec's values; every code step names its selectors and the `proto_db` lines it ports. The
    bodies are left to the port of the cited lines; IP13 pins the one shape choice.
 3. **Type consistency.** `PBKeySpec` (2) is what `name:keySpec:` (3), `supportsOrder:` (6) and
-   `PBTerm >> keySpec` (5) use; `PBSortKey` (6) is what `PBPlanner` (7) and `PBQuery` (8) build;
+   `PBTerm >> keySpecObject` (5) use; `PBSortKey` (6) is what `PBPlanner` (7) and `PBQuery` (8) build;
    `PBEstimate` (6) is `estimate:`'s answer; `windowFrom:to:` answers an `Array` everywhere;
-   `keySpecObject` (3) is the only selector answering a `PBKeySpec` from an index; 4b expects
+   `keySpecObject` (3, and 5 on `PBTerm`) is the only selector name answering a `PBKeySpec`; 4b expects
    the extractor's own exception (2).
 4. **Review Focus.** Each of the five lines has a named test case in its owning task.
 5. **Proportion.** The plan is about the spec's length and holds no method body; the code is the

@@ -26,6 +26,10 @@
 Import from: 'protobase'.
 Import from: '_lesson'.
 
+"The extractor's own error class: a commit that fails during a merge signals exactly this class,
+ neither wrapped nor replaced (IQ1, IP2)."
+Error subclass: #NamelessPerson.
+
 | lesson dir space db cities walk tr people oslo before after inCity mine theirs contacts zip spec count nameless named |
 lesson := Lesson named: '17 indexes'.
 dir := FileSystem temp / ('pbst-tutorial-17-' , Smalltalk pid printString).
@@ -131,7 +135,7 @@ lesson check: 'ne: matches present keys only' is: (count value: (zip ne: '1010')
 "Extractors: a named block, registered in every process that changes the collection."
 PBKeySpec registerExtractor: 'name_length' block: [:p | | n |
     n := p at: 'name'.
-    n isNil ifTrue: [Error signal: 'a person without a name'].
+    n isNil ifTrue: [NamelessPerson signal: 'a person without a name'].
     n size] version: '1'.
 db run: [:t |
     t setRootObject: 'people' value: ((t getRootObject: 'people')
@@ -149,7 +153,7 @@ named := db newTransaction.
 nameless setRootObject: 'people' value: (nameless newDictionary setAt: 800 value: (nameless newObject: { 'city' -> 'Oslo' })).
 named setRootObject: 'people' value: (named newDictionary setAt: 801 value: (named newObject: { 'name' -> 'person801'. 'city' -> 'Oslo' })).
 lesson check: 'the commit whose merge ran the failing extractor fails with the block''s own error'
-    signals: Error containing: 'a person without a name' during: [nameless commit].
+    signals: NamelessPerson containing: 'a person without a name' during: [nameless commit].
 named commit.
 people := db newTransaction getRootObject: 'people'.
 lesson check: 'the other commit went through' isTrue: (people has: 801).

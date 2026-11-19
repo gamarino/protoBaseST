@@ -1031,7 +1031,7 @@ For tests, tools and readers of the format. An application does not need them.
 > (sections 5.2 and 5.5) and of its implementation plan's interfaces, written early so the
 > chapters can cite it. Until each task lands, the messages below are listed as pending in the
 > documentation guard, and the collections above keep refusing every change when they hold an
-> index. A name marked *provisional* may change when built. The concepts are in
+> index. The concepts are in
 > [queries.md](queries.md); the tutorial is chapters [17](tutorial/17-indexes.md),
 > [18](tutorial/18-queries-and-plans.md) and [19](tutorial/19-ordered-reads-and-pages.md).
 
@@ -1119,7 +1119,7 @@ protoBaseST does not know is refused the same way.
 | Message | Meaning |
 |---|---|
 | `PBTerm path: aStringOrNil op: anOperator value: v`, `path: aStringOrNil op: anOperator` | A term; the second form for `'?N'`, `'?!N'`, `'?T'`, `'?!T'`. Operators are `proto_db`'s strings: `'=='` `'!='` `'<'` `'<='` `'>'` `'>='` `'in'` `'between[]'` `'between()'` `'between(]'` `'between[)'` `'?N'` `'?!N'` `'contains'` `'?T'` `'?!T'`. `'near[]'` is `PBNotSupportedError` (vector search is out of scope); an unknown operator or malformed operand `PBValidationError`. |
-| `path`, `op`, `value`, `keySpec` | The term's parts; a term's `keySpec` is the `PBKeySpec` its path names (`PBKeySpec forTermPath: path`), unlike `PBIndex >> keySpec`, which answers the persisted tuple. |
+| `path`, `op`, `value`, `keySpecObject` | The term's parts; `keySpecObject` is the `PBKeySpec` its path names (`PBKeySpec forTermPath: path`). |
 | `matches: anElement` | The scan oracle, `proto_db`'s D28 semantics ([queries.md](queries.md#key-specs-missing-and-nil)). |
 | `describe`, `asList` | `{ 'path'. 'op'. 'value' }` for `explain`; the 0.1 list form. |
 | `PBExpression`: `evaluate: anElement`, `describe`, `asList`, `termsDo: aBlock`, `&`, `\|`, `not` | Every condition (a term, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate`). `PBAnd` and `PBOr` are n-ary and flattened; `aCondition not not` is the condition itself. |
@@ -1158,7 +1158,7 @@ projection name would read backwards (ruling IQ2).
 **`PBPlanner`** (`proto_db`'s `plan_query`, a pure function of its arguments):
 `PBPlanner plan: aCollectionOrPlan where: aConditionOrArrayOrNil orderBy: keysOrNil limit: anIntegerOrNil offset: anInteger`
 answers a `PBQueryPlan`; `where:` also takes the 0.1 list syntax as an `Array`. Sort keys are
-`PBSortKey key: aPathOrFieldOrBlock descending: aBoolean` (*provisional*). `PBPlanner normalize:`
+`PBSortKey key: aPathOrFieldOrBlock descending: aBoolean` (plan call IP14). `PBPlanner normalize:`
 answers a condition with negations pushed inward and the one exact rewrite (`not isNone` is
 `notNone`). Malformed arguments are `PBValidationError`.
 
@@ -1176,13 +1176,13 @@ Every node is a `PBQueryPlan`, immutable once built, safe to run on any actor:
 
 | Node (`explain`) | Class | Fields |
 |---|---|---|
-| `CollectionScan` | `PBCollectionScan` | `'collection'`, `'rows'`, `'indexes'` |
+| `CollectionScan` | `PBCollectionScan` | `'collection'` (`proto_db`'s class name: `'Dictionary'`, `'List'`, `'HashDictionary'`, `'Set'`, `'CountedSet'`, never the protoST class name), `'rows'`, `'indexes'` |
 | `IndexLookup`, `IndexRange`, `IndexComplement`, `IndexOrderedScan` | `PBIndexPlan` | `'index'`, `'term'` (`nil` for an ordered scan), `'descending'` (ordered scan) |
 | `Filter` | `PBFilter` | `'predicate'` |
 | `BlockFilter` | `PBBlockFilter` | `'description'` |
 | `Union`, `Intersect` | `PBUnion`, `PBIntersect` | none |
 | `Project` | `PBProject` | `'fields'` or `'function'` |
-| `Sort` | `PBSort` | `keys` (each `{ 'key'. 'descending' }`) |
+| `Sort` | `PBSort` | `'keys'` (each `{ 'key'. 'descending' }`) |
 | `Limit` | `PBLimit` | `'limit'`, `'offset'`, `'by_rank'` (only when true) |
 | `Count` | `PBCount` | `'by_rank'` (only when true) |
 | `Distinct` | `PBDistinct` | none |
