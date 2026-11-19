@@ -4,22 +4,6 @@
 # Columns: selector<TAB>task
 # Task 2: key specs and the extractor registry
 # Task 3: key-group indexes
-countOfKey:	3
-explain	3
-groupCount	3
-keySpecObject	3
-membersDo:	3
-name:keySpec:	3
-name:path:	3
-onAdd:	3
-onRemove:	3
-onReplace:with:	3
-rebuiltStale:	3
-validate:	3
-withAdded:	3
-withIndex:	3
-withRemoved:	3
-withReplaced:with:	3
 # Task 4a: collections maintain their indexes (4a and 4b share the spec's T4)
 addIndex:	4
 removeIndex:	4

@@ -44,6 +44,7 @@ PBOrderKey class>>_initializeInfinities
 _PBLoadResolver>>_setStorage:chain:
 _PBNameMap>>_setEntries:
 PBKeyNode>>_setOid:pointer:storage:
+PBIndex>>_setOid:pointer:storage:
 _PBPlace>>_setPointer:storage:
 PBIndexedCollection>>_setLog:complete:
 _PBOpLog>>_setPrevious:op:

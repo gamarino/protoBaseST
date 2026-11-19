@@ -1,8 +1,8 @@
-"-- keygroups.st: the member keys of the key-group indexes --
+"-- keygroups.st: the member keys and the groups of the key-group indexes --
 
-A port of the member-key part of proto_db's proto_db/indexing/keyed.py at v2.0.0rc4 (lines
-81-215: surrogate, the exact member keys, the equal-member bounds and the nesting depth of member
-keys). A key-group index files each element of a group in a members tree under its member key:
+A port of proto_db's proto_db/indexing/keyed.py at v2.0.0rc4, lines 81-258: surrogate, the exact
+member keys, the equal-member bounds, the nesting depth of member keys, and the group operations
+(PBKeyGroups; the indexes that use them are in indexes.st). A key-group index files each element of a group in a members tree under its member key:
 
   ((0, element), exact token)      for an orderable element (an atom by its oid, a value by its
                                    order key)
@@ -19,9 +19,18 @@ exactToken:, the canonical encoding, D58) tells apart values that are equal but 
                                      the member key, a PBTuple
   PBMemberKeys lowestOf: aValue      the order keys enclosing every member key whose equality
   PBMemberKeys highestOf: aValue     part is aValue's (keyed.py _equal_members_bounds)
-  PBMemberKeys checkDepth: anElement anElement, or PBValidationError when its member key would
-                                     nest deeper than MAX_VALUE_DEPTH
+  PBMemberKeys checkDepth: anElement index: anIndex
+                                     anElement, or PBValidationError (proto_db's sentence, naming
+                                     anIndex) when its member key would nest deeper than
+                                     MAX_VALUE_DEPTH
   PBMemberKeys depthLimits           the deepest elements an index can store, by shape
+  PBMemberKeys identityOf: anElement proto_db's element_identity, for comparing multisets
+  PBMemberKeys orderKeyOrNil: aValue the order key of aValue, nil when it is unorderable
+
+A group is the PBTuple (members, total): members a PBCountedKeyNode tree from member key to the
+PBTuple (element, count). PBKeyGroups empty, group:with:memberKey:, group:without:,
+group:do: and sortedMembers:total: are keyed.py's EMPTY_GROUP, _group_add, _group_remove,
+_group_iter and _GroupBuilder.group.
 
 Every walk keeps an explicit stack (_PBValueFrame fold:...), so a value of any depth is walked
 on any actor."
@@ -141,23 +150,28 @@ PBMemberKeys class >> depthLimits
     'lists' -> (room - self surrogateLeaf // self surrogateListLevel).
     'maps' -> (room - self surrogateLeaf // self surrogateMapLevel) }.
 
-"anElement, or PBValidationError when its member key would nest deeper than MAX_VALUE_DEPTH
- (keyed.py check_member_key, with proto_db's sentence after the index it names: a scalar or an
- atom nests a few containers only; a container is bounded first from its own depth, and only an
- element that could pass the limit costs the walk of its member key). There is no outer
- parameter: in proto_db only the vector index stores member keys inside more containers, and
- protoBaseST never writes a vector index (ruling IQ5)."
-PBMemberKeys class >> checkDepth: anElement
+"anElement, or PBValidationError when its member key would nest deeper than MAX_VALUE_DEPTH, with
+ proto_db's sentence naming anIndex (keyed.py check_member_key): a scalar or an atom nests a few
+ containers only; a container is bounded first from its own depth, and only an element that could
+ pass the limit costs the walk of its member key. There is no outer parameter: in proto_db only the
+ vector index stores member keys inside more containers, and protoBaseST never writes a vector
+ index (ruling IQ5)."
+PBMemberKeys class >> checkDepth: anElement index: anIndex
+  ^ self checkDepth: anElement memberKey: nil index: anIndex.
+
+"As checkDepth:index:, for a caller that has the member key aKeyOrNil already (nil: computed when
+ the bound needs it), as with_added passes it to check_member_key."
+PBMemberKeys class >> checkDepth: anElement memberKey: aKeyOrNil index: anIndex
   | max depth limits |
   (anElement isClassObject not and: [
       (anElement isKindOf: _PBSequence) or: [anElement isKindOf: PBFrozenDict]]) ifFalse: [^ anElement].
   max := PBCodec maxValueDepth.
   self memberKeyWrapping + (self surrogateListLevel * (PBCodec valueDepth: anElement)) + self surrogateLeaf <= max
     ifTrue: [^ anElement].
-  depth := PBCodec valueDepth: (self memberKeyOf: anElement).
+  depth := PBCodec valueDepth: (aKeyOrNil isNil ifTrue: [self memberKeyOf: anElement] ifFalse: [aKeyOrNil]).
   depth <= max ifTrue: [^ anElement].
   limits := self depthLimits.
-  ^ PBValidationError signal: 'An index cannot store this element: its member key would nest '
+  ^ PBValidationError signal: anIndex _subject , ' cannot store this element: its member key would nest '
     , depth printString , ' MessagePack containers deep, more than MAX_VALUE_DEPTH = ' , max printString
     , ' (format spec, "Value nesting depth"). The index stores an orderable element inside '
     , self memberKeyWrapping printString , ' containers, so it may nest at most ' , (limits at: 'orderable') printString
@@ -165,3 +179,73 @@ PBMemberKeys class >> checkDepth: anElement
     , self surrogateListLevel printString , ' containers per list level and ' , self surrogateMapLevel printString
     , ' per map level: at most ' , (limits at: 'lists') printString , ' nested lists or '
     , (limits at: 'maps') printString , ' nested maps'.
+
+"=== identities ==============================================================="
+
+"The order key of aValue, or nil when aValue is unorderable (PBKeys isOrderable: false: a list, a
+ map, a NaN, or a tuple holding one): the test and the key in one computation."
+PBMemberKeys class >> orderKeyOrNil: aValue
+  ^ [PBKeys orderKey: aValue] on: PBValidationError do: [:e | e return: nil].
+
+"An identity of anElement, equal for equal elements, for comparing multisets (proto_db
+ indexing.element_identity): the order key of its equality part. Atoms are identified by oid,
+ orderable values by their order key (1 and 1.0 are one element, true another), and lists, maps
+ and unorderable tuples item by item at any depth through their surrogates (a list never equals a
+ tuple; every NaN equals every NaN). PBMissing and nil are two identities."
+PBMemberKeys class >> identityOf: anElement
+  ^ PBKeys orderKey: (self _equalityPart: anElement).
+
+"=== groups (keyed.py _group_add, _group_remove, _group_iter) ==================
+
+A group is the PBTuple (members, total): members a PBCountedKeyNode tree from member key to the
+PBTuple (element, count), total the occurrences the group holds. Every operation answers a new
+group and shares the rest of the tree (path copying)."
+
+Object subclass: #PBKeyGroups.
+
+"keyed.py EMPTY_GROUP: (None, 0)."
+PBKeyGroups class >> empty
+  ^ PBTuple withAll: { nil. 0 }.
+
+"aGroup with one more occurrence of anElement, whose member key is aKey (keyed.py _group_add)."
+PBKeyGroups class >> group: aGroup with: anElement memberKey: aKey
+  | members node entry |
+  members := aGroup at: 1.
+  node := PBAvl keyAt: members key: aKey.
+  entry := node isNil
+    ifTrue: [PBTuple withAll: { anElement. 1 }]
+    ifFalse: [PBTuple withAll: { node value at: 1. (node value at: 2) + 1 }].
+  members := (PBAvl keyPut: members key: aKey value: entry nodeClass: PBCountedKeyNode) at: 1.
+  ^ PBTuple withAll: { members. (aGroup at: 2) + 1 }.
+
+"aGroup with one occurrence of anElement fewer, or nil when it holds none (keyed.py
+ _group_remove): only the member whose member key is anElement's is taken, never an equal member
+ with another token (D58)."
+PBKeyGroups class >> group: aGroup without: anElement
+  | members key node entry |
+  members := aGroup at: 1.
+  key := PBMemberKeys memberKeyOf: anElement.
+  node := PBAvl keyAt: members key: key.
+  node isNil ifTrue: [^ nil].
+  entry := node value.
+  members := (entry at: 2) = 1
+    ifTrue: [(PBAvl keyRemove: members key: key) at: 1]
+    ifFalse: [(PBAvl keyPut: members key: key value: (PBTuple withAll: { entry at: 1. (entry at: 2) - 1 })
+      nodeClass: PBCountedKeyNode) at: 1].
+  ^ PBTuple withAll: { members. (aGroup at: 2) - 1 }.
+
+"Evaluates aBlock with each stored element of aGroup and its count, in member order (keyed.py
+ _group_iter yields each occurrence; the count stands for them)."
+PBKeyGroups class >> group: aGroup do: aBlock
+  PBAvl keysAndValuesDo: [:key :entry | aBlock value: (entry at: 1) value: (entry at: 2)] over: (aGroup at: 1).
+
+"The group of anArray's { member order key. member key. element. count } entries, sorted by
+ member order key, built balanced (keyed.py _GroupBuilder.group): total is its occurrences."
+PBKeyGroups class >> sortedMembers: anArray total: anInteger
+  | sorted |
+  sorted := anArray asArray sort: [:a :b | (a at: 1) <= (b at: 1)].
+  ^ PBTuple withAll: {
+    PBAvl keyFromSortedOrderKeys: (sorted collect: [:each |
+        { each at: 1. each at: 2. PBTuple withAll: { each at: 3. each at: 4 } }])
+      nodeClass: PBCountedKeyNode.
+    anInteger }.

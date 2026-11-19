@@ -1115,7 +1115,9 @@ filed under its member key, the `PBTuple` `((0, element) | (1, surrogate), exact
 | `PBMemberKeys memberKeyOf: anElement` | The member key: `(0, element)` for an orderable element, `(1, surrogate)` for an unorderable one, then `PBKeys exactToken:` of the element. |
 | `PBMemberKeys surrogate: aValue` | An orderable stand-in: `('l', items)` for a list, `('d', pairs)` for a map (pairs in key order), `('t', items)` for a tuple holding an unorderable value, `('n')` for a NaN, `('v', value)` otherwise. |
 | `PBMemberKeys lowestOf: aValue`, `highestOf: aValue` | The order keys enclosing every member key whose equality part is the value's. |
-| `PBMemberKeys checkDepth: anElement`, `depthLimits` | The element, or `PBValidationError` when its member key would nest deeper than `PBCodec maxValueDepth` (1022); the limits are 1018 containers for an orderable element, 254 nested lists, 169 nested maps. |
+| `PBMemberKeys checkDepth: anElement index: anIndex`, `depthLimits` | The element, or `PBValidationError` when its member key would nest deeper than `PBCodec maxValueDepth` (1022), in `proto_db`'s sentence: "Index 'n' (EqualityIndex on a.b) cannot store this element: ..."; the limits are 1018 containers for an orderable element, 254 nested lists, 169 nested maps. The hooks check every element they store. |
+| `PBMemberKeys identityOf: anElement` | `proto_db`'s element_identity: equal for equal elements (atoms by oid, 1 and 1.0 one identity, `true` another, lists and maps item by item, every NaN equal), for comparing multisets. |
+| `PBKeyGroups` | The group operations (class side, `keyed.py` `_group_add`, `_group_remove`, `_group_iter`): a group is the `PBTuple` (members, total), members a `PBCountedKeyNode` tree from member key to `(element, count)`. |
 
 ### Indexes
 
@@ -1124,24 +1126,25 @@ filed under its member key, the `PBTuple` `((0, element) | (1, surrogate), exact
 | Message | Meaning |
 |---|---|
 | `PBEqualityIndex name: aString keySpec: aKeySpec`, `name: aString path: aString` | An empty unsaved index. `name:keySpec:` is the constructor and takes a `PBKeySpec` only: anything else, a String included, is `PBValidationError`. `name:path:` is the convenience for one path, `name: aString keySpec: (PBKeySpec path: aPath)`. `PBRangeIndex` the same. |
-| `withAdded: e`, `withRemoved: e`, `withReplaced: old with: new` | A new index with one occurrence more, fewer, or replaced. Removing an occurrence the index does not hold is `PBValidationError`. The receiver never changes. |
-| `empty`, `build: aCollection` | An empty index with the same definition; the bulk build over the elements given. |
+| `withAdded: e`, `withRemoved: e`, `withReplaced: old with: new` | A new unsaved index with one occurrence more, fewer, or replaced (removed, then added). Removing an occurrence the index does not hold is `PBValidationError`, also when it holds an equal value with another exact token (1.0 for 1). The receiver never changes. |
+| `empty`, `build: aCollection` | An empty index with the same definition; the bulk build over the elements of anything answering `do:` (grouped, sorted, balanced trees as `proto_db`'s build), holding what the fold of `withAdded:` from `empty` holds, key for key and member for member; the receiver's content is never kept. |
 | `supports: aTerm`, `estimate: aTerm`, `plan: aTerm` | Whether the index answers the term exactly as a scan would; its `PBEstimate`; its `PBIndexPlan`. An unsupported term is `PBNotSupportedError`. |
 | `supportsOrder: aKeySpec`, `orderedPlan:descending:` | `PBRangeIndex` only: every element in key order (`IndexOrderedScan`). |
-| `explain` | `{ 'index'. 'kind'. 'key'. 'entries'. 'keys'. 'unorderable' }` as a `PBFrozenDict`. |
-| `validate: aCollection` | Structural checks and the stored multiset against the elements: `PBCorruptionError`, or `PBMisfiledError` for a misfiled format-3 entry. |
+| `explain` | `{ 'index'. 'kind'. 'key'. 'entries'. 'keys'. 'unorderable' }` as a `PBFrozenDict`, in that order; `kind` is `proto_db`'s class name, `'EqualityIndex'` or `'RangeIndex'`; `key` is the key spec's `describe`. |
+| `validate: aCollection` | Structural checks and the stored multiset against the elements: `PBCorruptionError` naming the index, or `PBMisfiledError` for an entry its own key does not place (a misfiled format-3 entry, a key tree out of key order). Answers the index. |
 | `keySpec` | Unchanged from 0.1.0: the persisted `(kind, arg)` tuple. |
 | `keySpecObject` | The key spec as a `PBKeySpec` (`PBKeySpec fromData: self keySpec`); a malformed tuple is `PBValidationError` naming the index, when asked, never at read. |
-| `groupCount`, `countOfKey: aKey`, `membersDo: aBlock` | The number of key groups; the occurrences under one key; every `[:element :count]`, groups in key order, unorderable keys last. |
+| `groupCount`, `count`, `countOfKey: aKey`, `membersDo: aBlock` | The number of key groups; the stored occurrences; the occurrences under one orderable key (1, 1.0 and `Decimal` 1 are one key; an unorderable key has no group of its own and is `PBValidationError`); every `[:element :count]`, groups in key order, members in member order, the side group of unorderable keys last. |
 
 | Kind | Operators answered |
 |---|---|
 | `PBEqualityIndex` | `'=='`, `'in'`, `'!='`, `'?N'`, `'?!N'` |
 | `PBRangeIndex` | the same, and `'<'`, `'<='`, `'>'`, `'>='`, `'between[]'`, `'between()'`, `'between(]'`, `'between[)'` |
 
-`PBVectorIndex` is unchanged and read only: `supports:` answers false, and every hook, like every
-change to a collection holding one, is `PBNotSupportedError` naming it. An index of a kind
-protoBaseST does not know is refused the same way.
+`PBVectorIndex` is unchanged and read only: `supports:` answers false, and every hook (`withAdded:`,
+`withRemoved:`, `withReplaced:with:`, `empty`, `build:`, `validate:`, `explain`, and `name:keySpec:`),
+like every change to a collection holding one, is `PBNotSupportedError` naming it. An index of a
+kind protoBaseST does not know is refused the same way, by the `PBIndexSet` hooks.
 
 **Collections** gain (on `PBIndexedCollection`):
 
@@ -1153,8 +1156,11 @@ protoBaseST does not know is refused the same way.
 | every mutator | Answers content and indexes computed in one step; an index written by format 3 is rebuilt before the first change. |
 | `rebaseOnto: current` | Replays the element intents through `current`'s mutators, which maintain its indexes, then the index-definition intents; an index this log created that `current` also has is `PBConflictError`. Onto a collection with a vector or unknown index: `PBNotSupportedError`. |
 
-`PBIndexSet` gains `withIndex:`, `without:`, `onAdd:`, `onRemove:`, `onReplace:with:` and
-`rebuiltStale:`; `PBMisfiledError` (under `PBCorruptionError`) is new.
+`PBIndexSet` gains `withIndex:` (a taken name is `PBValidationError`), `without:` (an absent name is
+`PBValidationError`), `onAdd:`, `onRemove:`, `onReplace:with:` (the hook on every index, the empty
+set answering itself) and `rebuiltStale: aCollection` (every format-3 index rebuilt as `empty
+build: aCollection`; the set itself when none is stale), each answering a new set;
+`PBMisfiledError` (under `PBCorruptionError`) is new.
 
 ### Terms and expressions
 

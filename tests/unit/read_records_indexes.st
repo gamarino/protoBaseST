@@ -1,11 +1,13 @@
-"EXPECT: ok 16"
+"EXPECT: ok 18"
 "Records and index flags on the read path (plan Task 12, review m2 and m3).
  DBObject's behaviour names (with_, has_defined_attr) are refused in every PBObject
  subclass, also one that overrides reservedAttributeNames with names of its own,
  which are refused too. hasMemberTokens answers member_tokens == 1 as ProtoBase
  compares it: true, 1, 1.0, Decimal 1 and Decimal 1.00 count; 0, 2, a NaN, a
- string and an absent field do not. The space is built here, in a temporary
- directory named after the process id."
+ string and an absent field do not. Plan call IP3 (indexed queries, Task 3): keySpec still
+ answers the persisted tuple, and keySpecObject answers it as a PBKeySpec; a malformed tuple
+ reads, and only keySpecObject refuses it, with PBValidationError naming the index. The space
+ is built here, in a temporary directory named after the process id."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_spaces'.
@@ -17,7 +19,7 @@ Ledger class >> reservedAttributeNames
   ^ #('cached_total').
 PBObjectSpace registerAtomClass: Ledger.
 
-| c base b st load ok withName definedName ownName plain dbWith idx keySpec tokens refs n |
+| c base b st load ok withName definedName ownName plain dbWith idx keySpec tokens refs n malformed specs |
 c := Check new.
 base := FileSystem temp / ('pbst-read-records-' , Smalltalk pid printString).
 base deleteAll.
@@ -40,6 +42,9 @@ refs := tokens collect: [:each |
 n := n + 1.
 refs := refs copyWith: (b add: 14 oid: n state: { 'name' -> 'by_a'. 'key_spec' -> keySpec. 'groups' -> nil.
   'side' -> nil. 'total_count' -> 0 }) -> false.
+n := n + 1.
+malformed := b add: 15 oid: n state: { 'name' -> 'by_bad'. 'key_spec' -> (PBTuple withAll: { 'nope'. 1 }). 'groups' -> nil.
+  'side' -> nil. 'total_count' -> 0. 'member_tokens' -> 1 }.
 b writeTo: base root: ok.
 st := PBFileStorage path: base.
 load := [:ref | PBTypeRegistry unloadedAtomFor: ref tag at: ref pointer storage: st].
@@ -59,6 +64,11 @@ refs doWithIndex: [:each :i |
     ifTrue: ['no member_tokens']
     ifFalse: ['member_tokens ' , (PBNotation describe: (tokens at: i) key) printString].
   c that: label is: (load value: each key) hasMemberTokens equals: each value].
+specs := refs collect: [:each | | index | index := load value: each key. { index keySpec. index keySpecObject }].
+c that: 'keySpec answers the tuple, keySpecObject the PBKeySpec' is: specs asSet asArray
+  equals: { { keySpec. PBKeySpec path: 'a' } }.
+c that: 'a malformed key spec refuses only keySpecObject' signals: PBValidationError containing: '''by_bad'''
+  during: [| index | index := load value: malformed. index keySpec. index hasMemberTokens. index keySpecObject].
 st close.
 base deleteAll.
 c report displayNl.

@@ -200,6 +200,93 @@ PBIndexSet class >> new
 PBIndexSet >> isEmpty
   ^ (self stateAt: 'root') isNil.
 
+"--- writes (proto_db collections/base.py IndexSet, plan Task 3): each answers a new set ---"
+
+"A new index set whose tree is aRoot (IndexSet._new)."
+PBIndexSet >> _withRoot: aRoot
+  ^ self class _unsavedWithState: (PBFrozenDict withAssociations: { 'root' -> aRoot }).
+
+"The name of anIndex (base.py _index_name): a non-empty String; PBValidationError otherwise."
+PBIndexSet >> _nameOf: anIndex
+  | name |
+  name := (anIndex isClassObject not and: [anIndex isKindOf: PBIndex]) ifTrue: [anIndex name] ifFalse: [nil].
+  ((name isString and: [name isSymbol not]) and: [name notEmpty]) ifFalse: [
+    ^ PBValidationError signal: 'An index needs a non-empty String name, got ' , (PBKeys _preview: name)
+      , ' from ' , (PBKeys _preview: anIndex)].
+  ^ name.
+
+"The set that also holds anIndex; a name already present is PBValidationError (with_index)."
+PBIndexSet >> withIndex: anIndex
+  | name |
+  name := self _nameOf: anIndex.
+  (self get: name) isNil ifFalse: [
+    ^ PBValidationError signal: 'An index named ' , (PBCodec repr: name) , ' already exists'].
+  ^ self _withRoot: ((PBAvl keyPut: (self stateAt: 'root') key: name value: anIndex nodeClass: PBKeyNode) at: 1).
+
+"The set without the index aName; an absent name is PBValidationError (without)."
+PBIndexSet >> without: aName
+  | removed |
+  removed := PBAvl keyRemove: (self stateAt: 'root') key: aName.
+  (removed at: 2) ifFalse: [
+    ^ PBValidationError signal: 'No index named ' , (PBKeySpec _repr: aName)].
+  ^ self _withRoot: (removed at: 1).
+
+"The set after aBlock (index -> new index) on every index, rebuilt balanced; the empty set answers
+ itself (IndexSet._map). An index of a kind protoBaseST does not know (an opaque atom) is
+ PBNotSupportedError naming it (design spec 3.3); a hook that answers an index of another name is
+ PBValidationError."
+PBIndexSet >> _map: aBlock
+  | pairs |
+  self isEmpty ifTrue: [^ self].
+  pairs := OrderedCollection new.
+  PBAvl keysAndValuesDo: [:name :index |
+    | updated |
+    updated := aBlock value: (self _known: index name: name).
+    ((updated isClassObject not and: [updated isKindOf: PBIndex]) and: [updated name = name]) ifFalse: [
+      ^ PBValidationError signal: 'Index ' , (PBCodec repr: name) , ' returned ' , (PBKeys _preview: updated)
+        , ' from a hook; hooks must return an index with the same name'].
+    pairs addLast: { name. updated }] over: (self stateAt: 'root').
+  ^ self _withRoot: (PBAvl keyFromSorted: pairs asArray nodeClass: PBKeyNode).
+
+"anIndex, an index protoBaseST can maintain the hooks of; an opaque atom (a custom proto_db index
+ kind) is PBNotSupportedError naming it: its collection is read only (design spec 3.3, ruling
+ IQ5). A PBVectorIndex refuses in its own hooks."
+PBIndexSet >> _known: anIndex name: aName
+  (anIndex isClassObject not and: [anIndex isKindOf: PBIndex]) ifTrue: [^ anIndex].
+  ^ PBNotSupportedError signal: 'The index ' , (PBCodec repr: aName) , ' is of the type '
+    , ((anIndex isKindOf: PBOpaqueAtom) ifTrue: [anIndex typeName] ifFalse: [anIndex class name])
+    , ', which protoBaseST does not know: a collection holding it is read only (design spec 3.3)'.
+
+"The set after withAdded: anElement on every index (on_add)."
+PBIndexSet >> onAdd: anElement
+  ^ self _map: [:index | index withAdded: anElement].
+
+"The set after withRemoved: anElement on every index (on_remove)."
+PBIndexSet >> onRemove: anElement
+  ^ self _map: [:index | index withRemoved: anElement].
+
+"The set after withReplaced: anOld with: aNew on every index (on_replace)."
+PBIndexSet >> onReplace: anOld with: aNew
+  ^ self _map: [:index | index withReplaced: anOld with: aNew].
+
+"The set with every index written by format 3 (hasMemberTokens false) rebuilt as empty build: over
+ the elements of aCollection (D58), the others kept; the set itself when there is none
+ (rebuilt_stale). An atom that is not a PBIndex counts as current, as proto_db's _current does for
+ an index without has_current_tokens: its first hook refuses it."
+PBIndexSet >> rebuiltStale: aCollection
+  | pairs stale |
+  self isEmpty ifTrue: [^ self].
+  pairs := OrderedCollection new.
+  stale := false.
+  PBAvl keysAndValuesDo: [:name :index |
+    ((index isClassObject not and: [index isKindOf: PBIndex]) and: [index hasMemberTokens not])
+      ifTrue: [
+        stale := true.
+        pairs addLast: { name. index empty build: aCollection }]
+      ifFalse: [pairs addLast: { name. index }]] over: (self stateAt: 'root').
+  stale ifFalse: [^ self].
+  ^ self _withRoot: (PBAvl keyFromSorted: pairs asArray nodeClass: PBKeyNode).
+
 "=== _PBOpLog ================================================================"
 
 "One link of an operation log: the op (a PBTuple) and the log before it (a

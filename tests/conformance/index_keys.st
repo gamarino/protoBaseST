@@ -3,9 +3,8 @@
  written by tests/interop/py_index_keys.py with proto_db at v2.0.0rc4 (seed 20261118) and checked
  against manifest.sha256 before it is read. For every case PBMemberKeys and PBKeys answer what
  proto_db's keyed.py and values.py answered: PBKeys isOrderable:, the depth and wire bytes of
- surrogate:, checkDepth:'s refusal (proto_db's sentence, whose subject is the index it names,
- 'Index 'by_key' (EqualityIndex on <element>)', where PBMemberKeys, which knows no index, says
- 'An index'), the
+ surrogate:, checkDepth:index:'s refusal for the index the generator names (proto_db's sentence
+ word for word: 'Index 'by_key' (EqualityIndex on <element>) cannot store this element: ...'), the
  depth and wire bytes of memberKeyOf:, and, for the cases whose member key nests at most
  'shallow' containers, where lowestOf: and highestOf: fall among all those cases' member keys
  (how many order below each bound). Every atom is written {'@ref': [oid, 0, tag]}: a case's atom
@@ -34,7 +33,7 @@ IndexKeysAtoms >> refBlock
 IndexKeysAtoms >> bytesOf: aValue
   ^ MessagePack encode: (PBCodec toWire: aValue atomRef: self refBlock).
 
-| blob listed data limits shallow cases atoms values fails tail okeys bounded refused |
+| blob listed data limits shallow cases atoms values fails okeys bounded refused byKey |
 blob := 'vectors-index-keys/keys.msgpack' asFileReference binaryContents.
 listed := 'vectors-index-keys/manifest.sha256' asFileReference contents.
 (listed copyFrom: 1 to: 64) = blob sha256 hex asLowercase ifFalse: [
@@ -49,6 +48,7 @@ PBMemberKeys depthLimits = (PBFrozenDict withAssociations: {
 shallow := data at: 'shallow'.
 cases := data at: 'cases'.
 atoms := IndexKeysAtoms new.
+byKey := PBEqualityIndex name: 'by_key' keySpec: PBKeySpec element.
 values := cases collect: [:case |
   PBCodec fromWire: (MessagePack decodeOrdered: (case at: 'value') strictKeys: false) resolver: atoms].
 okeys := OrderedCollection new.
@@ -63,15 +63,8 @@ cases doWithIndex: [:case :i |
     bad value: 'the surrogate depth' value: (PBCodec valueDepth: sur) value: (case at: 'surrogate_depth')].
   (case at: 'surrogate') isNil ifFalse: [
     (atoms bytesOf: sur) = (case at: 'surrogate') ifFalse: [bad value: 'the surrogate' value: (atoms bytesOf: sur) hex value: (case at: 'surrogate') hex]].
-  refusal := [PBMemberKeys checkDepth: v. nil] on: PBValidationError do: [:e | e return: e messageText].
-  (case at: 'refusal') isNil
-    ifTrue: [refusal isNil ifFalse: [bad value: 'the refusal' value: refusal value: nil]]
-    ifFalse: [
-      "proto_db names the generator's index first; PBMemberKeys says 'An index'."
-      tail := ((case at: 'refusal') beginsWith: 'Index ''by_key'' (EqualityIndex on <element>) ')
-        ifTrue: [(case at: 'refusal') copyFrom: 45 to: (case at: 'refusal') size]
-        ifFalse: ['(an unexpected proto_db sentence) ' , (case at: 'refusal')].
-      refusal = ('An index ' , tail) ifFalse: [bad value: 'the refusal' value: refusal value: tail]].
+  refusal := [PBMemberKeys checkDepth: v index: byKey. nil] on: PBValidationError do: [:e | e return: e messageText].
+  refusal = (case at: 'refusal') ifFalse: [bad value: 'the refusal' value: refusal value: (case at: 'refusal')].
   key := PBMemberKeys memberKeyOf: v.
   (PBCodec valueDepth: key) = (case at: 'member_key_depth') ifFalse: [
     bad value: 'the member key depth' value: (PBCodec valueDepth: key) value: (case at: 'member_key_depth')].

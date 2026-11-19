@@ -913,7 +913,6 @@ The detail:
 | Opaque predicates in `explain` | A block condition is the node `BlockFilter` with `description`, where `proto_db` has `PythonFilter` (call IC6). | The node runs a protoST block; naming it after Python would mislead. | A one-name difference in `explain`; the query vectors hold no opaque predicate. |
 | Equality on the field builder | `eq:` and `ne:` build `==` and `!=`; `=` is not overridden on `PBField` (IC4, ruling IQ2). | `=` must stay an equality for collections and tests. | Less like Python's `F.city == "Oslo"`; `aField = v` answers a Boolean, which `where:` refuses. |
 | Index constructors | `name:keySpec:` takes a `PBKeySpec` only (a String is `PBValidationError`); one path is `name:path:` (controller ruling CR3). `proto_db`'s `KeyGroupIndex(name, key_spec)` accepts a `KeySpec` or a str path. | One argument, one type: a keyword selector names the convenience instead of overloading the argument. | A path is written `name: 'by_city' path: 'city'`, not `name: 'by_city' keySpec: 'city'`. |
-| Member-key depth refusal (until Task 3) | `PBMemberKeys checkDepth: anElement` cannot name an index, so its refusal starts "An index cannot store this element: ...", where `proto_db`'s `check_member_key` starts "Index 'n' (EqualityIndex on a.b) cannot store this element: ..."; the rest of the sentence is word for word (`tests/conformance/index_keys.st`). | The member keys land in Task 2, before the indexes that know their name and key spec. | The text only. Task 3 adds `checkDepth: anElement index: anIndex` with `proto_db`'s exact sentence, and this row goes when it lands. |
 | Extractor blocks | `registerExtractor:block:version:` takes a `BlockClosure` only (anything else is `PBValidationError`); `proto_db`'s `register_extractor` takes any callable. | An extractor is `[:element \| key]`; one type keeps the identity test (`==`, `proto_db`'s `is`) and the purity contract simple. | An object that answers `value:` must be wrapped in a block. |
 | `isExtractorRegistered:` | A protoBaseST addition: `proto_db` has no such function (its programs call `extractor_version` and catch the error). | Asking needs no exception handler. | None: one more message. |
 | Projection | `project:` and `collect:`; `PBQuery` has **no** `select:` (ruling IQ2). | Smalltalk's `select:` filters; `proto_db`'s `select` projects, and would read backwards. | A name to learn. |
@@ -1077,22 +1076,55 @@ What the figures say, and what they do not:
 - **No `proto_db` figure is shown**: `proto_db`'s cluster was not run on this workload shape, so
   no ratio to it is claimed. Memory was not measured.
 
-### Queries and indexes (not measured yet)
+### Queries and indexes
 
-Planned for 0.3.0 (spec section 7.3, `bench/run_query.sh`). No figure exists; the drafts cite these
-markers, each filled by the task named:
+Planned for 0.3.0 (spec section 7.3, `bench/run_query.sh`). Only M2 is measured so far (below); the
+drafts cite these markers for the rest, each filled by the task named:
 
 - [measured in T8: Q1-Q4, point equality, `in` and ranges, compound conditions, ordering, indexed
   against a forced scan, in both implementations]
 - [measured in T9: Q5, page k by rank against materialised, and `count` by rank]
 - [measured in T4: M1 (plan task 4a), commits per second with 0, 1 and 3 indexes; M3 (plan task
   4b), merges onto an indexed current, standalone and in a three-member cluster]
-- [measured in T3: M2, the bulk build against the fold of single additions]
 - [measured in T7: P1 planner overhead; P2 where the cost model switches between an index plan and
   a scan with a filter as selectivity varies, and whether the timings cross there; P3 the
   hand-built intersection against the filter plan]
 - [measured in T10: the full comparison with `proto_db`, with date, machine, load, both commits and
   both binaries]
+
+#### M2: the bulk build against the fold of single additions
+
+`QUERY_M2_SIZES="100 1000 10000" RUNS=3 bench/run_query.sh M2`. **Indicative only.** Measured
+2026-11-19 (03:55-03:58 local) on an AMD Ryzen 5 5500U (6 cores, 12 threads, Linux 7.0.0, DEV12),
+load average 2.6 before and 2.9 after (other desktop sessions open; their load was not controlled); protoBaseST at
+the Task 3 commit (parent `cc09aec`), protoST 0.12.0 on protoCore 3.6.0 (the `pinned-360` release
+builds, `build_release/protost`, as built); `proto_db` v2.0.0rc4 in the interop venv on CPython
+3.14.0. The workload is an `EqualityIndex` on the path `age` over n records (about a quarter as many
+distinct ages as records, Integers and Floats, some absent, some nil), built by `build:` and by the
+fold of `withAdded:` from `empty`. Every run self-reports its rows and an ordered checksum over the
+stored occurrences; the runner refuses any run whose work differs from `proto_db`'s first run, and
+all six runs (three each, interleaved) agreed. Times in microseconds, minimum / median of 3:
+
+| n | plan | `proto_db` | protoBaseST | protoBaseST / `proto_db` (min) |
+|---|---|---|---|---|
+| 100 | build | 3884 / 4189 | 64771 / 73068 | 16.7x |
+| 100 | fold | 5695 / 6141 | 105419 / 146660 | 18.5x |
+| 1000 | build | 23831 / 24365 | 691942 / 709918 | 29.0x |
+| 1000 | fold | 76950 / 78559 | 1807449 / 1838218 | 23.5x |
+| 10000 | build | 261664 / 275029 | 10011607 / 10200266 | 38.3x |
+| 10000 | fold | 1007979 / 1051734 | 30599201 / 30720372 | 30.4x |
+
+- The bulk build is 3.1x faster than the fold at 10^4 in protoBaseST (1.6x at 10^2) and 3.9x in
+  `proto_db`: the build is what `rebuiltStale:` and a first change to a stale collection pay.
+- protoBaseST is 17x to 38x slower than `proto_db` here, and the gap grows with n. Not analysed
+  in Task 3 beyond a probe on 4000 records: each element costs about 0.17 ms for its member key
+  (`memberKeyOf:`), 0.11 ms for the order key of that member key, 0.07 ms per hash of it (not
+  cached; a `Dictionary` rehash recomputes it) and 0.24 ms for the depth check (`checkDepth:`), all
+  of which `proto_db` does in C-backed MessagePack and tuples. These are the first candidates.
+- **n = 10^5 was not measured in protoBaseST**: the first `RUNS=3` attempt with the default sizes
+  was stopped by the machine's out-of-memory guard (earlyoom, SIGTERM) at 14 GB resident during
+  the 10^5 step, while other processes held most of the 48 GB; `proto_db` took 4.3 s (build) and
+  17.1 s (fold) at 10^5 in a single run. Memory was not otherwise measured.
 
 ## Known protoST limits
 

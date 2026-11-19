@@ -1,62 +1,62 @@
 # proto_db index and query tests (tag v2.0.0rc4) and where each is ported; see queries_checklist.sh for the row rules.
 # columns: proto_db file::function, status, task or reason class, reason (or check label for ported rows)
-test_equality_index.py::test_definition_type_name_and_str_key	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_equality_index.py::test_definition_type_name_and_str_key	ported	tests/unit/idx_keygroups.st	the definition is validated; name:path: is name:keySpec:
 test_equality_index.py::test_supported_operators	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
 test_equality_index.py::test_answers_match_a_scan_with_value_semantics	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
 test_equality_index.py::test_missing_keys_are_recorded_and_never_match_ne	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
-test_equality_index.py::test_duplicates_are_counted	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_equality_index.py::test_removing_an_absent_element_raises	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_equality_index.py::test_unorderable_keys_and_elements	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_equality_index.py::test_duplicates_are_counted	ported	tests/unit/idx_keygroups.st	duplicates are counted in a multiset
+test_equality_index.py::test_removing_an_absent_element_raises	ported	tests/unit/idx_keygroups.st	removing an absent element is refused as proto_db decides
+test_equality_index.py::test_unorderable_keys_and_elements	ported	tests/unit/idx_keygroups.st	unorderable keys go to the side group
 test_equality_index.py::test_estimates	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
-test_equality_index.py::test_explain_reports_the_structure	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_equality_index.py::test_validate_detects_stale_and_miscounted_entries	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_equality_index.py::test_build_equals_fold_and_ignores_the_receiver	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_equality_index.py::test_persistence_roundtrip_keeps_answers	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_equality_index.py::test_readers_unaffected_by_concurrent_writers	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_range_index.py::test_definition_and_type_name	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_equality_index.py::test_explain_reports_the_structure	ported	tests/unit/idx_keygroups.st	explain keys and values
+test_equality_index.py::test_validate_detects_stale_and_miscounted_entries	ported	tests/unit/idx_keygroups.st	validate: passes on built indexes and detects corruption
+test_equality_index.py::test_build_equals_fold_and_ignores_the_receiver	ported	tests/unit/idx_keygroups.st	build: holds the fold of withAdded: node for node in key order
+test_equality_index.py::test_persistence_roundtrip_keeps_answers	ported	tests/unit/idx_contract.st	save and lazy load give equal explain
+test_equality_index.py::test_readers_unaffected_by_concurrent_writers	ported	tests/unit/idx_contract.st	readers are unaffected by concurrent writers
+test_range_index.py::test_definition_and_type_name	ported	tests/unit/idx_keygroups.st	the definition is validated; name:path: is name:keySpec:
 test_range_index.py::test_supported_operators_and_ordering	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
 test_range_index.py::test_range_operators_stay_within_the_operand_rank	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
 test_range_index.py::test_between_variants_inclusivity	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
 test_range_index.py::test_presence_equality_and_unorderable_keys	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
 test_range_index.py::test_ordered_iteration_follows_the_total_order	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
 test_range_index.py::test_range_estimates_use_subtree_counts	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
-test_range_index.py::test_validate_detects_corruption	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_range_index.py::test_build_equals_fold	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_range_index.py::test_readers_unaffected_by_concurrent_writers	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_range_index.py::test_validate_detects_corruption	ported	tests/unit/idx_keygroups.st	validate: passes on built indexes and detects corruption
+test_range_index.py::test_build_equals_fold	ported	tests/unit/idx_keygroups.st	build: holds the fold of withAdded: node for node in key order
+test_range_index.py::test_readers_unaffected_by_concurrent_writers	ported	tests/unit/idx_contract.st	readers are unaffected by concurrent writers
 test_range_index.py::test_plans_return_the_stored_values_not_an_equal_representative	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
-test_index_base.py::test_index_requires_every_abstract_hook	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_definition_is_validated	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_index_is_immutable	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_definition_must_name_name_and_key_spec	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_abstract_base_type_name	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_concrete_index_classes_must_name_their_type	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_with_rejects_unknown_fields	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_with_replaced_defaults_to_remove_then_add	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_build_starts_from_empty_and_folds_with_added	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_build_accepts_any_iterable	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_empty_keeps_the_whole_definition	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_explain_default	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_index_requires_every_abstract_hook	ported	tests/unit/idx_keygroups.st	the definition is validated; name:path: is name:keySpec:
+test_index_base.py::test_definition_is_validated	ported	tests/unit/idx_keygroups.st	the definition is validated; name:path: is name:keySpec:
+test_index_base.py::test_index_is_immutable	n/a	Python-only API	Python setattr and delattr on an index have no protoST counterpart: an atom has no setters and its state is a PBFrozenDict.
+test_index_base.py::test_definition_must_name_name_and_key_spec	n/a	Python-only API	Checks a Python __init_subclass__ rule on _definition, a class attribute protoBaseST does not have.
+test_index_base.py::test_abstract_base_type_name	ported	tests/unit/idx_keygroups.st	the definition is validated; name:path: is name:keySpec:
+test_index_base.py::test_concrete_index_classes_must_name_their_type	n/a	Python-only API	Checks a Python __init_subclass__ rule; protoBaseST registers types through PBTypeRegistry register:, tested elsewhere.
+test_index_base.py::test_with_rejects_unknown_fields	ported	tests/unit/idx_keygroups.st	the definition is validated; name:path: is name:keySpec:
+test_index_base.py::test_with_replaced_defaults_to_remove_then_add	ported	tests/unit/idx_contract.st	withReplaced:with: equals remove then add
+test_index_base.py::test_build_starts_from_empty_and_folds_with_added	ported	tests/unit/idx_keygroups.st	empty keeps the definition; build: ignores the receiver
+test_index_base.py::test_build_accepts_any_iterable	ported	tests/unit/idx_keygroups.st	empty keeps the definition; build: ignores the receiver
+test_index_base.py::test_empty_keeps_the_whole_definition	ported	tests/unit/idx_keygroups.st	empty keeps the definition; build: ignores the receiver
+test_index_base.py::test_explain_default	ported	tests/unit/idx_keygroups.st	explain keys and values
 test_index_base.py::test_supports_checks_the_key_path	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_plan_on_unsupported_term_raises_not_supported	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_estimate_on_unsupported_term_raises_not_supported	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_ordered_iteration_is_unsupported_by_default	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_ordered_scan_index	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
-test_index_base.py::test_validate_detects_an_inconsistent_index	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_validate_covers_missing_keys_and_stale_keys	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_validate_detects_an_inconsistent_index	ported	tests/unit/idx_keygroups.st	validate: passes on built indexes and detects corruption
+test_index_base.py::test_validate_covers_missing_keys_and_stale_keys	ported	tests/unit/idx_keygroups.st	validate: passes on built indexes and detects corruption
 test_index_base.py::test_validate_only_checks_supported_terms	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
-test_index_base.py::test_validate_skips_unorderable_keys	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_key_spec_survives_persistence	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_validate_skips_unorderable_keys	ported	tests/unit/idx_keygroups.st	validate: passes on built indexes and detects corruption
+test_index_base.py::test_key_spec_survives_persistence	ported	tests/unit/idx_contract.st	save and lazy load give equal explain
 test_index_base.py::test_index_attached_to_a_collection_persists	deferred	4a	Attaches an index to a collection and persists it, so it needs addIndex: from Task 4a.
 test_index_base.py::test_index_plan	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_index_plan_without_term_needs_an_estimate	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_index_plan_default_kind_and_validation	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_index_plan_concurrent_execution	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
-test_index_base.py::test_element_identity	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_key_neutrality.py::test_an_element_index_has_the_same_bytes_however_the_value_was_built	deferred	3	Index bytes do not depend on how the value was built, a Task 3 structure check.
-test_index_key_neutrality.py::test_a_field_index_has_the_same_bytes_however_the_value_was_built	deferred	3	Index bytes do not depend on how the value was built, a Task 3 structure check.
-test_index_key_neutrality.py::test_an_extractor_index_has_the_same_bytes_however_the_key_was_built	deferred	3	Index bytes do not depend on how the value was built, a Task 3 structure check.
+test_index_base.py::test_element_identity	ported	tests/unit/idx_keygroups.st	mixed numeric and unorderable keys
+test_index_key_neutrality.py::test_an_element_index_has_the_same_bytes_however_the_value_was_built	ported	tests/unit/idx_keygroups.st	the stored bytes do not depend on how a value was built
+test_index_key_neutrality.py::test_a_field_index_has_the_same_bytes_however_the_value_was_built	ported	tests/unit/idx_keygroups.st	the stored bytes do not depend on how a value was built
+test_index_key_neutrality.py::test_an_extractor_index_has_the_same_bytes_however_the_key_was_built	ported	tests/unit/idx_keygroups.st	the stored bytes do not depend on how a value was built
 test_index_contract.py::test_index_contract	deferred	7	Contract over every index kind: structure half in Task 3, whole contract with plans in Task 7.
-test_index_contract.py::test_scan_index_is_registered	deferred	3	Registry of contract index kinds, set up with the Task 3 contract test.
+test_index_contract.py::test_scan_index_is_registered	n/a	Python-only API	Registers the Python test-support ScanIndex kinds; protoBaseST writes no user index kinds (spec 3.3), and idx_contract.st runs the contract directly.
 test_index_contract.py::test_contract_rejects_broken_index	deferred	7	Contract over every index kind: structure half in Task 3, whole contract with plans in Task 7.
 test_keyspec.py::test_path_reads_record_attributes_and_absent_is_missing	ported	tests/unit/idx_keyspec.st	path steps read records, maps and other atoms
 test_keyspec.py::test_dotted_path_through_records_and_mappings	ported	tests/unit/idx_keyspec.st	path steps read records, maps and other atoms
