@@ -1105,7 +1105,7 @@ the drafts cite these markers for the rest, each filled by the task named:
 `RUNS=5 bench/run_query.sh M1`. **Indicative only.** Measured 2026-11-19 (05:05-05:13 local) on
 the same machine as M2 below (AMD Ryzen 5 5500U, 6 cores, 12 threads, Linux 7.0.0, DEV12), load
 average 3.0 before and 3.1 after (other desktop sessions open, not controlled); protoBaseST at the
-Task 4a commit (`Queries T4a: indexed collections can be written; M1 measured`, on `b9ec393`; the
+Task 4a commit `82572e9` (on `b9ec393`; the
 benchmark ran on that working tree), protoST 0.12.0 (`b7e206a`) on protoCore 3.6.0 (`799d7615`),
 the `pinned-360` release build; `proto_db` v2.0.0rc4 (`8e6127f`) on CPython 3.14.0. Each unit (a
 plan) ran in a process of its own, five rounds interleaved, every protost process with the heap
