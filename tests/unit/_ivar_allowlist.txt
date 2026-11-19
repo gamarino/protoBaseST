@@ -143,3 +143,16 @@ PBMemberKeys class>>_initializeConstants
 PBTerm>>_setPath:op:value:keySpecObject:valueKey:operandKeys:
 _PBNode>>_setOperands:
 PBBlockPredicate>>_setBlock:description:
+PBEstimate>>_setRows:cost:
+PBRankAccess>>_setSegments:
+PBIndexPart>>_setKind:producer:estimate:details:rank:sortedRank:
+PBSortKey>>_setKey:descending:spec:description:
+PBCollectionScan>>_setCollection:
+PBIndexPlan>>_setIndex:term:part:
+_PBOneSourcePlan>>_setSource:
+PBFilter>>_setPredicate:
+PBBlockFilter>>_setPredicate:
+PBProject>>_setFields:block:description:
+PBSort>>_setKeys:
+PBLimit>>_setLimit:offset:
+_PBSetPlan>>_setSources:

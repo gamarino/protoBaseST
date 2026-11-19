@@ -1,17 +1,19 @@
-"""Write the term vectors of the indexed queries (plan Task 5) with proto_db at v2.0.0rc4.
+"""Write the term vectors of the indexed queries (plan Tasks 5 and 6) with proto_db at v2.0.0rc4.
 
 Usage: python py_term_cases.py <out directory>
 
 Needs PROTOST (the protost binary). It runs tests/interop/_st_term_values.st, which prints the
-values of protoBaseST's ``QData values: COUNT seed: SEED`` (tests/unit/_queries.st, the port of
-proto_db's ``index_contract.mixed_value``), decodes them with proto_db's codec (each atom becomes a
+values of protoBaseST's ``QData termValues: COUNT seed: SEED`` (tests/unit/_queries.st: ``QData
+values:``, the port of proto_db's ``index_contract.mixed_value``, then ``QData domainValues``, one
+naive datetime, time, timedelta, UUID, empty str and empty bytes value), decodes them with proto_db's codec (each atom becomes a
 DBObject with the oid and the attribute ``r`` the helper reported), and evaluates every case below
 on them with proto_db's Term and Expression. It writes <out>/terms.msgpack and regenerates
 <out>/manifest.sha256 over every .msgpack file of the directory (one manifest per vector
 directory, pre-flight F8), in sha256sum's format, sorted by name. It refuses to run unless the
 imported proto_db is the commit tests/interop/setup_venv.sh pins (the venv's .commit file). Run it
 through the interop venv (tests/interop/env.sh sets PYTHONPATH). The vendored copy is
-tests/conformance/vectors-index-keys/, read by tests/unit/qry_terms.st.
+tests/conformance/vectors-index-keys/, read by tests/unit/qry_terms.st and
+tests/unit/qry_index_plans.st.
 
 terms.msgpack is one msgpack map: 'tag', 'count', 'seed', 'values' (the wire form of each value, as
 the helper printed it: the test checks that QData still draws them) and 'cases', an array of maps:
@@ -27,6 +29,16 @@ the helper printed it: the test checks that QData still draws them) and 'cases',
   to_list    nil, or the wire form of expression.to_list() (nil for near[], whose list holds a
              NearQuery, which has no wire form)
   describe   nil, or the msgpack bytes of expression.describe()
+  index      nil unless the case compiles to one Term; then a map from 'EqualityIndex' and
+             'RangeIndex' (each built over the values with KeySpec.element(), named 'v') to a map:
+             'supports' (index.supports(term)) and, when it supports the term, 'estimate'
+             ([rows, cost] of index.estimate(term)), 'rows' (the number of rows of
+             index.plan(term).execute()), 'exact_rows' (plan.exact_rows()) and 'explain' (the msgpack
+             bytes of plan.explain() without its 'estimate' entry, which 'estimate' holds)
+
+and, beside the cases, 'indexes': a map from the two kind names to a map 'explain' (the msgpack bytes
+of index.explain()) and, for 'RangeIndex', 'ordered': [[estimate, explain bytes without estimate]
+of ordered_plan(False), the same of ordered_plan(True)].
 
 The cases: every operator with operands of several ranks (numbers of each type, strings, nil,
 booleans, bytes, dates, instants, tuples, an atom), the degenerate terms of the plan's Review
@@ -49,7 +61,9 @@ from proto_db.core import codec
 from proto_db.core.atom import AtomPointer
 from proto_db.core.dbobject import DBObject
 from proto_db.errors import ProtoNotSupportedError, ProtoValidationError
+from proto_db.indexing import EqualityIndex, KeySpec, RangeIndex
 from proto_db.query.expressions import Expression, evaluate
+from proto_db.query.terms import Term
 
 TAG = "v2.0.0rc4"
 COUNT = 160
@@ -174,9 +188,26 @@ def cases(an_atom):
     return out
 
 
-def outcome(tokens, values):
+def explained(plan) -> list:
+    """[rows, cost] of plan.estimate() and the msgpack bytes of plan.explain() less 'estimate'."""
+    estimate = plan.estimate()
+    rest = {k: v for k, v in plan.explain().items() if k != "estimate"}
+    return [[estimate.rows, estimate.cost], msgpack.packb(rest, use_bin_type=True)]
+
+
+def index_row(index, term) -> dict:
+    """What one index answers for one term (the module docstring, 'index')."""
+    if not index.supports(term):
+        return {"supports": False}
+    plan = index.plan(term)
+    estimate, explain = explained(plan)
+    return {"supports": True, "estimate": estimate, "rows": sum(1 for _ in plan.execute()),
+            "exact_rows": plan.exact_rows(), "explain": explain}
+
+
+def outcome(tokens, values, indexes):
     row = {"tokens": wire_bytes(tokens), "error": None, "answers": None, "match_error": None,
-           "to_list": None, "describe": None}
+           "to_list": None, "describe": None, "index": None}
     try:
         expr = Expression.compile(tokens)
     except (ProtoValidationError, ProtoNotSupportedError) as e:
@@ -187,6 +218,8 @@ def outcome(tokens, values):
     except ProtoValidationError:  # a near[] term lists its NearQuery, which has no wire form
         row["to_list"] = None
     row["describe"] = msgpack.packb(expr.describe(), use_bin_type=True)
+    row["index"] = ({kind: index_row(index, expr) for kind, index in indexes.items()}
+                    if isinstance(expr, Term) else None)
     try:
         row["answers"] = [evaluate(expr, v) for v in values]
     except (ProtoValidationError, ProtoNotSupportedError) as e:
@@ -201,13 +234,19 @@ def main() -> None:
     atoms = {bytes(oid): make_atom(bytes(oid), r) for oid, r in dumped["atoms"]}
     values = [codec.decode_value(w, lambda ptr, tag: atoms[ptr.segment.bytes]) for w in dumped["values"]]
     an_atom = next(v for v in values if isinstance(v, DBObject))
+    indexes = {"EqualityIndex": EqualityIndex("v", KeySpec.element()).build(values),
+               "RangeIndex": RangeIndex("v", KeySpec.element()).build(values)}
     rows = []
     for name, tokens in cases(an_atom):
-        row = outcome(tokens, values)
+        row = outcome(tokens, values, indexes)
         row["id"] = name
         rows.append(row)
     data = {"tag": TAG, "count": COUNT, "seed": SEED,
-            "values": [wire_bytes(v) for v in values], "cases": rows}
+            "values": [wire_bytes(v) for v in values], "cases": rows,
+            "indexes": {kind: {"explain": msgpack.packb(index.explain(), use_bin_type=True)}
+                        for kind, index in indexes.items()}}
+    data["indexes"]["RangeIndex"]["ordered"] = [explained(indexes["RangeIndex"].ordered_plan(d))
+                                                for d in (False, True)]
     out.mkdir(parents=True, exist_ok=True)
     blob = msgpack.packb(data, use_bin_type=True)
     (out / "terms.msgpack").write_bytes(blob)

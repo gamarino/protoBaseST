@@ -1,29 +1,29 @@
 # proto_db index and query tests (tag v2.0.0rc4) and where each is ported; see queries_checklist.sh for the row rules.
 # columns: proto_db file::function, status, task or reason class, reason (or check label for ported rows)
 test_equality_index.py::test_definition_type_name_and_str_key	ported	tests/unit/idx_keygroups.st	the definition is validated; name:path: is name:keySpec:
-test_equality_index.py::test_supported_operators	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
-test_equality_index.py::test_answers_match_a_scan_with_value_semantics	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
-test_equality_index.py::test_missing_keys_are_recorded_and_never_match_ne	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
+test_equality_index.py::test_supported_operators	ported	tests/unit/qry_index_plans.st	supports: answers per operator and per kind, on the index's own key only
+test_equality_index.py::test_answers_match_a_scan_with_value_semantics	ported	tests/unit/qry_index_plans.st	an equality index answers like a scan, and PBMissing never matches !=
+test_equality_index.py::test_missing_keys_are_recorded_and_never_match_ne	ported	tests/unit/qry_index_plans.st	an equality index answers like a scan, and PBMissing never matches !=
 test_equality_index.py::test_duplicates_are_counted	ported	tests/unit/idx_keygroups.st	duplicates are counted in a multiset
 test_equality_index.py::test_removing_an_absent_element_raises	ported	tests/unit/idx_keygroups.st	removing an absent element is refused as proto_db decides
 test_equality_index.py::test_unorderable_keys_and_elements	ported	tests/unit/idx_keygroups.st	unorderable keys go to the side group
-test_equality_index.py::test_estimates	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
+test_equality_index.py::test_estimates	ported	tests/unit/qry_index_plans.st	estimates are exact for lookups, use the subtree counts for ranges, and charge != a full pass
 test_equality_index.py::test_explain_reports_the_structure	ported	tests/unit/idx_keygroups.st	explain keys and values
 test_equality_index.py::test_validate_detects_stale_and_miscounted_entries	ported	tests/unit/idx_keygroups.st	validate: passes on built indexes and detects corruption
 test_equality_index.py::test_build_equals_fold_and_ignores_the_receiver	ported	tests/unit/idx_keygroups.st	build: holds the fold of withAdded: node for node in key order
 test_equality_index.py::test_persistence_roundtrip_keeps_answers	ported	tests/unit/idx_contract.st	save and lazy load give equal explain
 test_equality_index.py::test_readers_unaffected_by_concurrent_writers	ported	tests/unit/idx_contract.st	readers are unaffected by concurrent writers
 test_range_index.py::test_definition_and_type_name	ported	tests/unit/idx_keygroups.st	the definition is validated; name:path: is name:keySpec:
-test_range_index.py::test_supported_operators_and_ordering	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
-test_range_index.py::test_range_operators_stay_within_the_operand_rank	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
-test_range_index.py::test_between_variants_inclusivity	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
-test_range_index.py::test_presence_equality_and_unorderable_keys	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
-test_range_index.py::test_ordered_iteration_follows_the_total_order	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
-test_range_index.py::test_range_estimates_use_subtree_counts	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
+test_range_index.py::test_supported_operators_and_ordering	ported	tests/unit/qry_index_plans.st	supports: answers per operator and per kind, on the index's own key only
+test_range_index.py::test_range_operators_stay_within_the_operand_rank	ported	tests/unit/qry_index_plans.st	range operators stay within the operand's type rank, and the between variants include their bounds as named
+test_range_index.py::test_between_variants_inclusivity	ported	tests/unit/qry_index_plans.st	range operators stay within the operand's type rank, and the between variants include their bounds as named
+test_range_index.py::test_presence_equality_and_unorderable_keys	ported	tests/unit/qry_index_plans.st	presence, equality and unorderable keys answer like a scan; ordered scans follow the total order
+test_range_index.py::test_ordered_iteration_follows_the_total_order	ported	tests/unit/qry_index_plans.st	presence, equality and unorderable keys answer like a scan; ordered scans follow the total order
+test_range_index.py::test_range_estimates_use_subtree_counts	ported	tests/unit/qry_index_plans.st	estimates are exact for lookups, use the subtree counts for ranges, and charge != a full pass
 test_range_index.py::test_validate_detects_corruption	ported	tests/unit/idx_keygroups.st	validate: passes on built indexes and detects corruption
 test_range_index.py::test_build_equals_fold	ported	tests/unit/idx_keygroups.st	build: holds the fold of withAdded: node for node in key order
 test_range_index.py::test_readers_unaffected_by_concurrent_writers	ported	tests/unit/idx_contract.st	readers are unaffected by concurrent writers
-test_range_index.py::test_plans_return_the_stored_values_not_an_equal_representative	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
+test_range_index.py::test_plans_return_the_stored_values_not_an_equal_representative	ported	tests/unit/qry_index_plans.st	plans answer the stored values, not an equal representative
 test_index_base.py::test_index_requires_every_abstract_hook	ported	tests/unit/idx_keygroups.st	the definition is validated; name:path: is name:keySpec:
 test_index_base.py::test_definition_is_validated	ported	tests/unit/idx_keygroups.st	the definition is validated; name:path: is name:keySpec:
 test_index_base.py::test_index_is_immutable	n/a	Python-only API	Python setattr and delattr on an index have no protoST counterpart: an atom has no setters and its state is a PBFrozenDict.
@@ -36,21 +36,21 @@ test_index_base.py::test_build_starts_from_empty_and_folds_with_added	ported	tes
 test_index_base.py::test_build_accepts_any_iterable	ported	tests/unit/idx_keygroups.st	empty keeps the definition; build: ignores the receiver
 test_index_base.py::test_empty_keeps_the_whole_definition	ported	tests/unit/idx_keygroups.st	empty keeps the definition; build: ignores the receiver
 test_index_base.py::test_explain_default	ported	tests/unit/idx_keygroups.st	explain keys and values
-test_index_base.py::test_supports_checks_the_key_path	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
-test_index_base.py::test_plan_on_unsupported_term_raises_not_supported	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
-test_index_base.py::test_estimate_on_unsupported_term_raises_not_supported	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
-test_index_base.py::test_ordered_iteration_is_unsupported_by_default	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
-test_index_base.py::test_ordered_scan_index	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
+test_index_base.py::test_supports_checks_the_key_path	ported	tests/unit/qry_index_plans.st	supports: answers per operator and per kind, on the index's own key only
+test_index_base.py::test_plan_on_unsupported_term_raises_not_supported	ported	tests/unit/qry_index_plans.st	an unsupported term, or order, is PBNotSupportedError
+test_index_base.py::test_estimate_on_unsupported_term_raises_not_supported	ported	tests/unit/qry_index_plans.st	an unsupported term, or order, is PBNotSupportedError
+test_index_base.py::test_ordered_iteration_is_unsupported_by_default	ported	tests/unit/qry_index_plans.st	an unsupported term, or order, is PBNotSupportedError
+test_index_base.py::test_ordered_scan_index	ported	tests/unit/qry_index_plans.st	presence, equality and unorderable keys answer like a scan; ordered scans follow the total order
 test_index_base.py::test_validate_detects_an_inconsistent_index	ported	tests/unit/idx_keygroups.st	validate: passes on built indexes and detects corruption
 test_index_base.py::test_validate_covers_missing_keys_and_stale_keys	ported	tests/unit/idx_keygroups.st	validate: passes on built indexes and detects corruption
-test_index_base.py::test_validate_only_checks_supported_terms	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
+test_index_base.py::test_validate_only_checks_supported_terms	n/a	Python-only API	The generic term-driven validate of base.py serves custom index kinds, which protoBaseST does not offer; its kinds validate their own structure.
 test_index_base.py::test_validate_skips_unorderable_keys	ported	tests/unit/idx_keygroups.st	validate: passes on built indexes and detects corruption
 test_index_base.py::test_key_spec_survives_persistence	ported	tests/unit/idx_contract.st	save and lazy load give equal explain
 test_index_base.py::test_index_attached_to_a_collection_persists	ported	tests/unit/idx_collections.st	an index attached to a collection persists (test_index_base.py), and validates read back
-test_index_base.py::test_index_plan	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
-test_index_base.py::test_index_plan_without_term_needs_an_estimate	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
-test_index_base.py::test_index_plan_default_kind_and_validation	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
-test_index_base.py::test_index_plan_concurrent_execution	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
+test_index_base.py::test_index_plan	ported	tests/unit/qry_index_plans.st	index plans and the indexes explain as proto_db's, less the description of an atom operand; one plan runs on several actors at once
+test_index_base.py::test_index_plan_without_term_needs_an_estimate	ported	tests/unit/qry_index_plans.st	index plans and the indexes explain as proto_db's, less the description of an atom operand; one plan runs on several actors at once
+test_index_base.py::test_index_plan_default_kind_and_validation	ported	tests/unit/qry_index_plans.st	index plans and the indexes explain as proto_db's, less the description of an atom operand; one plan runs on several actors at once
+test_index_base.py::test_index_plan_concurrent_execution	ported	tests/unit/qry_index_plans.st	index plans and the indexes explain as proto_db's, less the description of an atom operand; one plan runs on several actors at once
 test_index_base.py::test_element_identity	ported	tests/unit/idx_keygroups.st	mixed numeric and unorderable keys
 test_index_key_neutrality.py::test_an_element_index_has_the_same_bytes_however_the_value_was_built	ported	tests/unit/idx_keygroups.st	the stored bytes do not depend on how a value was built
 test_index_key_neutrality.py::test_a_field_index_has_the_same_bytes_however_the_value_was_built	ported	tests/unit/idx_keygroups.st	the stored bytes do not depend on how a value was built
@@ -159,10 +159,10 @@ test_planner.py::test_near_where_with_order_by_never_filters_on_the_ordered_scan
 test_planner.py::test_explain_is_exactly_the_executed_node_tree	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
 test_planner.py::test_planning_is_per_version	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
 test_planner.py::test_property_planned_result_equals_the_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_query_plans.py::test_estimate_is_frozen_and_validated	deferred	6	Plan operator base and CollectionScan, ported with Task 6.
-test_query_plans.py::test_query_plan_is_abstract	deferred	6	Plan operator base and CollectionScan, ported with Task 6.
-test_query_plans.py::test_collection_scan_plan	deferred	6	Plan operator base and CollectionScan, ported with Task 6.
-test_query_plans.py::test_collection_scan_plan_on_empty_collection	deferred	6	Plan operator base and CollectionScan, ported with Task 6.
+test_query_plans.py::test_estimate_is_frozen_and_validated	ported	tests/unit/qry_plans.st	PBEstimate is frozen and validated
+test_query_plans.py::test_query_plan_is_abstract	ported	tests/unit/qry_plans.st	PBQueryPlan is abstract
+test_query_plans.py::test_collection_scan_plan	ported	tests/unit/qry_plans.st	a collection scan executes, estimates and explains as proto_db, empty or not
+test_query_plans.py::test_collection_scan_plan_on_empty_collection	ported	tests/unit/qry_plans.st	a collection scan executes, estimates and explains as proto_db, empty or not
 test_linq.py::test_regression_linq_over_a_collection_returns_the_rows_not_an_empty_list	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
 test_linq.py::test_sources_collection_plan_iterable_and_queryable	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
 test_linq.py::test_invalid_sources_raise	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
@@ -289,15 +289,15 @@ test_query_cache.py::test_a_disabled_cache_counts_no_misses_and_no_refusals	n/a	
 test_query_cache.py::test_every_key_holds_the_decimal_context_and_exceptions_are_never_cached	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
 test_index_equals_scan.py::test_planned_query_equals_scan	deferred	7	Property that a planned query equals the scan, ported with Task 7.
 test_index_equals_scan.py::test_every_access_path_was_exercised	deferred	7	Property that a planned query equals the scan, ported with Task 7.
-test_index_rank.py::test_built_index_windows_equal_execution	deferred	6	Rank access windows and weights of the index plans, ported with Task 6.
-test_index_rank.py::test_incremental_writes_keep_weights_exact	deferred	6	Rank access windows and weights of the index plans, ported with Task 6.
-test_index_rank.py::test_window_bounds_are_validated	deferred	6	Rank access windows and weights of the index plans, ported with Task 6.
-test_index_rank.py::test_an_unweighted_index_offers_no_window_and_still_answers	deferred	6	Rank access windows and weights of the index plans, ported with Task 6.
-test_index_rank.py::test_sorted_and_filtered_index_plans_window_by_rank	deferred	6	Rank access windows and weights of the index plans, ported with Task 6.
+test_index_rank.py::test_built_index_windows_equal_execution	ported	tests/unit/qry_rank.st	windows equal the slices of execute on built indexes, for every operator and ordered scan
+test_index_rank.py::test_incremental_writes_keep_weights_exact	ported	tests/unit/qry_rank.st	additions, removals and replacements keep the weights exact and the windows equal execution
+test_index_rank.py::test_window_bounds_are_validated	ported	tests/unit/qry_rank.st	window bounds are validated
+test_index_rank.py::test_an_unweighted_index_offers_no_window_and_still_answers	ported	tests/unit/qry_rank.st	an index written without weights offers no rank access and still answers
+test_index_rank.py::test_sorted_and_filtered_index_plans_window_by_rank	ported	tests/unit/qry_rank.st	sorts by the index key, one-term filters over its ordered scan, list and dictionary scans and Limits window by rank
 test_query_cache_soundness.py::test_cached_results_equal_fresh_execution_across_commits	n/a	deferred: cache	The cache soundness property is ported only with the deferred query result cache.
 test_query_cache_soundness.py::test_equal_keys_mean_equal_results	n/a	deferred: cache	The cache soundness property is ported only with the deferred query result cache.
 test_query_cache_soundness.py::test_plan_families_with_equal_keys_give_equal_results	n/a	deferred: cache	The cache soundness property is ported only with the deferred query result cache.
-test_index_weights_concurrency.py::test_weights_are_exact_after_concurrent_merges_and_retries	deferred	6	plan-free half ported in tests/unit/idx_indexed_roots.st (Task 4b); the rank-window half needs Task 6 plans
+test_index_weights_concurrency.py::test_weights_are_exact_after_concurrent_merges_and_retries	ported	tests/unit/idx_indexed_roots.st	index weights are exact, the indexes validate and rank windows equal execution on every snapshot after concurrent merges and retries; the blind writes merged
 test_indexed_roots.py::test_appends_to_an_indexed_list	ported	tests/unit/idx_indexed_roots.st	appends to an indexed List from 4 actors: each record once, in its writer's order; the indexes answer like a scan
 test_indexed_roots.py::test_blind_set_at_on_an_indexed_dictionary	ported	tests/unit/idx_indexed_roots.st	blind setAt: into an indexed Dictionary from 4 actors: every own key, a written value on each shared key, no conflict; the indexes answer like a scan
 test_pager_stability.py::test_pagers_and_cached_queries_stay_on_their_snapshot_under_writers	deferred	9	Pagers stay on their snapshot under writers; the cached-query half is deferred with the query cache and is dropped and noted when Task 9 ports it.

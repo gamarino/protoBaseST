@@ -33,7 +33,15 @@ exactToken:, the canonical encoding, D58) tells apart values that are equal but 
 A group is the PBTuple (members, total): members a PBCountedKeyNode tree from member key to the
 PBTuple (element, count). PBKeyGroups empty, group:with:memberKey:, group:without:,
 group:do: and sortedMembers:total: are keyed.py's EMPTY_GROUP, _group_add, _group_remove,
-_group_iter and _GroupBuilder.group.
+_group_iter and _GroupBuilder.group; group:elementsDo: evaluates a block once per occurrence.
+
+Rank segments (keyed.py 266-336, D56; plan call IP15): a segment is the Array { tree. start. rows.
+descending. ofGroups }, rows occurrences from occurrence start of tree, a groups tree (ofGroups
+true) or one group's members tree. Members are always produced in ascending member order;
+descending reverses only the order of key groups. PBKeyGroups segmentOfGroup:, window:from:to:
+(the rows start .. stop - 1 of the concatenation of segments, an Array), reverseSegments: and
+rowsOfSegments: are keyed.py's _group_segment, _window, _reverse_segments and the row count of
+_rank_access.
 
 Every walk keeps an explicit stack (_PBValueFrame fold:...), so a value of any depth is walked
 on any actor."
@@ -288,6 +296,11 @@ PBKeyGroups class >> group: aGroup without: anElement
 PBKeyGroups class >> group: aGroup do: aBlock
   PBAvl keysAndValuesDo: [:key :entry | aBlock value: (entry at: 1) value: (entry at: 2)] over: (aGroup at: 1).
 
+"Evaluates aBlock with each stored occurrence of aGroup, an element count times, in member order
+ (keyed.py _group_iter)."
+PBKeyGroups class >> group: aGroup elementsDo: aBlock
+  self group: aGroup do: [:element :n | n timesRepeat: [aBlock value: element]].
+
 "The group of anArray's { member order key. member key. element. count } entries, sorted by
  member order key, built balanced (keyed.py _GroupBuilder.group): total is its occurrences."
 PBKeyGroups class >> sortedMembers: anArray total: anInteger
@@ -300,3 +313,68 @@ PBKeyGroups class >> sortedMembers: anArray total: anInteger
     anInteger }.
 
 PBMemberKeys _initializeConstants.
+
+"=== rank segments (keyed.py 266-336, D56) ===================================="
+
+"The segment of every occurrence of aGroup (keyed.py _group_segment)."
+PBKeyGroups class >> segmentOfGroup: aGroup
+  ^ { aGroup at: 1. 0. aGroup at: 2. false. false }.
+
+"The occurrences anArray of segments holds."
+PBKeyGroups class >> rowsOfSegments: anArray
+  ^ anArray inject: 0 into: [:sum :segment | sum + (segment at: 3)].
+
+"The segments of anArray with their groups in reverse order, each group keeping its members' order
+ (keyed.py _reverse_segments): a segment of a groups tree is the mirror run of the tree read the
+ other way."
+PBKeyGroups class >> reverseSegments: anArray
+  ^ anArray reverse collect: [:segment |
+    (segment at: 5)
+      ifTrue: [{ segment at: 1. (PBAvl keyWeight: (segment at: 1)) - (segment at: 2) - (segment at: 3). segment at: 3.
+        (segment at: 4) not. true }]
+      ifFalse: [segment]].
+
+"The rows aStart .. aStop - 1 of the concatenation of anArray's segments (aStop nil: to the end), a
+ new Array (keyed.py _window): the segments before the window are skipped by their row counts, and
+ each one the window reaches is entered by one seek."
+PBKeyGroups class >> window: anArray from: aStart to: aStop
+  | out start stop |
+  out := OrderedCollection new.
+  start := aStart.
+  stop := aStop.
+  anArray do: [:segment | | rows end |
+    rows := segment at: 3.
+    (stop notNil and: [stop <= 0]) ifTrue: [^ out asArray].
+    start >= rows
+      ifTrue: [
+        start := start - rows.
+        stop notNil ifTrue: [stop := stop - rows]]
+      ifFalse: [
+        end := stop isNil ifTrue: [rows] ifFalse: [rows min: stop].
+        end > start ifTrue: [self _segment: segment from: start limit: end - start into: out].
+        stop notNil ifTrue: [stop := stop - rows].
+        start := 0]].
+  ^ out asArray.
+
+"Adds to anOut aLimit rows of aSegment from its occurrence anOffset (keyed.py _segment_rows): a
+ segment of a groups tree seeks its first group by weight, in its direction, then reads each group's
+ members from the skip the seek leaves (_groups_from); one of a members tree seeks its first member
+ (_members_from). The walks stop at the limit (a non-local return)."
+PBKeyGroups class >> _segment: aSegment from: anOffset limit: aLimit into: anOut
+  | left rank |
+  aLimit <= 0 ifTrue: [^ self].
+  left := aLimit.
+  rank := (aSegment at: 2) + anOffset.
+  (aSegment at: 5) ifFalse: [
+    PBAvl keyDo: [:key :entry :skip |
+      (entry at: 2) - skip timesRepeat: [
+        anOut addLast: (entry at: 1).
+        left := left - 1.
+        left = 0 ifTrue: [^ self]]] over: (aSegment at: 1) fromWeight: rank descending: false.
+    ^ self].
+  PBAvl keyDo: [:key :group :skip |
+    PBAvl keyDo: [:mkey :entry :mskip |
+      (entry at: 2) - mskip timesRepeat: [
+        anOut addLast: (entry at: 1).
+        left := left - 1.
+        left = 0 ifTrue: [^ self]]] over: (group at: 1) fromWeight: skip descending: false] over: (aSegment at: 1) fromWeight: rank descending: (aSegment at: 4).

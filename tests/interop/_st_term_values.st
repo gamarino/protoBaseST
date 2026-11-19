@@ -4,7 +4,7 @@
  Usage: STPATH=<repo>/src:<repo>/tests/unit protost _st_term_values.st <count> <seed>
 
  Prints one line: the hexadecimal MessagePack bytes of a map with
-   'values'  the wire form of each value of QData values: count seed: seed, in order, with the
+   'values'  the wire form of each value of QData termValues: count seed: seed, in order, with the
              oids QData pinOids: gives its records (so the bytes are the same in every run), each atom
              written {'@ref': [oid, 0, type tag]}
    'atoms'   an array of [oid, r] for each distinct atom among them (QData's records hold one
@@ -15,7 +15,7 @@ Import from: '_queries'.
 
 | args values ref atoms seen wire |
 args := Smalltalk arguments.
-values := QData pinOids: (QData values: (args at: 1) asInteger seed: (args at: 2) asInteger).
+values := QData pinOids: (QData termValues: (args at: 1) asInteger seed: (args at: 2) asInteger).
 atoms := OrderedCollection new.
 seen := Set new.
 ref := [:anAtom |

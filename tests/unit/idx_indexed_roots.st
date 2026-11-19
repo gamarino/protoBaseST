@@ -12,14 +12,16 @@
  blind-write 15 times into an indexed PBDictionary root (a new dictionary with one key of its own
  and one of 5 shared keys; the root never read: merged onto the current value). Every own key
  holds what its writer wrote, a shared key one of the values written to it, the seed is kept, no
- attempt conflicted, and the indexes validate and answer like a scan. (3) The half of
- test_weights_are_exact_after_concurrent_merges_and_retries that needs no plan: 4 actors, two
+ attempt conflicted, and the indexes validate and answer like a scan. (3)
+ test_weights_are_exact_after_concurrent_merges_and_retries: 4 actors, two
  blind writers and two read-modify-writers (inserts, updates of the indexed field, removals, and
  appends to an indexed PBList), on a PBDictionary and a PBList each indexed on 'k'; on snapshots
  taken during the run and at the end, every group's total equals its members' recount and its
  members tree's weight, the groups tree's weight plus the side group equals the index's total,
- and the index validates; keys only a blind writer writes are in the final dictionary (the merge
- path ran). Its rank windows (ordered plans, window:) are ported with Task 6. Spaces go to
+ and the index validates; the plans of that test (both ordered scans, '>= 5' and '== 3') answer
+ exactRows as their row count and windowFrom:to: as the slice of execute for 7 rows from the start,
+ a third in and the last row (the rank-window half, plan Task 6); keys only a blind writer writes
+ are in the final dictionary (the merge path ran). Spaces go to
  out/idx_indexed_roots (git ignores out/), a new directory per run."
 Import from: 'random'.
 Import from: 'protobase'.
@@ -87,7 +89,7 @@ RootWriter >> weights: n seed: aSeed in: aDb
       tr abort]].
   ^ snaps asArray.
 
-| c dir space db t0 log records futures counts scanAgrees d content shared own exact snaps final |
+| c dir space db t0 log records futures counts scanAgrees d content shared own exact windows snaps final |
 c := Check new.
 dir := 'out/idx_indexed_roots' asFileReference / ('run-' , Smalltalk pid printString , '-'
   , Time microsecondClockValue printString).
@@ -172,11 +174,25 @@ exact := [:aCollection | | index recount problem side sideN |
   recount + sideN = index count ifFalse: [problem := 'total'].
   [index validate: aCollection elements] on: PBDBError do: [:e | problem := e class name , ': ' , e messageText].
   problem].
-c that: 'index weights are exact and the indexes validate on every snapshot after concurrent merges and retries; the blind writes merged'
-  is: { (snaps collect: [:pair | { exact value: (pair at: 1). exact value: (pair at: 2) }]) asSet asArray.
+"nil when every plan of proto_db's _check answers exactRows and the windows of 7 rows as execute
+ does (the rank-window half, plan Task 6); otherwise the plan that differs."
+windows := [:aCollection | | index problem |
+  index := aCollection getIndex: 'k'.
+  problem := nil.
+  { index orderedPlan: (PBKeySpec path: 'k') descending: false. index orderedPlan: (PBKeySpec path: 'k') descending: true.
+    index plan: (PBTerm path: 'k' op: '>=' value: 5). index plan: (PBTerm path: 'k' op: '==' value: 3) } do: [:plan | | rows |
+    rows := plan execute.
+    plan exactRows = rows size ifFalse: [problem := 'exactRows of ' , (plan explain at: 'plan')].
+    { 0. rows size // 3. rows size - 1 } do: [:start | | a |
+      a := start max: 0.
+      (plan windowFrom: a to: a + 7) = (rows copyFrom: (a + 1 min: rows size + 1) to: (a + 7 min: rows size)) ifFalse: [
+        problem := 'window ' , a printString , ' of ' , (plan explain at: 'plan')]]].
+  problem].
+c that: 'index weights are exact, the indexes validate and rank windows equal execution on every snapshot after concurrent merges and retries; the blind writes merged'
+  is: { (snaps collect: [:pair | { exact value: (pair at: 1). exact value: (pair at: 2). windows value: (pair at: 1). windows value: (pair at: 2) }]) asSet asArray.
     (snaps last at: 1) count > 0. (snaps last at: 2) count > 0.
     #(1 3) allSatisfy: [:s | (0 to: 29) anySatisfy: [:i | (snaps last at: 1) has: 2000 + (100 * s) + i]] }
-  equals: { { #(nil nil) }. true. true. true }.
+  equals: { { #(nil nil nil nil) }. true. true. true }.
 final abort.
 space close.
 c report displayNl.

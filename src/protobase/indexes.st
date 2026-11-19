@@ -57,6 +57,22 @@ The hooks (base.py Index, keyed.py KeyGroupIndex), each answering a new index:
                      elements: PBCorruptionError, or PBMisfiledError for an entry
                      its own key does not place
 
+The access paths (base.py Index, keyed.py 461-647, equality.py, range.py; plan Task 6, call
+IP15), answering the plan classes of plans.st:
+
+  supports: aTerm    whether plan: answers aTerm exactly as a scan would: a key-group index
+                     answers the operators of supportedOperators on its own key spec only;
+                     a vector index nothing (a non-term is PBValidationError)
+  estimate: aTerm    its PBEstimate (the cost model D30, keyed.py estimate)
+  plan: aTerm        a PBIndexPlan: an IndexLookup ('==', 'in', '?N'), an IndexRange ('?!N'
+                     and the range operators) or an IndexComplement ('!='); with rank access
+                     (windowFrom:to:, exactRows) when the index is weighted
+  supportsOrder: aKeySpec, orderedPlan: aKeySpec descending: aBoolean
+                     PBRangeIndex only: every occurrence in key order (IndexOrderedScan),
+                     descending its exact reverse
+  estimate: and plan: of a term the index does not support, and orderedPlan:descending: of
+  an order it does not offer, are PBNotSupportedError naming the index.
+
 A key-group index files each element under the key its key spec extracts:
 groups is a PBCountedKeyNode tree from key to group (PBKeyGroups, keygroups.st),
 side the group of every element whose key is unorderable. Its reads:
@@ -244,6 +260,58 @@ PBIndex >> explain
 PBIndex >> _explained
   ^ { 'index' -> self name. 'kind' -> self class kindName. 'key' -> self keySpecObject describe }.
 
+"--- access paths (base.py Index: supports, estimate, plan, supports_order, ordered_plan) ---"
+
+"Whether plan: answers aTerm exactly as a scan would. The index kinds answer it."
+PBIndex >> supports: aTerm
+  ^ self _subclassResponsibility: 'supports:'.
+
+"The PBEstimate of plan: aTerm; PBNotSupportedError for a term the index does not support."
+PBIndex >> estimate: aTerm
+  self _checkSupported: aTerm.
+  ^ self _subclassResponsibility: 'estimate:'.
+
+"A PBIndexPlan answering the elements that match aTerm; PBNotSupportedError for a term the index
+ does not support."
+PBIndex >> plan: aTerm
+  self _checkSupported: aTerm.
+  ^ self _subclassResponsibility: 'plan:'.
+
+"Whether orderedPlan: aKeySpec descending: answers the elements in the order of aKeySpec
+ (base.py supports_order: false by default)."
+PBIndex >> supportsOrder: aKeySpec
+  ^ false.
+
+"Every stored occurrence in the order of aKeySpec, descending when aBoolean (a Boolean, else
+ PBValidationError), as a PBIndexPlan (base.py ordered_plan with plans.py ordered_index_scan's
+ checks): PBNotSupportedError unless supportsOrder: aKeySpec."
+PBIndex >> orderedPlan: aKeySpec descending: aBoolean
+  (aBoolean == true or: [aBoolean == false]) ifFalse: [
+    ^ PBValidationError signal: 'descending must be a Boolean, not ' , (PBKeySpec _repr: aBoolean)].
+  (self supportsOrder: aKeySpec) ifFalse: [^ self _cannotOrderBy: aKeySpec].
+  ^ self _orderedPlan: aBoolean.
+
+"The refusal of an order this index does not offer: base.py ordered_plan's sentence."
+PBIndex >> _cannotOrderBy: aKeySpec
+  ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: self name) , ' (' , self class kindName
+    , ') does not provide ordered iteration'.
+
+PBIndex >> _orderedPlan: aBoolean
+  ^ self _subclassResponsibility: '_orderedPlan:'.
+
+"aTerm, a PBTerm, or PBValidationError."
+PBIndex >> _checkTerm: aTerm
+  (aTerm isClassObject not and: [aTerm isKindOf: PBTerm]) ifFalse: [
+    ^ PBValidationError signal: self _subject , ' takes a PBTerm, not ' , (PBKeySpec _repr: aTerm)].
+  ^ aTerm.
+
+"PBNotSupportedError unless supports: accepts aTerm (base.py _check_supported's sentence)."
+PBIndex >> _checkSupported: aTerm
+  (self supports: aTerm) ifFalse: [
+    ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: self name) , ' (' , self class kindName , ' on '
+      , self keySpecObject describe , ') does not support ' , (PBKeySpec _repr: aTerm op) , ' on '
+      , (PBKeySpec _repr: aTerm path)].
+
 "=== PBKeyGroupIndex (keyed.py KeyGroupIndex) ================================="
 
 PBIndex subclass: #PBKeyGroupIndex.
@@ -407,6 +475,236 @@ PBKeyGroupIndex >> _builder: aBuilder add: anElement
 PBKeyGroupIndex >> _groupOfBuilder: aBuilder
   ^ PBKeyGroups sortedMembers: (aBuilder at: 3) values total: (aBuilder at: 4).
 
+"--- plans (keyed.py 461-532) ---"
+
+"The operators the kind answers exactly (equality.py and range.py SUPPORTED_OPS)."
+PBKeyGroupIndex class >> supportedOperators
+  ^ self _subclassResponsibility: 'supportedOperators'.
+
+"The operators of supportedOperators on this index's own key spec (base.py _on_key)."
+PBKeyGroupIndex >> supports: aTerm
+  self _checkTerm: aTerm.
+  ^ (self class supportedOperators includes: aTerm op) and: [aTerm keySpecObject = self keySpecObject].
+
+"The group stored under the order key anOrderKey, or the empty group (keyed.py _lookup)."
+PBKeyGroupIndex >> _lookupKey: anOrderKey
+  | node |
+  node := PBAvl keyAt: self groups orderKey: anOrderKey.
+  ^ node isNil ifTrue: [PBKeyGroups empty] ifFalse: [node value].
+
+"The order keys a term looks up (keyed.py _distinct and the values of estimate and _plan_parts):
+ '==' its value's, 'in' its operands' without repetitions in first-seen order, '?N' those of
+ PBMissing and nil. The term's own order keys are used (PBTerm valueKey, operandKeys)."
+PBKeyGroupIndex >> _lookupKeysOf: aTerm
+  | seen out |
+  aTerm op = '==' ifTrue: [^ { aTerm _valueKey }].
+  aTerm op = '?N' ifTrue: [^ { self class _missingKey. self class _nilKey }].
+  seen := Set new.
+  out := OrderedCollection new.
+  aTerm _operandKeys do: [:k | (seen includes: k) ifFalse: [seen add: k. out addLast: k]].
+  ^ out asArray.
+
+"The order keys of PBMissing and nil (keyed.py _MISSING_OKEY, _NONE_OKEY)."
+PBKeyGroupIndex class >> _missingKey
+  ^ PBKeys orderKey: PBMissing default.
+
+PBKeyGroupIndex class >> _nilKey
+  ^ PBKeys orderKey: nil.
+
+"Order keys bracketing every key of anOrderKey's type rank (values.py rank_bounds: the one-item
+ keys (rank) and (rank + 1)): every key of that rank lies strictly between them, and neither is
+ the key of a value. A rank sits between two integers here, so it compares below and above every
+ key of the rank and never reaches a payload."
+PBKeyGroupIndex class >> _rankBoundsOf: anOrderKey
+  ^ { PBOrderKey basicNew _setRank: anOrderKey rank - (1 / 2) payload: nil.
+    PBOrderKey basicNew _setRank: anOrderKey rank + (1 / 2) payload: nil }.
+
+"{ low order key. high order key. include low. include high } of a range term, within the
+ operand's rank (keyed.py _range)."
+PBKeyGroupIndex >> _rangeOf: aTerm
+  | op ok bounds |
+  op := aTerm op.
+  (PBTerm betweenOperators includes: op) ifTrue: [
+    ^ { aTerm _operandKeys at: 1. aTerm _operandKeys at: 2. op = 'between[]' or: [op = 'between[)']. op = 'between[]' or: [op = 'between(]'] }].
+  ok := aTerm _valueKey.
+  bounds := self class _rankBoundsOf: ok.
+  op = '<' ifTrue: [^ { bounds at: 1. ok. true. false }].
+  op = '<=' ifTrue: [^ { bounds at: 1. ok. true. true }].
+  op = '>' ifTrue: [^ { ok. bounds at: 2. false. true }].
+  ^ { ok. bounds at: 2. true. true }.
+
+"Evaluates aBlock with every occurrence of the groups whose key lies in the range (nil: an open
+ side), in key order."
+PBKeyGroupIndex >> _groups: aGroups from: aLow inclusive: aLowInclusive to: aHigh inclusive: aHighInclusive do: aBlock
+  PBAvl keyDo: [:key :group | PBKeyGroups group: group elementsDo: aBlock]
+    over: aGroups fromOrderKey: aLow inclusive: aLowInclusive toOrderKey: aHigh inclusive: aHighInclusive.
+
+"{ kind. producer } for a supported term (keyed.py _plan_parts): the producer is a block of one
+ argument, evaluated with each matching occurrence; it holds only the immutable trees of this
+ version. '!=' walks the keys above PBMissing on both sides of the excluded key: the groups the
+ proto_db producer visits, in its order, without recomputing a key's order key."
+PBKeyGroupIndex >> _planParts: aTerm
+  | op groups side found range excluded |
+  op := aTerm op.
+  groups := self groups.
+  side := self side.
+  (#('==' 'in' '?N') includes: op) ifTrue: [
+    found := (self _lookupKeysOf: aTerm) collect: [:k | self _lookupKey: k].
+    ^ { 'IndexLookup'. [:aBlock | found do: [:group | PBKeyGroups group: group elementsDo: aBlock]] }].
+  op = '?!N' ifTrue: [
+    ^ { 'IndexRange'. [:aBlock |
+      self _groups: groups from: self class _nilKey inclusive: false to: nil inclusive: false do: aBlock.
+      PBKeyGroups group: side elementsDo: aBlock] }].
+  op = '!=' ifTrue: [
+    excluded := aTerm _valueKey.
+    ^ { 'IndexComplement'. [:aBlock |
+      self _groups: groups from: self class _missingKey inclusive: false to: excluded inclusive: false do: aBlock.
+      self _groups: groups from: excluded inclusive: false to: nil inclusive: false do: aBlock.
+      PBKeyGroups group: side elementsDo: aBlock] }].
+  range := self _rangeOf: aTerm.
+  ^ { 'IndexRange'. [:aBlock |
+    self _groups: groups from: (range at: 1) inclusive: (range at: 3) to: (range at: 2) inclusive: (range at: 4) do: aBlock] }.
+
+"A PBIndexPlan answering every stored occurrence matching aTerm (keyed.py plan, D28 semantics); on
+ a weighted index it offers rank access (D56)."
+PBKeyGroupIndex >> plan: aTerm
+  | parts rank sorted |
+  self _checkSupported: aTerm.
+  parts := self _planParts: aTerm.
+  rank := nil.
+  sorted := nil.
+  self _hasWeights ifTrue: [
+    rank := PBRankAccess segments: [self _termSegments: aTerm].
+    sorted := self _sortedRank: [:descending | self _sortedSegments: aTerm descending: descending]].
+  ^ PBIndexPlan index: self term: aTerm part: (PBIndexPart kind: (parts at: 1) producer: (parts at: 2) estimate: nil
+    details: nil rank: rank sortedRank: sorted).
+
+"--- rank access (keyed.py 534-594, D56) ---"
+
+"Whether a tree is weighted (keyed.py _weighted): empty, or of PBCountedKeyNode nodes."
+PBKeyGroupIndex >> _weighted: aTree
+  ^ aTree isNil or: [aTree isKindOf: PBCountedKeyNode].
+
+"Whether both the key tree and the side group are weighted (written by this code or proto_db's
+ since D56; keyed.py _has_weights)."
+PBKeyGroupIndex >> _hasWeights
+  ^ (self _weighted: self groups) and: [self _weighted: (self side at: 1)].
+
+"The groups whose keys lie in the range, as one segment (keyed.py _range_segment; a nil order key
+ is an open side)."
+PBKeyGroupIndex >> _rangeSegmentFrom: aLow inclusive: aLowInclusive to: aHigh inclusive: aHighInclusive
+  | groups low high |
+  groups := self groups.
+  low := aLow isNil ifTrue: [0] ifFalse: [PBAvl keyWeightBelow: groups orderKey: aLow inclusive: aLowInclusive not].
+  high := aHigh isNil
+    ifTrue: [PBAvl keyWeight: groups]
+    ifFalse: [PBAvl keyWeightBelow: groups orderKey: aHigh inclusive: aHighInclusive].
+  ^ { groups. low. high - low max: 0. false. true }.
+
+"The segments of plan:'s rows, in the order its producer answers them (keyed.py _term_segments)."
+PBKeyGroupIndex >> _termSegments: aTerm
+  | op side excluded range |
+  op := aTerm op.
+  (#('==' 'in' '?N') includes: op) ifTrue: [
+    ^ (self _lookupKeysOf: aTerm) collect: [:k | PBKeyGroups segmentOfGroup: (self _lookupKey: k)]].
+  side := PBKeyGroups segmentOfGroup: self side.
+  op = '?!N' ifTrue: [^ { self _rangeSegmentFrom: self class _nilKey inclusive: false to: nil inclusive: true. side }].
+  op = '!=' ifTrue: [
+    excluded := aTerm _valueKey.
+    ^ { self _rangeSegmentFrom: self class _missingKey inclusive: false to: excluded inclusive: false.
+      self _rangeSegmentFrom: excluded inclusive: false to: nil inclusive: true. side }].
+  range := self _rangeOf: aTerm.
+  ^ { self _rangeSegmentFrom: (range at: 1) inclusive: (range at: 3) to: (range at: 2) inclusive: (range at: 4) }.
+
+"The sortedRank: block of an index plan (keyed.py _sorted_rank): given a key spec and a direction,
+ the PBRankAccess of the plan's rows in the order a stable sort by this index's key gives them, or
+ nil for another key spec. aBlock answers the segments for a direction."
+PBKeyGroupIndex >> _sortedRank: aBlock
+  ^ [:aKeySpec :descending |
+    aKeySpec = self keySpecObject
+      ifTrue: [PBRankAccess segments: [aBlock value: descending]]
+      ifFalse: [nil]].
+
+"The rows of plan: in the order a stable sort by this index's key gives (keyed.py
+ _sorted_segments): key groups ascending, each group's members in member order (the plan's own
+ order for every operator but 'in', whose groups come in operand order and are sorted here);
+ descending reverses the groups and keeps each group's members in order."
+PBKeyGroupIndex >> _sortedSegments: aTerm descending: aBoolean
+  | segments |
+  segments := aTerm op = 'in'
+    ifTrue: [((self _lookupKeysOf: aTerm) asSortedCollection: [:a :b | a <= b]) asArray collect: [:k |
+      PBKeyGroups segmentOfGroup: (self _lookupKey: k)]]
+    ifFalse: [self _termSegments: aTerm].
+  ^ aBoolean ifTrue: [PBKeyGroups reverseSegments: segments] ifFalse: [segments].
+
+"Every occurrence in key order: the groups tree, then the side group; descending the side group
+ first, then the groups tree read backwards (keyed.py _ordered_segments)."
+PBKeyGroupIndex >> _orderedSegments: aBoolean
+  | groups whole side |
+  groups := self groups.
+  whole := { groups. 0. PBAvl keyWeight: groups. aBoolean. true }.
+  side := PBKeyGroups segmentOfGroup: self side.
+  ^ aBoolean ifTrue: [{ side. whole }] ifFalse: [{ whole. side }].
+
+"--- estimates (keyed.py 596-622, the cost model D30) ---"
+
+"Rows and cost of plan: aTerm (keyed.py estimate): one unit per occurrence produced, per key group
+ visited and per tree level descended; '!=' is charged a full pass. The Floats are built by
+ proto_db's formulas in Python's order of evaluation; the descent is PBCost log2: (plan call IP7)."
+PBKeyGroupIndex >> estimate: aTerm
+  | op groupsN descent keys rows sideTotal absent visited range perKey |
+  self _checkSupported: aTerm.
+  op := aTerm op.
+  groupsN := self groupCount.
+  descent := PBCost log2: groupsN + 2.
+  (#('==' 'in' '?N') includes: op) ifTrue: [
+    keys := self _lookupKeysOf: aTerm.
+    rows := keys inject: 0 into: [:sum :k | sum + ((self _lookupKey: k) at: 2)].
+    ^ PBEstimate rows: rows cost: rows + (keys size * descent)].
+  sideTotal := self side at: 2.
+  op = '?!N' ifTrue: [
+    absent := { (self _lookupKey: self class _missingKey) at: 2. (self _lookupKey: self class _nilKey) at: 2 }.
+    rows := self totalCount - ((absent at: 1) + (absent at: 2)).
+    visited := groupsN - (absent count: [:n | n ~= 0]) + (sideTotal ~= 0 ifTrue: [1] ifFalse: [0]).
+    ^ PBEstimate rows: rows cost: rows + descent + visited].
+  op = '!=' ifTrue: [
+    rows := self totalCount - ((self _lookupKey: self class _missingKey) at: 2) - ((self _lookupKey: aTerm _valueKey) at: 2).
+    ^ PBEstimate rows: rows cost: self totalCount + groupsN + 1].
+  range := self _rangeOf: aTerm.
+  keys := (PBAvl keyCountBelow: self groups orderKey: (range at: 2) inclusive: (range at: 4))
+    - (PBAvl keyCountBelow: self groups orderKey: (range at: 1) inclusive: (range at: 3) not).
+  keys := keys max: 0.
+  perKey := groupsN = 0
+    ifTrue: [0.0]
+    ifFalse: [(self totalCount - sideTotal) asFloat / groupsN asFloat].
+  rows := keys * perKey.
+  ^ PBEstimate rows: rows cost: rows + descent + keys.
+
+"--- ordered iteration (keyed.py 626-647; offered by PBRangeIndex through supportsOrder:) ---"
+
+"Every stored occurrence in key order (descending: the side group, then the groups backwards),
+ estimated at rows n and cost n + groups + 1, with the detail 'descending'."
+PBKeyGroupIndex >> _orderedPlan: aBoolean
+  | groups side n rank sorted producer |
+  groups := self groups.
+  side := self side.
+  producer := aBoolean
+    ifTrue: [[:aBlock |
+      PBKeyGroups group: side elementsDo: aBlock.
+      PBAvl keyReverseDo: [:key :group | PBKeyGroups group: group elementsDo: aBlock] over: groups]]
+    ifFalse: [[:aBlock |
+      PBAvl keysAndValuesDo: [:key :group | PBKeyGroups group: group elementsDo: aBlock] over: groups.
+      PBKeyGroups group: side elementsDo: aBlock]].
+  n := self totalCount.
+  rank := nil.
+  sorted := nil.
+  self _hasWeights ifTrue: [
+    rank := PBRankAccess segments: [self _orderedSegments: aBoolean].
+    sorted := self _sortedRank: [:descending | self _orderedSegments: descending]].
+  ^ PBIndexPlan index: self term: nil part: (PBIndexPart kind: 'IndexOrderedScan' producer: producer
+    estimate: (PBEstimate rows: n cost: n + self groupCount + 1)
+    details: (PBFrozenDict withAssociations: { 'descending' -> aBoolean }) rank: rank sortedRank: sorted).
+
 "--- explain and validate (keyed.py 651-737) ---"
 
 "The base entries plus entries (occurrences), keys (distinct orderable keys) and unorderable
@@ -533,10 +831,27 @@ PBKeyGroupIndex subclass: #PBEqualityIndex.
 PBEqualityIndex class >> typeName
   ^ 'proto_db.indexing.EqualityIndex'.
 
+"equality.py SUPPORTED_OPS: equality and presence; no ordered iteration."
+PBEqualityIndex class >> supportedOperators
+  ^ #('==' 'in' '!=' '?N' '?!N').
+
 PBKeyGroupIndex subclass: #PBRangeIndex.
 
 PBRangeIndex class >> typeName
   ^ 'proto_db.indexing.RangeIndex'.
+
+"range.py SUPPORTED_OPS: equality, the ranges, the between variants and presence."
+PBRangeIndex class >> supportedOperators
+  ^ #('==' 'in' '!=' '<' '<=' '>' '>=' 'between[]' 'between()' 'between(]' 'between[)' '?N' '?!N').
+
+"Ordered iteration by this index's own key (range.py supports_order)."
+PBRangeIndex >> supportsOrder: aKeySpec
+  ^ aKeySpec = self keySpecObject.
+
+"plans.py ordered_index_scan's refusal of another key."
+PBRangeIndex >> _cannotOrderBy: aKeySpec
+  ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: self name) , ' cannot iterate in the order of '
+    , ((aKeySpec isClassObject not and: [aKeySpec isKindOf: PBKeySpec]) ifTrue: [aKeySpec describe] ifFalse: [PBKeySpec _repr: aKeySpec]).
 
 "=== PBVectorIndex (read only: design spec 3.3, ruling IQ5) ================="
 
@@ -607,6 +922,11 @@ PBVectorIndex >> build: aCollection
 
 PBVectorIndex >> validate: aCollection
   ^ self _refuse: 'validate:'.
+
+"No term is answered by a vector index here: vector search is out of scope (ruling IQ5), so the
+ planner never uses one as an access path."
+PBVectorIndex >> supports: aTerm
+  ^ false.
 
 "proto_db's VectorIndex.explain adds its training state, which protoBaseST does not compute."
 PBVectorIndex >> explain

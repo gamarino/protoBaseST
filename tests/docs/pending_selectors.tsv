@@ -6,20 +6,6 @@
 # Task 3: key-group indexes
 # Task 4a: collections maintain their indexes (4a and 4b share the spec's T4)
 # Task 5: terms and expressions
-# Task 6: plan operators, explain, index access paths
-byRank	6
-cost	6
-estimate	6
-estimate:	6
-exactRows	6
-execute	6
-key:descending:	6
-orderedPlan:descending:	6
-plan:	6
-rows	6
-supports:	6
-supportsOrder:	6
-windowFrom:to:	6
 # Task 7: the planner
 normalize:	7
 plan:where:orderBy:limit:offset:	7

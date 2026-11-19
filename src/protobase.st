@@ -34,6 +34,7 @@ Import from: 'protobase/collections'.
 Import from: 'protobase/records'.
 Import from: 'protobase/indexes'.
 Import from: 'protobase/terms'.
+Import from: 'protobase/plans'.
 Import from: 'protobase/roots'.
 Import from: 'protobase/publisher'.
 Import from: 'protobase/cluster/round'.

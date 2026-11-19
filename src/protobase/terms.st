@@ -576,6 +576,12 @@ PBTerm >> = anObject
 PBTerm >> _valueKey
   ^ valueKey.
 
+"The order keys of the operands, computed once when the term was made: { value's } for a scalar
+ operator and 'contains', one per operand for 'in', { low's. high's } for a between operator, empty
+ for a unary one (the index plans use them, never recompute them)."
+PBTerm >> _operandKeys
+  ^ operandKeys.
+
 PBTerm >> hash
   ^ ((path hash bitXor: op hash) bitXor: valueKey hash) \\ 1073741824.
 

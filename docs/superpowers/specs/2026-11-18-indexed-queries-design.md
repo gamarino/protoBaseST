@@ -314,7 +314,7 @@ machinery), `terms.st`, `plans.st`, `planner.st`, `query.st`, `pager.st`; `avl.s
 | `PBBlockPredicate` | `PythonPredicate` | An opaque predicate: a block and a description. |
 | `PBExpression class >> compile:` | `Expression.compile` | The 0.1 prefix list syntax, from an `Array`. |
 | `PBEstimate` | `Estimate` | `rows`, `cost`: finite non-negative Floats. |
-| `PBQueryPlan` and subclasses `PBCollectionScan`, `PBIndexPlan`, `PBFilter`, `PBBlockFilter`, `PBUnion`, `PBIntersect`, `PBProject`, `PBSort`, `PBLimit`, `PBCount`, `PBDistinct` | `plans.py` | `execute` (a new stream each time; `do:` evaluates a block per row), `explain` (a `PBFrozenDict` with `proto_db`'s keys), `estimate`, `windowFrom:to:`, `exactRows`. |
+| `PBQueryPlan` and subclasses `PBCollectionScan`, `PBIndexPlan`, `PBFilter`, `PBBlockFilter`, `PBUnion`, `PBIntersect`, `PBProject`, `PBSort`, `PBLimit`, `PBCountPlan` (the name `PBCount` is the cluster coordinator's counter effect), `PBDistinct` | `plans.py` | `execute` (a new stream each time; `do:` evaluates a block per row), `explain` (a `PBFrozenDict` with `proto_db`'s keys), `estimate`, `windowFrom:to:`, `exactRows`. |
 | `PBPlanner` | `planner.py` | `PBPlanner plan: aCollectionOrPlan where: anExpression orderBy: keys limit: n offset: m`; `normalize:`. Pure function of its arguments. |
 | `PBQuery`, `PBField` | `Queryable`, `F` / `Field` | The front end (5.5). |
 | `PBPager` | `Pager` | `on: aPlanOrQuery pageSize: n`; `rows`, `pages`, `page: k` (zero-based, as `proto_db`), `byRank`, `explain` (`pager` → `page_size`, `by_rank`; `plan` → the plan's explain; no `portable`, since tokens are deferred). No `token` (deferred). |

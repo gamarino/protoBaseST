@@ -437,6 +437,29 @@ PBIndexedCollection >> getIndex: aName
 PBIndexedCollection >> do: aBlock
   ^ PBNotSupportedError signal: self class name , ': ' , self class typeName , ' is abstract: it has no elements'.
 
+"A full-scan plan over this collection (base.py as_query_plan): a PBCollectionScan, from which
+ the planner reads the collection's indexes."
+PBIndexedCollection >> asQueryPlan
+  ^ PBCollectionScan on: self.
+
+"The elements aStart .. aStop - 1 of do: (aStop nil: to the end) without producing the earlier
+ ones, as a new Array, or nil when the structure cannot seek (base.py _scan_window: the default).
+ A collection that answers an Array makes count the number of elements do: evaluates (D56). The
+ caller has checked the bounds (non-negative Integers, aStop possibly nil)."
+PBIndexedCollection >> _scanWindowFrom: aStart to: aStop
+  ^ nil.
+
+"Whether a subclass of aClass up to the receiver's class redefines do:, so its elements are not
+ the tree's in order and cannot be windowed by position (lists.py and dictionaries.py
+ _scan_window: type(self).elements is not List.elements)."
+PBIndexedCollection >> _redefinesDoBelow: aClass
+  | cls |
+  cls := self class.
+  [cls == aClass] whileFalse: [
+    (cls includesSelector: #do:) ifTrue: [^ true].
+    cls := cls superclass].
+  ^ false.
+
 "The elements, in order, as an Array."
 PBIndexedCollection >> elements
   | out |
@@ -825,6 +848,26 @@ PBList class >> persistedFields
 PBList >> do: aBlock
   _PBTree nodesOf: (self stateAt: 'root') kind: PBPosNode in: self do: [:node | aBlock value: node value].
 
+"Items aStart .. aStop - 1 by position, in O(log n + k) (lists.py _scan_window, D56)."
+PBList >> _scanWindowFrom: aStart to: aStop
+  | stop out left |
+  (self _redefinesDoBelow: PBList) ifTrue: [^ nil].
+  stop := aStop isNil ifTrue: [self count] ifFalse: [aStop min: self count].
+  aStart >= stop ifTrue: [^ #()].
+  out := OrderedCollection new.
+  left := stop - aStart.
+  self _window: [:v |
+      out addLast: v.
+      left := left - 1.
+      left = 0] from: aStart.
+  ^ out asArray.
+
+"Evaluates aBlock with each item from position aStart on until it answers true (an early exit by
+ non-local return)."
+PBList >> _window: aBlock from: aStart
+  PBAvl posDo: [:v | (aBlock value: v) ifTrue: [^ self]]
+    over: (_PBTree node: (self stateAt: 'root') kind: PBPosNode in: self) from: aStart.
+
 "The position anIndex stands for, in 0 .. anUpper (ProtoBase List._position,
  plan call C15): a negative index counts from the end; an index that is not an
  Integer (a Boolean included), or outside, is PBValidationError."
@@ -993,6 +1036,27 @@ PBDictionary >> keysAndValuesDo: aBlock
 "The values, in key order (the elements)."
 PBDictionary >> do: aBlock
   self keysAndValuesDo: [:k :v | aBlock value: v].
+
+"Values aStart .. aStop - 1 in key order, by the node counts, in O(log n + k) (dictionaries.py
+ _scan_window, D56)."
+PBDictionary >> _scanWindowFrom: aStart to: aStop
+  | stop out left |
+  (self _redefinesDoBelow: PBDictionary) ifTrue: [^ nil].
+  stop := aStop isNil ifTrue: [self count] ifFalse: [aStop min: self count].
+  aStart >= stop ifTrue: [^ #()].
+  out := OrderedCollection new.
+  left := stop - aStart.
+  self _window: [:v |
+      out addLast: v.
+      left := left - 1.
+      left = 0] from: aStart.
+  ^ out asArray.
+
+"Evaluates aBlock with each value from the aStart-th key on until it answers true (an early exit by
+ non-local return)."
+PBDictionary >> _window: aBlock from: aStart
+  PBAvl keyDo: [:k :v | (aBlock value: v) ifTrue: [^ self]]
+    over: (_PBTree node: (self stateAt: 'root') kind: PBKeyNode in: self) from: aStart.
 
 PBDictionary >> keys
   | out |

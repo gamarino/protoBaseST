@@ -11,6 +11,11 @@
                               nil, Booleans, ByteArrays, dates, instants in several offsets,
                               tuples, records, and the unorderable values (lists, maps, NaN, a
                               tuple holding a list)
+  QData termValues: n seed: s values: n seed: s followed by QData domainValues: the values of the
+                              term vector (tests/interop/py_term_cases.py)
+  QData domainValues          one value of each scalar kind QData values: never draws: a naive
+                              datetime, a time, a timedelta, a UUID, an empty String and an empty
+                              ByteArray (with a second naive datetime and a zero timedelta)
   QData pinOids: aValues       gives each record among aValues the oid of 15 zero bytes then its r,
                               before anything draws one, so atoms (ordered by oid) order the same
                               way in every run and in proto_db (tests/interop/py_term_cases.py)
@@ -29,6 +34,9 @@
                               written as their MessagePack bytes, an atom by its oid), then the side
                               group's: equal for two indexes that hold the same entries in the
                               same order, whatever the shapes of their trees
+  TermAtoms on: aValues       resolves the term vector's references to the atoms among aValues (by
+                              oid) and writes them back the same way (decode:, bytesOf:);
+                              TermAtoms tree: a description or explain as a MessagePack tree
   QData seeds: aDefault       PBST_PROP_SEEDS as a positive Integer (plan call IP16), or aDefault"
 Import from: 'random'.
 Import from: 'protobase'.
@@ -108,6 +116,22 @@ QData >> value
       Decimal fromString: '0E-3'. true }].
   pick = 15 ifTrue: [^ self instant].
   ^ self between: 0 and: 2.
+
+QData class >> termValues: n seed: aSeed
+  ^ (self values: n seed: aSeed) , self domainValues.
+
+"The scalar kinds QData values: does not draw, fixed (the operands of py_term_cases.py's 'in naive
+ and time' and 'in uuid' cases among them). Collection atoms are not among them: the generator
+ rebuilds only records on the Python side."
+QData class >> domainValues
+  ^ { DateTime year: 2026 month: 1 day: 1 hour: 12 minute: 30 second: 5 microsecond: 7 fold: 0 zone: nil.
+    DateTime year: 2026 month: 1 day: 2 hour: 0 minute: 0 second: 0 microsecond: 0 fold: 0 zone: nil.
+    TimeOfDay hour: 12 minute: 30 second: 0 microsecond: 0 fold: 0 zone: nil.
+    TimeSpan days: -1 seconds: 5 microseconds: 0.
+    TimeSpan days: 0 seconds: 0 microseconds: 0.
+    UUID fromString: '12345678-1234-5678-1234-567812345678'.
+    ''.
+    ByteArray new }.
 
 "12:00 or 13:00 UTC on 2026-01-01, written in the offset -3, 0, 1 or 5 hours: equal instants in
  different offsets are equal keys with distinct exact tokens."
@@ -195,3 +219,36 @@ QData class >> seeds: aDefault
   ((text allSatisfy: [:d | d isDigit]) and: [text asInteger > 0]) ifFalse: [
     ^ Error signal: 'PBST_PROP_SEEDS must be a positive integer, not ' , text printString].
   ^ text asInteger.
+
+"Resolves the vector's references to the atoms of the values drawn here (by oid), and writes them
+ back the same way."
+Object subclass: #TermAtoms instanceVariableNames: 'atoms'.
+
+TermAtoms class >> on: aValues
+  ^ self basicNew setAtoms: aValues.
+
+TermAtoms >> setAtoms: aValues
+  atoms := Dictionary new.
+  aValues do: [:each | (each isKindOf: PBAtom) ifTrue: [atoms at: each oid hex put: each]].
+
+TermAtoms >> refTo: aSegmentBytes offset: anInteger tag: aTag
+  ^ atoms at: aSegmentBytes hex ifAbsent: [Error signal: 'no atom of oid ' , aSegmentBytes hex].
+
+TermAtoms >> refBlock
+  ^ [:anAtom | MessagePackMap withAll: { '@ref' -> { anAtom oid. 0. PBTypeRegistry writerTag: anAtom tag } }].
+
+TermAtoms >> bytesOf: aValue
+  ^ MessagePack encode: (PBCodec toWire: aValue atomRef: self refBlock).
+
+TermAtoms >> decode: aByteArray
+  ^ PBCodec fromWire: (MessagePack decodeOrdered: aByteArray strictKeys: false) resolver: self.
+
+"The MessagePack tree of a description or an explain (PBFrozenDict to MessagePackMap, Array and
+ PBFrozenList to Array), to compare its bytes with proto_db's describe() or explain() packed by
+ msgpack."
+TermAtoms class >> tree: aDescription
+  (aDescription isKindOf: PBFrozenDict) ifTrue: [
+    ^ MessagePackMap withAll: (aDescription associations collect: [:each | each key -> (self tree: each value)])].
+  (aDescription isKindOf: Array) ifTrue: [^ aDescription collect: [:each | self tree: each]].
+  (aDescription isKindOf: PBFrozenList) ifTrue: [^ aDescription asArray collect: [:each | self tree: each]].
+  ^ aDescription.

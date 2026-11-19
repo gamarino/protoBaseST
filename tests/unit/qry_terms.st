@@ -8,44 +8,13 @@
  match only '?!N', '!=', 'contains', '?T' and '?!T'. Terms are frozen values, equal by order key.
  'near[]' is refused (vector search is out of scope, spec 3.3). The vector
  ../conformance/vectors-index-keys/terms.msgpack (tests/interop/py_term_cases.py, checked against
- the directory's manifest.sha256) holds proto_db's answers on the values of QData values: 160
- seed: 5 for every operator, its outcome for the degenerate terms of the plan's Review Focus 4, and
+ the directory's manifest.sha256) holds proto_db's answers on the values of QData termValues: 160
+ seed: 5 (QData values: and QData domainValues) for every operator, its outcome for the degenerate terms of the plan's Review Focus 4, and
  the list form and description of each term proto_db compiled. Each check gathers its mismatches
  and requires none, so one label covers one behaviour."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_queries'.
-
-"Resolves the vector's references to the atoms of the values drawn here (by oid), and writes them
- back the same way."
-Object subclass: #TermAtoms instanceVariableNames: 'atoms'.
-
-TermAtoms class >> on: aValues
-  ^ self basicNew setAtoms: aValues.
-
-TermAtoms >> setAtoms: aValues
-  atoms := Dictionary new.
-  aValues do: [:each | (each isKindOf: PBAtom) ifTrue: [atoms at: each oid hex put: each]].
-
-TermAtoms >> refTo: aSegmentBytes offset: anInteger tag: aTag
-  ^ atoms at: aSegmentBytes hex ifAbsent: [Error signal: 'no atom of oid ' , aSegmentBytes hex].
-
-TermAtoms >> refBlock
-  ^ [:anAtom | MessagePackMap withAll: { '@ref' -> { anAtom oid. 0. PBTypeRegistry writerTag: anAtom tag } }].
-
-TermAtoms >> bytesOf: aValue
-  ^ MessagePack encode: (PBCodec toWire: aValue atomRef: self refBlock).
-
-TermAtoms >> decode: aByteArray
-  ^ PBCodec fromWire: (MessagePack decodeOrdered: aByteArray strictKeys: false) resolver: self.
-
-"The MessagePack tree of a description (PBFrozenDict to MessagePackMap), to compare its bytes with
- proto_db's describe() packed by msgpack."
-TermAtoms class >> tree: aDescription
-  (aDescription isKindOf: PBFrozenDict) ifTrue: [
-    ^ MessagePackMap withAll: (aDescription associations collect: [:each | each key -> (self tree: each value)])].
-  (aDescription isKindOf: Array) ifTrue: [^ aDescription collect: [:each | self tree: each]].
-  ^ aDescription.
 
 | c fails expect refused missing rec absent none one oneF tru five aStr aList all named matching
   t s blob listed data values atoms cases errorClass outcome dec decimal1 r x |
@@ -224,19 +193,19 @@ expect value: 'NaN and missing' value: { PBTerm displayValue: Float nan. PBTerm 
     expect value: each value value: (PBTerm displayValue: each key) value: each value].
 c that: 'describe and display values' is: fails asArray equals: #().
 
-"=== the vector: proto_db's answers on QData values: 160 seed: 5 ==="
+"=== the vector: proto_db's answers on QData termValues: 160 seed: 5 ==="
 blob := '../conformance/vectors-index-keys/terms.msgpack' asFileReference binaryContents.
 listed := ('../conformance/vectors-index-keys/manifest.sha256' asFileReference contents lines)
   detect: [:line | line endsWith: '  terms.msgpack'] ifNone: [''].
 (listed copyFrom: 1 to: (64 min: listed size)) = blob sha256 hex asLowercase ifFalse: [
   Error signal: 'vectors-index-keys/terms.msgpack does not match manifest.sha256'].
 data := MessagePack decode: blob.
-values := QData pinOids: (QData values: (data at: 'count') seed: (data at: 'seed')).
+values := QData pinOids: (QData termValues: (data at: 'count') seed: (data at: 'seed')).
 atoms := TermAtoms on: values.
 (data at: 'values') size = values size ifFalse: [Error signal: 'the vector holds another count of values'].
 (data at: 'values') doWithIndex: [:bytes :i |
   (PBKeys exactToken: (atoms decode: bytes)) = (PBKeys exactToken: (values at: i)) ifFalse: [
-    Error signal: 'QData values: no longer draws the values of the vector (value ' , i printString , ')']].
+    Error signal: 'QData termValues: no longer draws the values of the vector (value ' , i printString , ')']].
 cases := data at: 'cases'.
 errorClass := [:name |
   name isNil ifTrue: [nil] ifFalse: [
@@ -258,9 +227,11 @@ cases doWithIndex: [:case :i |
     got := [values collect: [:v | expr evaluate: v]] on: PBDBError do: [:e | e return: e class].
     got = want asArray ifFalse: [
       fails add: (case at: 'id') , ': ' , ((1 to: values size) detect: [:k | ((got isKindOf: Array) and: [(got at: k) = (want at: k)]) not] ifNone: [0]) printString]]].
-"Value domain of the vector (Task 6 extends the generator and these counts): QData values: draws
- no naive datetime, time, timedelta, UUID, empty String or ByteArray, and no collection atom; those
- are covered by the unit checks above and in qry_expressions.st only."
+"Value domain of the vector (extended at Task 6): QData values: and QData domainValues, the latter
+ a naive datetime, a time, a timedelta, a UUID, an empty String and an empty ByteArray. No
+ collection atom is among them (the generator rebuilds records only); collection atoms are covered
+ by the unit checks above and in qry_expressions.st only. The counts below are of cases, which the
+ Task 6 extension left as they were (199 cases: 176 with answers, 12 degenerate, 177 compiled)."
 expect value: 'cases with answers' value: (cases select: [:case | (case at: 'answers') notNil]) size value: 176.
 c that: 'matches: on QData values equals proto_db''s answers for every operator' is: fails asArray equals: #().
 
@@ -279,7 +250,7 @@ cases doWithIndex: [:case :i |
     got := [values do: [:v | expr evaluate: v]. nil] on: PBDBError do: [:e | e return: e class].
     got = (errorClass value: (case at: 'match_error')) ifFalse: [
       fails add: id , ': evaluate: signals ' , got printString , ', proto_db ' , (case at: 'match_error')]]].
-"A count of the vector: Task 6 updates it with the generator (value-domain note above)."
+"A count of the vector (value-domain note above)."
 expect value: 'degenerate cases' value: (cases select: [:case | (case at: 'id') includesSubstring: '(degenerate)']) size value: 12.
 s := t value: nil value: 'in' value: { 1. 1.0. decimal1. true. 's1'. nil. 1 }.
 expect value: 'in keeps duplicates and mixed types' value: s value size value: 7.
@@ -307,7 +278,7 @@ cases doWithIndex: [:case :i |
       ifFalse: [
         (MessagePack encode: (TermAtoms tree: expr describe)) = (case at: 'describe') ifFalse: [
           fails add: (case at: 'id') , ': describe ' , expr describe printString]]]].
-"A count of the vector: Task 6 updates it with the generator (value-domain note above)."
+"A count of the vector (value-domain note above)."
 expect value: 'compiled cases' value: (dec select: [:each | each value notNil]) size value: 177.
 c that: 'compile: of every recorded list gives proto_db''s list and description' is: fails asArray equals: #().
 

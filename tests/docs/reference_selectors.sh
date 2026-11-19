@@ -70,7 +70,7 @@ extend slice head tail has union intersection difference count_of index_names ge
 register_atom_class is_active committed_at lock_timeout retries backoff keys values
 asFrozenDict asOf: tr: asActor wait EXPECT: protost bytes date ensure:
 flock fsync nil true false proto_db remove aName atom_pointer context cluster_term current pair n i v repr
-avl calendar codec collections decimal errors framing net notation publisher registry roots round store transactions uuid zonekeys
+avl calendar codec collections decimal errors framing keygroups keyspec net notation plans publisher registry roots round store terms transactions uuid zonekeys
 """.split())
 # selectors of GemStone/S and Soil, cited from their documentation by the chapters of
 # docs/tutorial/ (mainly gemstone.md and soil.md) to compare them; they are not protoBaseST's and

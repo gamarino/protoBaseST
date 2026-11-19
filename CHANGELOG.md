@@ -77,6 +77,26 @@
   `tests/interop/py_term_cases.py`: `proto_db`'s answers on the values of `QData values:` for
   every operator, its outcome for the degenerate terms, and its list form and description of
   each term.
+- **Plans, explain, index access paths and rank access** (plan Task 6, `src/protobase/plans.st`,
+  a port of `proto_db`'s `query/plans.py`, and the term-facing half of `keyed.py`): the nodes
+  `PBCollectionScan` (`asQueryPlan`), `PBIndexPlan` (`IndexLookup`, `IndexRange`,
+  `IndexComplement`, `IndexOrderedScan`, from a `PBIndexPart`), `PBFilter`, `PBBlockFilter`,
+  `PBUnion`, `PBIntersect`, `PBProject`, `PBSort` (with `PBSortKey key:descending:`),
+  `PBLimit`, `PBCountPlan` and `PBDistinct`, each with `do:` (lazy), `execute`, `explain` in
+  `proto_db`'s shape and key order, `estimate` (`PBEstimate`, the cost model D30, `PBCost log2:`),
+  `windowFrom:to:`, `byRank` and `exactRows`. The indexes gain `supports:`, `estimate:`,
+  `plan:`, `supportsOrder:` and `orderedPlan:descending:` (`PBVectorIndex` supports nothing);
+  their plans seek windows by occurrence rank over the weighted trees (`PBKeyGroups` rank
+  segments, D56), as do a sort by the index's key over its plan, a one-term filter over its
+  ordered scan, and the scans of `PBList` and `PBDictionary`. `PBTerm` exposes its operands'
+  order keys to the index plans. Tests: `tests/unit/qry_plans.st`,
+  `tests/unit/qry_index_plans.st` (against the vector `terms.msgpack`, now holding
+  `proto_db`'s supports, estimate, row count, exact rows and explain for each single-term case on
+  an equality and a range index, and both ordered scans), `tests/unit/qry_rank.st`, and the
+  rank-window half of `tests/unit/idx_indexed_roots.st`. The vector's values gain naive
+  datetimes, a time, timedeltas, a UUID, an empty String and an empty ByteArray
+  (`QData termValues:`). The guide's Plan 2 filter cost is corrected to `proto_db`'s
+  152.95419631038686 (it read ...688, one unit in the last place).
 - **Benchmark M1**: commits per second of single-record transactions on a 600-record dictionary
   with 0, 1 and 3 indexes. `bench/run_query.sh` now runs each unit (a size and a plan) in a
   process of its own with an explicit heap budget (`PROTOCORE_HEAP_LIMIT_CELLS`) and reports each

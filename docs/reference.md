@@ -1056,8 +1056,9 @@ For tests, tools and readers of the format. An application does not need them.
 
 > **Planned for 0.3.0 and built task by task.** Implemented so far: "Key specs and extractors"
 > (`src/protobase/keyspec.st`), `PBMemberKeys` and `PBMisfiledError`, "Indexes" (Task 3), the
-> collection messages of "Collections gain" (Tasks 4a and 4b), and "Terms and expressions" (Task 5,
-> `src/protobase/terms.st`); every other message of this section is not implemented yet. It is the API of
+> collection messages of "Collections gain" (Tasks 4a and 4b), "Terms and expressions" (Task 5,
+> `src/protobase/terms.st`), and "Plans and explain" with the indexes' access paths and rank access
+> (Task 6, `src/protobase/plans.st`); every other message of this section is not implemented yet. It is the API of
 > the approved [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md)
 > (sections 5.2 and 5.5) and of its implementation plan's interfaces, written early so the
 > chapters can cite it. Until each task lands, the messages below are listed as pending in the
@@ -1137,7 +1138,7 @@ filed under its member key, the `PBTuple` `((0, element) | (1, surrogate), exact
 | `withAdded: e`, `withRemoved: e`, `withReplaced: old with: new` | A new unsaved index with one occurrence more, fewer, or replaced (removed, then added). Removing an occurrence the index does not hold is `PBValidationError`, also when it holds an equal value with another exact token (1.0 for 1). The receiver never changes. |
 | `empty`, `build: aCollection` | An empty index with the same definition; the bulk build over the elements of anything answering `do:` (grouped, sorted, balanced trees as `proto_db`'s build), holding what the fold of `withAdded:` from `empty` holds, key for key and member for member; the receiver's content is never kept. |
 | `supports: aTerm`, `estimate: aTerm`, `plan: aTerm` | Whether the index answers the term exactly as a scan would; its `PBEstimate`; its `PBIndexPlan`. An unsupported term is `PBNotSupportedError`. |
-| `supportsOrder: aKeySpec`, `orderedPlan:descending:` | `PBRangeIndex` only: every element in key order (`IndexOrderedScan`). |
+| `supportsOrder: aKeySpec`, `orderedPlan: aKeySpec descending: aBoolean` | `PBRangeIndex` only, by its own key spec: every occurrence in key order (`IndexOrderedScan`, the side group of unorderable keys last), descending its exact reverse. Another key spec, or any order on a `PBEqualityIndex`, is `PBNotSupportedError`; a `descending` that is not a Boolean is `PBValidationError`. |
 | `explain` | `{ 'index'. 'kind'. 'key'. 'entries'. 'keys'. 'unorderable' }` as a `PBFrozenDict`, in that order; `kind` is `proto_db`'s class name, `'EqualityIndex'` or `'RangeIndex'`; `key` is the key spec's `describe`. |
 | `validate: aCollection` | Structural checks and the stored multiset against the elements: `PBCorruptionError` naming the index, or `PBMisfiledError` for an entry its own key does not place (a misfiled format-3 entry, a key tree out of key order). Answers the index. |
 | `keySpec` | Unchanged from 0.1.0: the persisted `(kind, arg)` tuple. |
@@ -1233,7 +1234,28 @@ Every node is a `PBQueryPlan`, immutable once built, safe to run on any actor:
 | `do: aBlock` | The rows one by one, lazily (stop early with a non-local return). |
 | `explain` | A `PBFrozenDict`: `'plan'` (the node name), the node's fields, `'estimate'` (`'rows'`, `'cost'`), `'children'`. |
 | `estimate` | A `PBEstimate` (`rows`, `cost`: finite, non-negative Floats). |
-| `windowFrom: start to: stop`, `exactRows`, `byRank` | Rank access where the plan offers it: rows `start` to `stop - 1` as an `Array`, the exact row count, or `nil`. |
+| `windowFrom: start to: stop` | Rows `start` to `stop - 1` of `execute` (`stop` nil: to the end) as a new `Array`, zero-based and half-open. Sought by rank when the plan offers it, otherwise read through `do:` and stopped after the window. Bounds that are not non-negative Integers are `PBValidationError`. |
+| `byRank`, `exactRows` | Whether the plan offers rank access; the exact row count when it is known without producing the rows, else `nil`. |
+
+The nodes are built by their own constructors (`PBQueryPlan new` is `PBUserError`); a malformed
+argument is `PBValidationError`:
+
+| Constructor | Meaning |
+|---|---|
+| `PBCollectionScan on: aCollection`, `aCollection asQueryPlan` | Every element, in the collection's order. A `PBList` and a `PBDictionary` window by position (rank access); the hash collections do not. |
+| `anIndex plan: aTerm`, `anIndex orderedPlan: aKeySpec descending: aBoolean` | A `PBIndexPlan`; `PBIndexPlan index:term:part:` builds one from a `PBIndexPart` (`kind:producer:`, `kind:producer:estimate:details:`), which a plan without a term needs an estimate for. A weighted index's plans have rank access. |
+| `PBFilter source: aPlan terms: anArray` | The rows for which the conjunction of the expressions holds (`PBExpression compile:`; the 0.1 list syntax works). One term over an index's ordered scan that the index answers windows by rank. |
+| `PBBlockFilter source: aPlan predicate: aPBBlockPredicate` | The rows the block accepts. |
+| `PBUnion withAll: plans`, `PBIntersect withAll: plans` | Two or more sources; each element identity with its largest, or smallest, multiplicity. Identity is `proto_db`'s element key: 1, 1.0 and `Decimal` 1 are three elements. |
+| `PBProject source: aPlan fields: paths`, `source:fields:description:` | Each row as a `PBFrozenDict` of the paths (an absent value leaves its field out), or a block's answer. |
+| `PBSort source: aPlan keys: { PBSortKey key: k descending: aBoolean }` | Stable and total (orderable keys by order key, unorderable keys after them). A key is a path, a `PBKeySpec` or a block of one argument (`key:descending:description:` names a block in `explain`; `'block'` otherwise). A sort by the index's own key over its plan windows by rank. |
+| `PBLimit source: aPlan limit: anIntegerOrNil offset: anInteger` | The window; by rank over a source that offers it. |
+| `PBCountPlan source: aPlan` | One row, the number of source rows (read by rank when the source knows it exactly). The class is not `PBCount`, the cluster coordinator's counter effect. |
+| `PBDistinct source: aPlan` | The first occurrence of each element identity. |
+
+`PBEstimate rows: r cost: c` (each an Integer or a Float, finite and not negative, kept as a
+Float) and `PBCost log2: n` (the descent term, `n asFloat log: 2`) are the cost model's two
+messages; `PBFilter selectivityOf: anExpression` is the filter's fraction.
 
 | Node (`explain`) | Class | Fields |
 |---|---|---|
@@ -1245,8 +1267,13 @@ Every node is a `PBQueryPlan`, immutable once built, safe to run on any actor:
 | `Project` | `PBProject` | `'fields'` or `'function'` |
 | `Sort` | `PBSort` | `'keys'` (each `{ 'key'. 'descending' }`) |
 | `Limit` | `PBLimit` | `'limit'`, `'offset'`, `'by_rank'` (only when true) |
-| `Count` | `PBCount` | `'by_rank'` (only when true) |
+| `Count` | `PBCountPlan` | `'by_rank'` (only when true) |
 | `Distinct` | `PBDistinct` | none |
+
+Explain differs from `proto_db`'s in three documented ways ([deviations](deviations.md)): its lists
+are `PBFrozenList`s; a block is described by its description, `'block'` by default, never a Python
+qualified name; an index's term is described by `PBTerm describe`, so an atom operand prints as
+protoBaseST describes it.
 
 The meaning of every node, field and estimate, with three worked plans, is
 [queries.md, Reading a plan](queries.md#reading-a-plan).
@@ -1266,7 +1293,7 @@ deferred).
 
 ## The module and its files
 
-`Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
-`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
+`Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`, `keyspec`,
+`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `keygroups`, `collections`, `records`, `indexes`, `terms`, `plans`, `roots`, `publisher`,
 `round`, `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar`, `uuid` and `net`.

@@ -67,7 +67,7 @@ lesson check: 'plan 2 is a filter over the age range' is: { filter at: 'plan'. r
 lesson check: 'the range: 7 keys of 10 rows' is: ((range at: 'estimate') at: 'rows') equals: 70.
 lesson check: 'its cost: rows + log2 (60 + 2) + keys' isTrue: (close value: ((range at: 'estimate') at: 'cost') value: 82.95419631038688).
 lesson check: 'the filter halves the rows, per term' is: ((filter at: 'estimate') at: 'rows') equals: 35.
-lesson check: 'and pays one unit per row it reads' isTrue: (close value: ((filter at: 'estimate') at: 'cost') value: 152.95419631038688).
+lesson check: 'and pays one unit per row it reads' isTrue: (close value: ((filter at: 'estimate') at: 'cost') value: 152.95419631038686).
 withoutAge := (PBQuery from: (people removeIndex: 'by_age')) where: ((city eq: 'Oslo') & (age > 70)).
 lesson check: 'the rejected candidate, made visible: the city lookup and a filter'
     isTrue: (close value: ((withoutAge explain at: 'estimate') at: 'cost') value: 302.5849625007212).

@@ -363,9 +363,13 @@ conditions of 1 to 32 conjuncts over 0 to 8 indexes.]
 ## Reading a plan
 
 `explain` answers the plan that `execute` runs, never a description of another one. It is a
-`PBFrozenDict` of Strings, Numbers, `nil`, Booleans and Arrays, in `proto_db`'s shape
-(`plans.py`, `QueryPlan._explain`), so `PBNotation describe:` prints it and the conformance runner
-compares it with `proto_db`'s:
+`PBFrozenDict` of Strings, Numbers, `nil`, Booleans and `PBFrozenList`s (what a decoded
+MessagePack list is), in `proto_db`'s shape (`plans.py`, `QueryPlan._explain`), so
+`PBNotation describe:` prints it and the conformance runner compares it with `proto_db`'s. The
+nodes and `explain` exist since plan Task 6 (`src/protobase/plans.st`); the planner that chooses
+among them comes with Task 7. For every term of the conformance vector, an index plan's explain,
+less its estimate, is byte for byte `proto_db`'s, and its estimate equal within 1e-12 relative
+(`tests/unit/qry_index_plans.st`):
 
 ```
 { 'plan' -> <node name>.  <the node's own fields>.
@@ -420,7 +424,8 @@ The data, here and in the next two plans: 600 people, cities Lima, Oslo, Paris a
 above, never a measurement and never a promise of time. Ruling CR10 requires each to equal
 `proto_db`'s own planner output for the same data, generated from `proto_db` by a script; plan task
 7 checks the numbers, and the program checks that protoBaseST's planner computes the same. Costs are
-compared within 1e-9 because of R2.
+compared within 1e-9 because of R2. Built node by node (Task 6, before the planner), the plans below
+give these figures exactly, model estimate for model estimate, including the rejected candidates'.
 
 ```smalltalk
 oslo := q where: (city eq: 'Oslo').
@@ -450,7 +455,7 @@ lesson check: 'plan 2 is a filter over the age range' is: { filter at: 'plan'. r
 lesson check: 'the range: 7 keys of 10 rows' is: ((range at: 'estimate') at: 'rows') equals: 70.
 lesson check: 'its cost: rows + log2 (60 + 2) + keys' isTrue: (close value: ((range at: 'estimate') at: 'cost') value: 82.95419631038688).
 lesson check: 'the filter halves the rows, per term' is: ((filter at: 'estimate') at: 'rows') equals: 35.
-lesson check: 'and pays one unit per row it reads' isTrue: (close value: ((filter at: 'estimate') at: 'cost') value: 152.95419631038688).
+lesson check: 'and pays one unit per row it reads' isTrue: (close value: ((filter at: 'estimate') at: 'cost') value: 152.95419631038686).
 withoutAge := (PBQuery from: (people removeIndex: 'by_age')) where: ((city eq: 'Oslo') & (age > 70)).
 lesson check: 'the rejected candidate, made visible: the city lookup and a filter'
     isTrue: (close value: ((withoutAge explain at: 'estimate') at: 'cost') value: 302.5849625007212).
