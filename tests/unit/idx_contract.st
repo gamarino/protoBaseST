@@ -19,7 +19,8 @@
  (b) runs at proto_db's cadence (30 steps, validate: and the oracle after each). The other checks
  are smaller than first written, to bound the run time: 8 replacements on 80 elements, saved
  indexes of 120 elements, readers dumping 5 times.
- Saves go to out/idx_contract (git ignores out/); each seed writes a new segment there."
+ Saves go to out/idx_contract (git ignores out/), a new directory per run, so runs over disjoint
+ seed ranges may run in parallel."
 Import from: 'random'.
 Import from: 'protobase'.
 Import from: '_check'.
@@ -168,7 +169,8 @@ c that: 'build: holds the fold of withAdded:' is: fails asArray equals: #().
  saved one, validates, and keeps working."
 fails := OrderedCollection new.
 PBKeySpec registerExtractor: 'tests.idx_contract.age' block: [:e | (PBKeySpec path: 'age') extract: e] version: '1'.
-base := 'out/idx_contract' asFileReference.
+base := 'out/idx_contract' asFileReference / ('run-' , Smalltalk pid printString , '-' , Time microsecondClockValue printString).
+base ensureCreateDirectory.
 storage := PBFileStorage path: base pathString.
 saved := OrderedCollection new.
 seeds do: [:seed |
