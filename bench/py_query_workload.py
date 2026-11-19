@@ -335,8 +335,11 @@ def q5(n, plan):
         raise SystemExit(f"Q5: unknown plan {plan}")
     if plan.startswith("count"):
         query = from_collection(q_records(n, plan == "count-index"))
+        if any(query.where(F.r >= n * (q + 1) // 21).explain_count().get("by_rank", False) != (plan == "count-index")
+               for q in range(20)):
+            raise SystemExit(f"Q5 {plan}: a count is not answered as planned")
         t0 = time.perf_counter_ns()
-        counts = [query.where(F.r >= n * q // 20).count() for q in range(20)]
+        counts = [query.where(F.r >= n * (q + 1) // 21).count() for q in range(20)]
         us = (time.perf_counter_ns() - t0) // 1000
         check = sum((q + 1) * c for q, c in enumerate(counts)) % P
         return sum(counts), 20, plan, check, us, shape(query.where(F.r >= n * 19 // 20).explain_count()), None

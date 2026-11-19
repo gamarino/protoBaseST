@@ -247,10 +247,13 @@ PlannerBench class >> p3: n plan: aPlan
                         read from the indexed query by skipping its first 50 k rows (do:, stopping
                         after the page: O(offset + page size) per page). rows n, queries the
                         number of pages, the checksum of (position + 1) * (id + 1) over the pages
-                        concatenated. count-index and count-scan: 20 counts of r >= n q // 20 (q
-                        from 0), by rank over the indexed records, by walking a Filter over the scan
-                        without them; rows the sum of the counts, the checksum the sum of
-                        (q + 1) * count. Each pager checks its byRank and fails the unit otherwise."
+                        concatenated. count-index and count-scan: 20 counts of r >= n (q + 1) // 21
+                        (q from 0), by rank over the indexed records (the planner answers each
+                        bound with an IndexRange; r >= 0 would be a scan, the range covering every
+                        row), by walking a Filter over the scan without them; rows the sum of the
+                        counts, the checksum the sum of (q + 1) * count. Each pager, and each
+                        count-index count, checks that it is by rank (count-scan: that it is not)
+                        and fails the unit otherwise."
 Object subclass: #QueryUnits.
 
 QueryUnits class >> sizes
@@ -375,8 +378,11 @@ QueryUnits class >> q5: n plan: aPlan
   query := (PBQuery from: (self records: n indexed: (#('page-mat' 'count-scan') includes: aPlan) not)) orderBy: 'r'.
   (aPlan beginsWith: 'count') ifTrue: [
     query := PBQuery from: (self records: n indexed: aPlan = 'count-index').
+    ((0 to: 19) allSatisfy: [:q |
+        (((query where: (PBField path: 'r') >= (n * (q + 1) // 21)) explainCount at: 'by_rank' ifAbsent: [false]) = true)
+          = (aPlan = 'count-index')]) ifFalse: [^ Error signal: 'Q5 ' , aPlan , ': a count is not answered as planned'].
     us := PlannerBench time: [
-      counts := (0 to: 19) asArray collect: [:q | (query where: (PBField path: 'r') >= (n * q // 20)) count]].
+      counts := (0 to: 19) asArray collect: [:q | (query where: (PBField path: 'r') >= (n * (q + 1) // 21)) count]].
     rows := counts inject: 0 into: [:a :b | a + b].
     check := 0.
     counts doWithIndex: [:count :q | check := (check + (q * count)) \\ p].
