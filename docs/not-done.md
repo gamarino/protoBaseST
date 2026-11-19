@@ -17,15 +17,21 @@ design (spec section 2) or a cut made while building, with its reason.
   second as one standalone process on disjoint roots, and a third as many on one hot key ([deviations.md](deviations.md#cluster-mode-commits-per-second)).
 - No cloud or tiered storage, no durability mode other than `fsync`, no Windows.
 - No writes to indexed collections, no merges onto them, no index queries, no vector-index
-  writes or training.
+  writes or training. *(Planned for 0.3.0, not implemented: maintained equality and range indexes,
+  merges onto them, a query planner and in-process pagers; drafts in
+  [chapters 17-19](tutorial/17-indexes.md) and [queries.md](queries.md). Vector indexes stay
+  read only.)*
 - No writes to `RepeatedKeysDictionary`.
 - No IANA time zones: no wall-clock conversion; a fixed pinned list of zone keys.
 - No runtime registry and no symbol kind (`@sym`): format 5 (`proto_db` 2.0.0rc4, D62) is
   known, not adopted, and refused.
 - No query planner or LINQ, no pagers, no `snapshot_ref` byte references, no
-  residency.
+  residency. *(Planned for 0.3.0: the planner, a query front end and in-process pagers; still not
+  planned: portable pager tokens, the query result cache, `GroupBy` / `Join` / `Unnest`, computed
+  values, `snapshot_ref`, residency.)*
 - No rebuilding of format-3 indexes, no `validate()` or `rebuilt()` of misfiled format-3
-  collections.
+  collections. *(Planned for 0.3.0: format-3 key-group indexes rebuilt before the first change, and
+  collection `validate`; `rebuilt` stays deferred.)*
 - No frozen instances: immutability is a convention, checked by a test, not enforced at run time.
 - No business rules in the core: no constraints, schema checks or `ondelete` rules. Application
   classes keep them (the Odoo lesson).
@@ -110,7 +116,7 @@ Not tested, or not proven:
 | Notify | Not done | `proto_db`'s notify is not ported. | Readers learn new commits by reading. |
 | The persister's timers at a tenth and ten times (final review M7) | Not done | The timer audit's persist row (`tests/audit/sim_timer_audit_persist_*`) scales `persistInterval` and `persistLag`, but the simulator reads neither, so those runs cannot exercise the persister's timers. The persister's liveness at those values is unaudited: its refresh period, and the lag write by a member that did not commit the root. | What would close it: count the persist parts out of the audit's run total (or drop them from the audit), and add a `tests/unit/cluster_persister.st` case at a tenth and at ten times the defaults that asserts `sync:` returns and that a non-committer persists a root once `persistLag` has passed. |
 | A real-process pause test (final review M8) | Not done | `tests/cluster` kills members with `kill -9` but never pauses one (`kill -STOP`, then `kill -CONT`). That is the real-clock, real-TCP check of a stale holder or owner, the property "safety never depends on timing" rests on. It is covered only in the simulator (a stalled clock) and in one process (`cluster_commit_path.st` (9)). | What would close it: a `tests/cluster/real_pause_holder.sh` that stops the holder once its root is built, waits until the others' lease on it has passed, resumes it, and checks with the verifier that the counters are exact and that the resumed holder's commit ends `#none` or unknown and is never applied twice. |
-| Index maintenance | Not done | Out of scope (design 7.4). Refused explicitly rather than done partly. | A database with indexes can be read, not changed in its indexed collections. |
+| Index maintenance | Not done; **planned for 0.3.0** ([indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md), drafts in [chapters 17-19](tutorial/17-indexes.md)) | Out of scope (design 7.4). Refused explicitly rather than done partly. | A database with indexes can be read, not changed in its indexed collections. When the plan lands, this row leaves the table and the spec's deferred items (section 3.2: pager tokens, the query cache, `GroupBy` / `Join` / `Unnest` / `ValuesScan`, computed values, `rebuilt`) enter it. |
 
 ## What would come next, if the workshop wants it
 
@@ -118,6 +124,8 @@ In the order the cost of the omission is felt:
 
 1. Index maintenance and merges onto indexed collections. Without them protoST cannot change an
    indexed collection, which limits the shared-directory story to databases without indexes.
+   **Planned for 0.3.0**, with index queries and a planner; the drafts of its documentation come
+   first ([queries.md](queries.md), [chapters 17-19](tutorial/17-indexes.md)).
 2. The `@sym` kind, once format 5 defines it, with the explicit symbol wrapper in protoST.
 3. A time-zone database in protoST, so zoned datetimes have a wall clock.
 4. Speed of the record and node paths, which is protoST VM work more than library work.

@@ -57,6 +57,12 @@ increments merge (chapter 6).
 
 ## Queries
 
+> **Planned (0.3.0, draft).** Index maintenance, index queries and a query planner are planned by
+> the [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md) and drafted
+> in [chapter 17](17-indexes.md) and the chapters after it; they are **not implemented**. This
+> section describes what the prototype does today. When they land, it becomes a short pointer to
+> chapter 17.
+
 This prototype has **no query language, no query planner and no index query**. A question is
 answered in one of two ways.
 
@@ -106,7 +112,8 @@ lesson check: 'and refuses every change, naming its indexes'
 
 So a directory shared with Python can use indexes on the Python side; protoST reads those
 collections and changes only the others. Index maintenance is the first item of "what would come
-next" in [not-done.md](../not-done.md).
+next" in [not-done.md](../not-done.md), and is planned for 0.3.0 (draft
+[chapter 17](17-indexes.md): it explains why a hand-kept index fails, and what replaces it).
 
 ## What to take away
 

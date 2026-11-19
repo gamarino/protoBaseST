@@ -1,0 +1,98 @@
+"EXPECT: 19 ordered reads and pages ok (15 checks)"
+"PENDING: runs once Task T9 (PBPager) of the indexed-queries plan lands, on top of T1 to T8.
+ Written against the API of docs/superpowers/specs/2026-11-18-indexed-queries-design.md,
+ sections 5.5 and 5.7; it has never run. The test runner does not run it (the .st.pending
+ extension). When the task is merged, move it to examples/tutorial/19_ordered_reads_and_pages.st,
+ run it, correct the EXPECT count, and fix the program and docs/tutorial/19-ordered-reads-and-pages.md
+ together wherever the built API differs.
+
+ Lesson 19: ordered reads and pages.
+ Tutorial chapter: docs/tutorial/19-ordered-reads-and-pages.md
+
+ What it teaches:
+ - an order on an indexed key streams the index in key order; a selective predicate is found by
+   the index and sorted;
+ - a window over a plan with rank access is sought, not skipped (by_rank in explain);
+ - the obvious paging, run the query and skip k pages, against a pager that seeks page k;
+ - a block key has no index and no rank: its pager materialises the result once;
+ - a pager reads one snapshot: every row once, whatever is committed meanwhile; a new query per
+   page, by offset, shows a row twice when a commit lands between pages.
+
+ Run it (from examples/tutorial, once moved): STPATH=<repository>/src protost 19_ordered_reads_and_pages.st"
+Import from: 'protobase'.
+Import from: '_lesson'.
+
+| lesson dir space db cities people planOf byAge youngest oldest narrow pageBySkipping pager tr first seen names fresh |
+lesson := Lesson named: '19 ordered reads and pages'.
+dir := FileSystem temp / ('pbst-tutorial-19-' , Smalltalk pid printString).
+dir deleteAll.
+space := PBObjectSpace storage: (PBFileStorage path: dir pathString).
+db := space newDatabase: 'people'.
+cities := #('Lima' 'Oslo' 'Paris' 'Rome').
+db newTransactionDo: [:t |
+    | ps |
+    ps := t newDictionary.
+    0 to: 599 do: [:i |
+        ps := ps setAt: i value: (t newObject: {
+            'name' -> ('person' , i printString).
+            'city' -> (cities at: i \\ 4 + 1).
+            'age' -> (18 + (i \\ 60)) })].
+    t setRootObject: 'people' value: (ps addIndex: (PBRangeIndex name: 'by_age' path: 'age'))].
+people := db newTransaction getRootObject: 'people'.
+planOf := [:query | | names node |
+    names := OrderedCollection new.
+    node := query explain.
+    [node isNil] whileFalse: [
+        names add: (node at: 'plan').
+        node := (node at: 'children') isEmpty ifTrue: [nil] ifFalse: [(node at: 'children') at: 1]].
+    names inject: '' into: [:acc :each | acc isEmpty ifTrue: [each] ifFalse: [acc , ' <- ' , each]]].
+
+"An order on an indexed key."
+byAge := (PBQuery from: people) orderBy: 'age'.
+youngest := byAge take: 5.
+lesson check: 'the index yields the order' is: (planOf value: youngest) equals: 'Limit <- IndexOrderedScan'.
+lesson check: 'the window is sought by rank' is: (youngest explain at: 'by_rank') equals: true.
+lesson check: 'the five youngest' is: (youngest asArray collect: [:p | p at: 'age']) equals: #(18 18 18 18 18).
+oldest := ((PBQuery from: people) orderBy: 'age' descending: true) take: 3.
+lesson check: 'descending' is: (oldest asArray collect: [:p | p at: 'age']) equals: #(77 77 77).
+narrow := (((PBQuery from: people) where: ((PBField path: 'age') between: 30 and: 35)) orderBy: 'age') take: 5.
+lesson check: 'a selective predicate: the index finds, a sort orders' is: (planOf value: narrow) equals: 'Limit <- Sort <- IndexRange'.
+lesson check: 'still sought by rank: the range is already in key order' is: (narrow explain at: 'by_rank') equals: true.
+
+"Page k, the obvious way: run the query and skip k pages."
+pageBySkipping := [:k | | rows |
+    rows := OrderedCollection new.
+    byAge do: [:p | rows add: p].
+    (rows copyFrom: k * 50 + 1 to: k * 50 + 50) asArray].
+pager := byAge pagerSize: 50.
+lesson check: 'the pager seeks by rank' isTrue: pager byRank.
+lesson check: 'twelve pages of fifty' is: { pager rows. pager pages } equals: #(600 12).
+lesson check: 'page 3 is the same rows either way'
+    is: ((pager page: 3) collect: [:p | p at: 'name']) equals: ((pageBySkipping value: 3) collect: [:p | p at: 'name']).
+lesson check: 'a block key has no rank: the result is materialised once'
+    is: (((PBQuery from: people) orderBy: [:p | (p at: 'name') size]) pagerSize: 50) byRank equals: false.
+
+"A pager reads one snapshot."
+tr := db newTransaction.
+pager := ((PBQuery from: (tr getRootObject: 'people')) orderBy: 'age') pagerSize: 50.
+first := pager page: 0.
+db run: [:t | t setRootObject: 'people' value: ((t getRootObject: 'people')
+    setAt: 1000 value: (t newObject: { 'name' -> 'newcomer'. 'city' -> 'Oslo'. 'age' -> 18 }))].
+seen := OrderedCollection new.
+seen addAll: first.
+1 to: pager pages - 1 do: [:k | seen addAll: (pager page: k)].
+names := seen collect: [:p | p at: 'name'].
+lesson check: 'every row once, none twice' is: { names size. names asSet size } equals: #(600 600).
+lesson check: 'the commit made meanwhile is not in it' isTrue: (names includes: 'newcomer') not.
+
+"A new query per page, by offset, reads a new snapshot each time."
+fresh := ((PBQuery from: (db newTransaction getRootObject: 'people')) orderBy: 'age') pagerSize: 50.
+lesson check: 'the new snapshot has 601 rows' is: fresh rows equals: 601.
+lesson check: 'its page 1 starts with the last row of the old page 0: shown twice'
+    is: (((fresh page: 1) at: 1) at: 'name') equals: ((first at: 50) at: 'name').
+lesson check: 'count of a range, by rank'
+    is: ((PBQuery from: people) where: ((PBField path: 'age') between: 30 and: 35)) count equals: 60.
+
+space close.
+dir deleteAll.
+lesson finish.
