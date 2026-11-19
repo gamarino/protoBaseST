@@ -231,6 +231,7 @@ A key can also be computed: a block registered under a name, in every process th
 index. Only the name is stored in the database, never the block.
 
 ```smalltalk
+Error subclass: #NamelessPerson.
 PBKeySpec registerExtractor: 'name_length' block: [:p | | n |
     n := p at: 'name'.
     n isNil ifTrue: [NamelessPerson signal: 'a person without a name'].

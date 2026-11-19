@@ -1176,7 +1176,7 @@ Every node is a `PBQueryPlan`, immutable once built, safe to run on any actor:
 
 | Node (`explain`) | Class | Fields |
 |---|---|---|
-| `CollectionScan` | `PBCollectionScan` | `'collection'` (`proto_db`'s class name: `'Dictionary'`, `'List'`, `'HashDictionary'`, `'Set'`, `'CountedSet'`, never the protoST class name), `'rows'`, `'indexes'` |
+| `CollectionScan` | `PBCollectionScan` | `'collection'` (`proto_db`'s class name: `'Dictionary'`, `'List'`, `'HashDictionary'`, `'Set'`, `'CountedSet'`, `'RepeatedKeysDictionary'`, never the protoST class name), `'rows'`, `'indexes'` |
 | `IndexLookup`, `IndexRange`, `IndexComplement`, `IndexOrderedScan` | `PBIndexPlan` | `'index'`, `'term'` (`nil` for an ordered scan), `'descending'` (ordered scan) |
 | `Filter` | `PBFilter` | `'predicate'` |
 | `BlockFilter` | `PBBlockFilter` | `'description'` |

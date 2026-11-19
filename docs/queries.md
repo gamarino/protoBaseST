@@ -371,7 +371,7 @@ compares it with `proto_db`'s:
 
 | Node | Fields besides `'plan'`, `'estimate'`, `'children'` | Children |
 |---|---|---|
-| `CollectionScan` | `'collection'` (`proto_db`'s class name of the collection, `'Dictionary'`, `'List'`, `'HashDictionary'`, `'Set'` or `'CountedSet'`, never the protoST class name, so the explain of both languages compares equal), `'rows'` (its count), `'indexes'` (its index names) | none |
+| `CollectionScan` | `'collection'` (`proto_db`'s class name of the collection, `'Dictionary'`, `'List'`, `'HashDictionary'`, `'Set'`, `'CountedSet'` or `'RepeatedKeysDictionary'`, never the protoST class name, so the explain of both languages compares equal), `'rows'` (its count), `'indexes'` (its index names) | none |
 | `IndexLookup`, `IndexRange`, `IndexComplement` | `'index'` (the index's own explain, below), `'term'` (the term's description) | none |
 | `IndexOrderedScan` | `'index'`, `'term'` (`nil`), `'descending'` | none |
 | `Filter` | `'predicate'`: the residual condition's description | its source |
