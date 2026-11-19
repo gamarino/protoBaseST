@@ -1529,6 +1529,65 @@ all six runs (three each, interleaved) agreed. Times in microseconds, minimum / 
   machine's out-of-memory guard at 14 GB, during the 10^5 step, with every size in one process). The
   ratio does not keep growing past 10^4 (38.3x there, 27.1x here, single runs on a busy machine).
 
+#### Atom weight, stage 1: construction cleanup, write-once fields by compare-and-swap
+
+Plan Task 11 (the maintainer's question of 2026-11-19, "why so many cells?", answered without
+breaking immutability; [decisions.md](decisions.md), row Queries 11). An atom's runtime-only
+fields (oid, saved place, load memo, a keyed node's order key, an index's parsed key spec) were
+one `Atom` each; they are now instance variables written once by a compare-and-swap from nil, and
+a constructor writes its fields in one write group without writing nil. A counted node builds its
+slots with one brace instead of `copyWith:`, the built-in node classes read their record shape
+from a class variable, and `PBTuple _trustedOn:` keeps a fresh brace Array instead of copying it.
+Bytes on disk and tree node identity with `proto_db` are unchanged
+(`tests/interop/*identical*.sh` pass).
+
+**Cells**, `bench/run_atom_weight.sh` (protoCore's cell allocator counted under gdb; live cells
+from `PROTOCORE_HEAP_TRACE` after a churn, 10^5 objects kept, minus an empty run, heap budget
+`PROTOCORE_HEAP_LIMIT_CELLS=32000000`), 2026-11-19, same machine and binary as below, load
+average 2.8 to 3.6 (the bench's own processes included); before at `138730d`, after at `70a4969`,
+both clean. Retained is the median live cells per object (the quartiles are within about 1 cell);
+allocated is the cells allocated per object built:
+
+| object | retained before | retained after | allocated before | allocated after |
+|---|---|---|---|---|
+| a `PBCountedKeyNode`, own key and value tuple (`key:orderKey:value:left:right:`) | 80.1 | 51.6 | 518.6 | 200.7 |
+| the same node, key, order key and value shared (the node's own cells) | 58.4 | 31.2 | 406.9 | 111.2 |
+| a node of a 10^5-node tree built by `PBAvl keyFromSorted:` (per node) | 88.3 | 59.9 | 481.6 | 173.2 |
+| a blank atom after `_setOid: nil pointer: nil storage: nil` | 33.3 | 3.8 | 121.4 | 13.0 |
+| a `PBTuple` of 2, `withAll:` (copies) / `_trustedOn:` (new) | 13.2 | 13.5 / 10.0 | 53.4 | 54.0 / 30.0 |
+
+Drawing a node's oid still allocates about 315 cells (the oid pool's slice and the
+publication); it retains about 2.
+
+**Wall time and memory**, `QUERY_M2_SIZES="2000 10000" QUERY_Q1_SIZES=10000 RUNS=3
+bench/run_query.sh M2 Q1`, before (`138730d`, from a clean worktree of that commit) then after
+(`70a4969`), one after the other on the machine of M1 to M3 (AMD Ryzen 5 5500U, Linux 7.0.0-43,
+DEV12), the `pinned-360` build (protoST 0.12.0 on protoCore 3.6.0), `proto_db` v2.0.0rc4 on
+CPython 3.14.0, heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`. Runner provenance lines,
+unmodified: `2026-11-19T17:59Z; protoBaseST 138730d; protoST 0.12.0` and
+`2026-11-19T18:03Z; protoBaseST 70a4969; protoST 0.12.0`. Load average 3.6 before and 4.2 after
+the first run, 3.2 and 3.6 for the second (desktop sessions open, not controlled). Every run was
+verified (same rows, queries, plan and checksum as `proto_db`'s). Microseconds, minimum / median
+of 3; peak RSS in MB (the largest over the runs):
+
+| unit | protoBaseST before | protoBaseST after | change (min) | peak RSS before / after | `proto_db` (after run) |
+|---|---|---|---|---|---|
+| M2, 2000, build | 1292462 / 1399337 | 1074495 / 1171899 | -17% | 765 / 665 | 51765 / 52791 |
+| M2, 2000, fold | 3513430 / 3933494 | 1827802 / 2145897 | -48% | 1393 / 749 | 185683 / 201873 |
+| M2, 10^4, build | 7343821 / 7446686 | 6043123 / 6266610 | -18% | 3928 / 3368 | 279660 / 282305 |
+| M2, 10^4, fold | 19711389 / 20012678 | 12322533 / 12649148 | -37% | 5070 / 4141 | 1083321 / 1083536 |
+| Q1, 10^4, index | 17606 / 17693 | 15616 / 16167 | -11% | 5087 / 5086 | 2127 / 2169 |
+| Q1, 10^4, scan | 10731204 / 12457996 | 11392206 / 11475968 | +6% | 5088 / 5086 | 542515 / 558608 |
+
+- The fold of single additions gains most (about a third to a half): every addition copies a
+  path of nodes, and each node cost four `Atom` creations and several publications before.
+  The build gains about a sixth. Differences under about 15% (Q1) are noise on this machine.
+- Q1's processes peak at the heap budget either way (protoCore keeps memory until it reaches
+  it), so their RSS says nothing about the live set; the M2 peaks below the budget dropped by
+  13% to 46%.
+- Stage 2 (plan Task 12: no envelope or state dictionary for a shaped atom, a decode fast path)
+  is not done here.
+
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded

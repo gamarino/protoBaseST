@@ -163,6 +163,18 @@
   with 0, 1 and 3 indexes. `bench/run_query.sh` now runs each unit (a size and a plan) in a
   process of its own with an explicit heap budget (`PROTOCORE_HEAP_LIMIT_CELLS`) and reports each
   process's peak resident set.
+- **Lighter atoms and nodes** (plan Task 11, stage 1 of the atom weight work; spec 4.1, decision 3
+  amended 2026-11-19): an atom's runtime-only fields (oid, saved place, load memo, a keyed node's
+  order key, an index's parsed key spec) are instance variables written once by a
+  compare-and-swap from nil (`_publishOid:`, `_publishSaved:`, `_publishMemo:`,
+  `_publishOrderKey:`, `_publishKeySpec:`), not one `Atom` each; constructors write their fields
+  in one group and never write nil; a counted node's slots are one brace; the built-in node
+  classes keep their record shape in class variables; `PBTuple _trustedOn:` (private) keeps a
+  fresh brace Array. A node with its own key and value retains 52 cells instead of 80 and its
+  construction allocates 201 instead of 519; M2's fold of 10^4 additions runs in 12.3 s instead
+  of 19.7 s ([deviations.md](docs/deviations.md#atom-weight-stage-1-construction-cleanup-write-once-fields-by-compare-and-swap)).
+  No public selector, byte on disk or tree node changes. Tests: `tests/unit/atom_weight.st`;
+  bench: `bench/run_atom_weight.sh`.
 
 ## 0.2.0 (2026-11-19)
 
