@@ -122,10 +122,24 @@ PBMemberKeys class >> memberKeyAndOrderKeyOf: anElement
   token := PBKeys exactToken: anElement.
   member := self _memberKeyOf: anElement orderKey: okey token: token.
   okey isNil ifTrue: [^ { member. PBKeys orderKey: member }].
-  ^ { member.
-    PBOrderKey rank: self _tupleRank payload: {
-      PBOrderKey rank: self _tupleRank payload: { ZeroKey. okey }.
-      self _orderKeyOfToken: token } }.
+  ^ { member. self _orderKeyOf: okey token: token }.
+
+"The order key of anElement's member key, as memberKeyAndOrderKeyOf: answers it, without
+ building the member key when anElement is orderable (Union, Intersect and Distinct need only the
+ order key)."
+PBMemberKeys class >> memberOrderKeyOf: anElement
+  | okey token |
+  okey := self orderKeyOrNil: anElement.
+  token := PBKeys exactToken: anElement.
+  okey isNil ifTrue: [^ PBKeys orderKey: (self _memberKeyOf: anElement orderKey: nil token: token)].
+  ^ self _orderKeyOf: okey token: token.
+
+"The order key of the member key ((0, element), aToken) of an orderable element whose order key is
+ anOrderKey: the one construction memberKeyAndOrderKeyOf: and memberOrderKeyOf: share."
+PBMemberKeys class >> _orderKeyOf: anOrderKey token: aToken
+  ^ PBOrderKey rank: self _tupleRank payload: {
+    PBOrderKey rank: self _tupleRank payload: { ZeroKey. anOrderKey }.
+    self _orderKeyOfToken: aToken }.
 
 "The member key (equality part, aToken) of anElement, whose order key is anOrderKeyOrNil (nil:
  unorderable) and whose exact token is aToken: the one construction memberKeyOf: and

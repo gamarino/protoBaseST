@@ -125,12 +125,19 @@
   and its open forms, `isNone`, `notNone`, `isTrue`, `notTrue`, `contains:`; `=` not overridden)
   and `PBQuery` (`from:`, `where:` with an expression or a one-argument block, chained as AND,
   `orderBy:`, `thenBy:`, `skip:`, `take:`, `project:`, `collect:`, `distinct`, `asArray`, `do:`,
-  `count`, `first`, `firstOrNil`, `explain`, `plan`), immutable, with `linq.py`'s mixing rule for
+  `count`, `first`, `firstOrNil`, `explain`, `plan`; `count:`, `first:`, `firstOrNil:` with a
+  condition and `explainCount`; on `PBField` also `betweenClosed:and:`, `between:and:inclusive:`
+  and `range:to:bounds:`), immutable, with `linq.py`'s mixing rule for
   blocks (`BlockFilter`). No `select:` (ruling IQ2); `where:` refuses the list syntax
   (`PBExpression compile:`) and anything else with ruling CR6's text. Tests
   `tests/unit/qry_field.st` and `tests/unit/qry_query.st` (41 `test_linq.py` rows ported). The
   programs of chapters 11 (indexed part), 17 and 18 and `examples/queries/` (`reading_plans`,
   `lookups`, `keys`, `expressions`, `compound`, `ranges`, `merge_indexed`) run as tests.
+- **Union, Intersect and Distinct key rows cheaply**: an atom by its oid's bytes, any other row by
+  its member order key built without the member tuple, one dictionary lookup per row (identity
+  unchanged: 1, 1.0 and Decimal 1 are three elements). A 500-row Union went from 263 ms to 19 ms.
+- **Chapter 4's program** checks that a change to `proto_db`'s indexed root maintains its indexes
+  (it still expected the refusal that Task 4a removed).
 - **Benchmarks Q1-Q4** (`bench/run_query.sh Q1 Q2 Q3 Q4`, `QueryUnits` in `bench/_query_bench.st`):
   point equality against size, `in` and ranges, compound conditions and ordering, the planner's
   choice against a forced scan, through the query front end in both implementations; figures in

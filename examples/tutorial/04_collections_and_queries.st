@@ -1,4 +1,4 @@
-"EXPECT: 04 collections and queries ok (18 checks)"
+"EXPECT: 04 collections and queries ok (19 checks)"
 "Lesson 04: the four writable collections, and how to ask questions of them.
  Tutorial chapter: docs/tutorial/04-collections-and-queries.md
 
@@ -16,7 +16,7 @@
 Import from: 'protobase'.
 Import from: '_lesson'.
 
-| lesson prices byYear shelf a b counts dir space db books old found addBook copy people |
+| lesson prices byYear shelf a b counts dir space db books old found addBook copy people changed |
 lesson := Lesson named: '04 collections and queries'.
 
 "PBDictionary: keys are compared and ordered by the format's order key."
@@ -87,8 +87,9 @@ lesson check: 'a lookup by year' is: ((db newTransaction getRootObject: 'byYear'
 lesson say: 'catalogue of ' , books count printString , ' books, ' , (db newTransaction getRootObject: 'byYear') count printString , ' years indexed'.
 space close.
 
-"proto_db's own indexes (equality, range, vector) are read, never queried or written here.
- The conformance database written by proto_db has a root 'people' with two indexes."
+"proto_db's own indexes are read, and an equality or range index is maintained by every change
+ (0.3.0, chapter 17). The conformance database written by proto_db has a root 'people' with two
+ indexes."
 copy := dir / 'indexed'.
 copy ensureCreateDirectory.
 '../../tests/conformance/vectors/database' asFileReference files do: [:f | f copyTo: copy / f basename].
@@ -97,8 +98,10 @@ people := (space openDatabase: 'db') newTransaction getRootObject: 'people'.
 lesson check: 'the indexes are read' is: people indexNames equals: #('by_age' 'by_city').
 lesson check: 'an index keeps its definition' is: (people getIndex: 'by_age') name equals: 'by_age'.
 lesson check: 'the indexed collection is read as usual' is: people count equals: people keys size.
-lesson check: 'and refuses every change, naming its indexes'
-    signals: PBNotSupportedError containing: 'by_age' during: [people setAt: 'zed' value: 1].
+changed := people setAt: 'zed' value: (PBObject withAll: { 'name' -> 'Zed'. 'age' -> 40 }).
+lesson check: 'a change answers a new version with one more element' is: changed count equals: people count + 1.
+lesson check: 'whose indexes were maintained in the same step'
+    is: ([changed validate. 'clean'] on: PBCorruptionError do: [:e | e messageText]) equals: 'clean'.
 space close.
 dir deleteAll.
 lesson finish.

@@ -14,6 +14,11 @@ conditions the planner answers with indexes:
   in: aCollection                       'in' (never a map or a String)
   between: a and: b, betweenOpen:and:, betweenLeftOpen:and:, betweenRightOpen:and:
                                         'between[]' 'between()' 'between(]' 'between[)'
+  betweenClosed: a and: b               'between[]' (linq.py between_closed)
+  between: a and: b inclusive: { includeLow. includeHigh }
+                                        the four between operators (linq.py between inclusive=)
+  range: a to: b, range: a to: b bounds: '[)'
+                                        by bounds '[]' '()' '(]' '[)' (linq.py range)
   isNone notNone isTrue notTrue contains: v
                                         '?N' '?!N' '?T' '?!T' 'contains'
 
@@ -26,7 +31,9 @@ answer. PBQuery from: takes a PBIndexedCollection (its indexes are consulted), a
 collection's scan keeps its indexes) or a PBQuery (answered as is); anything else is
 PBValidationError (a host collection would need ValuesScan, deferred). The operators are where:,
 orderBy:, orderBy:descending:, thenBy:, thenBy:descending:, skip:, take:, project:, collect: and
-distinct; the terminals asArray, do:, count, first, firstOrNil, plan and explain. There is no
+distinct; the terminals asArray, do:, count, count:, first, first:, firstOrNil, firstOrNil:, plan,
+explain and explainCount (count:, first: and firstOrNil: take a condition, as where: does, and
+answer for the query with it added). There is no
 select: (ruling IQ2): Smalltalk's select: filters, so proto_db's name would read backwards.
 
 where: takes a PBExpression or a one-argument block (ruling CR6; anything else is
@@ -146,6 +153,37 @@ PBField >> in: aCollection
 "low <= key <= high."
 PBField >> between: low and: high
   ^ self _op: 'between[]' value: { low. high }.
+
+"low <= key <= high (linq.py between_closed)."
+PBField >> betweenClosed: low and: high
+  ^ self between: low and: high.
+
+"A between whose bound inclusion is aPair, { include low. include high }: an Array of two
+ Booleans (linq.py between with inclusive=); anything else is PBValidationError."
+PBField >> between: low and: high inclusive: aPair
+  | op |
+  ((aPair isClassObject not and: [aPair class == Array]) and: [
+    aPair size = 2 and: [aPair allSatisfy: [:each | each == true or: [each == false]]]])
+      ifFalse: [^ PBValidationError signal: 'between:and:inclusive: needs a pair of Booleans, not '
+        , (PBKeySpec _repr: aPair)].
+  op := (aPair at: 1)
+    ifTrue: [(aPair at: 2) ifTrue: ['between[]'] ifFalse: ['between[)']]
+    ifFalse: [(aPair at: 2) ifTrue: ['between(]'] ifFalse: ['between()']].
+  ^ self _op: op value: { low. high }.
+
+"low <= key <= high: range:to:bounds: with '[]'."
+PBField >> range: low to: high
+  ^ self range: low to: high bounds: '[]'.
+
+"A between whose bounds are aString, one of '[]', '()', '(]', '[)' (surrounding blanks ignored),
+ as linq.py range; anything else is PBValidationError."
+PBField >> range: low to: high bounds: aString
+  | bounds |
+  bounds := (aString isClassObject not and: [aString isString]) ifTrue: [aString trimBoth] ifFalse: [nil].
+  (#('()' '(]' '[)' '[]') includes: bounds) ifFalse: [
+    ^ PBValidationError signal: 'range:to:bounds: needs bounds ''()'', ''(]'', ''[)'' or ''[]'', not '
+      , (PBKeySpec _repr: aString)].
+  ^ self _op: 'between' , bounds value: { low. high }.
 
 "low < key < high."
 PBField >> betweenOpen: low and: high
@@ -341,6 +379,23 @@ PBQuery >> do: aBlock
 "The number of rows, by a PBCountPlan (read by rank when the plan knows it exactly)."
 PBQuery >> count
   ^ (PBCountPlan source: self plan) execute first.
+
+"The number of rows that also satisfy aCondition (an expression or a one-argument block, as for
+ where:) (linq.py count with a predicate)."
+PBQuery >> count: aCondition
+  ^ (self where: aCondition) count.
+
+"The explain of the plan count runs: a Count over this query's plan (linq.py explain_count)."
+PBQuery >> explainCount
+  ^ (PBCountPlan source: self plan) explain.
+
+"The first row that also satisfies aCondition; PBUserError when there is none."
+PBQuery >> first: aCondition
+  ^ (self where: aCondition) first.
+
+"The first row that also satisfies aCondition, or nil when there is none."
+PBQuery >> firstOrNil: aCondition
+  ^ (self where: aCondition) firstOrNil.
 
 "The first row; PBUserError when there is none (linq.py first)."
 PBQuery >> first

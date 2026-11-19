@@ -212,6 +212,7 @@ SmallInteger milliseconds, not float seconds.
 | `.select([paths])`, `.select(fn)` | `project: #('name' 'age')`, `collect: aBlock` (no `select:`: Smalltalk's `select:` filters) |
 | `.order_by(k, descending=)`, `.then_by(k, descending=)`, `.skip(n)`, `.take(n)`, `.distinct()` | `orderBy:`, `orderBy:descending:`, `thenBy:`, `thenBy:descending:`, `skip:`, `take:`, `distinct` |
 | `.to_list()`, `.count()`, `.first()`, `.first_or_none()`, `.explain()`, `.plan()` | `asArray`, `count`, `first`, `firstOrNil`, `explain`, `plan` |
+| `.count(p)`, `.first(p)`, `.first_or_none(p)`, `.explain_count()`; `F.a.between(a, b, inclusive=(lo, hi))`, `F.a.between_closed(a, b)`, `F.a.range(a, b, bounds)` | `count:`, `first:`, `firstOrNil:`, `explainCount`; `between:and:inclusive:`, `betweenClosed:and:`, `range:to:bounds:` |
 | `plan_query(source, where, order_by, limit, offset)` | `PBPlanner plan:where:orderBy:limit:offset:` |
 | iteration (`for x in coll`) | `do:`; `keysAndValuesDo:` on the dictionaries |
 
@@ -233,8 +234,8 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 | [docs/tutorial/erp.md](docs/tutorial/erp.md) | A guided build of a small ERP, with the reasoning at each step. Every snippet is run by the tests. |
 | [docs/tutorial/](docs/tutorial/README.md) | The chaptered tutorial: chapters 1-12 on a single process, chapters 13-16 on cluster mode, each quoting a program of `examples/tutorial/` or `examples/cluster/`; and two orientation chapters, coming from GemStone/S and coming from Soil, with their sources. |
 | [examples/cluster/](examples/cluster/README.md) | The cluster chapters' programs, run by the tests; `pending/` is for those that need API still being built (none today). |
-| [examples/tutorial/](examples/tutorial/README.md) | Twelve small programs, one concept each, each checking its own results; run by the tests. |
-| [docs/reference.md](docs/reference.md) | Every public class and message; the indexed-query API in a section marked planned. |
+| [examples/tutorial/](examples/tutorial/README.md) | Small programs, one concept each, each checking its own results; run by the tests. |
+| [docs/reference.md](docs/reference.md) | Every public class and message; the indexed-query API in a section marked in progress (pagers to come). |
 | [docs/queries.md](docs/queries.md) | **0.3.0, in progress:** indexed queries and the query planner, the conceptual guide, including how to read `explain`. |
 | [examples/queries/](examples/queries/README.md) | **0.3.0, in progress:** the programs of the guide, run as tests; the one that needs pagers is still in `pending/`. |
 | [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from `proto_db`. |

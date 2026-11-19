@@ -873,11 +873,11 @@ PBDistinct class >> source: aPlan
 PBDistinct >> do: aBlock
   | seen |
   seen := Set new.
-  source do: [:each | | k |
-    k := _PBSetPlan keyOf: each.
-    (seen includes: k) ifFalse: [
-      seen add: k.
-      aBlock value: each]].
+  source do: [:each | | before |
+    "One hash per row: the set grows only for an identity not seen before."
+    before := seen size.
+    seen add: (_PBSetPlan keyOf: each).
+    seen size > before ifTrue: [aBlock value: each]].
 
 "rows = source rows (an upper bound); cost = source cost + source rows."
 PBDistinct >> _estimateWith: aMemo
@@ -891,9 +891,14 @@ PBDistinct >> _explainWith: aMemo
 "=== Union and Intersect (plans.py _SetPlan) ================================="
 
 "The identity of a row for Union, Intersect and Distinct (plans.py element_key: (element_identity,
- exact_token)): the order key of its member key, ((0, element) or (1, surrogate), exact token)."
+ exact_token)). An atom answers its oid's bytes: every atom has the same exact token and its order
+ key is its oid alone, so the oid is the whole identity, and a ByteArray never equals the
+ PBOrderKey any other row answers. Any other row answers the order key of its member key, ((0,
+ element) or (1, surrogate), exact token), built without the member tuple itself."
 _PBSetPlan class >> keyOf: anElement
-  ^ (PBMemberKeys memberKeyAndOrderKeyOf: anElement) at: 2.
+  ((anElement isClassObject not and: [anElement isKindOf: PBAtom]) and: [anElement isPBReference == true])
+    ifTrue: [^ PBKeys _oidBytes: anElement oid].
+  ^ PBMemberKeys memberOrderKeyOf: anElement.
 
 "A node over anArray's plans (two or more; PBValidationError otherwise)."
 _PBSetPlan class >> withAll: anArray
@@ -921,16 +926,19 @@ _PBSetPlan >> _explainWith: aMemo
 "Every occurrence of the first source, then from each later source the occurrences of an identity
  beyond those already produced: each identity with its largest multiplicity (first-seen order)."
 PBUnion >> do: aBlock
-  | produced |
-  produced := Dictionary new.
-  sources do: [:src | | seen |
-    seen := Dictionary new.
-    src do: [:each | | k n |
+  | entries |
+  "One entry per identity, looked up once per row: { produced. seen in the current source. that
+   source's number }; this run's own working state, never shared."
+  entries := Dictionary new.
+  sources doWithIndex: [:src :s |
+    src do: [:each | | k e n |
       k := _PBSetPlan keyOf: each.
-      n := (seen at: k ifAbsent: [0]) + 1.
-      seen at: k put: n.
-      n > (produced at: k ifAbsent: [0]) ifTrue: [
-        produced at: k put: n.
+      e := entries at: k ifAbsent: [entries at: k put: (Array with: 0 with: 0 with: s)].
+      (e at: 3) = s ifFalse: [e at: 2 put: 0; at: 3 put: s].
+      n := (e at: 2) + 1.
+      e at: 2 put: n.
+      n > (e at: 1) ifTrue: [
+        e at: 1 put: n.
         aBlock value: each]]].
 
 "rows = sum of source rows (an upper bound); cost = sum of costs + rows."
@@ -946,19 +954,22 @@ PBUnion >> _name
 "The later sources are counted first; the first is then read, so the rows follow its order: each
  identity with its smallest multiplicity."
 PBIntersect >> do: aBlock
-  | counts seen |
-  counts := (sources copyFrom: 2 to: sources size) collect: [:src | | bag |
-    bag := Dictionary new.
-    src do: [:each | | k |
+  | entries m |
+  "One entry per identity, looked up once per row: slot 1 counts the first source's occurrences
+   produced so far, slot i (i > 1) source i's occurrences; this run's own working state."
+  entries := Dictionary new.
+  m := sources size.
+  2 to: m do: [:s |
+    (sources at: s) do: [:each | | k e |
       k := _PBSetPlan keyOf: each.
-      bag at: k put: (bag at: k ifAbsent: [0]) + 1].
-    bag].
-  seen := Dictionary new.
-  (sources at: 1) do: [:each | | k n |
-    k := _PBSetPlan keyOf: each.
-    n := (seen at: k ifAbsent: [0]) + 1.
-    seen at: k put: n.
-    (counts allSatisfy: [:bag | n <= (bag at: k ifAbsent: [0])]) ifTrue: [aBlock value: each]].
+      e := entries at: k ifAbsent: [entries at: k put: (Array new: m withAll: 0)].
+      e at: s put: (e at: s) + 1]].
+  (sources at: 1) do: [:each | | e n |
+    e := entries at: (_PBSetPlan keyOf: each) ifAbsent: [nil].
+    e isNil ifFalse: [
+      n := (e at: 1) + 1.
+      e at: 1 put: n.
+      ((2 to: m) allSatisfy: [:s | n <= (e at: s)]) ifTrue: [aBlock value: each]]].
 
 "rows = smallest source rows; cost = sum of (source cost + source rows)."
 PBIntersect >> _estimateWith: aMemo

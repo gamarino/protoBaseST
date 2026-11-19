@@ -246,11 +246,16 @@ def q_units(id_):
     return [(id_, 2000, f"{p}-{f}") for p in points[id_] for f in ("index", "scan")]
 
 
-def q_records(n, indexed):
+def q_plain(n):
     groups = max(n // 10, 1)
     coll = List()
     for i in range(n):
         coll = coll.append_last(DBObject(id=i, g=i % groups, r=i, few=i % 4, x=i % 10))
+    return coll
+
+
+def q_records(n, indexed):
+    coll = q_plain(n)
     if not indexed:
         return coll
     return (coll.add_index(EqualityIndex("by_g", KeySpec.path("g")))
@@ -278,7 +283,9 @@ def q_split(plan):
 def q1(n, plan):
     if plan not in ("index", "scan"):
         raise SystemExit(f"Q1: unknown plan {plan}")
-    coll, groups = q_records(n, plan == "index"), max(n // 10, 1)
+    coll, groups = q_plain(n), max(n // 10, 1)
+    if plan == "index":
+        coll = coll.add_index(EqualityIndex("by_g", KeySpec.path("g")))
     return q_run(lambda query, q: query.where(F.g == 37 * q % groups), coll, plan, False)
 
 

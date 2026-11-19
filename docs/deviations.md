@@ -937,8 +937,8 @@ The detail:
 > [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md) plans on purpose,
 > written early so the draft chapters ([17](tutorial/17-indexes.md),
 > [18](tutorial/18-queries-and-plans.md), [19](tutorial/19-ordered-reads-and-pages.md)) and the
-> guide ([queries.md](queries.md)) can link here. The entry "Indexed collections are written and
-> merged; queries are not yet provided" above says what holds today. Each entry becomes a deviation when its task is merged;
+> guide ([queries.md](queries.md)) can link here. The entry "Indexed collections are written, merged
+> and queried; pagers are not yet provided" above says what holds today. Each entry becomes a deviation when its task is merged;
 > the rows marked with a task (4a to 8), and the rows on opaque predicates, `=` on the field
 > builder, index constructors, extractor blocks, `isExtractorRegistered:`, projection and
 > selection blocks, are in force; the pager row is not yet.
@@ -1193,8 +1193,11 @@ on every unit but one, about 10x on index lookups and ordered streams and about 
 is the speed of a protoST walk over immutable records. **The exception is Q3's Union**: 107x
 `proto_db`'s time, and slower than its own scan of the same records (6.3 s against 5.0 s for 20
 queries of about 500 rows), where `proto_db`'s Union is 4.4x faster than its scan. Its answers are
-right (the runner checked them); the time is in `PBUnion`'s identity bookkeeping (plan Task 6) and is
-not explained here: an open item, not a property of the model. The planner's choices are
+right (the runner checked them). The cause, found in review: a constant cost of about 430 µs per row
+in the identity key of `PBUnion`, `PBIntersect` and `PBDistinct` (a member tuple built and dropped, a
+nested tuple order key, and four dictionary operations each recomputing that key's uncached
+hash). Fix round 1 keys an atom by its oid's bytes, builds no member tuple, and looks each row up
+once; this table predates the fix, and the re-run follows it. The planner's choices are
 `proto_db`'s, and both implementations sort the unselective Q4 over a lookup rather than filter an
 ordered scan, as the model says.
 

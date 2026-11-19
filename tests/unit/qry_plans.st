@@ -1,4 +1,4 @@
-"EXPECT: ok 15"
+"EXPECT: ok 16"
 "Indexed queries, plan Task 6: the plan operators (proto_db proto_db/query/plans.py at v2.0.0rc4,
  less ValuesScan, VectorSearch, GroupBy, Join and Unnest; spec 3.2). tests/unit/test_query_plans.py's
  four behaviours (the estimate, the abstract plan, the collection scan and its empty case), then
@@ -19,7 +19,7 @@ Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_queries'.
 
-| c people list byCity byAge scan city age bag ids keysOf est plans rows r1 a b u i k sorted
+| oidBytes c people list byCity byAge scan city age bag ids keysOf est plans rows r1 a b u i k sorted
   sortRows fails seen limit count dist proj missing decimal1 expected composite filter mapped
   guide gCity gAge oslo range gFilter rejected fullScan r30 gSort gLimit |
 c := Check new.
@@ -98,6 +98,20 @@ c that: 'Union keeps the largest multiplicity and Intersect the smallest, by ele
     [PBIntersect withAll: { a. 3 }. nil] on: PBValidationError do: [:e | e return: #refused] }
   equals: { { 1. 1. 2. 1.0. r1. 2. 3. decimal1 } collect: [:e | PBKeys exactToken: e]. { 1. 2 } collect: [:e | PBKeys exactToken: e].
     #(10.0 20.0). #(5.0 20.0). true. true. #refused. #refused }.
+
+"Identity keys (fix round 1 of Task 8: an atom is keyed by its oid's bytes, any other row by its
+ member order key): 1, 1.0 and Decimal 1 stay three elements, an atom given twice is one, and a
+ ByteArray equal to the atom's oid bytes is another element, in all three nodes."
+oidBytes := PBKeys _oidBytes: r1 oid.
+a := PBCollectionScan on: (PBList new extend: { 1. 1.0. decimal1. r1. r1. oidBytes. 1 }).
+b := PBCollectionScan on: (PBList new extend: { decimal1. r1. oidBytes. 1.0. 1 }).
+c that: 'Union, Intersect and Distinct key an atom by its oid and keep 1, 1.0, Decimal 1 and the oid bytes apart'
+  is: { (PBDistinct source: a) execute collect: [:e | PBKeys exactToken: e].
+    (PBUnion withAll: { a. b }) execute collect: [:e | PBKeys exactToken: e].
+    (PBIntersect withAll: { a. b }) execute collect: [:e | PBKeys exactToken: e] }
+  equals: { { 1. 1.0. decimal1. r1. oidBytes } collect: [:e | PBKeys exactToken: e].
+    { 1. 1.0. decimal1. r1. r1. oidBytes. 1 } collect: [:e | PBKeys exactToken: e].
+    { 1. 1.0. decimal1. r1. oidBytes } collect: [:e | PBKeys exactToken: e] }.
 
 "Sort: rows i -> k of 2, nil, 'a', 1, absent, a list, 1.0, 2, NaN"
 sortRows := { 2. nil. 'a'. 1. missing. PBFrozenList withAll: #(1). 1.0. 2. Float nan } withIndexCollect: [:v :n |

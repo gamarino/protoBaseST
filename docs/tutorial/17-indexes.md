@@ -27,11 +27,12 @@ lesson check: 'a walk finds the people in Oslo' is: (walk value: (db newTransact
 
 It is correct, and it is the right answer for 600 elements read once. Its cost is the size of the
 collection, whatever the answer: finding one person among a million reads a million records.
-In protoBaseST each record read is a lazy load and a decode, so the cost per element is not
-small. Measured in T8 (bench Q1, RUNS=5 interleaved, the minimum,
-[deviations.md](../deviations.md#q1-q4-queries-indexed-against-a-forced-scan)): one lookup by a
-walk took 5.5 ms at 10^2 elements, 59 ms at 10^3 and 565 ms at 10^4; by an equality index, about
-1 ms at every one of those sizes.
+In protoBaseST a stored record that is not in memory is also a lazy load and a decode, so the
+cost per element is not small. Measured in T8 on records in memory (bench Q1, RUNS=5 interleaved,
+the minimum, [deviations.md](../deviations.md#q1-q4-queries-indexed-against-a-forced-scan)): one
+lookup by a walk took 5.5 ms at 10^2 elements, 59 ms at 10^3 and 565 ms at 10^4; by an equality
+index, about 1 ms at every one of those sizes. A stored collection adds a load and a
+decode per record the walk reads.
 
 ## The next obvious solution: keep the lookup yourself
 

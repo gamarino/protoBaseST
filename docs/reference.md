@@ -1054,7 +1054,7 @@ For tests, tools and readers of the format. An application does not need them.
 
 ## Indexed queries (in progress, 0.3.0)
 
-> **Planned for 0.3.0 and built task by task.** Implemented so far: "Key specs and extractors"
+> **0.3.0, built task by task.** Implemented so far: "Key specs and extractors"
 > (`src/protobase/keyspec.st`), `PBMemberKeys` and `PBMisfiledError`, "Indexes" (Task 3), the
 > collection messages of "Collections gain" (Tasks 4a and 4b), "Terms and expressions" (Task 5,
 > `src/protobase/terms.st`), and "Plans and explain" with the indexes' access paths and rank access
@@ -1068,7 +1068,7 @@ For tests, tools and readers of the format. An application does not need them.
 > [queries.md](queries.md); the tutorial is chapters [17](tutorial/17-indexes.md),
 > [18](tutorial/18-queries-and-plans.md) and [19](tutorial/19-ordered-reads-and-pages.md).
 
-| `proto_db` | protoBaseST (planned) |
+| `proto_db` | protoBaseST |
 |---|---|
 | `KeySpec`, `register_extractor`, `unregister_extractor`, `extractor_version` | `PBKeySpec`, `PBKeySpec registerExtractor:block:version:`, `unregisterExtractor:`, `extractorVersion:` |
 | `EqualityIndex(name, key)`, `RangeIndex(name, key)` | `PBEqualityIndex name:keySpec:`, `name:path:`; `PBRangeIndex` the same |
@@ -1078,6 +1078,8 @@ For tests, tools and readers of the format. An application does not need them.
 | `from_collection(c).where(p).order_by(k).skip(n).take(n)` | `((((PBQuery from: c) where: p) orderBy: k) skip: n) take: n` |
 | `select(...)` | `project:`, `collect:` (`select:` is **not** defined on `PBQuery`) |
 | `count()`, `first()`, `first_or_none()`, `to_list()`, `explain()`, `plan()`, `pager(n)` | `count`, `first`, `firstOrNil`, `asArray`, `explain`, `plan`, `pagerSize:` (Task 9) |
+| `count(p)`, `first(p)`, `first_or_none(p)`, `explain_count()` | `count:`, `first:`, `firstOrNil:`, `explainCount` |
+| `F.a.between(a, b, inclusive=(lo, hi))`, `F.a.between_closed(a, b)`, `F.a.range(a, b, bounds)` | `between:and:inclusive:`, `betweenClosed:and:`, `range:to:`, `range:to:bounds:` |
 | `plan_query(source, where, order_by, limit, offset)` | `PBPlanner plan:where:orderBy:limit:offset:` |
 | `PythonFilter` (an `explain` node) | `BlockFilter` |
 
@@ -1199,6 +1201,8 @@ the vector parts). Every condition is a frozen value: no message changes it.
 | `PBField path: aString`, `element`, `extractor: aName` | A field: a dotted path (a non-empty String; a malformed one is `PBValidationError`), the element itself, or a registered extractor. A field is not a condition: `where:` refuses it. Implemented (Task 8, `src/protobase/query.st`). |
 | `eq: v`, `ne: v`, `< v`, `<= v`, `> v`, `>= v`, `in: aCollection` | The term of `'=='`, `'!='`, `'<'` ... `'in'`. `=` is **not** overridden: `aField = v` is a Boolean. `in:` refuses a map, a String and a `ByteArray` (`PBValidationError`) and reads any other collection as a sequence. |
 | `between: a and: b`, `betweenOpen:and:`, `betweenLeftOpen:and:`, `betweenRightOpen:and:` | `'between[]'`, `'between()'`, `'between(]'`, `'between[)'`. |
+| `betweenClosed: a and: b`, `between: a and: b inclusive: { includeLow. includeHigh }` | `'between[]'` (`F.a.between_closed(a, b)`); the between of that bound inclusion (`F.a.between(a, b, inclusive=(lo, hi))`): the pair is an `Array` of two Booleans, anything else `PBValidationError`. |
+| `range: a to: b`, `range: a to: b bounds: aString` | The between of the bounds `'[]'` (the default), `'()'`, `'(]'` or `'[)'`, blanks around them ignored (`F.a.range(a, b, bounds)`); other bounds are `PBValidationError`. |
 | `isNone`, `notNone`, `isTrue`, `notTrue`, `contains: v` | `'?N'`, `'?!N'`, `'?T'`, `'?!T'`, `'contains'`. |
 
 ### Queries
@@ -1216,6 +1220,8 @@ A query keeps the collection version it was built from: later writes do not chan
 | `skip: n`, `take: n`, `distinct` | The window (composed like slicing; an Integer >= 0, else `PBValidationError`); first occurrences only. |
 | `project: anArrayOfPaths`, `collect: aBlock` | Each row as a `PBFrozenDict` of the paths (an Array of paths or `PBField`s, or a `PBFrozenDict` of output name to path; an absent field is left out), or through a one-argument block. |
 | `asArray`, `do: aBlock`, `count`, `first`, `firstOrNil` | Run it. `first` of an empty result is `PBUserError`. |
+| `count: aCondition`, `first: aCondition`, `firstOrNil: aCondition` | The same, for the query with `where: aCondition` added (an expression or a one-argument block). |
+| `explainCount` | The explain of the plan `count` runs: a `Count` over the query's plan (`explain_count()`). |
 | `explain`, `plan` | The plan that runs, explained; the plan itself. |
 | `pagerSize: n` | `PBPager on: self pageSize: n` (Task 9; not implemented yet). |
 

@@ -227,7 +227,8 @@ PlannerBench class >> p3: n plan: aPlan
  (q + 1) * (id + 1), for Q4 of (q + 1) * (position + 1) * (id + 1) (the order is the answer);
  model the node names of the last query's plan, depth first, compared with proto_db's like the
  rest of the work.
-  Q1:<n>:index|scan     20 point lookups, g == (37 q) mod (n // 10), n in QUERY_Q1_SIZES
+  Q1:<n>:index|scan     20 point lookups, g == (37 q) mod (n // 10), n in QUERY_Q1_SIZES; plan
+                        index builds only the index the lookups use, by_g
                         (default 100 1000 10000)
   Q2:2000:<p>-index|-scan  20 queries: in1, in10, in100, g in: the k values (7 j + q) mod 200,
                         j < k; r0001, r0010, r0100, r0500, r in [q, q + w) (betweenRightOpen:and:)
@@ -257,15 +258,20 @@ QueryUnits class >> unitsOf: anId
   ^ out asArray.
 
 QueryUnits class >> records: n indexed: aBoolean
+  | coll |
+  coll := self records: n.
+  aBoolean ifFalse: [^ coll].
+  ^ ((coll addIndex: (PBEqualityIndex name: 'by_g' path: 'g'))
+    addIndex: (PBRangeIndex name: 'by_r' path: 'r'))
+    addIndex: (PBEqualityIndex name: 'by_few' path: 'few').
+
+QueryUnits class >> records: n
   | coll groups |
   groups := n // 10 max: 1.
   coll := PBList new.
   0 to: n - 1 do: [:i |
     coll := coll appendLast: (PBObject withAll: { 'id' -> i. 'g' -> (i \\ groups). 'r' -> i. 'few' -> (i \\ 4). 'x' -> (i \\ 10) })].
-  aBoolean ifFalse: [^ coll].
-  ^ ((coll addIndex: (PBEqualityIndex name: 'by_g' path: 'g'))
-    addIndex: (PBRangeIndex name: 'by_r' path: 'r'))
-    addIndex: (PBEqualityIndex name: 'by_few' path: 'few').
+  ^ coll.
 
 "Runs the 20 (Q1: 20) queries aBlock answers for q (a PBQuery from q), timed, and answers the
  unit's result."
@@ -294,7 +300,8 @@ QueryUnits class >> point: aPlan
 QueryUnits class >> q1: n plan: aPlan
   | coll g groups |
   (#('index' 'scan') includes: aPlan) ifFalse: [^ Error signal: 'Q1: unknown plan ' , aPlan].
-  coll := self records: n indexed: aPlan = 'index'.
+  coll := self records: n.
+  aPlan = 'index' ifTrue: [coll := coll addIndex: (PBEqualityIndex name: 'by_g' path: 'g')].
   g := PBField path: 'g'.
   groups := n // 10 max: 1.
   ^ self run: [:query :q | query where: (g eq: 37 * q \\ groups)] on: coll plan: aPlan ordered: false.

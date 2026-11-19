@@ -16,19 +16,19 @@ design (spec section 2) or a cut made while building, with its reason.
   barrier, no notify. A three-member cluster commits about half as many small transactions per
   second as one standalone process on disjoint roots, and a third as many on one hot key ([deviations.md](deviations.md#cluster-mode-commits-per-second)).
 - No cloud or tiered storage, no durability mode other than `fsync`, no Windows.
-- No index queries, no vector-index writes or training. Equality and range indexes are
-  maintained by every write and by merges onto indexed collections (0.3.0 in progress, plan Tasks
-  4a and 4b); a collection holding a vector index stays read only. *(Planned for 0.3.0, not
-  implemented: a query planner and in-process pagers; drafts in
-  [chapters 17-19](tutorial/17-indexes.md) and [queries.md](queries.md).)*
+- No vector-index writes, training or vector search (planned). Equality and range indexes are
+  maintained by every write and by merges onto indexed collections, and queried through
+  `PBQuery` and a cost-based planner (0.3.0 in progress; [chapters 17-18](tutorial/17-indexes.md),
+  [queries.md](queries.md)); a collection holding a vector index stays read only. *(Still to
+  come in 0.3.0: in-process pagers, [chapter 19](tutorial/19-ordered-reads-and-pages.md).)*
 - No writes to `RepeatedKeysDictionary`.
 - No IANA time zones: no wall-clock conversion; a fixed pinned list of zone keys.
 - No runtime registry and no symbol kind (`@sym`): format 5 (`proto_db` 2.0.0rc4, D62) is
   known, not adopted, and refused.
-- No query planner or LINQ, no pagers, no `snapshot_ref` byte references, no
-  residency. *(Planned for 0.3.0: the planner, a query front end and in-process pagers; still not
-  planned: portable pager tokens, the query result cache, `GroupBy` / `Join` / `Unnest`, computed
-  values, `snapshot_ref`, residency.)*
+- No pagers yet (0.3.0, plan Task 9), no `snapshot_ref` byte references, no residency. *(Not
+  planned: portable pager tokens, the query result cache, `GroupBy` / `Join` / `Unnest`,
+  computed values, `snapshot_ref`, residency. The planner and the query front end are in 0.3.0,
+  in progress.)*
 - No `rebuilt()` of misfiled format-3 collections: `validate` reports them (`PBMisfiledError`),
   nothing repairs them (deferred, spec 3.2).
 - No frozen instances: immutability is a convention, checked by a test, not enforced at run time.
@@ -121,10 +121,9 @@ Not tested, or not proven:
 
 In the order the cost of the omission is felt:
 
-1. Merges onto indexed collections. Indexed collections are written (0.3.0 in progress), but two
-   writers of one indexed root conflict instead of merging, which limits the shared-directory
-   story. **Planned for 0.3.0**, with index queries and a planner; the drafts of its documentation come
-   first ([queries.md](queries.md), [chapters 17-19](tutorial/17-indexes.md)).
+1. Pagers (0.3.0, plan Task 9; [chapter 19](tutorial/19-ordered-reads-and-pages.md)). Index
+   maintenance, merges onto indexed collections, index queries and the planner are in 0.3.0 (in
+   progress; [queries.md](queries.md), [chapters 17-18](tutorial/17-indexes.md)).
 2. The `@sym` kind, once format 5 defines it, with the explicit symbol wrapper in protoST.
 3. A time-zone database in protoST, so zoned datetimes have a wall clock.
 4. Speed of the record and node paths, which is protoST VM work more than library work.

@@ -1,4 +1,4 @@
-"EXPECT: ok 14"
+"EXPECT: ok 15"
 "Indexed queries, plan Task 8: PBQuery, the immutable query front end (proto_db
  proto_db/query/linq.py at v2.0.0rc4, Queryable and the predicate mixing rule, lines 169-358 and
  906-1189, less group_by, join, select_many, computed values, ValuesScan and the cache, deferred by
@@ -416,5 +416,21 @@ r := { q count. (q where: (category eq: 'c3')) count = (QData scan: rows where: 
 c that: 'count, first, firstOrNil, asArray and do: run the plan explain describes; first of an empty query is PBUserError'
   is: r
   equals: { 600. true. 10. true. 42. nil. 3. #refused. #('Count' 'IndexLookup'). true. true. true. true }.
+
+"proto_db: test_count_first_and_first_or_none, with a predicate; explain_count (linq.py:1069-1090;
+ fix round 1 of Task 8)."
+r := { q count: (category eq: 'c3'). (q where: (category eq: 'c3')) count.
+  ((q orderBy: 'id') first: (id > 40)) at: 'id'.
+  ((q orderBy: 'id') firstOrNil: [:e | (e at: 'id') > 598]) at: 'id'.
+  (q firstOrNil: (id eq: -1)).
+  [q first: (id eq: -1). #accepted] on: PBUserError do: [:e | e return: #refused].
+  [q count: true. #accepted] on: PBValidationError do: [:e | e return: #refused].
+  names value: (q where: (id eq: 3)) explainCount.
+  (q where: (id eq: 3)) explainCount = (PBCountPlan source: (q where: (id eq: 3)) plan) explain.
+  q count: [:e | (e at: 'id') <= 10] }.
+c that: 'count:, first: and firstOrNil: take a condition as where: does; explainCount is the explain of count''s plan'
+  is: r
+  equals: { r at: 2. (QData scan: rows where: [:e | (e at: 'category') = 'c3']) values sum. 41. 599. nil. #refused. #refused.
+    #('Count' 'IndexLookup'). true. 10 }.
 
 c report displayNl.

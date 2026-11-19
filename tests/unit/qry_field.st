@@ -1,4 +1,4 @@
-"EXPECT: ok 6"
+"EXPECT: ok 7"
 "Indexed queries, plan Task 8: PBField, the predicate builder (proto_db proto_db/query/linq.py at
  v2.0.0rc4, Field and _Operand, lines 360-484 and 600-640, less the computed values, startswith,
  endswith and near, deferred or excluded by spec 3.2 and 3.3). The behaviours of proto_db's
@@ -91,5 +91,20 @@ c that: 'a field is not a condition and does not override =: a field compared wi
   is: { a = 1. (a = a). (PBField path: 'a') = (PBField path: 'a'). (PBExpression _isExpression: a).
     a printString. PBField element printString. (a respondsTo: #path:). (a respondsTo: #eq:) }
   equals: { false. true. false. false. 'PBField(''a'')'. 'PBField(nil)'. false. true }.
+
+"proto_db: test_between_sugars, test_between_range_bounds (linq.py between inclusive=,
+ between_closed, range; fix round 1 of Task 8)."
+c that: 'betweenClosed:and:, between:and:inclusive: and range:to:bounds: answer the four between terms; a bad pair or bounds is PBValidationError'
+  is: { a betweenClosed: 1 and: 5.
+    { #(true true). #(false false). #(false true). #(true false) } collect: [:pair | (a between: 1 and: 5 inclusive: pair) op].
+    a range: 1 to: 5.
+    #('[]' '()' '(]' ' [) ') collect: [:bounds | (a range: 1 to: 5 bounds: bounds) op].
+    { #(true). { true. 1 }. 'tt'. nil } collect: [:pair | [a between: 1 and: 5 inclusive: pair. #accepted] on: PBValidationError do: [:e | e return: #refused]].
+    { '[['. '[ ]'. nil. 3 } collect: [:bounds | [a range: 1 to: 5 bounds: bounds. #accepted] on: PBValidationError do: [:e | e return: #refused]] }
+  equals: { t value: 'a' value: 'between[]' value: #(1 5).
+    #('between[]' 'between()' 'between(]' 'between[)').
+    t value: 'a' value: 'between[]' value: #(1 5).
+    #('between[]' 'between()' 'between(]' 'between[)').
+    #(#refused #refused #refused #refused). #(#refused #refused #refused #refused) }.
 
 c report displayNl.
