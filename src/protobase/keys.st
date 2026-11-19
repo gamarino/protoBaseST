@@ -323,6 +323,11 @@ PBKeys class >> _oidBytes: anOid
 
 PBKeys class >> _unsignedBigEndian: aByteArray
   | n |
+  "An oid, 16 bytes, is read as two 64-bit words: two LargeInteger operations instead of
+   sixteen (every order key of an atom comes here)."
+  (aByteArray class == ByteArray and: [aByteArray size = 16]) ifTrue: [
+    ^ ((aByteArray unsignedLong64At: 1 bigEndian: true) bitShift: 64)
+      + (aByteArray unsignedLong64At: 9 bigEndian: true)].
   n := 0.
   aByteArray do: [:b | n := n * 256 + b].
   ^ n.
@@ -509,7 +514,18 @@ PBKeys class >> residue: aNumber
  canonical encoding, with every atom, at any depth, written {'@ref': nil}.
  An atom's token is the 7 bytes 81 a4 40 72 65 66 c0."
 PBKeys class >> exactToken: aValue
+  "An atom's token is a constant: answered without encoding, after the one check canonical:
+   makes of a reference (PBCodec _canonicalLeaf:, the UTF-8 of its tag). PBMutableObject is
+   not an atom."
+  ((aValue isClassObject not and: [aValue isKindOf: PBAtom]) and: [aValue isPBReference == true]) ifTrue: [
+    ((aValue respondsTo: #tag) and: [aValue tag isString]) ifTrue: [PBCodec _checkUTF8: aValue tag].
+    ^ self atomToken].
   ^ MessagePack encode: (PBCodec toWire: aValue atomRef: PBCodec tokenRef).
+
+"The exact token of every atom: the msgpack bytes of {'@ref': nil} (ByteArrays are immutable,
+ so one is shared)."
+PBKeys class >> atomToken
+  ^ #[16r81 16rA4 16r40 16r72 16r65 16r66 16rC0].
 
 "=== map keys ================================================================="
 

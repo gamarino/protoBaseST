@@ -50,6 +50,9 @@ avl.py over a root node, or nil for the empty tree:
   PBAvl keyAt: root key: k                    the node of key k, or nil
   PBAvl keyPut: root key: k value: v nodeClass: aClass     key_put:
                                               { root. replaced. old value }
+  PBAvl keyAt: root orderKey: ok, keyPut: root key: k orderKey: ok value: v nodeClass: aClass,
+  keyRemove: root orderKey: ok                the same, for a caller that has the order key ok
+                                              of k (trusted, as keyFromSortedOrderKeys:)
 
 Node classes: a keyed tree's nodes are of the class nodeClass: names for an
 empty tree (PBKeyNode, PBCountedKeyNode or an application subclass of
@@ -827,10 +830,13 @@ PBAvl class >> _posSplit: aNode at: anIndex
 "The node of the keyed tree aRoot whose key is aKey (equal order keys: 1 and
  1.0 are one key), or nil. An unorderable aKey is PBValidationError."
 PBAvl class >> keyAt: aRoot key: aKey
-  | okey |
+  ^ self keyAt: aRoot orderKey: (PBKeys orderKey: aKey).
+
+"As keyAt:key:, for a caller that has the order key of the key (PBKeys orderKey:), as
+ keyFromSortedOrderKeys:nodeClass: trusts its caller's: the key is not given."
+PBAvl class >> keyAt: aRoot orderKey: anOrderKey
   self _root: aRoot kind: PBKeyNode.
-  okey := PBKeys orderKey: aKey.
-  ^ _PBTree nodeWithKey: okey of: aRoot in: aRoot.
+  ^ _PBTree nodeWithKey: anOrderKey of: aRoot in: aRoot.
 
 "ProtoBase key_put: { new root. replaced. old value } with aKey mapped to
  aValue. An existing key keeps its stored key object and takes the new value;
@@ -838,9 +844,16 @@ PBAvl class >> keyAt: aRoot key: aKey
  otherwise false and nil. A new key gets a node of the tree's class (the
  root's), or of aClass (PBKeyNode, PBCountedKeyNode) when the tree is empty."
 PBAvl class >> keyPut: aRoot key: aKey value: aValue nodeClass: aClass
+  ^ self keyPut: aRoot key: aKey orderKey: (PBKeys orderKey: aKey) value: aValue nodeClass: aClass.
+
+"As keyPut:key:value:nodeClass:, for a caller that has anOrderKey, the order key of aKey
+ (PBKeys orderKey: aKey), which is trusted, as keyFromSortedOrderKeys:nodeClass: trusts its
+ caller's (ProtoBase passes _okey the same way). The tree is the one keyPut:key:value:nodeClass:
+ makes, node for node."
+PBAvl class >> keyPut: aRoot key: aKey orderKey: anOrderKey value: aValue nodeClass: aClass
   | okey make out root |
   self _root: aRoot kind: PBKeyNode.
-  okey := PBKeys orderKey: aKey.
+  okey := anOrderKey.
   make := self _keyedClass: (aRoot isNil ifTrue: [aClass] ifFalse: [aRoot class]) for: 'keyPut:'.
   out := Array new: 1.
   root := self _keyPut: aRoot okey: okey key: aKey value: aValue make: make out: out.
@@ -866,10 +879,14 @@ PBAvl class >> _keyPut: aNode okey: anOrderKey key: aKey value: aValue make: aCl
 "ProtoBase key_remove: { new root. removed. old value } without aKey; when
  aKey is absent, { aRoot itself. false. nil }. The old value is unboxed."
 PBAvl class >> keyRemove: aRoot key: aKey
+  ^ self keyRemove: aRoot orderKey: (PBKeys orderKey: aKey).
+
+"As keyRemove:key:, for a caller that has the order key of the key (trusted, as keyAt:orderKey:)."
+PBAvl class >> keyRemove: aRoot orderKey: anOrderKey
   | out root |
   self _root: aRoot kind: PBKeyNode.
   out := Array new: 1.
-  root := self _keyRemove: aRoot okey: (PBKeys orderKey: aKey) out: out.
+  root := self _keyRemove: aRoot okey: anOrderKey out: out.
   ^ { root. (out at: 1) notNil. (out at: 1) isNil ifTrue: [nil] ifFalse: [(out at: 1) value] }.
 
 PBAvl class >> _keyRemove: aNode okey: anOrderKey out: anArray

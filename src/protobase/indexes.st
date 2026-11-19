@@ -307,18 +307,24 @@ PBKeyGroupIndex >> membersDo: aBlock
  an unorderable key files it in the side group. An element whose member key would nest too deep
  is PBValidationError naming the index (check_member_key)."
 PBKeyGroupIndex >> withAdded: anElement
-  | member key groups node group |
-  member := PBMemberKeys memberKeyOf: anElement.
+  | pair member mokey key okey groups node group |
+  "Each order key is computed once (the member key's and the key's) and handed to the tree
+   operations, which would otherwise compute each again (keyAt:, then keyPut:)."
+  pair := PBMemberKeys memberKeyAndOrderKeyOf: anElement.
+  member := pair at: 1.
+  mokey := pair at: 2.
   PBMemberKeys checkDepth: anElement memberKey: member index: self.
   key := self keySpecObject extract: anElement.
-  (PBMemberKeys orderKeyOrNil: key) isNil ifTrue: [
+  okey := PBMemberKeys orderKeyOrNil: key.
+  okey isNil ifTrue: [
     ^ self _with: {
-      'side' -> (PBKeyGroups group: self side with: anElement memberKey: member).
+      'side' -> (PBKeyGroups group: self side with: anElement memberKey: member orderKey: mokey).
       'total_count' -> (self totalCount + 1) }].
   groups := self groups.
-  node := PBAvl keyAt: groups key: key.
+  node := PBAvl keyAt: groups orderKey: okey.
   group := node isNil ifTrue: [PBKeyGroups empty] ifFalse: [node value].
-  groups := (PBAvl keyPut: groups key: key value: (PBKeyGroups group: group with: anElement memberKey: member)
+  groups := (PBAvl keyPut: groups key: key orderKey: okey
+    value: (PBKeyGroups group: group with: anElement memberKey: member orderKey: mokey)
     nodeClass: PBCountedKeyNode) at: 1.
   ^ self _with: { 'groups' -> groups. 'total_count' -> (self totalCount + 1) }.
 
@@ -326,19 +332,20 @@ PBKeyGroupIndex >> withAdded: anElement
  (never an equal member with another token, D58). An element the index does not hold is
  PBValidationError (keyed.py with_removed)."
 PBKeyGroupIndex >> withRemoved: anElement
-  | key side groups node group |
+  | key okey side groups node group |
   key := self keySpecObject extract: anElement.
-  (PBMemberKeys orderKeyOrNil: key) isNil ifTrue: [
+  okey := PBMemberKeys orderKeyOrNil: key.
+  okey isNil ifTrue: [
     side := PBKeyGroups group: self side without: anElement.
     side isNil ifTrue: [^ self _notHeld: anElement key: key].
     ^ self _with: { 'side' -> side. 'total_count' -> (self totalCount - 1) }].
   groups := self groups.
-  node := PBAvl keyAt: groups key: key.
+  node := PBAvl keyAt: groups orderKey: okey.
   group := node isNil ifTrue: [nil] ifFalse: [PBKeyGroups group: node value without: anElement].
   group isNil ifTrue: [^ self _notHeld: anElement key: key].
   groups := (group at: 2) = 0
-    ifTrue: [(PBAvl keyRemove: groups key: key) at: 1]
-    ifFalse: [(PBAvl keyPut: groups key: key value: group nodeClass: PBCountedKeyNode) at: 1].
+    ifTrue: [(PBAvl keyRemove: groups orderKey: okey) at: 1]
+    ifFalse: [(PBAvl keyPut: groups key: key orderKey: okey value: group nodeClass: PBCountedKeyNode) at: 1].
   ^ self _with: { 'groups' -> groups. 'total_count' -> (self totalCount - 1) }.
 
 PBKeyGroupIndex >> _notHeld: anElement key: aKey
@@ -385,11 +392,12 @@ PBKeyGroupIndex >> _newBuilder: aKey orderKey: anOrderKey
   ^ { aKey. anOrderKey. Dictionary new. 0 }.
 
 PBKeyGroupIndex >> _builder: aBuilder add: anElement
-  | member mokey members slot |
+  | pair member mokey members slot |
   aBuilder at: 4 put: (aBuilder at: 4) + 1.
-  member := PBMemberKeys memberKeyOf: anElement.
+  pair := PBMemberKeys memberKeyAndOrderKeyOf: anElement.
+  member := pair at: 1.
   PBMemberKeys checkDepth: anElement memberKey: member index: self.
-  mokey := PBKeys orderKey: member.
+  mokey := pair at: 2.
   members := aBuilder at: 3.
   slot := members at: mokey ifAbsent: [nil].
   slot isNil

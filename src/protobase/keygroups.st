@@ -17,6 +17,9 @@ exactToken:, the canonical encoding, D58) tells apart values that are equal but 
                                      surrogates
   PBMemberKeys memberKeyOf: anElement
                                      the member key, a PBTuple
+  PBMemberKeys memberKeyAndOrderKeyOf: anElement
+                                     { member key. its order key }, the element's order key
+                                     computed once
   PBMemberKeys lowestOf: aValue      the order keys enclosing every member key whose equality
   PBMemberKeys highestOf: aValue     part is aValue's (keyed.py _equal_members_bounds)
   PBMemberKeys checkDepth: anElement index: anIndex
@@ -91,6 +94,23 @@ PBMemberKeys class >> _surrogateOf: v results: anArray
  members equal to one another are adjacent in a members tree."
 PBMemberKeys class >> memberKeyOf: anElement
   ^ PBTuple withAll: { self _equalityPart: anElement. PBKeys exactToken: anElement }.
+
+"{ member key. its order key } of anElement: memberKeyOf: and PBKeys orderKey: of it, with the
+ element's order key computed once. A tuple's order key is the rank-13 key of its items' keys
+ (PBKeys _orderKey:), so the order key of ((0, element), token) is built from the order keys of 0,
+ the element and the token; an unorderable element takes the general path."
+PBMemberKeys class >> memberKeyAndOrderKeyOf: anElement
+  | okey token member |
+  okey := self orderKeyOrNil: anElement.
+  okey isNil ifTrue: [
+    member := self memberKeyOf: anElement.
+    ^ { member. PBKeys orderKey: member }].
+  token := PBKeys exactToken: anElement.
+  member := PBTuple withAll: { PBTuple withAll: { 0. anElement }. token }.
+  ^ { member.
+    PBOrderKey rank: 13 payload: {
+      PBOrderKey rank: 13 payload: { PBKeys orderKey: 0. okey }.
+      PBKeys orderKey: token } }.
 
 "(0, element) for an orderable element, (1, surrogate) for an unorderable one (keyed.py
  _equality_part)."
@@ -209,28 +229,35 @@ PBKeyGroups class >> empty
 
 "aGroup with one more occurrence of anElement, whose member key is aKey (keyed.py _group_add)."
 PBKeyGroups class >> group: aGroup with: anElement memberKey: aKey
+  ^ self group: aGroup with: anElement memberKey: aKey orderKey: (PBKeys orderKey: aKey).
+
+"As group:with:memberKey:, for a caller that has anOrderKey, the order key of aKey (PBMemberKeys
+ memberKeyAndOrderKeyOf:): it is computed once, not once per tree operation."
+PBKeyGroups class >> group: aGroup with: anElement memberKey: aKey orderKey: anOrderKey
   | members node entry |
   members := aGroup at: 1.
-  node := PBAvl keyAt: members key: aKey.
+  node := PBAvl keyAt: members orderKey: anOrderKey.
   entry := node isNil
     ifTrue: [PBTuple withAll: { anElement. 1 }]
     ifFalse: [PBTuple withAll: { node value at: 1. (node value at: 2) + 1 }].
-  members := (PBAvl keyPut: members key: aKey value: entry nodeClass: PBCountedKeyNode) at: 1.
+  members := (PBAvl keyPut: members key: aKey orderKey: anOrderKey value: entry nodeClass: PBCountedKeyNode) at: 1.
   ^ PBTuple withAll: { members. (aGroup at: 2) + 1 }.
 
 "aGroup with one occurrence of anElement fewer, or nil when it holds none (keyed.py
  _group_remove): only the member whose member key is anElement's is taken, never an equal member
  with another token (D58)."
 PBKeyGroups class >> group: aGroup without: anElement
-  | members key node entry |
+  | members pair key okey node entry |
   members := aGroup at: 1.
-  key := PBMemberKeys memberKeyOf: anElement.
-  node := PBAvl keyAt: members key: key.
+  pair := PBMemberKeys memberKeyAndOrderKeyOf: anElement.
+  key := pair at: 1.
+  okey := pair at: 2.
+  node := PBAvl keyAt: members orderKey: okey.
   node isNil ifTrue: [^ nil].
   entry := node value.
   members := (entry at: 2) = 1
-    ifTrue: [(PBAvl keyRemove: members key: key) at: 1]
-    ifFalse: [(PBAvl keyPut: members key: key value: (PBTuple withAll: { entry at: 1. (entry at: 2) - 1 })
+    ifTrue: [(PBAvl keyRemove: members orderKey: okey) at: 1]
+    ifFalse: [(PBAvl keyPut: members key: key orderKey: okey value: (PBTuple withAll: { entry at: 1. (entry at: 2) - 1 })
       nodeClass: PBCountedKeyNode) at: 1].
   ^ PBTuple withAll: { members. (aGroup at: 2) - 1 }.
 
