@@ -652,6 +652,10 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
   `tests/conformance/vectors-index-keys/terms.msgpack` and that directory's `manifest.sha256`
   (extended with the index costs; the manifest regenerated, F8).
 - Test: `tests/unit/qry_plans.st`, `tests/unit/qry_index_plans.st`, `tests/unit/qry_rank.st`.
+- Also ports the rank-window half of `proto_db`'s
+  `test_index_weights_concurrency.py::test_weights_are_exact_after_concurrent_merges_and_retries`
+  (its plan-free half is in `tests/unit/idx_indexed_roots.st`, Task 4b): ordered plans' `window:`
+  over the snapshots that test takes; its checklist row moves from `deferred 6` to `ported`.
 
 **Interfaces:**
 - Consumes: Tasks 1, 3, 4a, 5.

@@ -56,10 +56,8 @@
   then the index definitions per name, as `proto_db`'s `rebase_onto`; an index both sides created
   is `PBConflictError` naming it. The interim refusal of Task 4a (`PBNotSupportedError` for a merge
   involving an index) is gone. An extractor runs in the commit's build: its exception passes
-  through unchanged and fails only its own commit, standalone, in a group commit and in a cluster
-  round (`tests/unit/idx_merge_extractor.st`). **Behaviour change in cluster mode:** an entry's
-  build error of any class now fails that commit alone; before, an error that was not a
-  `PBDBError` ended the whole round, as `proto_db` rc4 still does (`docs/deviations.md`).
+  through unwrapped and fails only that commit, standalone and in a group commit; in a cluster
+  round, as in `proto_db` rc4, the whole round fails (`tests/unit/idx_merge_extractor.st`).
   Benchmark M3 (`bench/run_query.sh M3`, `bench/_query_bench.st`, profiles `m3-idx0/1/3` of
   `bench/cluster_workload.st`): a blind write merged onto an indexed current, standalone against
   `proto_db` and in a three-member cluster; figures in `docs/deviations.md#performance`.

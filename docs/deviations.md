@@ -179,7 +179,12 @@ explicit.
   durable with one flush and one publish; a failure of the lock, the root read, the flush or the
   publish reaches every built commit (each `wait` re-signals its own copy of the error, as
   `proto_db` raises a copy in each thread), and the step-8 outcome of a failed publish is the
-  round's. A commit alone in the queue runs exactly the single-commit protocol (the bytes of
+  round's. A commit's own error, a build error included (an extractor's exception in a merge),
+  also reaches its caller as a copy (`shallowCopy`: the same class, text and fields, not the same
+  object, since a Future's `wait` re-signals a copy), where `proto_db` raises the object itself
+  (`transactions.py:1121`). *Cost:* a caller that compares the exception it caught with `==`
+  against one it kept (an extractor that records what it raised) finds them different; compare
+  class and text. A commit alone in the queue runs exactly the single-commit protocol (the bytes of
   `tests/unit/bytes_pinned.st` are unchanged). The round is a message of the runner actor, so a
   group is what was queued while the previous round ran; `proto_db`'s group is what was queued
   while the previous runner held the group. The R148 change to `transactions.py` (`88ca21d`,
@@ -758,21 +763,6 @@ The detail:
   - A replicate that fails with an error (`PBReplicateFailed`) is decided by the error's class,
     as `proto_db`'s `nothing_sent`: a conflict, validation (`PBClosedError` included) or user
     error sent nothing; any other error, a failed flush included, leaves the outcome unknown.
-  - **An entry's build error in a cluster round** (indexed queries plan Task 4b, ruling IQ1,
-    controller ruling CR8). An error, of any class, that one entry's build raises fails that
-    commit alone, and the round builds the next entry (`PBCoordinatorCore >>
-    roundBuildFailed:in:now:`). `proto_db` rc4's `_permit_round` fails every entry of the round
-    and re-raises when the error is not a `ProtoDBError`. *Why:* a build runs application code,
-    an extractor in a merge onto an indexed current, and IQ1 requires its exception to fail only
-    the commit whose merge ran it, as `proto_db`'s own standalone round does
-    (`_standalone_round`); a cluster round that fails its neighbours too would make the same
-    program behave differently in the two modes. Nothing was sent when a build fails (every build
-    comes before the round's replicate), so failing one entry is safe. Unchanged: a base read
-    that failed with `PBUnexpectedError` after the permission expired is still a retryable
-    conflict (R212), and the re-commit's error still ends the round. *Cost:* a caller whose
-    neighbour's build failed with, say, a `ZeroDivide` commits here where `proto_db` would fail
-    it with that error (`tests/unit/idx_merge_extractor.st` case (d),
-    `tests/unit/cluster_round_rules.st` case 30).
   - A permission that arrives after the round closed is ended `#none` at once; `proto_db`'s
     closing thread never asked for one.
   - rc4's R148 texts ('its kept permission is still being ended', '... s of it spent waiting
@@ -946,8 +936,10 @@ The detail:
 | Deferred | No query result cache, and so no `extractor_generation` (the registration generation that keys it); no `GroupBy`, `Agg`, `Join`, `Unnest` (`select_many`) or `ValuesScan`; no computed values, `startswith` / `endswith` or field-to-field comparisons; no collection `rebuilt` (misfiled format-3 repair) (ruling IQ3, spec 3.2). | Each is either not portable today or not an optimisation; a block condition covers computed values meanwhile. | Programs that need them wait, or use a block. |
 
 Not a deviation, but worth knowing: an extractor runs inside the commit when a blind write is
-merged onto a collection with an extractor index, and an exception it raises fails only that commit
-and passes through unchanged, exactly as in `proto_db` (ruling IQ1 as corrected; plan call IP2).
+merged onto a collection with an extractor index, and an exception it raises passes through
+unwrapped and fails only that commit, standalone and in a group commit; in a cluster round, as in
+`proto_db` rc4, the whole round fails. Exactly as in `proto_db` (ruling IQ1 as corrected at Task 4b;
+plan call IP2), apart from the identity of the exception (see "Group commit" above).
 Purity is a documented contract ([queries.md](queries.md#extractors-and-their-purity-contract)).
 
 ## Errors and messages
@@ -1197,6 +1189,12 @@ Commits per second from the minimum of five runs (medians: standalone within 5 %
   than standalone; with 0 and 1 index it is 2.0x and 1.7x slower (0 to 5 and 28 to 82 retries
   per run). This is the cost queries.md names: an indexed root lengthens the build, which runs
   under the cluster-wide permission. A longer `leaseDuration` raises the ceiling (not measured).
+- **Two limits follow, in cluster mode only.** A single build longer than the permission less
+  sendReserve (about 500 ms at the default 2000 ms lease: 667 ms less 167 ms) never commits: every
+  attempt is refused before its send (CC18 says so in the conflict's text), so a merge onto a
+  large or heavily indexed current can be impossible at the default lease. And retries this heavy
+  can exhaust the default `run:` retry budget (10), where M3 passed `run:retries: 1000`. The remedy is a
+  longer `leaseDuration` (with its drift margin), not more retries.
 - **Peak RSS is the heap budget, not the live set** (as M1): the standalone protost processes
   grow to their 5 GB budget, the cluster members to their 2 GB one. Not a measure of what the
   workload needs.

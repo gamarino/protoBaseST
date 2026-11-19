@@ -68,10 +68,11 @@ permission held is ended #unknown.
 
 Every PBCommitEntry's transaction is built with its own validation and merge. The one application
 code a build runs is an extractor, when a merge onto an indexed current evaluates it (indexed
-queries ruling IQ1): its exception passes through unchanged as that entry's PBBuildFailed, and the
-core fails that commit alone (PBCoordinatorCore >> roundBuildFailed:in:now:); the others of the
-round are built and replicated. A cluster commit never writes space.root: the persisted root is
-the persister's (Task 25).
+queries ruling IQ1): its exception reaches the core as that entry's PBBuildFailed, and, as in
+proto_db rc4's _permit_round, an error that is not a PBDBError fails the whole round: every commit
+of it fails with a copy of that exception (same class and text; PBCoordinatorCore >>
+roundBuildFailed:in:now:). Standalone and in a group commit it fails only its own commit. A cluster
+commit never writes space.root: the persisted root is the persister's (Task 25).
 
 This module is a shell: it reads the monotonic clock (Time microsecondClockValue for the build
 and replication durations; the node's clock, the coordinator's _now, for the core) and uses

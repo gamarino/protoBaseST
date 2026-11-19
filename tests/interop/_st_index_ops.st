@@ -11,11 +11,13 @@
  tokens). Each result must pass validate. Prints each result in the dump format
  py_index_replay.py documents ('collection <name>', then one line per atom reached from it that is
  not saved yet, breadth first in the order the encoder meets the references), and commits the
- results as py_index_replay.py does: the roots 'out_<kind>' of main and the new 'stale'. Last
- line 'end'."
+ results as py_index_replay.py does: the roots 'out_<kind>' and 'merged_<kind>' of main (the
+ merges of plan Task 4b: py_index_replay.py merge_log rebased onto the replayed dictionary, hash
+ dictionary and counted set) and the new 'stale'. Last line 'end'."
 Import from: 'protobase'.
 
-| dir space tx records ops defs segment dump kinds classes results apply stale before blind changed print |
+| dir space tx records ops defs segment dump kinds classes results apply stale before blind changed print
+  currents mergeLog plant |
 dir := Smalltalk arguments first.
 segment := ByteArray fromHex: '0123456789abcdef0123456789abcdef'.
 PBKeySpec registerExtractor: 'interop.index_ops.w' block: [:e | (PBKeySpec path: 'w') extract: e] version: '1'.
@@ -96,6 +98,24 @@ dump := [:root | | numbers count queue numberOf |
       each key -> (PBCodec toWire: each value atomRef: ref)]).
     ((numberOf value: atom) printString , ' ' , atom class typeName , ' ' , (MessagePack encode: map) hex) displayNl]].
 
+"py_index_replay.py merge_log: the blind write of aKind rebased onto the replayed collection."
+mergeLog := [:aKind | | coll |
+  coll := (classes at: aKind) new addIndex: (PBEqualityIndex name: 'eq_m' path: 'v').
+  (aKind = 'dict' or: [aKind = 'hash'])
+    ifTrue: [
+      coll := (((coll setAt: 3 value: (records at: 41)) setAt: 17 value: (records at: 42)) removeAt: 5) setAt: 3 value: (records at: 43).
+      coll := (coll removeAt: 9) setAt: 21 value: (records at: 44)]
+    ifFalse: [
+      coll := (((coll add: (records at: 41)) add: (records at: 41)) add: (records at: 42)) remove: (records at: 41).
+      1 to: 3 do: [:i | coll := coll remove: (records at: i)].
+      coll := coll add: (records at: 43)].
+  coll := coll addIndex: (PBRangeIndex name: 'tmp' path: 'w').
+  coll := (coll removeIndex: 'eq_m') addIndex: (PBEqualityIndex name: 'eq_m' path: 'w').
+  coll removeIndex: 'tmp'].
+"INDEX_OPS_PLANT=index-first (index_ops_identical.sh's planted fault): the merge replays the index
+ ops before the element ops, the wrong order, which the comparison with ProtoBase must catch."
+plant := (Smalltalk getenv: 'INDEX_OPS_PLANT') = 'index-first'.
+
 print := [:aResults | aResults do: [:each |
   ('collection ' , each key) displayNl.
   dump value: each value]].
@@ -107,6 +127,19 @@ kinds do: [:kind |
   coll validate.
   results addLast: kind -> coll.
   tx setRootObject: 'out_' , kind value: coll].
+currents := Dictionary new.
+results do: [:each | currents at: each key put: each value].
+#('dict' 'hash' 'bag') do: [:kind | | log merged |
+  log := mergeLog value: kind.
+  merged := plant
+    ifTrue: [ | target |
+      target := log _replayIndexOps: (log opLog asArray select: [:op | log class _isIndexOp: op])
+        onto: (currents at: kind).
+      log _netOps inject: target into: [:acc :op | log _replay: op onto: acc]]
+    ifFalse: [log rebaseOnto: (currents at: kind)].
+  merged validate.
+  results addLast: 'merged_' , kind -> merged.
+  tx setRootObject: 'merged_' , kind value: merged].
 print value: results.
 tx commit.
 space close.

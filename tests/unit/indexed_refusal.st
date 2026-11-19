@@ -1,4 +1,4 @@
-"EXPECT: ok 12"
+"EXPECT: ok 13"
 "What an indexed collection refuses (design spec 3.3 and 7.4; indexed queries, plan Task 4a). Run on a copy of the database vector: its root 'people' is a Dictionary with the
  key-group indexes by_age and by_city, 'hnsw' a List with the vector index hnsw, 'tags' a List
  without indexes.
@@ -9,7 +9,8 @@
  change, addIndex: and removeIndex: included, is PBNotSupportedError naming it; extend: of
  nothing answers the receiver, as proto_db returns before it touches the indexes. Merges onto
  indexed currents are not refused (plan Task 4b, tests/unit/idx_merge.st), except onto one
- holding a vector index (idx_merge.st check 8)."
+ holding a vector index (idx_merge.st check 8) or an index of an unknown kind (here, on a
+ Dictionary written with the same opaque index)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_spaces'.
@@ -57,6 +58,18 @@ st := PBFileStorage path: (dir / 'opaque') pathString.
 custom := PBTypeRegistry unloadedAtomFor: listRef tag at: listRef pointer storage: st.
 c that: 'an unknown index kind: appendLast:' signals: PBNotSupportedError containing: 'acme.indexing.CustomIndex'
   during: [custom appendLast: 1].
+st close.
+"The same opaque index on a Dictionary: a merge onto it is refused, naming it (plan Task 4b)."
+b := SpaceBuilder segment: (ByteArray fromHex: '4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4c').
+opaque := b add: 'acme.indexing.CustomIndex' oid: 1 state: { 'name' -> 'custom' }.
+setRef := b add: 3 oid: 2 state: { 'root' -> (b add: 0 oid: 3 state: { 'key' -> 'custom'. 'value' -> opaque.
+  'left' -> nil. 'right' -> nil. 'height' -> 1. 'count' -> 1 }) }.
+listRef := b add: 6 oid: 4 state: { 'root' -> nil. 'count' -> 0. 'indexes' -> setRef }.
+b writeTo: dir / 'opaque-dict' root: listRef.
+st := PBFileStorage path: (dir / 'opaque-dict') pathString.
+custom := PBTypeRegistry unloadedAtomFor: listRef tag at: listRef pointer storage: st.
+c that: 'an unknown index kind: a merge onto it (rebaseOnto:)' signals: PBNotSupportedError containing: 'acme.indexing.CustomIndex'
+  during: [(PBDictionary new setAt: 1 value: 2) rebaseOnto: custom].
 st close.
 
 c that: 'a List without indexes is written' is: (tags appendLast: 'new') count equals: tags count + 1.

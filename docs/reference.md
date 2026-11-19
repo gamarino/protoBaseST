@@ -1111,7 +1111,10 @@ rebuild), a `validate`, or a scan that must extract signals `PBValidationError` 
 extractor; a blind write, `removeIndex:` and an `addIndex:` of another index pass, as in
 `proto_db`. The block must be pure: the purity contract is in
 [queries.md](queries.md#extractors-and-their-purity-contract). During a merge it runs in the
-commit's build; an exception it raises fails only that commit and reaches the caller unchanged.
+commit's build; an exception it raises fails only that commit, standalone and in a group commit
+(in a cluster round, as in `proto_db` rc4, the whole round fails), and reaches the caller
+unwrapped, as a copy: the same class, text and fields, not the same object (`proto_db` raises the
+object itself, `transactions.py:1121`).
 
 **Member keys** (`PBMemberKeys`, class side, `proto_db`'s `keyed.py`): an element of a key group is
 filed under its member key, the `PBTuple` `((0, element) | (1, surrogate), exact token)`.
@@ -1160,7 +1163,7 @@ kind protoBaseST does not know is refused the same way, by the `PBIndexSet` hook
 | `removeIndex: aName` | A new version without it; an absent name is `PBValidationError`. Logged as `('@index_remove' name)`, never on `PBList`. |
 | `validate` | The placement of the content (`PBMisfiledError` for an entry its own key does not place), then every index's `validate:` against `elements`. Answers the receiver. |
 | every mutator | Answers content and indexes computed in one step, with the hook order of `proto_db`'s mutator: an add, remove or replace event per element that appears, leaves or changes (a `PBCountedSet` fires only when an element appears or disappears; a slice rebuilds every index); a blind write answers the receiver's index set itself. An index written by format 3 is rebuilt before the first change. |
-| `rebaseOnto: current` | Replays the element intents through `current`'s mutators, which maintain its indexes (an extractor runs there, in the commit's build; its exception passes through unchanged and fails only that commit), then the index-definition intents per name: an index this log created that `current` also has is `PBConflictError` naming it; one it removed is removed if `current` still has it; one created and removed leaves `current` as it is. Onto a collection with a vector or unknown index: `PBNotSupportedError`. |
+| `rebaseOnto: current` | Replays the element intents through `current`'s mutators, which maintain its indexes (an extractor runs there, in the commit's build; its exception passes through unwrapped and fails only that commit, standalone and in a group commit; in a cluster round, as in `proto_db` rc4, the whole round fails), then the index-definition intents per name: an index this log created that `current` also has is `PBConflictError` naming it; one it removed is removed if `current` still has it; one created and removed leaves `current` as it is. Onto a collection with a vector or unknown index: `PBNotSupportedError`. |
 
 `PBIndexSet` gains `withIndex:` (a taken name is `PBValidationError`), `without:` (an absent name is
 `PBValidationError`), `onAdd:`, `onRemove:`, `onReplace:with:` (the hook on every index, the empty

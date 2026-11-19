@@ -21,12 +21,15 @@ same atoms with the same oids on both sides:
 'replay' (and _st_index_ops.st on a copy of the same spaces) runs each sequence from a new
 collection, then on 'stale' a blind remove_at of an absent key (the stale index must stay the same
 object, still stale) and a set_at (it must be rebuilt, current); every result must validate(). It
+then (plan Task 4b) rebases a fixed blind write of a dictionary, a hash dictionary and a counted
+set (merge_log: element writes and removals, addIndex, removeIndex, a redefinition) onto the
+replayed collection of its kind, which is indexed, and validates the answer ('merged_<kind>'). It
 prints each resulting collection as 'collection <name>' and one line per atom reached from it that
 is not saved yet, breadth first in the order the encoder meets the references: '<number> <type
 name> <hex of the msgpack of the encoded state>', a saved atom written as its own pointer, an
 unsaved one as the pointer (fixed segment, its number); then 'end'. Equal lines mean the same
 collection and index trees, node for node and byte for byte. It commits the results as the roots
-'out_<kind>' of main and as the new 'stale'.
+'out_<kind>' and 'merged_<kind>' of main and as the new 'stale'.
 
 'check' runs ProtoBase's verifier on main with the extractor registered (every record decoded and
 canonical, validate() on every collection; its dump to <directory>/verify.json) and validate() on
@@ -216,6 +219,31 @@ def apply(kind, coll, op, records, defs):
     return coll.add(rec(1)) if code == 0 else coll.remove(rec(1))
 
 
+#: The kinds whose replayed collection is also the indexed current of a merge (plan Task 4b).
+MERGE_KINDS = ["dict", "hash", "bag"]
+
+
+def merge_log(kind, records):
+    """A blind write of kind, built from new (a complete log), that 'replay' rebases onto the
+    replayed collection of that kind, which holds the indexes rg_w and rg_v: an index 'eq_m' on 'v'
+    added, element writes over several keys with removals, an index 'tmp' added, 'eq_m' removed and
+    added again on 'w' (a redefinition), 'tmp' removed (created then removed: the current keeps
+    nothing of it). A dictionary's keys 3, 17, 5, 9 and 21; a counted set's adds, removes of a
+    record twice added, and removes of records 0 to 2 (the counter transform onto the current)."""
+    coll = CLASSES[kind]().add_index(EqualityIndex("eq_m", KeySpec.path("v")))
+    if kind in ("dict", "hash"):
+        coll = coll.set_at(3, records[40]).set_at(17, records[41]).remove_at(5).set_at(3, records[42])
+        coll = coll.remove_at(9).set_at(21, records[43])
+    else:
+        coll = coll.add(records[40]).add(records[40]).add(records[41]).remove(records[40])
+        for i in range(3):
+            coll = coll.remove(records[i])
+        coll = coll.add(records[42])
+    coll = coll.add_index(RangeIndex("tmp", KeySpec.path("w")))
+    coll = coll.remove_index("eq_m").add_index(EqualityIndex("eq_m", KeySpec.path("w")))
+    return coll.remove_index("tmp")
+
+
 def dump(root):
     numbers = {id(root): 0}
     keep = [root]
@@ -254,6 +282,12 @@ def replay(directory):
             coll.validate()
             results.append((kind, coll))
             tx.set_root_object(f"out_{kind}", coll)
+        currents = dict(results)
+        for kind in MERGE_KINDS:
+            merged = merge_log(kind, records).rebase_onto(currents[kind])
+            merged.validate()
+            results.append((f"merged_{kind}", merged))
+            tx.set_root_object(f"merged_{kind}", merged)
         print_dumps(results)
         tx.commit()
     finally:

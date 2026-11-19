@@ -34,10 +34,8 @@
  (27) A held retry is awaited by its caller, not by a count: another caller's commit does not
  take its round (reviewer probe P3). (28) Commits left queued by the group bound do not stand
  for the held retry. (29) #none: a retryable conflict, never held; the permission ends #none, or
- #committed after a committed round. (30) A build error of any class fails its commit alone and
- the round builds the next entry (indexed queries ruling IQ1: an extractor's exception fails only
- its commit; proto_db rc4 ends the round on an error that is not a ProtoDBError, a documented
- deviation). (31) With no held caller, a kept permission waits for as many
+ #committed after a committed round. (30) A build error: a PBDBError fails its commit alone, any
+ other error ends the round. (31) With no held caller, a kept permission waits for as many
  commits as the round had conflicts. (32) The stale limit fails every queued commit, those
  queued after the round's too. (33) PBBuildFailed carries whether the tier failed, a Boolean
  (R231). (34) A build that failed with exactly PBUnexpectedError after the permission expired
@@ -344,15 +342,15 @@ c that: '#none: a retryable conflict, never held, reported #none; after a commit
     ((firstErr value: out last) isKindOf: PBConflictError). held value: out last. reportOf value: out last }
   equals: { true. false. #(#none). true. #(#none). true. false. #(#committed) }.
 
-"(30) an entry's build error, of any class, fails that entry alone (IQ1; was m5 before plan Task 4b)"
+"(30) m5: an entry's build error other than a PBDBError ends the round"
 st := go value: core value: (rule value: core value: true) first value: {
   { PBBuildFailed entry: (e value: 'a' value: false) error: (Error new messageText: 'bug'; yourself) tierFailed: false. 2000 } }.
 x := go value: core value: (rule value: core value: true) first value: {
   { PBBuildFailed entry: (e value: 'a' value: false) error: (PBValidationError new messageText: 'v'; yourself) tierFailed: false. 2000 } }.
-c that: 'a build error of any class fails its commit alone; the round builds the next entry'
-  is: { (settles value: st last) collect: [:q | { q first. q last messageText }]. reportOf value: st last. st first phase.
+c that: 'a build error: a PBDBError fails its commit alone; any other error ends the round, nothing sent'
+  is: { (settles value: st last) collect: [:q | { q first. q last messageText }]. reportOf value: st last.
     (settles value: x last) collect: [:q | q first]. x first phase }
-  equals: { #(#('a' 'bug')). #(). #build. #('a'). #build }.
+  equals: { #(#('a' 'bug') #('b' 'bug')). #(#none). #('a'). #build }.
 
 "(31) n1: with no held caller, the kept permission waits for as many commits as conflicts"
 st := go value: core value: fresh value: {

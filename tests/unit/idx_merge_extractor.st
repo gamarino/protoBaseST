@@ -1,9 +1,11 @@
 "EXPECT: ok 4"
 "Indexed queries, plan Task 4b, ruling IQ1 (spec 9.2, plan call IP2, Review Focus 1, controller
- ruling CR8): an extractor runs inside the commit, in the merge the build makes, and an exception
- it raises passes through unchanged and fails only the commit whose merge ran it, as proto_db's
- KeySpec.extract (keyspec.py) and _standalone_round (transactions.py: one commit's error, even an
- unexpected one, is that commit's alone).
+ ruling CR8, corrected at Task 4b review): an extractor runs inside the commit, in the merge the
+ build makes, and an exception it raises passes through unchanged, exactly as proto_db rc4:
+ standalone and in a group commit it fails only the commit whose merge ran it (KeySpec.extract,
+ _standalone_round: one commit's error, even an unexpected one, is that commit's alone); in a
+ cluster round it fails the whole round (_permit_round catches only ProtoConflictError and
+ ProtoDBError per entry; any other error fails every unfinished entry with a copy of it).
 
  The root 'd' is a PBDictionary of five records with an equality index on the extractor 'flaky',
  which raises ZeroDivide for a record whose 'bad' is true (the exception it raised is kept, to
@@ -13,16 +15,19 @@
  'd' (a new dictionary holding one record; the root is never read), so the extractor runs only
  when the commit merges that write onto the current version.
  (a) Standalone: the commit of a bad record fails with ZeroDivide, the class and text the block
- raised; nothing of it is in the root. (b) Then the next commit succeeds, and its record is
- indexed. (c) Group commit (D52): three writers queued one after the other on a storage that
+ raised; nothing of it is in the root; then the next commit succeeds, and its record is indexed
+ (two checks). (b) Group commit (D52), one extractor fails: three writers queued one after the other on a storage that
  holds the root lock until the three have saved their atoms, so one round builds the three in
  queue order, the middle one's merge running the extractor on its bad record: the first and the
  third commit, their records in the new root, with one publish; the middle one fails with
- the block's ZeroDivide. (d) The cluster round of a one-node cluster
- (PBClusterRound over an in-process coordinator; its first permit is held until the three commits
- are queued, so they join one round): the same outcome, the error the class and text the block
- raised, and the
- round runner still serves the next round: a fourth commit succeeds. Spaces go to
+ the block's ZeroDivide. (c) The cluster round of a one-node cluster (PBClusterRound over an
+ in-process coordinator, not the simulator: the round runner itself is under test; its first
+ permit is held until the three commits are queued, so they join one round; the lease is 20 s
+ with the least drift margin R78b allows, so a permission is believed for 6.6 s and the send
+ reserve cannot split the round (R121); the startup grace is 3 s, since its default, lease plus
+ margin, would outlast the 30 s permit wait): rc4's outcome, all three commits fail with
+ ZeroDivide (class and text), none of their records is in the root, the trace shows one permit and no replicate (one round, nothing sent), and the round
+ runner still serves the next round: a fourth commit succeeds. Spaces go to
  out/idx_merge_extractor (git ignores out/), a new directory per run."
 Import from: 'protobase'.
 Import from: '_check'.
@@ -58,7 +63,7 @@ Writer >> write: aRecord in: aDatabase
   ^ [aDatabase newTransactionDo: [:t | t setRootObject: 'd' value: (t newDictionary setAt: (aRecord at: 'id') value: aRecord)]. 'ok']
     on: Error do: [:e | e return: { e class name asString. e messageText }].
 
-| c dir raised record index space db storage outcome results root writers waitFor kit seam w f before ok |
+| c dir raised record index space db storage outcome results root writers waitFor kit seam w f before ok trace |
 c := Check new.
 dir := 'out/idx_merge_extractor' asFileReference / ('run-' , Smalltalk pid printString , '-'
   , Time microsecondClockValue printString).
@@ -93,11 +98,11 @@ c that: 'standalone: the commit whose merge runs the failing extractor fails wit
   is: { results first. results first = ok value. outcome value: db }
   equals: { #('ZeroDivide' 'ZeroDivide'). true. { 5. #(1 2 3 4 5). 5. true } }.
 results := { Writer new write: (record value: 7 value: false) in: db }.
-c that: 'standalone: the next commit succeeds and is indexed'
+c that: 'standalone: then the next commit succeeds and is indexed'
   is: { results first. outcome value: db } equals: { 'ok'. { 6. #(1 2 3 4 5 7). 6. true } }.
 space close.
 
-"(c) group commit: the writers queued one after the other (each once the previous one's step 0
+"(b) group commit: the writers queued one after the other (each once the previous one's step 0
  has saved its dictionary), the root lock held until the three have."
 storage := GroupGate path: (dir / 'group') pathString.
 space := PBObjectSpace storage: storage lockTimeout: 600000.
@@ -114,15 +119,15 @@ writers := OrderedCollection new.
   writers addLast: (Writer new asActor write: r in: db).
   waitFor value: i].
 results := writers asArray collect: [:fut | [fut waitWithin: 120000] on: TimeoutError do: [:e | e return: 'no outcome within 120 s']].
-c that: 'group commit: only the commit whose merge ran the failing extractor fails, with that exception; the others commit in one publish'
+c that: 'group commit: one extractor fails: only the commit whose merge ran it fails, with its exception; the others commit in one publish'
   is: { results. (results at: 2) = ok value. outcome value: db. storage replaces - before }
   equals: { { 'ok'. #('ZeroDivide' 'ZeroDivide'). 'ok' }. true. { 7. #(1 2 3 4 5 10 12). 7. true }. 1 }.
 space close.
 
-"(d) the cluster round of a one-node cluster."
+"(c) the cluster round of a one-node cluster: rc4's outcome."
 SeamRound setUp.
 kit := CommitKit ids: #('s0') dir: dir / 'cluster'
-  options: (Dictionary new at: #leaseDuration put: 3000; at: #driftMargin put: 2000; at: #requestTimeout put: 300; yourself).
+  options: (Dictionary new at: #leaseDuration put: 20000; at: #driftMargin put: 13400; at: #startupGrace put: 3000; at: #requestTimeout put: 300; yourself).
 space := kit open: 's0'.
 kit waitUntil: [((kit node: 's0') stats at: 'rejoining') not].
 db := space newDatabase: 'db'.
@@ -137,10 +142,12 @@ writers := OrderedCollection new.
   kit waitUntil: [| rs | rs := (SeamRound roundOf: 's0') roundState. rs batch size + rs queue size = i]].
 before resolve: true.
 results := writers asArray collect: [:fut | kit settle: fut].
+trace := seam calls: #('permit' 'replicate').
 w := Writer new asActor.
 f := kit settle: (w write: (record value: 23 value: false) in: db).
-c that: 'cluster round: only the commit whose merge ran the failing extractor fails, with its class and text; the others commit; the next round is served'
-  is: { results. (results at: 2) = ok value. f. outcome value: db }
-  equals: { { 'ok'. #('ZeroDivide' 'ZeroDivide'). 'ok' }. true. 'ok'. { 8. #(1 2 3 4 5 20 22 23). 8. true } }.
+c that: 'cluster round: as rc4, the failing extractor fails every commit of the round with its class and text; one round, nothing sent; the next round is served'
+  is: { results. (results at: 2) = ok value. trace. f. outcome value: db }
+  equals: { { #('ZeroDivide' 'ZeroDivide'). #('ZeroDivide' 'ZeroDivide'). #('ZeroDivide' 'ZeroDivide') }. true. #('permit').
+    'ok'. { 6. #(1 2 3 4 5 23). 6. true } }.
 kit shutdown.
 c report displayNl.
