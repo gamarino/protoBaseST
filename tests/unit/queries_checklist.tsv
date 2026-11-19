@@ -46,7 +46,7 @@ test_index_base.py::test_validate_covers_missing_keys_and_stale_keys	ported	test
 test_index_base.py::test_validate_only_checks_supported_terms	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_validate_skips_unorderable_keys	ported	tests/unit/idx_keygroups.st	validate: passes on built indexes and detects corruption
 test_index_base.py::test_key_spec_survives_persistence	ported	tests/unit/idx_contract.st	save and lazy load give equal explain
-test_index_base.py::test_index_attached_to_a_collection_persists	deferred	4a	Attaches an index to a collection and persists it, so it needs addIndex: from Task 4a.
+test_index_base.py::test_index_attached_to_a_collection_persists	ported	tests/unit/idx_collections.st	an index attached to a collection persists (test_index_base.py), and validates read back
 test_index_base.py::test_index_plan	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_index_plan_without_term_needs_an_estimate	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_index_plan_default_kind_and_validation	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.

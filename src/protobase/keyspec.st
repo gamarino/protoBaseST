@@ -254,6 +254,13 @@ PBKeySpec >> _step: aValue name: aName
     ^ aValue state at: aName ifAbsent: [PBMissing default]].
   ^ PBMissing default.
 
+"The receiver, when extract: can run in this process: an extractor key spec whose name is not
+ registered is PBValidationError naming it, the text extract: would signal (_entry:). A collection
+ checks it before any change (PBIndexedCollection >> _checkWritable:, design spec 5.4)."
+PBKeySpec >> _checkRegistered
+  kind = 'extractor' ifTrue: [self class _entry: arg].
+  ^ self.
+
 "How a term names this key: the path, nil (the element) or '@name' (an extractor)."
 PBKeySpec >> termPath
   kind = 'element' ifTrue: [^ nil].

@@ -8,8 +8,8 @@
 #   3. Python as A: py_case.py a starts A, runs _st_case.st b to completion, then commits A;
 #      protoST's dump of the space must equal the one Python printed.
 # Runs 2 and 3 must print the reference too, except where the case records protoBaseST's
-# documented refusal (its 'protobasest' entry: a blind write onto an indexed root, design spec
-# 7.4), whose difference is asserted exactly and printed as a NOTE. py_case.py expected refuses a
+# documented refusal (its 'protobasest' entry: a blind write onto an indexed root, refused until
+# plan Task 4b logs the index operations, plan call IP17), whose difference is asserted exactly and printed as a NOTE. py_case.py expected refuses a
 # 'protobasest' entry on any other case, or one whose outcomes are not PBNotSupportedError. Every step is a process run to
 # completion, so nothing depends on timing. Exit 77 without the interop venv.
 set -u
@@ -62,7 +62,7 @@ for id in $ids; do
 
     if [[ "$want_st" != "$reference" || "$want_py" != "$reference" ]]; then
         echo "NOTE: $id: ProtoBase $(head -n 1 <<< "$reference"); protoBaseST refuses as documented" \
-            "(design spec 7.4): protoST as A $(head -n 1 <<< "$want_st"), Python as A $(head -n 1 <<< "$want_py")"
+            "(until plan Task 4b, call IP17): protoST as A $(head -n 1 <<< "$want_st"), Python as A $(head -n 1 <<< "$want_py")"
     fi
     count=$((count + 1))
 done

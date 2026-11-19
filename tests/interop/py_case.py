@@ -37,7 +37,7 @@ HERE = Path(__file__).resolve().parent
 CASES = HERE / "concurrency_cases.json"
 VECTOR = HERE.parent / "conformance" / "vectors" / "database"
 # The ids that may record protoBaseST's documented refusal in place of ProtoBase's outcome
-# (design spec 7.4); the refusal must be PBNotSupportedError.
+# (until plan Task 4b, plan call IP17); the refusal must be PBNotSupportedError.
 REFUSAL_IDS = ("indexed-root",)
 
 

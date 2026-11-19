@@ -27,7 +27,7 @@ Contents:
 [Values](#values) |
 [Errors](#errors) |
 [Lower layers](#lower-layers) |
-[Indexed queries (planned)](#indexed-queries-planned-not-yet-implemented) |
+[Indexed queries (planned)](#indexed-queries-in-progress-030) |
 [The module and its files](#the-module-and-its-files)
 
 ## Mapping from `proto_db`
@@ -235,8 +235,11 @@ kept byte for byte.
 
 All inherit from `PBIndexedCollection` (`proto_db`'s `IndexedCollection`). Every write answers a
 new version. Values, keys and elements pass through `PBCodec canonical:` at once; a key or
-element that is not orderable (a NaN, a list, a map) is `PBValidationError`. A collection that
-has an index refuses every change with `PBNotSupportedError` naming its indexes (design spec 7.4).
+element that is not orderable (a NaN, a list, a map) is `PBValidationError`. Every write
+maintains the collection's indexes in the same step ([Collections gain](#indexes)); a collection
+holding a vector index or an index of an unknown kind is read only (`PBNotSupportedError` naming
+it), and one holding an index on an unregistered extractor refuses every change
+(`PBValidationError` naming the extractor).
 
 **Common** (`PBIndexedCollection`):
 
@@ -248,7 +251,7 @@ has an index refuses every change with `PBNotSupportedError` naming its indexes 
 | `indexNames`, `getIndex: aName`, `indexes` | The indexes, sorted; `nil` when absent. |
 | `opLog` | A `PBFrozenList` of `PBTuple`s: the intents that built this version (`proto_db`'s names: `('set' k v)`, `('remove' k)`, `('add' e)`, `('transform' e removes adds)`). |
 | `logComplete`, `isMergeable` | True for a version built by `new` and derived only by logged mutators; false for a loaded version and everything derived from it. A `PBList` has no log and is never mergeable. |
-| `rebaseOnto: current` | Replays the net effect of the log onto `current` (the last intent per key, by order key, in order of last occurrence). `current` of another class is `PBValidationError`; one with an index `PBNotSupportedError`. |
+| `rebaseOnto: current` | Replays the net effect of the log onto `current` (the last intent per key, by order key, in order of last occurrence). `current` of another class is `PBValidationError`; until plan Task 4b, an indexed receiver or `current` is `PBNotSupportedError`. |
 | `markConsumed`, `consumed` | Set by the publisher after a commit: later versions are no longer mergeable, so a reused value replaces instead of replaying twice (D33). |
 
 **PBList.** Zero-based positions; a negative position counts from the end; a position out of
@@ -282,7 +285,7 @@ out; an absent element answers a new version with the same content), `countOf:`,
 **PBRepeatedKeysDictionary**: `getAt:`, `has:`, `keys`, `values`, `items`, `keysAndValuesDo:`,
 `totalCount`. Read only; its writes are a non-goal.
 
-**Indexes** are decoded and kept, not queried (their maintenance and queries are planned for 0.3.0: [Indexed queries](#indexed-queries-planned-not-yet-implemented)): `PBEqualityIndex`, `PBRangeIndex`
+**Indexes** are decoded, kept and maintained, not yet queried (queries are planned for 0.3.0: [Indexed queries](#indexed-queries-in-progress-030)): `PBEqualityIndex`, `PBRangeIndex`
 (`PBKeyGroupIndex`), `PBVectorIndex` (`dim`, `metric`, `backend`, `params`, `centroids`,
 `trainedSize`, `storeEntries`). On all: `name`, `keySpec`, `hasMemberTokens` (false for an index
 written by format 3), `totalCount`. `PBIndexSet` (`names`, `get:`, `size`, `isEmpty`) holds a
@@ -1051,14 +1054,15 @@ For tests, tools and readers of the format. An application does not need them.
 
 ## Indexed queries (in progress, 0.3.0)
 
-> **Planned for 0.3.0 and built task by task.** "Key specs and extractors" below is implemented
-> (`src/protobase/keyspec.st`), and so are `PBMemberKeys` and `PBMisfiledError`; every other
-> message of this section is not implemented yet. It is the API of
+> **Planned for 0.3.0 and built task by task.** Implemented so far: "Key specs and extractors"
+> (`src/protobase/keyspec.st`), `PBMemberKeys` and `PBMisfiledError`, "Indexes" (Task 3), and the
+> collection messages of "Collections gain" except the merge (`addIndex:`, `removeIndex:`,
+> `validate`, maintenance in every mutator: Task 4a); every other message of this section is not
+> implemented yet. It is the API of
 > the approved [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md)
 > (sections 5.2 and 5.5) and of its implementation plan's interfaces, written early so the
 > chapters can cite it. Until each task lands, the messages below are listed as pending in the
-> documentation guard, and the collections above keep refusing every change when they hold an
-> index. The concepts are in
+> documentation guard. The concepts are in
 > [queries.md](queries.md); the tutorial is chapters [17](tutorial/17-indexes.md),
 > [18](tutorial/18-queries-and-plans.md) and [19](tutorial/19-ordered-reads-and-pages.md).
 
@@ -1150,11 +1154,11 @@ kind protoBaseST does not know is refused the same way, by the `PBIndexSet` hook
 
 | Message | Meaning |
 |---|---|
-| `addIndex: anIndex` | A new version holding the index, built over `elements` now. A name already present is `PBValidationError`. Logged as `('@index_add' name index)` on the logged collection classes (never `PBList`). |
-| `removeIndex: aName` | A new version without it; an absent name is `PBValidationError`. Logged as `('@index_remove' name)`. |
-| `validate` | Every index's `validate:` against `elements`. |
-| every mutator | Answers content and indexes computed in one step; an index written by format 3 is rebuilt before the first change. |
-| `rebaseOnto: current` | Replays the element intents through `current`'s mutators, which maintain its indexes, then the index-definition intents; an index this log created that `current` also has is `PBConflictError`. Onto a collection with a vector or unknown index: `PBNotSupportedError`. |
+| `addIndex: anIndex` | A new version holding the index, built over `elements` now (`anIndex empty build: self`). A name already present is `PBValidationError`. From Task 4b, logged as `('@index_add' name index)` on the logged collection classes (never `PBList`); until then the answer's log is incomplete (plan call IP17), so it is never merged. |
+| `removeIndex: aName` | A new version without it; an absent name is `PBValidationError`. From Task 4b, logged as `('@index_remove' name)`; until then the log is incomplete, as for `addIndex:`. |
+| `validate` | The placement of the content (`PBMisfiledError` for an entry its own key does not place), then every index's `validate:` against `elements`. Answers the receiver. |
+| every mutator | Answers content and indexes computed in one step, with the hook order of `proto_db`'s mutator: an add, remove or replace event per element that appears, leaves or changes (a `PBCountedSet` fires only when an element appears or disappears; a slice rebuilds every index); a blind write answers the receiver's index set itself. An index written by format 3 is rebuilt before the first change. |
+| `rebaseOnto: current` | (Task 4b; until then an indexed receiver or `current` is `PBNotSupportedError`.) Replays the element intents through `current`'s mutators, which maintain its indexes, then the index-definition intents; an index this log created that `current` also has is `PBConflictError`. Onto a collection with a vector or unknown index: `PBNotSupportedError`. |
 
 `PBIndexSet` gains `withIndex:` (a taken name is `PBValidationError`), `without:` (an absent name is
 `PBValidationError`), `onAdd:`, `onRemove:`, `onReplace:with:` (the hook on every index, the empty

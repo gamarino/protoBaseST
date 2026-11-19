@@ -100,16 +100,20 @@ explicit.
 
 ## Collections and records
 
-- **Indexed collections are not written or merged.** A collection that has an index (a
-  `PBEqualityIndex`, `PBRangeIndex` or `PBVectorIndex`) refuses every change with
-  `PBNotSupportedError` naming its indexes, and so does a merge onto one (design spec 7.4).
-  `proto_db` updates the indexes in the same step and merges blind writes onto them; protoBaseST
-  cannot do either, so it does not do a lesser version. Index *queries* are not provided either:
-  indexes are decoded and kept. `extend:` of nothing still answers the receiver, as `proto_db`'s.
-  *Cost:* a database that uses indexes can be read and its non-indexed parts changed; the indexed
-  collections cannot be changed from protoST. *Planned for 0.3.0, not implemented:* index
-  maintenance in every mutator and merges onto indexed collections, the refusal narrowed to vector
-  and unknown index kinds ([Indexed queries (planned)](#indexed-queries-planned)).
+- **Indexed collections are written, not yet merged** (0.3.0 in progress, plan Task 4a). Every
+  mutator maintains the collection's `PBEqualityIndex` and `PBRangeIndex` indexes in the same
+  step, with the hook order of `proto_db`'s mutator, so one sequence of operations gives the same
+  index nodes in both implementations (`tests/interop/index_ops_identical.sh`); a format-3 index is
+  rebuilt before the first change; `addIndex:`, `removeIndex:` and `validate` are provided. What
+  stays refused: a collection holding a `PBVectorIndex` or an index of a kind protoBaseST does not
+  know is read only (`PBNotSupportedError` naming it; see the table below), and, until Task 4b logs
+  the index operations (plan call IP17), **a merge involving an indexed collection**:
+  `rebaseOnto:` with an indexed receiver or `current` is `PBNotSupportedError` ("Task 4b"), and
+  `addIndex:` / `removeIndex:` answer a version whose log is incomplete, so a commit replaces
+  instead of merging. `proto_db` merges blind writes onto indexed roots. Index *queries* are not
+  provided yet. `extend:` of nothing still answers the receiver, as `proto_db`'s. *Cost:* two
+  transactions that write one indexed root concurrently conflict where `proto_db` would merge
+  them; the loser retries.
 - **`PBRepeatedKeysDictionary` is read only.** Its writes and merges are a non-goal. A new empty
   one is mergeable and its rebase answers `current` unchanged, as `proto_db`'s.
 - **Immutability is by convention** (decision 3). No instance is frozen at run time: a method
@@ -201,7 +205,7 @@ explicit.
 The round-trip tests (design spec 10.2) write a space from protoST and have `proto_db`'s verifier
 accept it. The space cannot contain what protoBaseST cannot write:
 
-- an indexed collection (index maintenance is out of scope, design spec 7.4);
+- a collection holding a vector index or an index of an unknown kind (read only, ruling IQ5);
 - `PBRepeatedKeysDictionary` writes (a non-goal);
 - Python-only types such as `demo.erp.AuditNote`, which protoST reads as opaque atoms and never
   re-writes.
@@ -209,7 +213,8 @@ accept it. The space cannot contain what protoBaseST cannot write:
 Hence the interop round trip compares dumps with `compare_dumps.py --exact` (no normalisation of
 the opaque type), and `tests/interop/concurrency.sh` row 13 (a blind write onto an indexed root)
 uses a copy of the conformance database in all four runs and asserts protoBaseST's
-`PBNotSupportedError` in place of `proto_db`'s merge. Likewise `st_random_ops` covers the four
+`PBNotSupportedError` in place of `proto_db`'s merge (until plan Task 4b, a merge onto an indexed
+current is refused, plan call IP17). Likewise `st_random_ops` covers the four
 collections with writes, and `PBCountedSet` since Task 22.
 
 ## Reading
@@ -218,9 +223,11 @@ collections with writes, and `PBCountedSet` since Task 22.
   answers `typeName`, `tag`, `at:` and `attributeNames`; every other message is
   `PBNotSupportedError` naming the type. A reference to it is written back byte for byte at the
   original pointer; no record of its type is written.
-- **Indexes** are decoded and kept (`name`, `keySpec`, `hasMemberTokens`...). Not queried.
-- **Format-3 collections** are read; their indexes are not rebuilt, and `validate()` and
-  `rebuilt()` of misfiled format-3 collections are not provided.
+- **Indexes** are decoded and kept (`name`, `keySpec`, `hasMemberTokens`...). Not queried yet.
+- **Format-3 collections** are read; a format-3 key-group index is rebuilt with format-4 tokens
+  before the collection's first change (a read or a blind write keeps it), and `validate` reports
+  a misfiled entry with `PBMisfiledError`, as `proto_db`'s. `rebuilt()` (the repair) is not
+  provided.
 - **`snapshot_ref` byte references, pagers and residency** are not provided.
 - **Format 5 is refused** (`proto_db` 2.0.0rc4, the runtime registry D62: the features `parents`,
   envelope key `p`, and `registry`, the types `ModuleList` and `Catalog`, aliases 22 and 23).
@@ -904,9 +911,9 @@ The detail:
 > [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md) plans on purpose,
 > written early so the draft chapters ([17](tutorial/17-indexes.md),
 > [18](tutorial/18-queries-and-plans.md), [19](tutorial/19-ordered-reads-and-pages.md)) and the
-> guide ([queries.md](queries.md)) can link here. Until the feature lands, the entry
-> "Indexed collections are not written or merged" above is what holds. Each entry becomes a
-> deviation when its task is merged.
+> guide ([queries.md](queries.md)) can link here. The entry "Indexed collections are written, not
+> yet merged" above says what holds today. Each entry becomes a deviation when its task is merged;
+> the rows marked (Task 4a) are in force.
 
 | What | Difference from `proto_db` | Why | Cost |
 |---|---|---|---|
@@ -918,7 +925,8 @@ The detail:
 | Projection | `project:` and `collect:`; `PBQuery` has **no** `select:` (ruling IQ2). | Smalltalk's `select:` filters; `proto_db`'s `select` projects, and would read backwards. | A name to learn. |
 | Selection blocks | Not in the first release (ruling IQ2): a block condition is opaque and never uses an index. | Translating a block by running it on a recording object fails silently (`30 < (p at: 'age')`, inlined `ifTrue:` and `==`, methods of the element). | Index-using conditions are written with `PBField`. |
 | Plan choice on near ties (R2) | The descent term `log2 (G + 2)` is computed as `ln x / ln 2` (protoST has no `log2`; ruling IQ4: protoST is not changed), which can differ from C's `log2` in the last bit. Two candidates whose costs are within a relative 1e-12 may be ranked differently: the same answer by another plan. | No protoST change for plan parity (IQ4). | The query vectors report such a plan difference by name and do not fail on it; any other plan difference, and every result difference, fails. |
-| Vector and unknown index kinds | A collection holding a `PBVectorIndex`, or an index of a kind protoBaseST does not know, stays read only: every change and every merge onto it is `PBNotSupportedError` naming it (IC2, ruling IQ5). | Vector search is out of scope; maintaining the other indexes but not that one would write a stale index. | Such a collection is changed from Python only. |
+| Unregistered extractor (Task 4a) | A collection holding an index on an extractor this process has not registered refuses **every** change with `PBValidationError` naming the extractor: blind writes, `addIndex:` of another index and `removeIndex:` included, as does `validate` (spec 5.4). `proto_db` fails only when the extractor is called: a blind write, `remove_index` or an `add_index` that never evaluates it pass. | One rule a program can rely on, checked before any work, rather than one that depends on which hooks a write happens to run. | A program must register the extractor before changing such a collection, even to drop the index; reads need no registration. |
+| Vector and unknown index kinds (Task 4a) | A collection holding a `PBVectorIndex`, or an index of a kind protoBaseST does not know, stays read only: every change and every merge onto it is `PBNotSupportedError` naming it (IC2, ruling IQ5). | Vector search is out of scope; maintaining the other indexes but not that one would write a stale index. | Such a collection is changed from Python only. |
 | Pagers | In-process only: no portable token, no `resumePager:` (ruling IQ3). The pager's `explain` has no `'portable'` key, which `proto_db`'s `Pager.explain` has (`pager.py:221-224`); a pager here is never portable (ruling CR7). | The token's plan digest is over Python's `repr` of the plan, which protoST cannot reproduce byte for byte (spec 3.2; a portable digest is proposal IQ7, not sent). | A page sequence cannot be resumed by another process or language. |
 | Deferred | No query result cache, and so no `extractor_generation` (the registration generation that keys it); no `GroupBy`, `Agg`, `Join`, `Unnest` (`select_many`) or `ValuesScan`; no computed values, `startswith` / `endswith` or field-to-field comparisons; no collection `rebuilt` (misfiled format-3 repair) (ruling IQ3, spec 3.2). | Each is either not portable today or not an optimisation; a block condition covers computed values meanwhile. | Programs that need them wait, or use a block. |
 
@@ -1078,19 +1086,57 @@ What the figures say, and what they do not:
 
 ### Queries and indexes
 
-Planned for 0.3.0 (spec section 7.3, `bench/run_query.sh`). Only M2 is measured so far (below); the
-drafts cite these markers for the rest, each filled by the task named:
+Planned for 0.3.0 (spec section 7.3, `bench/run_query.sh`). M1 and M2 are measured so far (below);
+the drafts cite these markers for the rest, each filled by the task named:
 
 - [measured in T8: Q1-Q4, point equality, `in` and ranges, compound conditions, ordering, indexed
   against a forced scan, in both implementations]
 - [measured in T9: Q5, page k by rank against materialised, and `count` by rank]
-- [measured in T4: M1 (plan task 4a), commits per second with 0, 1 and 3 indexes; M3 (plan task
-  4b), merges onto an indexed current, standalone and in a three-member cluster]
+- [measured in T4: M3 (plan task 4b), merges onto an indexed current, standalone and in a
+  three-member cluster]
 - [measured in T7: P1 planner overhead; P2 where the cost model switches between an index plan and
   a scan with a filter as selectivity varies, and whether the timings cross there; P3 the
   hand-built intersection against the filter plan]
 - [measured in T10: the full comparison with `proto_db`, with date, machine, load, both commits and
   both binaries]
+
+#### M1: commits per second with 0, 1 and 3 indexes
+
+`RUNS=5 bench/run_query.sh M1`. **Indicative only.** Measured 2026-11-19 (05:05-05:13 local) on
+the same machine as M2 below (AMD Ryzen 5 5500U, 6 cores, 12 threads, Linux 7.0.0, DEV12), load
+average 3.0 before and 3.1 after (other desktop sessions open, not controlled); protoBaseST at the
+Task 4a commit (`Queries T4a: indexed collections can be written; M1 measured`, on `b9ec393`; the
+benchmark ran on that working tree), protoST 0.12.0 (`b7e206a`) on protoCore 3.6.0 (`799d7615`),
+the `pinned-360` release build; `proto_db` v2.0.0rc4 (`8e6127f`) on CPython 3.14.0. Each unit (a
+plan) ran in a process of its own, five rounds interleaved, every protost process with the heap
+budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000` (about 5 GB). The workload: a `PBDictionary` of 600
+records committed once, then 200 transactions, timed together, each reading the dictionary and
+committing it with one record replaced (one replace event per index), on a file space under
+`bench/out`. Plans: no index (idx0); a `PBEqualityIndex` on `city` (idx1); that one, a
+`PBRangeIndex` on `age` and a `PBRangeIndex` on an extractor (the name's length) (idx3). Every run
+self-reports the count read back and an ordered checksum over the values and every index; the
+read-back version must pass `validate`; all ten runs of each plan agreed with `proto_db`'s first.
+
+| Indexes | `proto_db` commits/s | protoBaseST commits/s | protoBaseST / `proto_db` time (min) | peak RSS MB `proto_db` / protoBaseST |
+|---|---|---|---|---|
+| 0 | 150 (6.7 ms per commit) | 38 (26.3 ms) | 3.9x | 27 / 1902 |
+| 1 | 115 (8.7 ms) | 11.9 (84.1 ms) | 9.7x | 33 / 5077 |
+| 3 | 83 (12.1 ms) | 5.2 (192.3 ms) | 15.9x | 45 / 5078 |
+
+Commits per second from the minimum of five runs of 200 commits (medians within 7 %: protoBaseST
+5.28 s, 18.0 s, 39.6 s; `proto_db` 1.34 s, 1.76 s, 2.48 s).
+
+- **The extra cost per index**: about 2.0 ms per commit for the first index and 1.8 ms each on
+  average over three in `proto_db`; about 58 ms for the first and 55 ms each over three in
+  protoBaseST. A commit without an index is 3.9x slower than `proto_db`'s; each index is about
+  30x slower than `proto_db`'s, which is what the per-element costs of the key-group trees
+  measured in M2 predict (member key, order key, depth check), not a cost of the maintenance
+  order itself.
+- **Peak RSS is the heap budget, not the live set**: protoCore keeps memory until it reaches its
+  budget, so 5 GB is the budget being used, and 1.9 GB for idx0 is where that run stopped growing.
+  `proto_db` stays under 50 MB. Not a measure of what the workload needs.
+- Not measured: commits per second under contention (merges onto indexed roots are Task 4b,
+  M3), and sizes other than 600.
 
 #### M2: the bulk build against the fold of single additions
 
@@ -1122,10 +1168,17 @@ all six runs (three each, interleaved) agreed. Times in microseconds, minimum / 
   (`memberKeyOf:`), 0.11 ms for the order key of that member key, 0.07 ms per hash of it (not
   cached; a `Dictionary` rehash recomputes it) and 0.24 ms for the depth check (`checkDepth:`), all
   of which `proto_db` does in C-backed MessagePack and tuples. These are the first candidates.
-- **n = 10^5 was not measured in protoBaseST**: the first `RUNS=3` attempt with the default sizes
-  was stopped by the machine's out-of-memory guard (earlyoom, SIGTERM) at 14 GB resident during
-  the 10^5 step, while other processes held most of the 48 GB; `proto_db` took 4.3 s (build) and
-  17.1 s (fold) at 10^5 in a single run. Memory was not otherwise measured.
+- **n = 10^5, measured in Task 4a** with the runner's new isolation: each plan in a process of
+  its own with the heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000` (about 5 GB),
+  `QUERY_M2_SIZES=100000 RUNS=1 bench/run_query.sh M2`, 2026-11-19 05:13-05:24 local, same
+  machine and binaries as M1 above, load average 2.8 before (13 GB of 62 free). One run each,
+  verified (same rows and checksum in both implementations and both plans): build 3.53 s
+  (`proto_db`) against 95.6 s (protoBaseST), 27.1x; fold 15.4 s against 470.4 s, 30.5x. The build
+  is 4.9x faster than the fold in protoBaseST, 4.4x in `proto_db`. Peak RSS: `proto_db` 172 MB
+  (build) and 143 MB (fold); protoBaseST 5301 MB and 5307 MB, that is, the budget (protoCore keeps
+  memory until it reaches it; the earlier attempt without a budget, in Task 3, was stopped by the
+  machine's out-of-memory guard at 14 GB, during the 10^5 step, with every size in one process). The
+  ratio does not keep growing past 10^4 (38.3x there, 27.1x here, single runs on a busy machine).
 
 ## Known protoST limits
 

@@ -171,11 +171,14 @@ members of one group) on top of the collection's own. protoBaseST's tree operati
 times slower than `proto_db`'s ([deviations.md](../deviations.md#avl-operations)), so this cost
 matters here more than in Python:
 
-| Indexes on the collection | Commits per second, one element per commit |
+| Indexes on the collection | Commits per second, one element per commit, 600-element `PBDictionary` (protoBaseST / `proto_db`) |
 |---|---|
-| 0 | [measured in T4: bench M1, commits per second on a 600-element `PBDictionary`] |
-| 1 | [measured in T4: bench M1, the same, one `PBEqualityIndex`] |
-| 3 | [measured in T4: bench M1, the same, an equality, a range and an extractor index] |
+| 0 | 38 / 150 |
+| 1 (a `PBEqualityIndex`) | 11.9 / 115 |
+| 3 (an equality, a range and an extractor index) | 5.2 / 83 |
+
+Measured on one busy machine, five runs each (bench M1, [deviations.md](../deviations.md#m1-commits-per-second-with-0-1-and-3-indexes)):
+indicative only. Each index costs about 55 ms per commit here, 2 ms in `proto_db`.
 
 The rule that follows is `proto_db`'s: **index what you query**, and nothing else.
 

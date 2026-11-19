@@ -1,4 +1,4 @@
-"EXPECT: legacy contents ok, 3 expected refusals"
+"EXPECT: legacy contents ok, 4 expected refusals"
 "The legacy_database section read as a database (README, 'Using the vectors', 7, the
  format-3 space), on a copy of vectors/legacy: every root, the mutables, the indexes
  (format-3 indexes read, with member_tokens false) and the origin (absent: nil) must
@@ -7,12 +7,15 @@
  (the UTC instant) needs the zone's rules, so PBNotation describeObject: refuses them
  with PBNotSupportedError naming the zone. They are the expected refusals listed
  below by root name; a listed root that is described, or another root that is
- refused, is a FAIL, and so is describeDatabase: answering instead of refusing. The
- index rebuild after a change and the detection of the misfiled roots need the
- writer and validate(), which the prototype does not have: they print SKIP-ITEM lines."
+ refused, is a FAIL, and so is describeDatabase: answering instead of refusing.
+ The misfiled roots (README 7, 'misfiled') must each fail validate with
+ PBMisfiledError (D58). The format-3 index rebuild after a change (indexed queries,
+ plan Task 4a): the only format-3 key-group index, 'e' of 'numbers', indexes those
+ zone datetimes, so the first change, which rebuilds it from the elements, is the
+ fourth expected refusal (PBNotSupportedError naming the zone)."
 Import from: 'protobase'.
 Import from: '_vectors'.
-| manifest section contents dir space db snap failures refusals expectedRefusals check |
+| manifest section contents dir space db snap failures refusals expectedRefusals check rebuild |
 manifest := Vectors manifest.
 section := manifest at: 'legacy_database'.
 contents := section at: 'contents'.
@@ -61,10 +64,22 @@ check value: 'the origin' value: (PBNotation describeOrigin: snap) value: (conte
 ([PBNotation describeDatabase: snap. false] on: PBNotSupportedError do: [:e | e return: true]) ifFalse: [
   failures := failures + 1.
   'FAIL describeDatabase: described a database that holds format-3 zone datetimes' displayNl].
-('SKIP-ITEM: index rebuild: after a change of ' , ((contents at: 'indexes') keys asArray sorted) printString
-  , ' each format-3 index is rebuilt with format-4 tokens (needs the writer, plan Tasks 15-16)') displayNl.
-('SKIP-ITEM: misfiled detection: ' , ((section at: 'misfiled') at: 'roots') printString
-  , ' (needs validate(), outside the prototype)') displayNl.
+((section at: 'misfiled') at: 'roots') do: [:name |
+  | outcome |
+  outcome := [(snap getRootObject: name) validate. 'validate passed'] on: Error do: [:e |
+    e return: ((e isKindOf: PBMisfiledError) ifTrue: [nil] ifFalse: [e class name , ': ' , e messageText])].
+  outcome isNil ifFalse: [
+    failures := failures + 1.
+    ('FAIL misfiled root ' , name , ': ' , outcome) displayNl]].
+rebuild := [((snap getRootObject: 'numbers') getIndex: 'e') hasMemberTokens
+    ifTrue: ['the index reads as current']
+    ifFalse: [(snap getRootObject: 'numbers') appendLast: 1. 'the change was accepted']]
+  on: PBNotSupportedError do: [:e | e return: ((e messageText includesSubstring: 'America/New_York')
+    ifTrue: [refusals := refusals + 1. ('EXPECTED REFUSAL index rebuild of numbers: ' , e messageText) displayNl. nil]
+    ifFalse: [e messageText])].
+rebuild isNil ifFalse: [
+  failures := failures + 1.
+  ('FAIL index rebuild of numbers: ' , rebuild) displayNl].
 space close.
 dir deleteAll.
 failures > 0

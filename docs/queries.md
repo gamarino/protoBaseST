@@ -4,8 +4,8 @@
 
 > **Draft: planned for protoBaseST 0.3.0, not implemented.** This guide explains the design of the
 > approved [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md). Today
-> protoBaseST reads `proto_db`'s indexes and refuses every change to an indexed collection
-> ([deviations.md](deviations.md#collections-and-records)). Everything below about `proto_db` is
+> protoBaseST reads `proto_db`'s indexes and maintains them on every write, but merges onto an indexed collection
+> are still refused ([deviations.md](deviations.md#collections-and-records)). Everything below about `proto_db` is
 > read from its code and documentation at `v2.0.0rc4` and cited by file; everything about
 > protoBaseST is what the spec plans, and nothing of it has run. Every code block comes from
 > [examples/queries/pending/reading_plans.st.pending](../examples/queries/pending/reading_plans.st.pending),
@@ -16,7 +16,7 @@ This is the conceptual guide. The tutorial teaches the same ground by example, i
 [chapter 17](tutorial/17-indexes.md) (indexes), [chapter 18](tutorial/18-queries-and-plans.md)
 (queries and the planner) and [chapter 19](tutorial/19-ordered-reads-and-pages.md) (ordered reads
 and pages). The reference lists every class and message:
-[reference.md, Indexed queries](reference.md#indexed-queries-planned-not-yet-implemented).
+[reference.md, Indexed queries](reference.md#indexed-queries-in-progress-030).
 
 The normative texts are `proto_db`'s own: `docs/source/indexing-framework.rst` and
 `docs/source/query-planner.rst` in the protoBase repository. Where protoBaseST differs on purpose,
@@ -584,9 +584,10 @@ Three consequences follow, each explicit:
 The cost on every write, merged or not, is a new version of two trees per index (the key groups,
 and the members of one group), on top of the collection's own. protoBaseST's tree operations are
 12 to 31 times slower than `proto_db`'s ([deviations.md](deviations.md#avl-operations)), so index
-what you query. [measured in T4: bench M1 (plan task 4a), commits per second for N single-element
-transactions on a collection with 0, 1 and 3 indexes, and the extra cost per index, in both
-implementations.]
+what you query. Bench M1 (200 single-element transactions on a 600-record dictionary): with 0, 1
+and 3 indexes protoBaseST commits 38, 11.9 and 5.2 times per second, `proto_db` 150, 115 and 83;
+each index adds about 55 ms per commit here and 2 ms in `proto_db`
+([deviations.md](deviations.md#m1-commits-per-second-with-0-1-and-3-indexes); indicative only).
 
 ## Cluster mode
 
@@ -621,7 +622,7 @@ same rows, checksum and plan. None exists yet.
 | AND, OR of two indexed branches and of an indexed and an unindexed one, NOT | Q3 | [measured in T8: Q3] |
 | Ordered scan against sort, with `take:` | Q4 | [measured in T8: Q4] |
 | Page k by rank against materialised; `count` by rank | Q5 | [measured in T9: Q5] |
-| Commits per second with 0, 1 and 3 indexes | M1 | [measured in T4: M1, plan task 4a] |
+| Commits per second with 0, 1 and 3 indexes | M1 | Measured in T4a: protoBaseST 38, 11.9 and 5.2 commits/s, `proto_db` 150, 115 and 83; about 55 ms per index per commit against 2 ms ([deviations.md](deviations.md#m1-commits-per-second-with-0-1-and-3-indexes)) |
 | Bulk `addIndex:` against the fold of single additions | M2 | Measured in T3: build 3.1x faster than the fold at 10^4, protoBaseST 16.7x (10^2) to 38.3x (10^4) slower than `proto_db` ([deviations.md](deviations.md#m2-the-bulk-build-against-the-fold-of-single-additions)) |
 | Merges onto an indexed current, standalone and in a cluster | M3 | [measured in T4: M3, plan task 4b] |
 | `plan` and `explain` alone, 1 to 32 conjuncts, 0 to 8 indexes | P1 | [measured in T7: P1] |

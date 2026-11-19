@@ -35,7 +35,7 @@
     "absent, 1, 'text', {'k': v} (sorted keys), [v], #{e} (sorted), #{e: n} for a CountedSet (element",
     "and count, sorted), <object> for a DBObject.",
     "protobasest, allowed only on the case indexed-root and only with PBNotSupportedError in each",
-    "outcome (both runners check it), records protoBaseST's documented refusal (design spec 7.4):",
+    "outcome (both runners check it), records protoBaseST's documented refusal (until plan Task 4b, call IP17):",
     "the outcomes with protoST as A (st_as_a), with Python as A (py_as_a) and with two protoST actors",
     "(actors); every other case must give the reference in all three."
   ],

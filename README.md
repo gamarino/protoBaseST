@@ -147,7 +147,7 @@ program that checks its own results and is run by the tests.
 |---|---|
 | [The tutorial, chapters 1-12](docs/tutorial/README.md) | A single process: first commit, values and versions, records, collections and queries, transactions and conflicts, blind writes, mutables and history, bytes, actors, crash recovery, Python interop, refusals. |
 | [Cluster mode, chapters 13-16](docs/tutorial/13-cluster-concepts.md) | Several processes sharing one database: [the ideas](docs/tutorial/13-cluster-concepts.md), [a three-node cluster](docs/tutorial/14-a-three-node-cluster.md), [failures and recovery](docs/tutorial/15-failures-and-recovery.md), [operating a cluster](docs/tutorial/16-operating-a-cluster.md). |
-| [Queries, chapters 17-19](docs/tutorial/17-indexes.md) **(draft, not implemented)** | Planned for 0.3.0, written before the code: [indexes](docs/tutorial/17-indexes.md), [queries and the planner](docs/tutorial/18-queries-and-plans.md), [ordered reads and pages](docs/tutorial/19-ordered-reads-and-pages.md). The API they use does not exist yet; today an indexed collection is read only. |
+| [Queries, chapters 17-19](docs/tutorial/17-indexes.md) **(draft, not implemented)** | Planned for 0.3.0, written before the code: [indexes](docs/tutorial/17-indexes.md), [queries and the planner](docs/tutorial/18-queries-and-plans.md), [ordered reads and pages](docs/tutorial/19-ordered-reads-and-pages.md). Most of the API they use does not exist yet; indexed collections can be written (0.3.0 in progress), not yet queried. |
 | [A small ERP](docs/tutorial/erp.md) | A guided build of a real application, with the reasoning at each step. |
 | [Coming from GemStone/S](docs/tutorial/gemstone.md), [Coming from Soil](docs/tutorial/soil.md) | Orientation for readers who know those systems. |
 
@@ -209,7 +209,7 @@ because `proto_db` has none; the tutorial shows the three-line helper.
 
 If a value, type, version or operation cannot be stored or done exactly, protoBaseST signals an
 error naming it. It does not store something else in its place. A `Symbol` longer than six bytes,
-a protoST `Dictionary` (its order is unspecified), a `Fraction`, a write to an indexed collection,
+a protoST `Dictionary` (its order is unspecified), a `Fraction`, a write to a collection holding a vector index,
 a wall clock in an IANA zone: each is refused, and each refusal protects a specific property of
 the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cost of each.
 

@@ -36,12 +36,25 @@
   groups are `PBKeyGroups` (`keygroups.st`), and `PBMemberKeys identityOf:` ports
   `element_identity`. A `PBVectorIndex` and an index of an unknown kind refuse every hook
   (`PBNotSupportedError`, design spec 3.3). `PBIndexSet` gains `withIndex:`, `without:`,
-  `onAdd:`, `onRemove:`, `onReplace:with:` and `rebuiltStale:`. Collections do not call the hooks
-  yet (plan Task 4a). The trees `build:` and the hooks write are node for node `proto_db`'s on a
+  `onAdd:`, `onRemove:`, `onReplace:with:` and `rebuiltStale:`. The trees `build:` and the hooks write are node for node `proto_db`'s on a
   shared space (`tests/interop/index_build_identical.sh`).
 - **Benchmark M2** (`bench/run_query.sh`, `bench/query_workload.st`,
   `bench/py_query_workload.py`): the bulk build against the fold of single additions, in both
   implementations, with the work verified; figures in `docs/deviations.md#performance`.
+- **Indexed collections can be written** (plan Task 4a, `src/protobase/collections.st`): every
+  mutator of `PBList`, `PBDictionary`, `PBHashDictionary`, `PBSet` and `PBCountedSet` answers
+  content and indexes computed in one step, with the hook order of `proto_db`'s mutator (a blind
+  write keeps the index set itself); a format-3 index is rebuilt before the first change.
+  `addIndex:`, `removeIndex:` and `validate` (placement, `PBMisfiledError`, then every index
+  against the elements) are new. The trees are node for node `proto_db`'s after the same
+  operations (`tests/interop/index_ops_identical.sh`). Still refused: a collection holding a
+  vector index or an index of an unknown kind (`PBNotSupportedError`), any change to one holding an
+  index on an unregistered extractor (`PBValidationError`), and, until Task 4b, a merge involving
+  an indexed collection (`addIndex:` and `removeIndex:` answer an incomplete log).
+- **Benchmark M1**: commits per second of single-record transactions on a 600-record dictionary
+  with 0, 1 and 3 indexes. `bench/run_query.sh` now runs each unit (a size and a plan) in a
+  process of its own with an explicit heap budget (`PROTOCORE_HEAP_LIMIT_CELLS`) and reports each
+  process's peak resident set.
 
 ## 0.2.0 (2026-11-19)
 
