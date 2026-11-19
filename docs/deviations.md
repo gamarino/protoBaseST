@@ -972,7 +972,7 @@ The detail:
 | Single-value projection (Task 8) | `project:` always answers maps (a `PBFrozenDict` per row), from an Array of paths or `PBField`s or a map of output names; `proto_db`'s `select("name")` answers the bare values. A single value is `collect: [:e \| e at: 'name']`. | `project:` has one result shape; a block names a computed answer. | One message more for a bare value. |
 | Query sources (Task 8) | `PBQuery from:` takes a `PBIndexedCollection`, a `PBQueryPlan` or a `PBQuery` (answered as is); a protoST collection (an `Array`, an `OrderedCollection`) is `PBValidationError`. `proto_db`'s `from_collection` also takes any iterable, through `ValuesScan` (deferred, row below). | `ValuesScan` is deferred (ruling IQ3). | Host collections are filtered with Smalltalk's own `select:`. |
 | First of nothing (Task 8) | `first` of an empty query is `PBUserError` ("first of an empty query; use firstOrNil when no row is expected"); `proto_db` raises `ProtoUserError` too, with its own text. | The hierarchy maps one to one; the text names the protoST message. | None. |
-| Benchmark sizes (Task 8) | Bench Q1 measures 10^2 to 10^4 records by default, not the spec's 10^2 to 10^5 (spec 7.3). | A 10^5 process with only the one index Q1 uses took 336 s and peaked at 5.4 GB in protoST (the budget is about 5 GB), and a run needs ten per size ([Q1-Q4](#q1-q4-queries-indexed-against-a-forced-scan)). | The largest size is 10^4; `QUERY_Q1_SIZES` adds 10^5 for a run that can afford it. |
+| Benchmark sizes (Task 8) | Bench Q1 measures 10^2 to 10^4 records by default, not the spec's 10^2 to 10^5 (spec 7.3); Q5 (Task 9) measures 2000 and 10^4. | A 10^5 process with only the one index Q1 uses took 336 s and peaked at 5.4 GB in protoST (the budget is about 5 GB), and a run needs ten per size ([Q1-Q4](#q1-q4-queries-indexed-against-a-forced-scan)). | The largest size is 10^4; `QUERY_Q1_SIZES` adds 10^5 for a run that can afford it. |
 | Deferred | No query result cache, and so no `extractor_generation` (the registration generation that keys it); no `GroupBy`, `Agg`, `Join`, `Unnest` (`select_many`) or `ValuesScan`; no computed values, `startswith` / `endswith` or field-to-field comparisons; no collection `rebuilt` (misfiled format-3 repair) (ruling IQ3, spec 3.2). | Each is either not portable today or not an optimisation; a block condition covers computed values meanwhile. | Programs that need them wait, or use a block. |
 
 Worth knowing: an extractor runs inside the commit when a blind write is merged onto a collection
@@ -1139,13 +1139,15 @@ What the figures say, and what they do not:
 
 ### Queries and indexes
 
-0.3.0, in progress (spec section 7.3, `bench/run_query.sh`). M1, M2, M3, P1-P3 and Q1-Q4 are measured so far (below);
+0.3.0, in progress (spec section 7.3, `bench/run_query.sh`). M1, M2, M3, P1-P3 and Q1-Q5 are measured so far (below);
 the drafts cite these markers for the rest, each filled by the task named:
 
 - Q1-Q4, point equality, `in` and ranges, compound conditions, ordering, indexed against a forced
   scan, in both implementations: measured at Task 8,
   [below](#q1-q4-queries-indexed-against-a-forced-scan).
-- [measured in T9: Q5, page k by rank against materialised, and `count` by rank]
+- Q5, every page by rank, materialised and by skipping, and `count` by rank against counting a
+  scan, in both implementations: measured at Task 9,
+  [below](#q5-pages-by-rank-materialised-and-by-skipping-counts-by-rank).
 - [measured in T10: the full comparison with `proto_db`, with date, machine, load, both commits and
   both binaries]
 
@@ -1226,6 +1228,67 @@ and answered its 20 lookups in 32.5 ms against `proto_db`'s 2.0 ms. Outputs are 
 by default (`QUERY_Q1_SIZES` sets the sizes); see "Benchmark sizes" in the table of indexed-query
 deviations. Peak resident sets of protost (up to 5 GB) are not a figure of the work: protoCore
 keeps memory until it needs it.
+
+#### Q5: pages by rank, materialised and by skipping; counts by rank
+
+`RUNS=5 bench/run_query.sh Q5`, plan Task 9, on a clean, committed tree with no other heavy
+process. The runner's provenance line, unmodified:
+`2026-11-19T16:59Z; protoBaseST f7d3da7; protoST 0.12.0`. The run took 24 minutes; load average
+3.08 before and 2.64 after (the desktop only), on the machine of M1 to M3 (AMD Ryzen 5 5500U, 6
+cores, 12 threads, Linux 7.0.0-43, DEV12); the `pinned-360` build (protoST 0.12.0 on protoCore
+3.6.0); `proto_db` v2.0.0rc4 on CPython 3.14.0. One process per unit, five rounds interleaved,
+heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`. The records are Q1-Q4's (`QueryUnits` in
+`bench/_query_bench.st`, `bench/py_query_workload.py`), at 2000 and 10^4. Every page of 50 of the
+records ordered by `r` is read, from page 0 to the last (40 and 200 pages): `page-rank` by a pager
+over the indexed records (an `IndexOrderedScan`, by rank); `page-mat` by a pager over the same
+records without indexes (a `Sort` over the scan, run once and sliced); `page-skip` the obvious way,
+each page read from the indexed query by producing and dropping the rows before it and stopping
+after it. `count-index` and `count-scan` time 20 counts of `r >= n (q + 1) // 21`, by rank over
+the indexes and by walking a filtered scan without them. Each unit checks before timing that its
+pager or every count is by rank (or is not) and fails otherwise; every run self-reported its rows,
+pages, plan and checksum, all ten runs of every unit agreed with `proto_db`'s first, and the three
+page units of a size, and the two count units, reported the same rows and checksum (the runner
+printed `verified`). Times are microseconds for the whole unit, minimum / median of five; per page
+and per count are the minimum divided by the pages or the counts. Peak RSS is the largest over a
+unit's runs, in MB, `proto_db` / protoBaseST; protoBaseST's (up to 5 GB, the heap budget) is not a
+figure of the work: protoCore keeps memory until it needs it.
+
+| Unit | `proto_db` | protoBaseST | Per page or count, `proto_db`; protoBaseST | Ratio st/py | Peak RSS |
+|---|---|---|---|---|---|
+| 2000, `page-rank` (40 pages) | 5450 / 5662 | 85097 / 97592 | 0.14; 2.1 ms | 15.6x | 31 / 2646 |
+| 2000, `page-mat` | 5596 / 6029 | 188960 / 205331 | 0.14; 4.7 ms | 33.8x | 26 / 1033 |
+| 2000, `page-skip` | 56258 / 60756 | 1554057 / 1652503 | 1.4; 38.9 ms | 27.6x | 31 / 3151 |
+| 2000, `count-index` (20 counts) | 2067 / 2197 | 34440 / 39398 | 0.10; 1.7 ms | 16.7x | 31 / 5067 |
+| 2000, `count-scan` | 123359 / 126130 | 2850606 / 2862384 | 6.2; 143 ms | 23.1x | 26 / 2818 |
+| 10^4, `page-rank` (200 pages) | 25956 / 27426 | 385390 / 420313 | 0.13; 1.9 ms | 14.8x | 59 / 5088 |
+| 10^4, `page-mat` | 32289 / 34284 | 910807 / 1041215 | 0.16; 4.6 ms | 28.2x | 32 / 5088 |
+| 10^4, `page-skip` | 1467964 / 1502836 | 39002927 / 39571531 | 7.3; 195 ms | 26.6x | 59 / 5088 |
+| 10^4, `count-index` | 2094 / 2173 | 43907 / 48654 | 0.10; 2.2 ms | 21.0x | 58 / 5126 |
+| 10^4, `count-scan` | 618763 / 629753 | 13082681 / 13310845 | 31; 654 ms | 21.1x | 29 / 5088 |
+
+What it shows.
+
+- **A page by rank costs the same at every size.** About 2 ms per page of 50 in protoBaseST at
+  2000 and at 10^4 records (0.13 ms in `proto_db`): one descent of the weighted index, then the
+  page. Skipping grows with the page number: on average 39 ms per page at 2000 and 195 ms at 10^4,
+  so reading every page by skipping costs 18x the pager's time at 2000 and 101x at 10^4
+  (`proto_db`: 10x and 57x). The gap grows with n, as O(n² / s) against O(n + (n / s) log n) says.
+- **Materialising once is close to rank.** A pager over a plan without rank access runs its sort
+  once and slices it: 2.2x to 2.4x the pager by rank in protoBaseST, over every page
+  (`proto_db`: 1.0x to 1.2x). Its cost is the plan's, paid once, not per page.
+- **A count by rank does not grow with the collection.** 1.7 and 2.2 ms per count at 2000 and
+  10^4 (`proto_db` 0.10 ms at both, which includes building and planning each query), against
+  143 and 654 ms for counting a filtered scan: 83x and 298x (`proto_db`: 60x and 295x).
+- **protoBaseST is 15x to 34x slower than `proto_db`** (minimum against minimum): 15x to 21x for
+  the rank units, 21x to 28x for the walks, and 28x to 34x for the materialised pager, whose
+  `Sort` dominates (Q4 measured a sort over a scan at 35x).
+
+The first run of Q5 (at `d7e5a25`, also `verified`) counted `r >= n q // 20`. For q = 0 that bound
+covers every row, and both planners answer it by a scan, so `count-index` was not all by rank and
+grew with n (98 % of `proto_db`'s 10^4 unit was that one walk, by profile). The bounds were changed
+and each count unit now checks its plans before timing (`f7d3da7`); the table is the second run.
+Sizes: Q5 runs 2000 and 10^4 records, not 10^5, for the reason given for Q1 ("Benchmark sizes" in
+the table of indexed-query deviations); `QUERY_Q5_SIZES` sets them.
 
 #### M1: commits per second with 0, 1 and 3 indexes
 

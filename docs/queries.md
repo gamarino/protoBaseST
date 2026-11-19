@@ -698,8 +698,13 @@ lesson check: 'and sliced: its pages are the query''s rows'
 A pager lives in one process: `proto_db`'s portable pager tokens are deferred (spec 3.2), because
 the token's plan digest is computed over Python's `repr` of the plan.
 
-[measured in T9: bench Q5, the time of page k for every k, by rank and materialised, and `count` by
-rank.] Measured in T8 (bench Q4, 2000 elements, 20 queries of `take: 5`, the minimum;
+Measured in T9 (bench Q5, every page of 50 of 2000 and 10^4 records ordered by an indexed key, the
+minimum; [deviations.md](deviations.md#q5-pages-by-rank-materialised-and-by-skipping-counts-by-rank)): a
+pager by rank served a page in about 2 ms at both sizes, a pager over a sort without rank in 4.6 ms
+(the sort once, then slices), and skipping to each page took 39 and 195 ms per page on average, so
+reading every page by skipping cost 18x and 101x the pager's time; a count by rank took 1.7 and
+2.2 ms against 143 and 654 ms for counting a filtered scan. `proto_db`: 0.13, 0.15, 1.4 and 7.3 ms
+per page, 0.10 against 6.2 and 31 ms per count. Measured in T8 (bench Q4, 2000 elements, 20 queries of `take: 5`, the minimum;
 [deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)): the ordered index scan answered in 1.0 ms per query against 172 ms for a
 `Sort` over a scan; with a condition the planner sorts over a lookup, 2.6 ms per query for ten
 rows and 57 ms for 500. `proto_db`: 0.12, 4.9, 0.23 and 1.8 ms.
@@ -830,7 +835,7 @@ same rows, checksum and plan. None exists yet.
 | `'in'` of 1, 10, 100 values; ranges of 0.1 % to 50 % selectivity | Q2 | Measured in T8: the index wins at every point, 1.2 to 49 ms per query against 125 to 401 ms for the scan; 10x to 24x `proto_db`'s time ([deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)) |
 | AND, OR of two indexed branches and of an indexed and an unindexed one, NOT | Q3 | Measured in T8: AND 2.4 ms per query against a 161 ms scan; the Union of two lookups 19 ms against a 235 ms scan (`proto_db` 2.7 against 12.6 ms), after fix round 1 removed a per-row identity-key cost that had made it slower than the scan; the other two plan a scan ([deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)) |
 | Ordered scan against sort, with `take:` | Q4 | Measured in T8: an ordered index scan 1.0 ms per query against 172 ms for a sort over a scan ([deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)) |
-| Page k by rank against materialised; `count` by rank | Q5 | [measured in T9: Q5] |
+| Page k by rank against materialised; `count` by rank | Q5 | Measured in T9, every page of 50 at 2000 and 10^4 records: by rank about 2 ms per page at both sizes, materialised once 4.6 ms, by skipping 39 and 195 ms; a count by rank 1.7 and 2.2 ms against 143 and 654 ms for a counted scan; `proto_db` 0.13, 0.15, 1.4 and 7.3 ms, and 0.10 against 6.2 and 31 ms ([deviations.md](deviations.md#q5-pages-by-rank-materialised-and-by-skipping-counts-by-rank)) |
 | Commits per second with 0, 1 and 3 indexes | M1 | Measured in T4a: protoBaseST 38, 11.9 and 5.2 commits/s, `proto_db` 150, 115 and 83; about 55 ms per index per commit against 2 ms ([deviations.md](deviations.md#m1-commits-per-second-with-0-1-and-3-indexes)) |
 | Bulk `addIndex:` against the fold of single additions | M2 | Measured in T3: build 3.1x faster than the fold at 10^4, protoBaseST 16.7x (10^2) to 38.3x (10^4) slower than `proto_db` ([deviations.md](deviations.md#m2-the-bulk-build-against-the-fold-of-single-additions)) |
 | Merges onto an indexed current, standalone and in a cluster | M3 | Measured in T4b: standalone protoBaseST 34.2, 11.9 and 5.1 commits/s with 0, 1 and 3 indexes, `proto_db` 141, 110 and 81; a three-member protoBaseST cluster 17.4, 6.8 and 1.1, its three-index build (189 ms) refused for the send reserve 135 to 210 times per 120 commits ([deviations.md](deviations.md#m3-a-blind-write-merged-onto-an-indexed-current-standalone-and-in-a-cluster)) |

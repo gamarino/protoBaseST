@@ -103,9 +103,23 @@ What page k costs, for a page of size s over n rows:
 | A pager by rank | O(log n + s): one descent of the weighted index, then the page | O(n + (n / s) log n) |
 | A pager over a plan without rank | the whole plan once, then O(s) per page | one run of the plan, then O(n) |
 
-How much the seek saves is a measurement: [measured in T9: bench Q5, the time of page k for every
-k from the first to the last, by rank and by skipping, on an ordered index scan of 10^4 and 10^5
-elements; and `count` by rank against counting the rows, RUNS=5 interleaved].
+How much the seek saves is a measurement. Bench Q5 reads every page of 50 of an ordered query over
+2000 and 10^4 records, three ways, five runs interleaved with `proto_db`'s (the minimum; the full
+table is in [deviations.md](../deviations.md#q5-pages-by-rank-materialised-and-by-skipping-counts-by-rank)):
+
+| Every page of 50, ordered by an indexed key | 2000 records (40 pages) | 10^4 records (200 pages) |
+|---|---|---|
+| A pager by rank (`IndexOrderedScan`) | 85 ms, 2.1 ms per page | 385 ms, 1.9 ms per page |
+| A pager over a `Sort` without rank: materialised once, then sliced | 189 ms | 911 ms |
+| Skipping to each page | 1554 ms, 39 ms per page on average | 39003 ms, 195 ms per page on average |
+| `proto_db`, the same three | 5.5, 5.6 and 56 ms | 26, 32 and 1468 ms |
+
+A page by rank costs the same at both sizes; a skipped page costs more the further it is, so the
+user who reads to the end pays 18 times the pager's price at 2000 records and 101 times at 10^4,
+and the gap keeps growing with the collection (`proto_db`: 10 and 57 times). Materialising once is
+not free, it pays the sort, but it pays it once: about twice the pager by rank. protoBaseST is 15
+to 34 times slower than `proto_db` in absolute terms, the gap of the whole port (chapter 18); the
+shape of the costs is the same in both.
 
 ## Stable pages: one snapshot
 
@@ -127,7 +141,10 @@ The pager was built on a transaction's snapshot. Between page 0 and page 1 anoth
 committed a newcomer aged 18, who sorts into page 0. The pager does not see it: its plan reads the
 versions of its snapshot, and a version never changes (chapter 2). So a pager never shows a row
 twice and never skips one, whatever is committed meanwhile, and it needs no lock and no pinning:
-every committed version stays readable (chapter 7).
+every committed version stays readable (chapter 7). The same holds under real concurrency:
+`tests/unit/qry_pager_stability.st` runs three writer actors that insert before, inside and after
+the pages and delete rows, while three reader actors page through snapshots, waiting for a commit
+before each page; every reader sees exactly its snapshot's rows, by rank and materialised.
 
 The obvious alternative, a new query per page with an offset, reads a new snapshot each time:
 
@@ -155,7 +172,9 @@ lesson check: 'count of a range, by rank'
 
 `count` uses the same weights: when the plan knows its exact number of rows without producing them
 (an index plan does, from the weights of the groups it covers), the count is read, not computed by
-walking the rows. A `Count` node in a plan shows `'by_rank'`: true when it does so.
+walking the rows. A `Count` node in a plan shows `'by_rank'`: true when it does so. In bench Q5 a
+count by rank took 1.7 ms at 2000 records and 2.2 ms at 10^4, against 143 and 654 ms for counting
+a filtered scan of the same records (`proto_db`: 0.10 ms against 6.2 and 31 ms).
 
 ## What to take away
 
