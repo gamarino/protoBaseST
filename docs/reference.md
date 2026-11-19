@@ -998,7 +998,29 @@ For tests, tools and readers of the format. An application does not need them.
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.
-  A large value is stored in a `PBValueBox`.
+  A large value is stored in a `PBValueBox`. The indexes and the rank access use these `PBAvl`
+  class-side functions, ports of `proto_db`'s `avl.py` (an order key is a `PBKeys orderKey:`
+  value; a `nil` bound is open):
+  - `keyDo:over:fromOrderKey:inclusive:toOrderKey:inclusive:` evaluates a `[:key :value]` block
+    over an order-key range, in key order (`avl.key_iter_okey_range`), and `keyReverseDo:over:` over
+    the whole tree in descending order (`avl.key_iter_reversed`).
+  - `keyCountBelow:orderKey:inclusive:` answers the number of keys below an order key (or equal
+    to it, when inclusive) in O(log n) (`avl.key_count_below`).
+  - `keyFromSorted:nodeClass:` builds a balanced keyed tree from an Array of `{ key. value }`
+    pairs in strictly increasing key order, and `keyFromSortedOrderKeys:nodeClass:` builds one
+    from `{ order key. key. value }` triples (`avl.key_from_sorted`, `avl.key_from_sorted_okeys`). The
+    shape is `proto_db`'s node for node; a key out of order or repeated is `PBValidationError`.
+  - `keyWeight:` and `keyWeightBelow:orderKey:inclusive:` answer the occurrences of a
+    `PBCountedKeyNode` tree, in all or below an order key (`avl.key_weight`, `avl.key_weight_below`).
+  - `keyDo:over:fromWeight:descending:` evaluates a `[:key :value :skip]` block from occurrence
+    `rank` on, where `0 <= rank <= keyWeight:`; the block's third argument counts the first
+    node's occurrences before that rank (`avl.key_iter_from_weight`).
+  - `posDo:over:from:` and `keyDo:over:from:` walk from a position, `0 <= start <= count`
+    (`avl.pos_iter_from`, `avl.key_iter_from`).
+
+  The weight functions refuse a tree that is not weighted, and a rank or start out of range,
+  with `PBValidationError`. Every walk evaluates its block as it reaches each node, so a `^`
+  from the block stops the walk.
 - **Roots**: `PBSpaceRoot` (`databases`, `clusterTerm`, `clusterEpoch`, `clusterPrevious`;
   `databases:` and, for a cluster commit, `databases:term:epoch:previous:`; `databases:stamp:previous:` chooses between them),
   `PBDatabaseRoot` (`objects`, `mutables`, `version`, `committedAt`, `previous`, `origin`).

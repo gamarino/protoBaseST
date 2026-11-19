@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+### Indexed queries (in progress)
+
+- **AVL functions for indexes and rank access** (`PBAvl`, class side, ports of `proto_db`'s
+  `avl.py`): order-key ranges (`keyDo:over:fromOrderKey:inclusive:toOrderKey:inclusive:`), the
+  descending walk (`keyReverseDo:over:`), counts and weights below an order key
+  (`keyCountBelow:orderKey:inclusive:`, `keyWeight:`, `keyWeightBelow:orderKey:inclusive:`),
+  the walk from an occurrence rank (`keyDo:over:fromWeight:descending:`), the walks from a
+  position (`posDo:over:from:`, `keyDo:over:from:`) and the balanced keyed build
+  (`keyFromSorted:nodeClass:`, `keyFromSortedOrderKeys:nodeClass:`), whose trees are node for
+  node `proto_db`'s (`tests/interop/avl_ops_identical.sh`, sequence `bulk`).
+
 ## 0.2.0 (2026-11-19)
 
 The detailed, task-by-task log of this release is

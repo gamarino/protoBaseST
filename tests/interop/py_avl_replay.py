@@ -1,11 +1,13 @@
 """Replay protoBaseST's seeded AVL operation sequence in ProtoBase and compare the trees (plan Task 14).
 
-Usage: python py_avl_replay.py <pos|key|counted|list|pos-large|key-large> <file>
+Usage: python py_avl_replay.py <pos|key|counted|list|pos-large|key-large|bulk> <file>
 
 <file> is the output of _st_avl_ops.st: 'op <words>' lines, and at each checkpoint a
 'dump <n>' line followed by 'node <line>' lines that describe protoBaseST's tree. This
 script applies every operation with proto_db.collections.avl (pos_insert, pos_set,
-pos_remove, key_put, key_remove; for 'list', the List messages of plan Task 15) and, at each checkpoint, dumps its own tree the same way
+pos_remove, key_put, key_remove; for 'list', the List messages of plan Task 15; for 'bulk',
+key_from_sorted and key_from_sorted_okeys, the balanced keyed builds of the indexed queries'
+plan Task 1) and, at each checkpoint, dumps its own tree the same way
 (tests/unit/_avl_ops.st, AvlOps dump:): one line per atom (node or value box) in pre-order,
 a node before its box, '<number> <type name> <hex>', where <hex> is the msgpack of the
 state ProtoBase encodes (codec.encode_state) with each reference written as the pointer
@@ -22,6 +24,7 @@ from proto_db.collections import avl
 from proto_db.collections.lists import List
 from proto_db.core import codec
 from proto_db.core.atom import AtomPointer
+from proto_db.values import order_key
 
 SEGMENT = uuid.UUID(bytes=bytes.fromhex("0123456789abcdef0123456789abcdef"))
 
@@ -106,9 +109,27 @@ def apply_list(lst, words):
     raise ValueError(f"unknown list operation {words!r}")
 
 
+def build_bulk(words):
+    """The tree of one 'bulk <key|counted> <n> <key> <value> ...' operation (indexed queries,
+    plan Task 1): key_from_sorted for KeyNode, key_from_sorted_okeys for CountedKeyNode."""
+    cls, n, tokens = words[1], int(words[2]), words[3:]
+    if len(tokens) != 2 * n:
+        raise ValueError(f"bulk: {n} pairs announced, {len(tokens) // 2} given")
+    pairs = [(value_of(tokens[2 * i]), value_of(tokens[2 * i + 1])) for i in range(n)]
+    if cls == "key":
+        return avl.key_from_sorted(pairs, node_class=avl.KeyNode)
+    if cls == "counted":
+        return avl.key_from_sorted_okeys([(order_key(k), k, v) for k, v in pairs], node_class=avl.CountedKeyNode)
+    raise ValueError(f"unknown bulk node class {cls!r}")
+
+
 def apply(kind, root, words):
     op = words[0]
     kind = kind.split("-")[0]
+    if kind == "bulk":
+        if op == "bulk":
+            return build_bulk(words)
+        raise ValueError(f"unknown operation {words!r}")
     if kind == "pos":
         if op == "insert":
             return avl.pos_insert(root, int(words[1]), value_of(words[2]))
@@ -184,7 +205,7 @@ def main(kind, path):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3 or sys.argv[1] not in ("pos", "key", "counted", "list", "pos-large", "key-large"):
+    if len(sys.argv) != 3 or sys.argv[1] not in ("pos", "key", "counted", "list", "pos-large", "key-large", "bulk"):
         print(__doc__)
         sys.exit(2)
     sys.exit(main(sys.argv[1], sys.argv[2]))

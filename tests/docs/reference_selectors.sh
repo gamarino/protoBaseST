@@ -128,6 +128,11 @@ for doc in docs:
             continue   # a file citation (keyed.py:596-622), not a selector
         bare = re.sub(r"'[^']*'|\"[^\"]*\"|<[^>]*>", "", span)   # string literals are not selectors
         for tok in re.findall(r"(?:[A-Za-z_]\w*:)+", bare):
+            # A lone keyword part cites the pending selectors it is a part of, even when the part
+            # is also a part of a defined selector (`descending:` once keyDo:over:fromWeight:descending:
+            # exists): otherwise defining one selector would make another's line look uncited.
+            if tok.count(":") == 1 and tok in pending_parts:
+                used.update(pending_parts[tok])
             if tok in defined or tok in allow_here:
                 continue
             if all(p in parts or p in allow_here for p in re.findall(r"[A-Za-z_]\w*:", tok)) and tok.count(":") == 1:
