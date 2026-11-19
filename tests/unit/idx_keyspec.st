@@ -147,8 +147,10 @@ expect value: 'asData of the element' value: PBKeySpec element asData value: (PB
 expect value: 'direct construction' value: (PBKeySpec fromData: #('path' 'a')) value: (PBKeySpec path: 'a').
 { nil. 'path'. #('path'). #('path' 'a' 'b'). #('bogus' 'a'). #('path' ''). #('element' 'a'). { 'path'. nil }. #('extractor' '') } do: [:bad |
   expect value: 'fromData: ' , bad printString value: (refused value: [PBKeySpec fromData: bad]) value: PBCorruptionError].
-expect value: 'the kind message' value: ([PBKeySpec fromData: #('bogus' 'a')] on: PBCorruptionError do: [:e | e return: e messageText])
+expect value: 'the kind message' value: ([PBKeySpec fromData: (PBTuple withAll: #('bogus' 'a'))] on: PBCorruptionError do: [:e | e return: e messageText])
   value: 'Malformed persisted key spec (''bogus'', ''a''): Unknown key spec kind ''bogus''; expected one of (''path'', ''element'', ''extractor'')'.
+expect value: 'a list as Python prints it' value: ([PBKeySpec fromData: #('path')] on: PBCorruptionError do: [:e | e return: e messageText])
+  value: 'Malformed persisted key spec [''path'']'.
 c that: 'data round trip and corruption' is: fails asArray equals: #().
 
 "test_keyspec_is_a_frozen_value (a frozen value: no setter; the initialiser runs once)"

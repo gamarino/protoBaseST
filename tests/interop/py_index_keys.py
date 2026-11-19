@@ -3,7 +3,8 @@
 Usage: python py_index_keys.py <out directory>
 
 Writes <out>/keys.msgpack and <out>/manifest.sha256 (the SHA-256 of keys.msgpack, in
-sha256sum's format). Run it through the interop venv (tests/interop/env.sh sets PYTHONPATH);
+sha256sum's format). It refuses to run unless the imported proto_db is the commit
+tests/interop/setup_venv.sh pins (the venv's .commit file). Run it through the interop venv (tests/interop/env.sh sets PYTHONPATH);
 the vendored copy is tests/conformance/vectors-index-keys/, read by
 tests/conformance/index_keys.st, which requires protoBaseST's PBMemberKeys and PBKeys to give
 the same answers for every case.
@@ -185,7 +186,22 @@ def random_value(rng: random.Random, depth: int):
     return {k: random_value(rng, depth + 1) for k in keys}
 
 
+def check_pinned() -> None:
+    """Refuse to run unless the imported proto_db is the commit setup_venv.sh pins (TAG_COMMIT):
+    the .commit file next to the proto_db package the venv holds must name it."""
+    import proto_db
+    setup = Path(__file__).resolve().parent / "setup_venv.sh"
+    pinned = next((line.split('"')[1] for line in setup.read_text().splitlines()
+                   if line.startswith('TAG_COMMIT="')), None)
+    held_file = Path(proto_db.__file__).resolve().parent.parent / ".commit"
+    held = held_file.read_text().strip() if held_file.is_file() else None
+    if not pinned or not held or not held.startswith(pinned):
+        sys.exit(f"py_index_keys: proto_db at {Path(proto_db.__file__).parent} is commit {held or 'unknown'}, "
+                 f"not the pinned {pinned} of setup_venv.sh ({TAG}); run it through the interop venv")
+
+
 def main() -> None:
+    check_pinned()
     out = Path(sys.argv[1])
     rng = random.Random(SEED)
     cases = fixed_cases() + [(f"random {i}", random_value(rng, 0)) for i in range(200)] + depth_cases()

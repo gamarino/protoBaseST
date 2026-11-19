@@ -397,6 +397,10 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
     `explain` → `PBFrozenDict` (keys of `keyed.py:651-675`); `validate: aCollection` (structural
     checks of `keyed.py:677-737`, `PBCorruptionError` or `PBMisfiledError`); `keySpec`,
     `keySpecObject` (IP3; `keySpec` unchanged); `_with: aFieldDictionary`.
+  - `PBMemberKeys class >> checkDepth: anElement index: anIndex` (Task 2 review): `proto_db`'s
+    `check_member_key` refusal word for word, "Index 'n' (EqualityIndex on a.b) cannot store this
+    element: ...", used by the hooks; its landing drops the `docs/deviations.md` row "Member-key
+    depth refusal (until Task 3)".
   - `PBKeyGroupIndex >> groupCount`, `count`, `countOfKey: aKey`,
     `membersDo: aBlock` (block `[:element :count]`, groups in key order, side group last).
   - `PBVectorIndex` and an unknown index kind: every hook signals `PBNotSupportedError` naming
@@ -421,7 +425,9 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
     `name:keySpec: (PBKeySpec path:)`; `validate:`
     passes on built indexes and fails with `PBMisfiledError` on a hand-misfiled member; a
     `PBVectorIndex withAdded:` signals `PBNotSupportedError` containing `'vector'`; IP3:
-    `keySpec` still answers the tuple, `keySpecObject` an equal `PBKeySpec`.
+    `keySpec` still answers the tuple, `keySpecObject` an equal `PBKeySpec`; the depth refusal
+    of `checkDepth:index:` is `proto_db`'s exact sentence for an index too deep to hold an element
+    (asserted in one of the sixteen checks).
   - `idx_contract.st` (`"EXPECT: ok 6"`): the structure half of `index_contract.py` over
     `QData values: 300 seed: s` for the seeds of `PBST_PROP_SEEDS` (default 5, IP16): random add / remove / replace keep `validate:`
     passing; `withReplaced:with:` equals remove then add; save and lazy load give equal

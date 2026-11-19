@@ -913,12 +913,15 @@ The detail:
 | Opaque predicates in `explain` | A block condition is the node `BlockFilter` with `description`, where `proto_db` has `PythonFilter` (call IC6). | The node runs a protoST block; naming it after Python would mislead. | A one-name difference in `explain`; the query vectors hold no opaque predicate. |
 | Equality on the field builder | `eq:` and `ne:` build `==` and `!=`; `=` is not overridden on `PBField` (IC4, ruling IQ2). | `=` must stay an equality for collections and tests. | Less like Python's `F.city == "Oslo"`; `aField = v` answers a Boolean, which `where:` refuses. |
 | Index constructors | `name:keySpec:` takes a `PBKeySpec` only (a String is `PBValidationError`); one path is `name:path:` (controller ruling CR3). `proto_db`'s `KeyGroupIndex(name, key_spec)` accepts a `KeySpec` or a str path. | One argument, one type: a keyword selector names the convenience instead of overloading the argument. | A path is written `name: 'by_city' path: 'city'`, not `name: 'by_city' keySpec: 'city'`. |
+| Member-key depth refusal (until Task 3) | `PBMemberKeys checkDepth: anElement` cannot name an index, so its refusal starts "An index cannot store this element: ...", where `proto_db`'s `check_member_key` starts "Index 'n' (EqualityIndex on a.b) cannot store this element: ..."; the rest of the sentence is word for word (`tests/conformance/index_keys.st`). | The member keys land in Task 2, before the indexes that know their name and key spec. | The text only. Task 3 adds `checkDepth: anElement index: anIndex` with `proto_db`'s exact sentence, and this row goes when it lands. |
+| Extractor blocks | `registerExtractor:block:version:` takes a `BlockClosure` only (anything else is `PBValidationError`); `proto_db`'s `register_extractor` takes any callable. | An extractor is `[:element \| key]`; one type keeps the identity test (`==`, `proto_db`'s `is`) and the purity contract simple. | An object that answers `value:` must be wrapped in a block. |
+| `isExtractorRegistered:` | A protoBaseST addition: `proto_db` has no such function (its programs call `extractor_version` and catch the error). | Asking needs no exception handler. | None: one more message. |
 | Projection | `project:` and `collect:`; `PBQuery` has **no** `select:` (ruling IQ2). | Smalltalk's `select:` filters; `proto_db`'s `select` projects, and would read backwards. | A name to learn. |
 | Selection blocks | Not in the first release (ruling IQ2): a block condition is opaque and never uses an index. | Translating a block by running it on a recording object fails silently (`30 < (p at: 'age')`, inlined `ifTrue:` and `==`, methods of the element). | Index-using conditions are written with `PBField`. |
 | Plan choice on near ties (R2) | The descent term `log2 (G + 2)` is computed as `ln x / ln 2` (protoST has no `log2`; ruling IQ4: protoST is not changed), which can differ from C's `log2` in the last bit. Two candidates whose costs are within a relative 1e-12 may be ranked differently: the same answer by another plan. | No protoST change for plan parity (IQ4). | The query vectors report such a plan difference by name and do not fail on it; any other plan difference, and every result difference, fails. |
 | Vector and unknown index kinds | A collection holding a `PBVectorIndex`, or an index of a kind protoBaseST does not know, stays read only: every change and every merge onto it is `PBNotSupportedError` naming it (IC2, ruling IQ5). | Vector search is out of scope; maintaining the other indexes but not that one would write a stale index. | Such a collection is changed from Python only. |
 | Pagers | In-process only: no portable token, no `resumePager:` (ruling IQ3). The pager's `explain` has no `'portable'` key, which `proto_db`'s `Pager.explain` has (`pager.py:221-224`); a pager here is never portable (ruling CR7). | The token's plan digest is over Python's `repr` of the plan, which protoST cannot reproduce byte for byte (spec 3.2; a portable digest is proposal IQ7, not sent). | A page sequence cannot be resumed by another process or language. |
-| Deferred | No query result cache; no `GroupBy`, `Agg`, `Join`, `Unnest` (`select_many`) or `ValuesScan`; no computed values, `startswith` / `endswith` or field-to-field comparisons; no collection `rebuilt` (misfiled format-3 repair) (ruling IQ3, spec 3.2). | Each is either not portable today or not an optimisation; a block condition covers computed values meanwhile. | Programs that need them wait, or use a block. |
+| Deferred | No query result cache, and so no `extractor_generation` (the registration generation that keys it); no `GroupBy`, `Agg`, `Join`, `Unnest` (`select_many`) or `ValuesScan`; no computed values, `startswith` / `endswith` or field-to-field comparisons; no collection `rebuilt` (misfiled format-3 repair) (ruling IQ3, spec 3.2). | Each is either not portable today or not an optimisation; a block condition covers computed values meanwhile. | Programs that need them wait, or use a block. |
 
 Not a deviation, but worth knowing: an extractor runs inside the commit when a blind write is
 merged onto a collection with an extractor index, and an exception it raises fails only that commit
@@ -935,6 +938,13 @@ Purity is a documented contract ([queries.md](queries.md#extractors-and-their-pu
   `repr:` leaves non-printable code points at or above U+0100 unescaped, where Python escapes
   them. It affects error text only.
 - `PBTimeoutError` is not protoST's `TimeoutError`.
+- Key specs and the extractor registry (`PBKeySpec`) speak protoST's nouns where `proto_db`'s
+  messages speak Python's: "String" for str, "nil" for None, "a block" for a function, "PBKeySpec
+  element takes no argument" for "KeySpec.element() takes no argument". The text for an
+  unregistered extractor names protoBaseST's remedy, "call PBKeySpec registerExtractor: 'x' block:
+  aBlock version: aStringOrNil", where `proto_db` says `register_extractor('x', fn)`. A path or
+  extractor name holding a lone surrogate is refused with the codec's own text (`PBCodec`, "a String
+  holding the lone surrogate U+... cannot be stored"), not with `check_text`'s sentence.
 
 ## Performance
 

@@ -48,7 +48,7 @@ PBKeySpec class >> _initializeRegistry
 
 "The three kinds, in proto_db's order (keyspec.py _KINDS)."
 PBKeySpec class >> kinds
-  ^ #('path' 'element' 'extractor').
+  ^ PBTuple withAll: #('path' 'element' 'extractor').
 
 "Python's repr of aValue in a message: a String quoted as Python quotes a str, nil as None."
 PBKeySpec class >> _repr: aValue
@@ -169,15 +169,19 @@ PBKeySpec class >> fromData: aTuple
   ^ [self _kind: (aTuple at: 1) arg: (aTuple at: 2)] on: PBValidationError do: [:e |
     PBCorruptionError signal: 'Malformed persisted key spec ' , (self _dataRepr: aTuple) , ': ' , e messageText].
 
-"aData as Python's repr shows a tuple of Strings: ('path', 'a')."
+"aData as Python's repr shows it: a tuple ('path', 'a') for a PBTuple, a list ['path', 'a'] for
+ a PBFrozenList or an Array (msgpack hands a list back), else the value's repr."
 PBKeySpec class >> _dataRepr: aData
+  | items |
   ((aData isClassObject not and: [(aData isKindOf: _PBSequence) or: [aData isKindOf: Array]])) ifFalse: [
     ^ self _repr: aData].
-  ^ '(' , (', ' join: (aData asArray collect: [:each | self _repr: each])) , (aData size = 1 ifTrue: [',)'] ifFalse: [')']).
+  items := ', ' join: (aData asArray collect: [:each | self _repr: each]).
+  (aData isKindOf: PBTuple) ifFalse: [^ '[' , items , ']'].
+  ^ '(' , items , (aData size = 1 ifTrue: [',)'] ifFalse: [')']).
 
 "A key spec of aKind and anArg, validated as proto_db's KeySpec.__post_init__."
 PBKeySpec class >> _kind: aKind arg: anArg
-  (self kinds includes: aKind) ifFalse: [
+  (self kinds asArray includes: aKind) ifFalse: [
     ^ PBValidationError signal: 'Unknown key spec kind ' , (self _repr: aKind)
       , '; expected one of (''path'', ''element'', ''extractor'')'].
   aKind = 'element' ifTrue: [

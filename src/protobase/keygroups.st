@@ -92,12 +92,16 @@ PBMemberKeys class >> _equalityPart: anElement
 "The order key below every member key whose equality part is aValue's: the one-item tuple
  (equality part), which orders before every (equality part, token)."
 PBMemberKeys class >> lowestOf: aValue
-  ^ PBOrderKey rank: 13 payload: { PBKeys orderKey: (self _equalityPart: aValue) }.
+  ^ PBOrderKey rank: self _tupleRank payload: { PBKeys orderKey: (self _equalityPart: aValue) }.
 
 "The order key above every member key whose equality part is aValue's: (equality part, a key
  above every rank) (keyed.py _equal_members_bounds and _ABOVE_EVERY_RANK)."
 PBMemberKeys class >> highestOf: aValue
-  ^ PBOrderKey rank: 13 payload: { PBKeys orderKey: (self _equalityPart: aValue). self _aboveEveryRank }.
+  ^ PBOrderKey rank: self _tupleRank payload: { PBKeys orderKey: (self _equalityPart: aValue). self _aboveEveryRank }.
+
+"The rank of a tuple's order key (keyed.py _R_TUPLE, order_key(())[0])."
+PBMemberKeys class >> _tupleRank
+  ^ (PBKeys orderKey: (PBTuple withAll: #())) rank.
 
 "keyed.py _ABOVE_EVERY_RANK, order_key(MISSING)[0] + 1000 as a one-item key: its rank exceeds
  every order key's, so it compares above any of them. It is a bound, never the key of a value,
@@ -140,7 +144,9 @@ PBMemberKeys class >> depthLimits
 "anElement, or PBValidationError when its member key would nest deeper than MAX_VALUE_DEPTH
  (keyed.py check_member_key, with proto_db's sentence after the index it names: a scalar or an
  atom nests a few containers only; a container is bounded first from its own depth, and only an
- element that could pass the limit costs the walk of its member key)."
+ element that could pass the limit costs the walk of its member key). There is no outer
+ parameter: in proto_db only the vector index stores member keys inside more containers, and
+ protoBaseST never writes a vector index (ruling IQ5)."
 PBMemberKeys class >> checkDepth: anElement
   | max depth limits |
   (anElement isClassObject not and: [
