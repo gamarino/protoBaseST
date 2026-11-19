@@ -119,6 +119,11 @@ QData >> instant
     zone: (ZoneOffset microseconds: offset * 3600000000).
 
 QData class >> pinOids: aValues
+  "Writes the oid cell of an unsaved record by compare-and-swap: it relies on PBAtom's instance
+   variable 'oid' (an Atom, registry.st PBAtom >> _setOid:pointer:storage:), checked here so a
+   rename fails loudly."
+  (PBAtom allInstVarNames includes: 'oid') ifFalse: [
+    ^ Error signal: 'QData pinOids: PBAtom has no instance variable oid any more'].
   aValues do: [:each |
     (each isKindOf: PBObject) ifTrue: [
       | oid |

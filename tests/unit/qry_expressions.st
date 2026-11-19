@@ -208,6 +208,7 @@ expect value: 'contains a list' value: (refused value: [t value: 'a' value: 'con
   (CalendarDate year: 2026 month: 1 day: 1) -> true. PBList new -> false. (PBList new appendLast: 1) -> true. (rec value: #()) -> true } do: [:each |
     expect value: '?T ' , each key printString value: ((PBTerm path: 'a' op: '?T') matches: (PBFrozenDict withAssociations: { 'a' -> each key })) value: each value.
     expect value: '?!T ' , each key printString value: ((PBTerm path: 'a' op: '?!T') matches: (PBFrozenDict withAssociations: { 'a' -> each key })) value: each value not].
+expect value: 'an empty host collection is false' value: { (PBTerm path: nil op: '?T') matches: Set new. (PBTerm path: nil op: '?T') matches: (Set withAll: #(0)). (PBBlockPredicate block: [:x | Set new] description: 'empty') evaluate: 1 } value: #(false true false).
 expect value: 'missing matches neither' value: { (PBTerm path: 'a' op: '?T') matches: (rec value: #()). (PBTerm path: 'a' op: '?!T') matches: (rec value: #()) } value: #(false false).
 expect value: '?T with a value' value: (refused value: [t value: 'a' value: '?T' value: 1]) value: PBValidationError.
 e := t value: 'c' value: 'contains' value: 2.

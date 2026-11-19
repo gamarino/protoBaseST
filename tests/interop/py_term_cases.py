@@ -22,7 +22,8 @@ the helper printed it: the test checks that QData still draws them) and 'cases',
   error      nil, or the class name of the error Expression.compile raised
              ('ProtoValidationError', 'ProtoNotSupportedError')
   answers    nil, or one boolean per value: proto_db's evaluate(expression, value)
-  match_error nil, or the class name of the error evaluate raised on the first value
+  match_error nil, or the class name of the error evaluate raised on whichever value failed
+             first (the values are evaluated in order and the first error stops the case)
   to_list    nil, or the wire form of expression.to_list() (nil for near[], whose list holds a
              NearQuery, which has no wire form)
   describe   nil, or the msgpack bytes of expression.describe()

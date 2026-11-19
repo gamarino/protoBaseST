@@ -209,6 +209,19 @@ expect value: 'between bounds' value: ((t value: 'x' value: 'between[]' value: #
 expect value: 'a map key' value: (PBTerm displayValue: (PBFrozenDict withAssociations: { 1 -> 'x'. '1' -> 2.5 }))
   value: (PBFrozenDict withAssociations: { '@dict' -> #(#(1 'x') #('1' 2.5)) }).
 expect value: 'NaN and missing' value: { PBTerm displayValue: Float nan. PBTerm displayValue: missing } value: #('nan' 'MISSING').
+"Values a term cannot hold as an operand (not orderable) but explain may show (index keys)."
+{ (TimeOfDay hour: 12 minute: 30 second: 0 microsecond: 7 fold: 1 zone: (ZoneName key: 'Europe/Rome'))
+    -> 'datetime.time(12, 30, 0, 7, tzinfo=zoneinfo.ZoneInfo(key=''Europe/Rome''), fold=1)'.
+  (TimeOfDay hour: 1 minute: 2 second: 0 microsecond: 0 fold: 1 zone: ZoneOffset utc)
+    -> 'datetime.time(1, 2, tzinfo=datetime.timezone.utc, fold=1)'.
+  (DateTime year: 2026 month: 1 day: 1 hour: 1 minute: 2 second: 0 microsecond: 0 fold: 1 zone: ZoneOffset utc)
+    -> 'datetime.datetime(2026, 1, 1, 1, 2, fold=1, tzinfo=datetime.timezone.utc)'.
+  (PBLegacyZoneDateTime wallClockFields: #(2026 1 1 1 2 0 0) fold: 1 zoneName: (ZoneName key: 'Europe/Rome'))
+    -> 'datetime.datetime(2026, 1, 1, 1, 2, fold=1, tzinfo=zoneinfo.ZoneInfo(key=''Europe/Rome''))'.
+  (Decimal fromString: 'Infinity') -> 'Decimal(''Infinity'')'. (Decimal fromString: '-Infinity') -> 'Decimal(''-Infinity'')'.
+  (Decimal fromString: 'NaN') -> 'Decimal(''NaN'')'. (Decimal fromString: '-NaN') -> 'Decimal(''-NaN'')'.
+  (Decimal fromString: 'sNaN') -> 'Decimal(''sNaN'')' } do: [:each |
+    expect value: each value value: (PBTerm displayValue: each key) value: each value].
 c that: 'describe and display values' is: fails asArray equals: #().
 
 "=== the vector: proto_db's answers on QData values: 160 seed: 5 ==="
@@ -245,6 +258,9 @@ cases doWithIndex: [:case :i |
     got := [values collect: [:v | expr evaluate: v]] on: PBDBError do: [:e | e return: e class].
     got = want asArray ifFalse: [
       fails add: (case at: 'id') , ': ' , ((1 to: values size) detect: [:k | ((got isKindOf: Array) and: [(got at: k) = (want at: k)]) not] ifNone: [0]) printString]]].
+"Value domain of the vector (Task 6 extends the generator and these counts): QData values: draws
+ no naive datetime, time, timedelta, UUID, empty String or ByteArray, and no collection atom; those
+ are covered by the unit checks above and in qry_expressions.st only."
 expect value: 'cases with answers' value: (cases select: [:case | (case at: 'answers') notNil]) size value: 176.
 c that: 'matches: on QData values equals proto_db''s answers for every operator' is: fails asArray equals: #().
 
@@ -263,6 +279,7 @@ cases doWithIndex: [:case :i |
     got := [values do: [:v | expr evaluate: v]. nil] on: PBDBError do: [:e | e return: e class].
     got = (errorClass value: (case at: 'match_error')) ifFalse: [
       fails add: id , ': evaluate: signals ' , got printString , ', proto_db ' , (case at: 'match_error')]]].
+"A count of the vector: Task 6 updates it with the generator (value-domain note above)."
 expect value: 'degenerate cases' value: (cases select: [:case | (case at: 'id') includesSubstring: '(degenerate)']) size value: 12.
 s := t value: nil value: 'in' value: { 1. 1.0. decimal1. true. 's1'. nil. 1 }.
 expect value: 'in keeps duplicates and mixed types' value: s value size value: 7.
@@ -290,6 +307,7 @@ cases doWithIndex: [:case :i |
       ifFalse: [
         (MessagePack encode: (TermAtoms tree: expr describe)) = (case at: 'describe') ifFalse: [
           fails add: (case at: 'id') , ': describe ' , expr describe printString]]]].
+"A count of the vector: Task 6 updates it with the generator (value-domain note above)."
 expect value: 'compiled cases' value: (dec select: [:each | each value notNil]) size value: 177.
 c that: 'compile: of every recorded list gives proto_db''s list and description' is: fails asArray equals: #().
 

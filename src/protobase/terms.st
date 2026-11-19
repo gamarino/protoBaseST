@@ -51,8 +51,8 @@ Messages follow proto_db's, with protoST's names; a value is quoted as Python's 
 String (PBKeySpec _repr:). describe renders an operand as proto_db's display_value: nil, Booleans,
 Integers, Strings and finite Floats as they are, tuples and lists as Arrays, a map as {'@dict' ->
 pairs}, any other value as Python's repr of it ('Decimal(''1.50'')', 'datetime.date(2026, 1, 2)',
-b'...', 'inf'), so explain reads the same in both languages; the exceptions (an atom, a datetime in
-an IANA zone) are listed in docs/deviations.md."
+b'...', 'inf'), so explain reads the same in both languages; the exceptions (an atom, an
+instant-form datetime in an IANA zone) are listed in docs/deviations.md."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/keys'.
@@ -300,9 +300,9 @@ PBTerm class >> _isPair: anObject
 PBTerm class >> _orderKeyOrNil: aKey
   ^ [PBKeys orderKey: aKey] on: PBValidationError do: [:e | e return: nil].
 
-"Python's bool(aValue) for a value of the format: nil, false, PBMissing, a zero number (a NaN is
- true), an empty String, ByteArray, list, tuple or map, a zero TimeSpan and an empty collection atom
- (proto_db's IndexedCollection.__len__) are false; everything else is true."
+"Python's bool(aValue): nil, false, PBMissing, a zero number (a NaN is true), an empty String,
+ ByteArray, list, tuple or map, a zero TimeSpan, an empty collection atom (proto_db's
+ IndexedCollection.__len__) and any other empty host collection are false; everything else is true."
 PBTerm class >> _truthy: aValue
   aValue isNil ifTrue: [^ false].
   aValue == true ifTrue: [^ true].
@@ -317,6 +317,9 @@ PBTerm class >> _truthy: aValue
     ^ aValue isEmpty not].
   (aValue isKindOf: TimeSpan) ifTrue: [^ aValue totalMicroseconds ~= 0].
   (aValue isKindOf: PBIndexedCollection) ifTrue: [^ aValue count ~= 0].
+  "Any other host collection (a Set, a Bag, an Interval): empty is false, as Python's bool of a
+   container."
+  (aValue isCollection and: [aValue isEmpty]) ifTrue: [^ false].
   ^ true.
 
 "terms.py _contains: whether aKey contains anOperand, whose order key is anOrderKey."
@@ -382,9 +385,9 @@ PBTerm class >> _displayLeaf: aValue
 
 "Python's repr of aValue, for the values display_value renders as text. An atom is shown as
  proto_db's generic Atom repr, <type name oid=...> (proto_db prints a record's fields, a
- collection's count, or, for a stub, the object's address), and a datetime in an IANA zone by its
- printString (Python shows its wall clock in the zone, which needs a time-zone database):
- docs/deviations.md."
+ collection's count, or, for a stub, its storage pointer), and an instant-form datetime in an IANA
+ zone by its printString (Python shows its wall clock in the zone, which needs a time-zone
+ database): docs/deviations.md."
 PBTerm class >> _pythonRepr: aValue
   aValue isFloat ifTrue: [
     "Only a NaN or an infinity comes here: display_value keeps a finite float."
@@ -449,39 +452,49 @@ PBTerm class >> _timedeltaRepr: aMicroseconds
   args isEmpty ifTrue: [args add: '0'].
   ^ self _call: 'datetime.timedelta' args: args asArray.
 
-"Python's repr of a fixed-offset tzinfo as proto_db decodes it (codec.py _decode_tz): an offset
- whose name is the default one is an unnamed timezone, datetime.timezone.utc for zero."
+"Python's repr of a tzinfo as proto_db decodes it (codec.py _decode_tz): an IANA zone is
+ zoneinfo.ZoneInfo(key='K'); a fixed offset whose name is the default one is an unnamed timezone,
+ datetime.timezone.utc for zero, and a named one keeps its name."
 PBTerm class >> _zoneRepr: aZone
   | default |
+  (aZone isKindOf: ZoneName) ifTrue: [^ 'zoneinfo.ZoneInfo(key=' , (PBCodec repr: aZone key) , ')'].
   default := (ZoneOffset microseconds: aZone microseconds) name.
   aZone name = default ifTrue: [
     aZone microseconds = 0 ifTrue: [^ 'datetime.timezone.utc'].
     ^ self _call: 'datetime.timezone' args: { self _timedeltaRepr: aZone microseconds }].
   ^ self _call: 'datetime.timezone' args: { self _timedeltaRepr: aZone microseconds. PBCodec repr: aZone name }.
 
-"The fields of a time repr after hour and minute: the second and the microsecond, trailing zeros
- left out; then fold=1 and tzinfo, in the order CPython's C implementation appends them."
-PBTerm class >> _clockArgs: anArray second: s microsecond: us fold: aFold zone: aZone
-  | args |
+"The arguments of a time or datetime repr: anArray (the fields up to the minute), then the second
+ and the microsecond with trailing zeros left out, then fold=1 and tzinfo in the order CPython's C
+ implementation appends them: a datetime appends fold before tzinfo, a time tzinfo before fold
+ (aBoolean true)."
+PBTerm class >> _clockArgs: anArray second: s microsecond: us fold: aFold zone: aZone tzinfoFirst: aBoolean
+  | args fold tz |
   args := anArray asOrderedCollection.
   us = 0
     ifTrue: [s = 0 ifFalse: [args add: s printString]]
     ifFalse: [args add: s printString; add: us printString].
-  aFold = 0 ifFalse: [args add: 'fold=1'].
-  aZone isNil ifFalse: [args add: 'tzinfo=' , (self _zoneRepr: aZone)].
+  fold := aFold = 0 ifTrue: [#()] ifFalse: [#('fold=1')].
+  tz := aZone isNil ifTrue: [#()] ifFalse: [{ 'tzinfo=' , (self _zoneRepr: aZone) }].
+  aBoolean ifTrue: [args addAll: tz; addAll: fold] ifFalse: [args addAll: fold; addAll: tz].
   ^ args asArray.
 
+"A time keeps its wall clock in every zone form, so an IANA zone is rendered too."
 PBTerm class >> _timeRepr: aTime
-  (aTime zone isNil or: [aTime zone isKindOf: ZoneOffset]) ifFalse: [^ aTime printString].
   ^ self _call: 'datetime.time' args: (self _clockArgs: { aTime hour printString. aTime minute printString }
-    second: aTime second microsecond: aTime microsecond fold: aTime fold zone: aTime zone).
+    second: aTime second microsecond: aTime microsecond fold: aTime fold zone: aTime zone tzinfoFirst: true).
 
+"A naive, fixed-offset or format-3 zone datetime (PBLegacyZoneDateTime, which holds its wall clock
+ and zone key, as proto_db's decoder builds datetime(..., tzinfo=ZoneInfo(key))) is rendered as
+ Python renders it. An instant-form datetime in an IANA zone holds its UTC instant only: its wall
+ clock in the zone needs a time-zone database (design 4.3), so it is shown by its printString
+ (docs/deviations.md)."
 PBTerm class >> _dateTimeRepr: aDateTime
-  (aDateTime zone isNil or: [aDateTime zone isKindOf: ZoneOffset]) ifFalse: [^ aDateTime printString].
-  (aDateTime isKindOf: PBLegacyZoneDateTime) ifTrue: [^ aDateTime printString].
+  ((aDateTime zone isKindOf: ZoneName) and: [(aDateTime isKindOf: PBLegacyZoneDateTime) not]) ifTrue: [
+    ^ aDateTime printString].
   ^ self _call: 'datetime.datetime' args: (self _clockArgs: ({ aDateTime year. aDateTime month. aDateTime day.
       aDateTime hour. aDateTime minute } collect: [:each | each printString])
-    second: aDateTime second microsecond: aDateTime microsecond fold: aDateTime fold zone: aDateTime zone).
+    second: aDateTime second microsecond: aDateTime microsecond fold: aDateTime fold zone: aDateTime zone tzinfoFirst: false).
 
 PBTerm >> _setPath: aStringOrNil op: anOperator value: aValue keySpecObject: aKeySpec valueKey: anOrderKey operandKeys: anArray
   "Runs once, on a fresh instance."
