@@ -223,7 +223,7 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 | [examples/tutorial/](examples/tutorial/README.md) | Twelve small programs, one concept each, each checking its own results; run by the tests. |
 | [docs/reference.md](docs/reference.md) | Every public class and message; the indexed-query API in a section marked planned. |
 | [docs/queries.md](docs/queries.md) | **Draft, not implemented:** indexed queries and the query planner (0.3.0), the conceptual guide, including how to read `explain`. |
-| [examples/queries/pending/](examples/queries/pending/README.md) | **Draft:** the programs of the query chapters, written before their API; none has run. |
+| [examples/queries/](examples/queries/README.md) | **Draft:** the programs of the guide and the query chapters; those written so far are in `pending/`, written before their API, and none has run. |
 | [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from `proto_db`. |
 | [docs/not-done.md](docs/not-done.md) | What is not done, and what is not proven. |
 | [docs/decisions.md](docs/decisions.md) | The choices, with what each costs if it is wrong. |

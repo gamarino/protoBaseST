@@ -91,7 +91,7 @@ A `PBPager` holds one plan, built once, and serves page k of it. When the plan o
 a block key costs one full run, not one per page. `byRank` says which, and `explain` on a pager
 shows its plan. Pages are numbered from 0, as `proto_db`'s and as `PBList` positions.
 
-How much the seek saves is a measurement: [measured in T9, bench Q5: the time of page k for every
+How much the seek saves is a measurement: [measured in T9: bench Q5, the time of page k for every
 k from the first to the last, by rank and by skipping, on an ordered index scan of 10^4 and 10^5
 elements; and `count` by rank against counting the rows, RUNS=5 interleaved].
 

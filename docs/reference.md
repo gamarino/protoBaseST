@@ -1031,7 +1031,7 @@ For tests, tools and readers of the format. An application does not need them.
 > (sections 5.2 and 5.5) and of its implementation plan's interfaces, written early so the
 > chapters can cite it. Until each task lands, the messages below are listed as pending in the
 > documentation guard, and the collections above keep refusing every change when they hold an
-> index. Names marked *provisional* may change when built. The concepts are in
+> index. A name marked *provisional* may change when built. The concepts are in
 > [queries.md](queries.md); the tutorial is chapters [17](tutorial/17-indexes.md),
 > [18](tutorial/18-queries-and-plans.md) and [19](tutorial/19-ordered-reads-and-pages.md).
 
@@ -1081,7 +1081,7 @@ commit's build; an exception it raises fails only that commit and reaches the ca
 
 | Message | Meaning |
 |---|---|
-| `PBEqualityIndex name: aString keySpec: aKeySpecOrString`, `name: aString path: aString` | An empty unsaved index; a String key spec is a path. `PBRangeIndex` the same. |
+| `PBEqualityIndex name: aString keySpec: aKeySpec`, `name: aString path: aString` | An empty unsaved index. `name:keySpec:` is the constructor and takes a `PBKeySpec` only: anything else, a String included, is `PBValidationError`. `name:path:` is the convenience for one path, `name: aString keySpec: (PBKeySpec path: aPath)`. `PBRangeIndex` the same. |
 | `withAdded: e`, `withRemoved: e`, `withReplaced: old with: new` | A new index with one occurrence more, fewer, or replaced. Removing an occurrence the index does not hold is `PBValidationError`. The receiver never changes. |
 | `empty`, `build: aCollection` | An empty index with the same definition; the bulk build over the elements given. |
 | `supports: aTerm`, `estimate: aTerm`, `plan: aTerm` | Whether the index answers the term exactly as a scan would; its `PBEstimate`; its `PBIndexPlan`. An unsupported term is `PBNotSupportedError`. |
@@ -1089,7 +1089,7 @@ commit's build; an exception it raises fails only that commit and reaches the ca
 | `explain` | `{ 'index'. 'kind'. 'key'. 'entries'. 'keys'. 'unorderable' }` as a `PBFrozenDict`. |
 | `validate: aCollection` | Structural checks and the stored multiset against the elements: `PBCorruptionError`, or `PBMisfiledError` for a misfiled format-3 entry. |
 | `keySpec` | Unchanged from 0.1.0: the persisted `(kind, arg)` tuple. |
-| `keySpecObject` (*provisional name*) | The key spec as a `PBKeySpec`; a malformed tuple is `PBValidationError` naming the index. |
+| `keySpecObject` | The key spec as a `PBKeySpec` (`PBKeySpec fromData: self keySpec`); a malformed tuple is `PBValidationError` naming the index, when asked, never at read. |
 | `groupCount`, `countOfKey: aKey`, `membersDo: aBlock` | The number of key groups; the occurrences under one key; every `[:element :count]`, groups in key order, unorderable keys last. |
 
 | Kind | Operators answered |
@@ -1119,7 +1119,7 @@ protoBaseST does not know is refused the same way.
 | Message | Meaning |
 |---|---|
 | `PBTerm path: aStringOrNil op: anOperator value: v`, `path: aStringOrNil op: anOperator` | A term; the second form for `'?N'`, `'?!N'`, `'?T'`, `'?!T'`. Operators are `proto_db`'s strings: `'=='` `'!='` `'<'` `'<='` `'>'` `'>='` `'in'` `'between[]'` `'between()'` `'between(]'` `'between[)'` `'?N'` `'?!N'` `'contains'` `'?T'` `'?!T'`. `'near[]'` is `PBNotSupportedError` (vector search is out of scope); an unknown operator or malformed operand `PBValidationError`. |
-| `path`, `op`, `value`, `keySpec` | |
+| `path`, `op`, `value`, `keySpec` | The term's parts; a term's `keySpec` is the `PBKeySpec` its path names (`PBKeySpec forTermPath: path`), unlike `PBIndex >> keySpec`, which answers the persisted tuple. |
 | `matches: anElement` | The scan oracle, `proto_db`'s D28 semantics ([queries.md](queries.md#key-specs-missing-and-nil)). |
 | `describe`, `asList` | `{ 'path'. 'op'. 'value' }` for `explain`; the 0.1 list form. |
 | `PBExpression`: `evaluate: anElement`, `describe`, `asList`, `termsDo: aBlock`, `&`, `\|`, `not` | Every condition (a term, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate`). `PBAnd` and `PBOr` are n-ary and flattened; `aCondition not not` is the condition itself. |
@@ -1144,7 +1144,7 @@ protoBaseST does not know is refused the same way.
 | Message | Meaning |
 |---|---|
 | `PBQuery from: aCollectionOrPlan` | A query over a collection (its indexes are consulted) or a plan. |
-| `where: aConditionOrBlock` | Adds a condition. A block is opaque (a `BlockFilter`); anything else, a Boolean included, is `PBValidationError`. |
+| `where: aConditionOrBlock` | Adds a condition; chained `where:` calls combine with AND. A one-argument block is opaque (a `BlockFilter`) and enters a query only here: `&`, `\|` and `not` take expressions only. Anything else, a Boolean included, is `PBValidationError` with the text `where: expects a PBExpression or a one-argument block, got a <class name>` (for `true`: `got a Boolean`). |
 | `orderBy: aKey`, `orderBy: aKey descending: aBoolean`, `thenBy:`, `thenBy:descending:` | A key is a path String, a `PBField` or a block (a block key always sorts with `Sort`). |
 | `skip: n`, `take: n`, `distinct` | The window; first occurrences only. |
 | `project: anArrayOfPaths`, `collect: aBlock` | Each row as a `PBFrozenDict` of the paths (an absent field is left out), or through a block. |

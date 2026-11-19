@@ -912,6 +912,7 @@ The detail:
 |---|---|---|---|
 | Opaque predicates in `explain` | A block condition is the node `BlockFilter` with `description`, where `proto_db` has `PythonFilter` (call IC6). | The node runs a protoST block; naming it after Python would mislead. | A one-name difference in `explain`; the query vectors hold no opaque predicate. |
 | Equality on the field builder | `eq:` and `ne:` build `==` and `!=`; `=` is not overridden on `PBField` (IC4, ruling IQ2). | `=` must stay an equality for collections and tests. | Less like Python's `F.city == "Oslo"`; `aField = v` answers a Boolean, which `where:` refuses. |
+| Index constructors | `name:keySpec:` takes a `PBKeySpec` only (a String is `PBValidationError`); one path is `name:path:` (controller ruling CR3). `proto_db`'s `KeyGroupIndex(name, key_spec)` accepts a `KeySpec` or a str path. | One argument, one type: a keyword selector names the convenience instead of overloading the argument. | A path is written `name: 'by_city' path: 'city'`, not `name: 'by_city' keySpec: 'city'`. |
 | Projection | `project:` and `collect:`; `PBQuery` has **no** `select:` (ruling IQ2). | Smalltalk's `select:` filters; `proto_db`'s `select` projects, and would read backwards. | A name to learn. |
 | Selection blocks | Not in the first release (ruling IQ2): a block condition is opaque and never uses an index. | Translating a block by running it on a recording object fails silently (`30 < (p at: 'age')`, inlined `ifTrue:` and `==`, methods of the element). | Index-using conditions are written with `PBField`. |
 | Plan choice on near ties (R2) | The descent term `log2 (G + 2)` is computed as `ln x / ln 2` (protoST has no `log2`; ruling IQ4: protoST is not changed), which can differ from C's `log2` in the last bit. Two candidates whose costs are within a relative 1e-12 may be ranked differently: the same answer by another plan. | No protoST change for plan parity (IQ4). | The query vectors report such a plan difference by name and do not fail on it; any other plan difference, and every result difference, fails. |
@@ -1077,8 +1078,9 @@ markers, each filled by the task named:
 - [measured in T4: M1 (plan task 4a), commits per second with 0, 1 and 3 indexes; M3 (plan task
   4b), merges onto an indexed current, standalone and in a three-member cluster]
 - [measured in T3: M2, the bulk build against the fold of single additions]
-- [measured in T7: P1 planner overhead, P2 the scan-to-index crossover, P3 the hand-built
-  intersection against the filter plan]
+- [measured in T7: P1 planner overhead; P2 where the cost model switches between an index plan and
+  a scan with a filter as selectivity varies, and whether the timings cross there; P3 the
+  hand-built intersection against the filter plan]
 - [measured in T10: the full comparison with `proto_db`, with date, machine, load, both commits and
   both binaries]
 

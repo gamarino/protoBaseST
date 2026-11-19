@@ -47,8 +47,8 @@ million reads a million records. In protoBaseST, reading a record that is not in
 load and a decode, so the constant is not small.
 
 An index changes what a question costs from "what is stored" to "what is returned": a lookup costs
-a descent of a tree, about `log2` of the number of distinct keys, plus the rows it answers.
-[measured in T8, bench Q1: the time of one point lookup against collection size, 10^2 to 10^5
+a descent of a tree, about log2 of the number of distinct keys, plus the rows it answers.
+[measured in T8: bench Q1, the time of one point lookup against collection size, 10^2 to 10^5
 elements, indexed and by a forced scan (the same collection without indexes), RUNS=5 interleaved,
 minimum and median; and the same for `proto_db` on the same seed and data.]
 
@@ -89,21 +89,21 @@ already decodes these records; writing them means writing exactly what `proto_db
 
 Both built-in kinds are key-group indexes (`proto_db`, `indexing/keyed.py:1-41`):
 
-- `groups`: a weighted tree of *key groups*, ordered by the format's order key of the extracted
+- `'groups'`: a weighted tree of *key groups*, ordered by the format's order key of the extracted
   key. `MISSING` and `nil` are ordinary keys at the bottom of the order.
-- `side`: the one group of every element whose key cannot be ordered (a list, a map, NaN, or a
+- `'side'`: the one group of every element whose key cannot be ordered (a list, a map, NaN, or a
   tuple holding one).
 - each group: a tree from a *member key* to `(element, count)`, and its total. The member key tells
   apart values that are equal but not identical (`1`, `1.0` and `Decimal 1.00` are one key and three
   members), so a plan answers the stored elements, never an equal representative. Counts make the
   index a multiset: a `PBList` holding an element twice stores it with count 2.
-- `total_count`, and `member_tokens` (1 for an index written by format 4; absent on one written by
+- `'total_count'`, and `'member_tokens'` (1 for an index written by format 4; absent on one written by
   format 3, which is rebuilt before its first change).
 
 | Kind | Answers | Plans | Also |
 |---|---|---|---|
-| `PBEqualityIndex` | `==`, `in`, `!=`, `?N`, `?!N` | `IndexLookup` (`==`, `in`, `?N`), `IndexRange` (`?!N`), `IndexComplement` (`!=`) | |
-| `PBRangeIndex` | the same, and `<`, `<=`, `>`, `>=`, the four `between` forms | the same, and `IndexRange` for the comparisons | ordered iteration: `IndexOrderedScan` |
+| `PBEqualityIndex` | `==`, `'in'`, `!=`, `?N`, `?!N` | `IndexLookup` (`==`, `'in'`, `?N`), `IndexRange` (`?!N`), `IndexComplement` (`!=`) | |
+| `PBRangeIndex` | the same, and `<`, `<=`, `>`, `>=`, the four `'between'` forms | the same, and `IndexRange` for the comparisons | ordered iteration: `IndexOrderedScan` |
 
 Every node of both trees carries a *weight*, the number of occurrences below it, so occurrence *r*
 is found by one descent. That is what gives windows and pages their O(log n + page size) cost
@@ -116,6 +116,11 @@ Vector search (`near[]`) is out of scope; a term with that operator is `PBNotSup
 built.
 
 ## Key specs, MISSING and nil
+
+<!-- pending example: examples/queries/keys.st (plan task 8) -->
+
+> The runnable program of this section, `examples/queries/keys.st`, is written by plan task 8
+> (pre-flight ruling F4); until then the section quotes no code.
 
 An index is defined by its name and its *key spec*, a persistable `(kind, arg)` description of the
 key (`proto_db`, `indexing/keyspec.py:165-267`):
@@ -140,21 +145,24 @@ at all. They are two different keys, and the operators treat them differently (d
 
 | Operator | Matches `nil` | Matches `MISSING` |
 |---|---|---|
-| `==` / `eq:`, `in` | when the operand is `nil` | never |
+| `==` / `eq:`, `'in'` | when the operand is `nil` | never |
 | `!=` / `ne:` | when the operand is not `nil` | **never**: an absent key satisfies no comparison |
-| `<`, `<=`, `>`, `>=`, `between` | never (only keys of the operand's type rank compare) | never |
+| `<`, `<=`, `>`, `>=`, `'between'` | never (only keys of the operand's type rank compare) | never |
 | `?N` / `isNone` | yes | yes |
 | `?!N` / `notNone` | no | no |
-| `?T`, `?!T`, `contains` | by the value | never |
+| `?T`, `?!T`, `'contains'` | by the value | never |
 
-A key that cannot be ordered (a list, a map, NaN) matches only `!=`, `?!N`, `contains`, `?T` and
+A key that cannot be ordered (a list, a map, NaN) matches only `!=`, `?!N`, `'contains'`, `?T` and
 `?!T`. Ordering operators compare only keys of the operand's type rank: `nil < 5` is false and
 `'a' > 1` is false, rather than an error.
 
 `proto_db` persists the key spec as the tuple `('path' 'address.zip')`, `('element' nil)` or
 `('extractor' 'name_length')`. In protoBaseST `PBIndex >> keySpec` keeps answering that tuple, as
-it does in 0.1.0; the planned `PBIndex >> keySpecObject` (name provisional) answers it as a
-`PBKeySpec`.
+it does in 0.1.0 (plan call IP3); the planned `PBIndex >> keySpecObject` answers it as a
+`PBKeySpec`. An index is built from a `PBKeySpec`, as in
+`PBEqualityIndex name: 'by_zip' keySpec: (PBKeySpec path: 'address.zip')`, or, for one path, with
+the convenience `PBEqualityIndex name: 'by_city' path: 'city'`; a String given as a key spec is
+`PBValidationError` (ruling CR3).
 
 ## Extractors and their purity contract
 
@@ -191,6 +199,11 @@ exception appears at the mutator call, in the transaction's own thread.
 
 ## The expression language
 
+<!-- pending example: examples/queries/expressions.st (plan task 8) -->
+
+> The runnable program of this section, `examples/queries/expressions.st`, is written by plan
+> task 8 (pre-flight ruling F4); the one block below comes from `reading_plans.st.pending`.
+
 A condition is a *term* `(path, op, value)` or a combination of conditions. The operators are
 `proto_db`'s strings, so a condition, its list form and its `explain` read the same in both
 languages (call IC3):
@@ -200,10 +213,10 @@ languages (call IC3):
 | `f eq: v`, `f ne: v` | `==`, `!=` | `=` is not overridden on a field: `=` must stay an equality for collections and tests (IC4). `f = v` answers a Boolean, and `where:` refuses it as a malformed query. |
 | `f < v`, `f <= v`, `f > v`, `f >= v` | `<` `<=` `>` `>=` | The field must be the receiver: `30 < f` sends `<` to an Integer. |
 | `f between: a and: b`, `betweenOpen:and:` and the two half-open forms | `between[]`, `between()`, `between(]`, `between[)` | Both bounds share a type rank. |
-| `f in: #(...)` | `in` | |
+| `f in: #(...)` | `'in'` | |
 | `f isNone`, `f notNone` | `?N`, `?!N` | |
-| `f isTrue`, `f notTrue`, `f contains: v` | `?T`, `?!T`, `contains` | Truthiness of a present key; substring, item or key membership. |
-| `a & b`, `a \| b`, `a not` | `And`, `Or`, `Not` | n-ary and flattened; `a not not` is `a`. Binary messages have no precedence between them: use parentheses. |
+| `f isTrue`, `f notTrue`, `f contains: v` | `?T`, `?!T`, `'contains'` | Truthiness of a present key; substring, item or key membership. |
+| `a & b`, `a \| b`, `a not` | `And`, `Or`, `Not` | n-ary and flattened; `a not not` is the original condition. Binary messages have no precedence between them: use parentheses. |
 
 A field is `PBField path: 'city'`, `PBField element` or `PBField extractor: 'name_length'`.
 
@@ -224,12 +237,17 @@ previous section; `&` and `|` short-circuit left to right; `not` is the logical 
 `(age < 5) not` is **true** for an element without an age. Ask for presence explicitly (`notNone`)
 when that matters.
 
-**Blocks.** A block is accepted wherever a condition is: `[:p | (p at: 'age') \\ 7 = 0]`. It is
-opaque: no index answers it, and `explain` shows it as a `BlockFilter` node (`proto_db`'s
+**Blocks.** A plain block enters a query only through `where:`
+(`q where: [:p | (p at: 'age') \\ 7 = 0]`); `&`, `|` and `not` take expressions only, and chained
+`where:` calls combine with AND (ruling CR5). `where:` given anything else, a Boolean included,
+signals `PBValidationError` with the text
+`where: expects a PBExpression or a one-argument block, got a <class name>` (ruling CR6). A block
+is opaque: no index answers it, and `explain` shows it as a `BlockFilter` node (`proto_db`'s
 `PythonFilter`, named after the language that runs it; a listed deviation, call IC6). The mixing
 rule is `proto_db`'s (`linq.py:48-61`): in a top-level conjunction the conditions built from fields
-go to the planner and each block becomes its own filter on top; a `|` or a `not` holding a block is
-one block filter for the whole condition.
+go to the planner and each block becomes its own filter on top; an `|` or a `not` holding a
+`PBBlockPredicate` (a block with a description, itself an expression) is one block filter for the
+whole condition.
 
 **Selection blocks are not in the first release** (ruling IQ2). Translating
 `[:p | (p at: 'city') = 'Oslo']` into a term by running it on a recording object reads like
@@ -247,8 +265,8 @@ between calls, and the plan it answers is the plan that runs.
 **1. Normalise** (`planner.py:98-126`). `&` and `|` are flattened; negations are pushed inward by De
 Morgan's laws, which is exact because evaluation is two-valued. A negated term stays a residual
 `not` filter, with one exception: `not isNone` becomes `notNone` and `not notNone` becomes
-`isNone`, the one exact rewrite. `not (x = 5)` is never rewritten to `x ne: 5`: an element without
-`x` satisfies the first and not the second.
+`isNone`, the one exact rewrite. `not (x = 5)` is never rewritten to `x ne: 5`: an element without an
+x satisfies the first and not the second.
 
 **2. Candidates for a conjunction** (`planner.py:195-218`). Duplicate conjuncts are dropped, order
 kept. The candidates are: a full scan with every conjunct as a residual `Filter`; and, for each
@@ -262,7 +280,7 @@ tree level descended. The estimate of each plan node:
 | Node | rows | cost | Source |
 |---|---|---|---|
 | `CollectionScan` | n | n | `plans.py`, `CollectionScanPlan.estimate` |
-| `IndexLookup` (`==`, `in`, `?N`) | the sizes of the groups looked up | rows + (groups looked up) × log2 (G + 2) | `keyed.py:596-622` |
+| `IndexLookup` (`==`, `'in'`, `?N`) | the sizes of the groups looked up | rows + (groups looked up) × log2 (G + 2) | `keyed.py:596-622` |
 | `IndexRange` for `?!N` | total − (`MISSING` and `nil` groups) | rows + log2 (G + 2) + groups visited | same |
 | `IndexComplement` (`!=`) | total − `MISSING` group − the excluded group | total + G + 1 (a full pass) | same |
 | `IndexRange` for a comparison | keys in the range × (total − side) / G | rows + log2 (G + 2) + keys in the range | same |
@@ -292,27 +310,30 @@ largest multiplicity over its branches, so it equals the scan's multiset.
 **6. Order** (`planner.py:263-275`). For an order on one key, each index that yields that key in
 order contributes an ordered scan with the whole condition as a residual filter, competing with a
 `Sort` over the planned condition. A selective condition is planned by index and sorted; an
-unselective one streams the ordered index. With several keys the plan uses `Sort`. `limit` and
-`offset` add a `Limit` on top.
+unselective one streams the ordered index. With several keys the plan uses `Sort`. A limit and
+an offset add a `Limit` on top.
 
 **Why there is no intersection.** Two indexed conjuncts invite the plan "ask both indexes and
 intersect". Under this model `Intersect(a, b)` costs `cost(a) + rows(a) + cost(b) + rows(b)`, never
 less than `Filter(a, b)` at `cost(a) + rows(a)`, so `proto_db` does not enumerate intersections at all
 (`planner.py`, module docstring, "Access paths and cost"; `query-planner.rst`). That is a claim of
-the model; [measured in T7, bench P3: the two-index intersection built by hand against the
+the model; [measured in T7: bench P3, the two-index intersection built by hand against the
 planner's filter plan, at several sizes and selectivities, in both implementations].
 
 **The crossover where scanning wins.** For a tiny collection the scan and its filter (two units per
 element) are cheaper than any descent. With one element, a matching lookup costs 1 + log2 3 ≈ 2.58
-against the scan's 2, and the planner scans; with two elements in two groups the lookup costs 3 and
-the scan 4, and it looks up. In the model, then, the switch comes at once. Whether the timings cross
-where the model says is a measurement: [measured in T7, bench P2: the collection size at which the
-planner switches from scan to index, and the measured times of both plans on either side of it].
+against the scan's 2 (model estimates), and the planner scans; with two elements in two groups the
+lookup costs 3 and the scan 4, and it looks up. In the model, then, the switch in collection size
+comes at once, so size is not what bench P2 sweeps (ruling CR2). Whether the timings cross where the
+model says is a measurement: [measured in T7: bench P2, for a range term swept from very selective
+to unselective and for `ne:` on indexes with few and with nearly n key groups, the point where the
+cost model switches between the index plan and a scan with a filter, and whether the measured times
+of the two plans, both forced, cross at that point].
 
 **`!=` and the complement.** An `IndexComplement` is charged a full pass over the index (total + G
 + 1), yet it is still cheaper than a scan with a filter (2n) whenever the index has fewer than
-n − 1 groups, so a lone `ne:` uses the index (`proto_db`'s
-`test_ne_term_alone_prefers_the_index_complement_over_scan_plus_filter`). Combined with a selective
+n − 1 groups, so a lone `ne:` uses the index (`proto_db`'s test
+test_ne_term_alone_prefers_the_index_complement_over_scan_plus_filter). Combined with a selective
 indexed conjunct, it becomes a residual filter instead.
 
 **Known limits of the model**, as `proto_db` states them (`query-planner.rst`, "The invariant and
@@ -322,7 +343,7 @@ The planner can only be slow by choosing badly, never wrong, because of the exac
 
 **Floating-point parity (deviation R2, ruling IQ4).** Costs are Floats computed by the same formulas
 in the same order as `proto_db`'s. The descent term `log2 (G + 2)` is computed in protoST as
-`ln x / ln 2`, which can differ from C's `log2` in the last bit, so two candidates whose costs differ
+`ln x / ln 2`, which can differ from C's log2 in the last bit, so two candidates whose costs differ
 by one unit in the last place could rank differently in the two implementations: the same answer
 by another plan. The query vectors compare plans and report such near ties by name; results must
 always be equal.
@@ -330,7 +351,7 @@ always be equal.
 **No fallback.** Nothing in the query path catches an error to answer something else. A malformed
 query is `PBValidationError`; an unsupported one `PBNotSupportedError`.
 
-[measured in T7, bench P1: the time of `plan` and `explain` alone, without execution, for
+[measured in T7: bench P1, the time of `plan` and `explain` alone, without execution, for
 conditions of 1 to 32 conjuncts over 0 to 8 indexes.]
 
 ## Reading a plan
@@ -348,27 +369,28 @@ compares it with `proto_db`'s:
 
 ### The nodes and their fields
 
-| Node | Fields besides `plan`, `estimate`, `children` | Children |
+| Node | Fields besides `'plan'`, `'estimate'`, `'children'` | Children |
 |---|---|---|
-| `CollectionScan` | `collection` (its class name), `rows` (its count), `indexes` (its index names) | none |
-| `IndexLookup`, `IndexRange`, `IndexComplement` | `index` (the index's own explain, below), `term` (the term's description) | none |
-| `IndexOrderedScan` | `index`, `term` (`nil`), `descending` | none |
-| `Filter` | `predicate`: the residual condition's description | its source |
-| `BlockFilter` | `description`: the block's description (protoBaseST; `proto_db`'s `PythonFilter`) | its source |
+| `CollectionScan` | `'collection'` (its class name), `'rows'` (its count), `'indexes'` (its index names) | none |
+| `IndexLookup`, `IndexRange`, `IndexComplement` | `'index'` (the index's own explain, below), `'term'` (the term's description) | none |
+| `IndexOrderedScan` | `'index'`, `'term'` (`nil`), `'descending'` | none |
+| `Filter` | `'predicate'`: the residual condition's description | its source |
+| `BlockFilter` | `'description'`: the block's description (protoBaseST; `proto_db`'s `PythonFilter`) | its source |
 | `Union`, `Intersect` | none | two or more sources |
-| `Project` | `fields` (output name to path) or `function` (a block's description) | its source |
-| `Sort` | `keys`: an Array of `{ 'key' -> path or description. 'descending' -> aBoolean }` | its source |
-| `Limit` | `limit` (`nil` when unbounded), `offset`, and `by_rank`: true when the window is sought by rank | its source |
-| `Count` | `by_rank`: true when the count is read from the source's exact row count | its source |
+| `Project` | `'fields'` (output name to path) or `'function'` (a block's description) | its source |
+| `Sort` | `'keys'`: an Array of `{ 'key' -> path or description. 'descending' -> aBoolean }` | its source |
+| `Limit` | `'limit'` (`nil` when unbounded), `'offset'`, and `'by_rank'`: true when the window is sought by rank | its source |
+| `Count` | `'by_rank'`: true when the count is read from the source's exact row count | its source |
 | `Distinct` | none | its source |
 
-An index explains itself as `{ 'index' -> name. 'kind' -> kind. 'key' -> the key spec's
-description. 'entries' -> occurrences. 'keys' -> distinct orderable keys. 'unorderable' ->
-occurrences in the side group }` (`indexing/base.py:309-311`, `keyed.py`, `explain`). A term
+An index explains itself as a `PBFrozenDict` with `'index'` (its name), `'kind'` (`proto_db`'s class
+name, `'EqualityIndex'` or `'RangeIndex'`, ruling CR4), `'key'` (the key spec's description),
+`'entries'` (occurrences), `'keys'` (distinct orderable keys) and `'unorderable'` (occurrences in
+the side group) (`indexing/base.py:309-311`, `keyed.py`, `explain`). A term
 describes itself as `{ 'path' -> path. 'op' -> operator. 'value' -> operand }`; an `&` as
 `{ 'and' -> { ... } }`, an `|` as `{ 'or' -> { ... } }`, a `not` as `{ 'not' -> ... }`.
 
-`by_rank` appears only when it is true. When it does, the subtree under that `Limit` or `Count` is
+`'by_rank'` appears only when it is true. When it does, the subtree under that `Limit` or `Count` is
 not executed row by row: it is sought (`plans.py`, `Limit.explain`).
 
 ### What the estimate means
@@ -387,10 +409,12 @@ same query again. Plan 2 below does exactly that.
 ### Plan 1: a lookup
 
 The data, here and in the next two plans: 600 people, cities Lima, Oslo, Paris and Rome in turn
-(150 each), ages 18 to 77 (ten each), with a `PBEqualityIndex` `by_city` and a `PBRangeIndex`
-`by_age`. The expected figures are not measurements: they are computed by hand from the formulas
-above, and the program checks that the planner computes the same. Costs are compared within 1e-9
-because of R2.
+(150 each), ages 18 to 77 (ten each), with a `PBEqualityIndex` `'by_city'` and a `PBRangeIndex`
+`'by_age'`. **Every figure in these three plans is a model estimate**: the output of the cost model
+above, never a measurement and never a promise of time. Ruling CR10 requires each to equal
+`proto_db`'s own planner output for the same data, generated from `proto_db` by a script; plan task
+7 checks the numbers, and the program checks that protoBaseST's planner computes the same. Costs are
+compared within 1e-9 because of R2.
 
 ```smalltalk
 oslo := q where: (city eq: 'Oslo').
@@ -405,10 +429,10 @@ lesson check: 'cost: rows plus one descent, log2 (4 + 2)' isTrue: (close value: 
 lesson check: 'a leaf has no children' isTrue: (plan at: 'children') isEmpty.
 ```
 
-Reading it: one node, an `IndexLookup` of `by_city` for `city == 'Oslo'`. The index has 600 entries
-in 4 key groups. The lookup produces the Oslo group, 150 rows, exactly; its cost is those 150 rows
-plus one descent of `log2 (4 + 2)` ≈ 2.585. The rejected candidate, a scan with a filter, costs
-600 + 600 = 1200 and would produce an estimated 300 rows.
+Reading it (model estimates): one node, an `IndexLookup` of `'by_city'` for `city == 'Oslo'`. The
+index has 600 entries in 4 key groups. The lookup produces the Oslo group, 150 rows, exactly; its
+cost is those 150 rows plus one descent of `log2 (4 + 2)` ≈ 2.585. The rejected candidate, a scan
+with a filter, costs 600 + 600 = 1200 and would produce an estimated 300 rows.
 
 ### Plan 2: two conditions
 
@@ -428,14 +452,14 @@ scanOnly := (PBQuery from: ((people removeIndex: 'by_age') removeIndex: 'by_city
 lesson check: 'and the scan: two units per element' is: ((scanOnly explain at: 'estimate') at: 'cost') equals: 1200.
 ```
 
-Reading it from the leaf up. The `IndexRange` of `by_age` for `age > 70` covers the keys 71 to 77,
+Reading it from the leaf up (model estimates). The `IndexRange` of `'by_age'` for `age > 70` covers the keys 71 to 77,
 7 of the 60 groups; with 600 entries in 60 groups it estimates 10 rows per key, 70 rows, at a cost
 of 70 + `log2 (60 + 2)` + 7 ≈ 82.95. The `Filter` above it tests `city == 'Oslo'` on those 70 rows:
 it pays one unit per row read (cost ≈ 152.95) and is estimated to keep half (35 rows).
 
 The three candidates were:
 
-| Candidate | Estimated cost |
+| Candidate | Estimated cost (model estimate) |
 |---|---|
 | `Filter (city) <- IndexRange (age > 70)` | ≈ 152.95, chosen |
 | `Filter (age) <- IndexLookup (city == 'Oslo')` | ≈ 302.58 |
@@ -458,25 +482,25 @@ lesson check: 'the sort pays n log2 n on 60 rows'
 lesson check: 'the limit is charged its whole source' isTrue: (close value: ((window at: 'estimate') at: 'cost') value: 426.367632046898).
 ```
 
-Reading it from the leaf up. The `IndexRange` for `between[] 30 35` covers 6 keys, 60 rows, at
-60 + `log2 62` + 6 ≈ 71.95. The `Sort` by `age` adds 60 × `log2 60` ≈ 354.41, for ≈ 426.37. The
+Reading it from the leaf up (model estimates). The `IndexRange` for `between[] 30 35` covers 6 keys, 60 rows, at
+60 + `log2 62` + 6 ≈ 71.95. The `Sort` by `'age'` adds 60 × `log2 60` ≈ 354.41, for ≈ 426.37. The
 `Limit` keeps 5 rows from offset 0 and is charged its whole source, ≈ 426.37 (the model's known
 limit).
 
 The rejected candidate streams the ordered index and filters every element:
-`Filter <- IndexOrderedScan`, at (600 + 60 + 1) + 600 = 1261. A selective condition is found by its
+`Filter <- IndexOrderedScan`, at a model estimate of (600 + 60 + 1) + 600 = 1261. A selective condition is found by its
 index and sorted; without the condition the ordered scan (661) would beat sorting all 600 rows
 (600 + 600 × `log2 600` ≈ 6137), and the plan would be `Limit <- IndexOrderedScan`
 ([chapter 19](tutorial/19-ordered-reads-and-pages.md#an-order-on-an-indexed-key)).
 
-`by_rank` is true although there is a `Sort`: the source of the sort is an index plan of the sort's
+`'by_rank'` is true although there is a `Sort`: the source of the sort is an index plan of the sort's
 only key, and an index range is already in key order, so the sort can serve rows 0 to 4 by rank
 without sorting (`plans.py`, `Sort._rank`; the plan's `execute` still describes a sort, and its rows
 are identical to a sort's).
 
 ## Ordered reads, windows and pages
 
-**Rank access** (`proto_db` D56; `keyed.py`, "Rank access"; `plans.py`, `window` and `exact_rows`).
+**Rank access** (`proto_db` D56; `keyed.py`, "Rank access"; `plans.py`, its window and exact_rows methods).
 A plan may offer `windowFrom:to:`, rows `start` to `stop − 1` without producing the rows before
 `start`, and `exactRows`, its row count without producing it. These are offered by:
 
@@ -489,7 +513,7 @@ A plan may offer `windowFrom:to:`, rows `start` to `stop − 1` without producin
 Anything else (a block key, two sort keys, a filter of several terms, a union) has no rank access.
 
 **Windows.** A `Limit` over a plan with rank access seeks its window in O(log n + its size)
-(`by_rank` in `explain`). A `Count` over one reads the count.
+(`'by_rank'` in `explain`). A `Count` over one reads the count.
 
 **Pagers** (spec 5.7). `PBPager on: aPlanOrQuery pageSize: n`, or `aQuery pagerSize: n`, holds one
 plan built on one snapshot. With rank access page k costs O(log n + page size); otherwise the
@@ -498,9 +522,9 @@ whatever commits meanwhile, because the snapshot's versions do not change. It li
 `proto_db`'s portable pager tokens are deferred (spec 3.2), because the token's plan digest is
 computed over Python's `repr` of the plan.
 
-[measured in T9, bench Q5: the time of page k for every k, by rank and materialised, and `count` by
-rank; and T8, bench Q4: `orderBy:` with `take:` by an ordered index scan against a `Sort` over a
-lookup, selective and unselective.]
+[measured in T9: bench Q5, the time of page k for every k, by rank and materialised, and `count` by
+rank.] [measured in T8: bench Q4, `orderBy:` with `take:` by an ordered index scan against a `Sort`
+over a lookup, selective and unselective.]
 
 ## Index maintenance under immutability and the commit
 
@@ -524,7 +548,7 @@ nothing (adding a present set member) does no index work.
 
 **Stale indexes.** An index written by format 3 (`hasMemberTokens` false) is rebuilt from the
 elements before the collection's first change (`proto_db` D58, call IC7). A first change to a large
-stale collection pays a full build. [measured in T3, bench M2: `addIndex:` on n elements (the bulk
+stale collection pays a full build. [measured in T3: bench M2, `addIndex:` on n elements (the bulk
 build) against the fold of single additions.]
 
 **Unsaved atoms.** A new index version is an unsaved atom like a new collection version; its trees
@@ -548,7 +572,7 @@ concurrent creation: that commit is `PBConflictError`.
 Three consequences follow, each explicit:
 
 - **The merge runs index work in the commit's build**, so an indexed root lengthens the commit.
-  [measured in T4 (plan task 4b), bench M3: the time of a blind write merged onto a current with 0,
+  [measured in T4: bench M3 (plan task 4b), the time of a blind write merged onto a current with 0,
   1 and 3 indexes, standalone and in a three-member cluster.]
 - **Extractors run in the commit's build** ([above](#extractors-and-their-purity-contract)): an
   exception fails only that commit, unchanged.
@@ -558,7 +582,7 @@ Three consequences follow, each explicit:
 The cost on every write, merged or not, is a new version of two trees per index (the key groups,
 and the members of one group), on top of the collection's own. protoBaseST's tree operations are
 12 to 31 times slower than `proto_db`'s ([deviations.md](deviations.md#avl-operations)), so index
-what you query. [measured in T4 (plan task 4a), bench M1: commits per second for N single-element
+what you query. [measured in T4: bench M1 (plan task 4a), commits per second for N single-element
 transactions on a collection with 0, 1 and 3 indexes, and the extra cost per index, in both
 implementations.]
 
@@ -567,9 +591,9 @@ implementations.]
 Indexes change nothing in cluster mode's protocol (spec 5.8):
 
 - **Nothing on the wire changes.** Indexes are ordinary records, shipped and persisted with the
-  commit like any other; no message names an index. The cluster messages named `query` and
-  `commit_query` are not database queries: `query` asks a peer for its acceptor state, and
-  `commit_query` asks where a commit's records are (Phase D, not ported).
+  commit like any other; no message names an index. The cluster messages named `'query'` and
+  `'commit_query'` are not database queries: `'query'` asks a peer for its acceptor state, and
+  `'commit_query'` asks where a commit's records are (Phase D, not ported).
 - **Reads.** A query reads the transaction's snapshot, so in a cluster it has exactly the
   consistency `getRootObject:` has there. It never contacts a peer.
 - **Writes and merges.** Index maintenance happens in the writer's mutators before the round. A
@@ -591,7 +615,7 @@ same rows, checksum and plan. None exists yet.
 | What | Bench | Task |
 |---|---|---|
 | A point lookup against collection size, indexed and scanned | Q1 | [measured in T8: Q1, sizes 10^2 to 10^5] |
-| `in` of 1, 10, 100 values; ranges of 0.1 % to 50 % selectivity | Q2 | [measured in T8: Q2] |
+| `'in'` of 1, 10, 100 values; ranges of 0.1 % to 50 % selectivity | Q2 | [measured in T8: Q2] |
 | AND, OR of two indexed branches and of an indexed and an unindexed one, NOT | Q3 | [measured in T8: Q3] |
 | Ordered scan against sort, with `take:` | Q4 | [measured in T8: Q4] |
 | Page k by rank against materialised; `count` by rank | Q5 | [measured in T9: Q5] |
@@ -599,13 +623,13 @@ same rows, checksum and plan. None exists yet.
 | Bulk `addIndex:` against the fold of single additions | M2 | [measured in T3: M2] |
 | Merges onto an indexed current, standalone and in a cluster | M3 | [measured in T4: M3, plan task 4b] |
 | `plan` and `explain` alone, 1 to 32 conjuncts, 0 to 8 indexes | P1 | [measured in T7: P1] |
-| The scan-to-index crossover and the times either side | P2 | [measured in T7: P2] |
+| Where the cost model switches between index and scan, and whether the timings cross there | P2 | [measured in T7: P2] |
 | The two-index intersection against the filter plan | P3 | [measured in T7: P3] |
 | protoBaseST against `proto_db` on every workload above | all | [measured in T10: the full `bench/run_query.sh` comparison, recorded in deviations.md#performance with date, machine, load, commits and binaries] |
 
 ## Sources
 
-`proto_db` at `v2.0.0rc4` (protoBase repository, `b99285b`): `docs/source/indexing-framework.rst`,
+`proto_db` at `v2.0.0rc4` (protoBase repository, b99285b): `docs/source/indexing-framework.rst`,
 `docs/source/query-planner.rst`, `docs/source/tutorials/indexing-querying.rst`;
 `proto_db/indexing/keyspec.py`, `base.py`, `keyed.py`; `proto_db/query/terms.py`, `expressions.py`,
 `planner.py`, `plans.py`, `pager.py`, `linq.py`; `proto_db/collections/base.py`;
@@ -613,4 +637,4 @@ same rows, checksum and plan. None exists yet.
 
 protoBaseST: the [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md)
 (the rulings IQ1 to IQ8 in its section 9.2, the calls IC1 to IC10 in 9.1) and its implementation
-plan, `docs/superpowers/plans/2026-11-18-indexed-queries.md` (the calls IP1 to IP15).
+plan, `docs/superpowers/plans/2026-11-18-indexed-queries.md` (the calls IP1 to IP17).

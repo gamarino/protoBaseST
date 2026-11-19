@@ -63,7 +63,8 @@ kept := (q where: (city eq: 'Oslo')) take: 5.
 lesson check: 'keep each answer' is: (planOf value: kept) equals: 'Limit <- IndexLookup'.
 lesson check: 'a field is not compared with =: that is a Boolean' is: (city = 'Oslo') equals: false.
 lesson check: 'and where: refuses a Boolean'
-    signals: PBValidationError containing: '' during: [q where: city = 'Oslo'].
+    signals: PBValidationError containing: 'where: expects a PBExpression or a one-argument block, got a Boolean'
+    during: [q where: city = 'Oslo'].
 
 "Reading a plan: one node."
 oslo := q where: (city eq: 'Oslo').

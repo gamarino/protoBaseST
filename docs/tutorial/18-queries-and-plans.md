@@ -43,14 +43,16 @@ The second trap is `=`:
 ```smalltalk
 lesson check: 'a field is not compared with =: that is a Boolean' is: (city = 'Oslo') equals: false.
 lesson check: 'and where: refuses a Boolean'
-    signals: PBValidationError containing: '' during: [q where: city = 'Oslo'].
+    signals: PBValidationError containing: 'where: expects a PBExpression or a one-argument block, got a Boolean'
+    during: [q where: city = 'Oslo'].
 ```
 
 Python's `proto_db` writes `F.city == "Oslo"`. A Smalltalk field cannot do the same: `=` must stay
 an equality, because collections and tests compare objects with it, and a builder that overrode it
 would break them (spec ruling IQ2, call IC4). So equality is `eq:` and inequality `ne:`; the
 comparisons `<`, `<=`, `>`, `>=` are kept, with the field as the receiver. `city = 'Oslo'` is
-simply `false`, and `where:` refuses it as a malformed query.
+simply `false`, and `where:` refuses it with a `PBValidationError` whose text names what it got:
+`where: expects a PBExpression or a one-argument block, got a Boolean` (ruling CR6).
 
 | Write | Means (`proto_db`'s operator) |
 |---|---|
@@ -125,9 +127,9 @@ better input costs `cost(a) + rows(a)`: the intersection can never be cheaper
 (`proto_db/query/planner.py`, module docstring, "Access paths and cost"). So enumerating
 intersections would only add untested code.
 
-That is the model's claim. Whether it holds in time, at protoST's speed, is a measurement: [measured
-in T7, bench P3: the two-index intersection built by hand against the planner's filter plan, on
-this data shape at several sizes and selectivities, RUNS=5 interleaved].
+That is the model's claim. Whether it holds in time, at protoST's speed, is a measurement:
+[measured in T7: bench P3, the two-index intersection built by hand against the planner's
+filter plan, on this data shape at several sizes and selectivities, RUNS=5 interleaved].
 
 ## Why the planner sometimes scans
 
@@ -141,12 +143,15 @@ lesson check: 'the planner scans a tiny collection'
 ```
 
 With one element, the scan and its filter cost 2 units (one to produce the element, one to test
-it); the lookup costs 1 row plus one descent of `log2 (1 + 2)`, about 2.58. In this model the
-switch comes almost at once: with two elements in two cities the lookup costs 3 and the scan 4.
-That is the model's crossover. The crossover that matters to a program is the one in time, which
-depends on what a descent and a record read really cost in protoST: [measured in T7, bench P2:
-the collection size at which the planner switches from scan to index for an equality, and the
-measured times of both plans on either side of it].
+it); the lookup costs 1 row plus one descent of `log2 (1 + 2)`, about 2.58 (model estimates, as
+every cost in this chapter). In this model the switch comes almost at once: with two elements in
+two cities the lookup costs 3 and the scan 4. That is the model's crossover in collection size, and
+it is too small to be worth measuring (ruling CR2). What matters to a program is whether the
+timings agree with the model where it switches for a reason other than size, the selectivity of the
+condition: [measured in T7: bench P2, for a range term swept from very selective to unselective and
+for `ne:` on indexes with few and with nearly n key groups, the point where the cost model switches
+between the index plan and a scan with a filter, and whether the measured times of the two plans,
+both forced, cross at that point].
 
 ## `not (age = 30)` is not `age ne: 30`
 
@@ -163,8 +168,8 @@ rewrites `not (age = 30)` as `age ne: 30` to use the index. It would change the 
 person satisfies the first (it is not true that its age is 30) and not the second (`ne:` matches
 present keys only, chapter 17). So the planner keeps a negated term as a residual filter, and the
 only negation it rewrites is the exact one: `not isNone` is `notNone`
-(`proto_db/query/planner.py`, `normalize`). Negations of `&` and `|` are pushed inward by De
-Morgan's laws, which is exact because every term answers true or false.
+(`proto_db/query/planner.py`, its normalize function). Negations of `&` and `|` are pushed inward
+by De Morgan's laws, which is exact because every term answers true or false.
 
 `ne:` itself has an index plan, the complement: every group but one. It is charged a full pass
 over the index, and it still beats a scan with a filter, which pays two units per element.
@@ -193,12 +198,14 @@ lesson check: 'beside an indexed conjunct, the block filters on top' is: (planOf
 lesson check: 'Oslo people whose age is a multiple of 7' is: mixed count equals: 20.
 ```
 
-A block is accepted wherever a condition is. The planner cannot look inside it, so it runs element
-by element and never uses an index; `explain` names it `BlockFilter` (`proto_db` calls the node
-`PythonFilter`, after the language that runs it; the different name is a listed deviation). In a
-conjunction, the conditions built from fields go to the planner and the block filters what they
-answer, so an indexed condition beside a block still uses its index. A block inside an `|` or a
-`not` makes the whole condition one block filter.
+A plain block enters a query only through `where:`; `&`, `|` and `not` take expressions only, and
+chained `where:` calls combine with AND, as mixed above shows (ruling CR5). The planner cannot look
+inside a block, so it runs element by element and never uses an index; `explain` names it
+`BlockFilter` (`proto_db` calls the node `PythonFilter`, after the language that runs it; the
+different name is a listed deviation). In a conjunction, the conditions built from fields go to the planner and the block filters what they
+answer, so an indexed condition beside a block still uses its index. A `PBBlockPredicate` (a block
+with a description, which is an expression) inside an `|` or a `not` makes the whole condition one
+block filter.
 
 The obvious next step would be to translate a block such as `[:p | (p at: 'city') = 'Oslo']` into
 a condition, as GemStone's selection blocks are. The first release does not (ruling IQ2): a

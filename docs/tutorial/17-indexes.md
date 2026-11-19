@@ -33,7 +33,7 @@ lesson check: 'a walk finds the people in Oslo' is: (walk value: (db newTransact
 It is correct, and it is the right answer for 600 elements read once. Its cost is the size of the
 collection, whatever the answer: finding one person among a million reads a million records.
 In protoBaseST each record read is a lazy load and a decode, so the cost per element is not
-small. [measured in T8, bench Q1: the time of one point lookup against collection size, 10^2 to
+small. [measured in T8: bench Q1, the time of one point lookup against collection size, 10^2 to
 10^5 elements, by a walk and by an equality index, RUNS=5 interleaved, minimum and median.]
 
 ## The next obvious solution: keep the lookup yourself
@@ -160,7 +160,7 @@ merge needs no index-specific rule at all.
 
 Two consequences, both explained in [the guide](../queries.md#index-maintenance-under-immutability-and-the-commit):
 the merge now runs index work during the commit, so it lengthens the commit
-([measured in T4, bench M3: the time of a blind write merged onto a current with 0, 1 and 3
+([measured in T4: bench M3, the time of a blind write merged onto a current with 0, 1 and 3
 indexes, standalone and in a three-member cluster]); and if two transactions add an index of the
 same name concurrently, the second commit is `PBConflictError`.
 
@@ -173,9 +173,9 @@ matters here more than in Python:
 
 | Indexes on the collection | Commits per second, one element per commit |
 |---|---|
-| 0 | [measured in T4, bench M1: commits per second on a 600-element `PBDictionary`] |
-| 1 | [measured in T4, bench M1: the same, one `PBEqualityIndex`] |
-| 3 | [measured in T4, bench M1: the same, an equality, a range and an extractor index] |
+| 0 | [measured in T4: bench M1, commits per second on a 600-element `PBDictionary`] |
+| 1 | [measured in T4: bench M1, the same, one `PBEqualityIndex`] |
+| 3 | [measured in T4: bench M1, the same, an equality, a range and an extractor index] |
 
 The rule that follows is `proto_db`'s: **index what you query**, and nothing else.
 

@@ -1,0 +1,90 @@
+# Selectors the documentation cites before they exist (plan call IP5), and the plan task whose
+# Interfaces block produces each. Read by tests/docs/reference_selectors.sh; each task removes its
+# own lines when it defines them; the list is empty at release (PENDING_FINAL=1, Task 10).
+# Columns: selector<TAB>task
+# Task 2: key specs and the extractor registry
+arg	2
+asData	2
+describe	2
+element	2
+extract:	2
+extractor:	2
+extractorVersion:	2
+forTermPath:	2
+fromData:	2
+isExtractorRegistered:	2
+registerExtractor:block:version:	2
+termPath	2
+unregisterExtractor:	2
+# Task 3: key-group indexes
+countOfKey:	3
+explain	3
+groupCount	3
+keySpecObject	3
+membersDo:	3
+name:keySpec:	3
+name:path:	3
+onAdd:	3
+onRemove:	3
+onReplace:with:	3
+rebuiltStale:	3
+validate:	3
+withAdded:	3
+withIndex:	3
+withRemoved:	3
+withReplaced:with:	3
+# Task 4a: collections maintain their indexes (4a and 4b share the spec's T4)
+addIndex:	4
+removeIndex:	4
+validate	4
+# Task 5: terms and expressions
+asList	5
+compile:	5
+evaluate:	5
+not	5
+op	5
+termsDo:	5
+# Task 6: plan operators, explain, index access paths
+byRank	6
+cost	6
+estimate	6
+estimate:	6
+exactRows	6
+execute	6
+key:descending:	6
+orderedPlan:descending:	6
+plan:	6
+rows	6
+supports:	6
+supportsOrder:	6
+windowFrom:to:	6
+# Task 7: the planner
+normalize:	7
+plan:where:orderBy:limit:offset:	7
+# Task 8: PBQuery and PBField
+between:and:	8
+betweenLeftOpen:and:	8
+betweenOpen:and:	8
+betweenRightOpen:and:	8
+contains:	8
+distinct	8
+eq:	8
+firstOrNil	8
+isNone	8
+isTrue	8
+ne:	8
+notNone	8
+notTrue	8
+orderBy:	8
+orderBy:descending:	8
+plan	8
+project:	8
+skip:	8
+thenBy:	8
+thenBy:descending:	8
+where:	8
+# Task 9: PBPager
+on:pageSize:	9
+page:	9
+pagerSize:	9
+pages	9
