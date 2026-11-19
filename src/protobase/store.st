@@ -523,18 +523,19 @@ PBFileStorage >> _pbLoad: aPointer into: anAtom within: aChain
       at: aPointer class: cls].
   ^ installed.
 
-"A save wrote anAtom's record at aPointer (pushAtom:, just before): the atom
- cache keeps the record as a decode of it would give it, built from anAtom's
- state with each atom replaced by a new stub (PBAtom >> _pbStoredStateIn:),
- never anAtom itself, so nothing a transaction loaded stays reachable from the
- cache. Weighed by the payload size pushAtom: wrote. Nothing is cached when the
- state holds a reference inside a container."
-PBFileStorage >> _pbSaved: anAtom at: aPointer
+"A save wrote anAtom's record, of the state aState, at aPointer (pushAtom:,
+ just before): the atom cache keeps the record as a decode of it would give it,
+ built from aState (PBAtom >> _pbCacheableState:) with each atom replaced by a
+ new stub (_pbCacheState:, one stub per reference), never anAtom itself, so
+ nothing a transaction loaded stays reachable from the cache. Weighed by the
+ payload size pushAtom: wrote. Nothing is cached when the state holds a
+ reference inside a container."
+PBFileStorage >> _pbSaved: anAtom state: aState at: aPointer
   | last stored |
   atomCache isEnabled ifFalse: [^ self].
   last := lastPush value.
   (last notNil and: [(last at: 1) = aPointer]) ifFalse: [^ self].
-  stored := anAtom _pbStoredStateIn: self.
+  stored := anAtom _pbCacheableState: aState.
   stored isNil ifTrue: [^ self].
   self _pbCacheState: stored oid: anAtom oid tag: (last at: 2) weight: (last at: 4) at: aPointer class: anAtom class.
 
@@ -710,7 +711,7 @@ PBFileStorage >> pushAtom: anEnvelope
     self _stopIfCloseRequested: 'before appending a record'.
     offset := self _write: [w append: record] what: 'appending a record to the segment ' , w segmentHex.
     ptr := PBAtomPointer segment: w segment offset: offset.
-    "What the next steps need of this push: _pbSaved:at: its tag and size,
+    "What the next steps need of this push: _pbSaved:state:at: its tag and size,
      _checkRootRecordAt: the payload of a SpaceRoot (kept for a SpaceRoot only)."
     lastPush swap: [:previous | { ptr. anEnvelope tag.
       (anEnvelope tag = self class _spaceRootWriterTag) ifTrue: [payload] ifFalse: [nil]. payload size }].

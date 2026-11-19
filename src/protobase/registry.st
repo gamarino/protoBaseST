@@ -834,30 +834,34 @@ PBAtom >> _saveInto: aStorage
   | stack known |
   known := self _pointerIn: aStorage.
   known isNil ifFalse: [^ known].
-  "Pairs { atom. its unsaved references, or nil before they are listed }."
+  "Frames { atom. nil } before the atom is visited, { atom. its state. its
+   unsaved references } once it is: the state is built once per atom saved and
+   serves the walk, the record and the atom cache (plan Task 10)."
   stack := OrderedCollection new.
   stack addLast: self; addLast: nil.
   [stack notEmpty] whileTrue: [
-    | refs atom |
+    | refs atom st |
     refs := stack removeLast.
-    atom := stack last.
     refs isNil
       ifTrue: [
+        atom := stack last.
         (atom _pointerIn: aStorage) isNil
           ifTrue: [
             "The class is checked before any dependent is written or bound to
              aStorage, as ProtoBase's _save checks the declared type name before
              it encodes the state."
             atom tag.
+            st := atom state.
             refs := OrderedCollection new.
-            atom state _pbAddUnsavedAtomsTo: refs in: aStorage.
-            stack addLast: refs.
+            st _pbAddUnsavedAtomsTo: refs in: aStorage.
+            stack addLast: st; addLast: refs.
             refs size to: 1 by: -1 do: [:i | stack addLast: (refs at: i); addLast: nil]]
           ifFalse: [stack removeLast]]
       ifFalse: [
-        stack removeLast.
+        st := stack removeLast.
+        atom := stack removeLast.
         "A dependent met twice is saved once: the second visit finds it saved."
-        (atom _pointerIn: aStorage) isNil ifTrue: [atom _pushInto: aStorage]]].
+        (atom _pointerIn: aStorage) isNil ifTrue: [atom _push: st into: aStorage]]].
   ^ self pointer.
 
 "The pointer of this atom in aStorage, or nil while it is not saved; an atom
@@ -884,12 +888,12 @@ PBAtom >> _storedElsewhere: aStorage
  (the record just pushed is an orphan nothing refers to, in an append-only
  segment); in another storage, PBValidationError, the error a sequential
  second save meets (_pointerIn:)."
-PBAtom >> _pushInto: aStorage
+PBAtom >> _push: aState into: aStorage
   | ptr place |
-  ptr := aStorage pushAtom: (PBAtomEnvelope _ofAtomTag: self tag oid: self oid state: self state).
+  ptr := aStorage pushAtom: (PBAtomEnvelope _ofAtomTag: self tag oid: self oid state: aState).
   place := _PBPlace pointer: ptr storage: aStorage.
   (self _publishSaved: place) == place ifTrue: [
-    aStorage _pbSaved: self at: ptr.
+    aStorage _pbSaved: self state: aState at: ptr.
     ^ ptr].
   ^ self _pointerIn: aStorage.
 
@@ -903,35 +907,25 @@ PBAtom >> _pushInto: aStorage
 Object >> _pbLoad: aPointer into: anAtom within: aChain
   ^ anAtom class _load: (self loadAt: aPointer expecting: anAtom tag within: aChain) at: aPointer into: anAtom.
 
-"Told by a save that anAtom's record is now at aPointer in this storage (a
- storage may keep what a decode of it would give)."
-Object >> _pbSaved: anAtom at: aPointer
+"Told by a save that anAtom's record, of the state aState, is now at aPointer
+ in this storage (a storage may keep what a decode of it would give)."
+Object >> _pbSaved: anAtom state: aState at: aPointer
   ^ self.
 
-"What a decode of the record of this saved atom's state would hold, built
- from the state without decoding: each attribute value that is an atom becomes
- a new stub of it in aStorage (the atom itself is never shared: its runtime
- fields belong to the transaction that made it), each other value is itself,
- canonical and immutable. nil when a container value holds a reference, or a
- value is a reference read without a resolver: those are left to a decode."
-PBAtom >> _pbStoredStateIn: aStorage
-  | st values shape |
-  st := self state.
-  values := Array new: st size.
-  1 to: st size do: [:i |
-    | v kind |
-    v := st _valueAt: i.
-    kind := v _pbReferenceKind.
-    kind = 0 ifFalse: [
-      kind = 1 ifFalse: [^ nil].
-      v := v _pbStubIn: aStorage].
-    values at: i put: v].
-  "As a decode does, a state in the persisted order of its class shares the
-   class's keys and index."
+"aState, this atom's state as its save just wrote it, in the form a decode of
+ that record would hold before its references are resolved: the same values
+ (an atom stays itself; the storage that caches it makes the one new stub of
+ each, PBFileStorage >> _pbOwnValues:), and, as a decode does, on the class's
+ shared keys and index when it is in the persisted order of its class. nil when
+ a container value holds a reference, or a value is a reference read without a
+ resolver: those are left to a decode."
+PBAtom >> _pbCacheableState: aState
+  | shape values |
+  aState _pbHoldsNestedReference ifTrue: [^ nil].
   shape := self class _recordShape.
-  (st _valuesIfKeys: shape persisted) notNil ifTrue: [
-    ^ PBFrozenDict _keys: shape persisted index: shape persistedIndex values: values].
-  ^ st _withValues: values.
+  values := aState _valuesIfKeys: shape persisted.
+  values isNil ifTrue: [^ aState].
+  ^ PBFrozenDict _keys: shape persisted index: shape persistedIndex values: values.
 
 "0: the value holds no reference; 1: it is an atom; 2: it is a reference read
  without a resolver, or a container holding a reference."
@@ -1111,12 +1105,15 @@ _PBRecordShape >> _setPersisted: anArray index: aPBMapKeyIndex fields: aFieldArr
 
 "Why aName cannot be a persisted attribute name, or nil (format spec 'Atom
  records'): a non-empty String, not starting with _, not oid, atom_pointer or
- context. The rule of every reader and writer (PBAtomEnvelope _nameProblem:)."
+ context. The rule of every reader and writer (PBAtomEnvelope _nameProblem:),
+ run once per key path step: the reserved names are compared one by one (a
+ literal Array's includes: cost more than the rest of the rule together; plan
+ Task 10)."
 _PBRecordShape class >> nameProblem: aName
   ((aName isString and: [aName isSymbol not]) and: [aName notEmpty]) ifFalse: [
     ^ 'an attribute name is a non-empty string, not ' , aName printString].
   aName first = $_ ifTrue: [^ 'the attribute name ' , aName printString , ' starts with _'].
-  (#('oid' 'atom_pointer' 'context') includes: aName) ifTrue: [
+  (aName = 'oid' or: [aName = 'atom_pointer' or: [aName = 'context']]) ifTrue: [
     ^ 'the attribute name ' , aName printString , ' is reserved'].
   ^ nil.
 

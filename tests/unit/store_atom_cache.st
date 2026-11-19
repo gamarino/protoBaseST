@@ -34,9 +34,9 @@ CountingStorage >> loadAt: aPointer expecting: aTag within: aChain
   ^ super loadAt: aPointer expecting: aTag within: aChain.
 "Each record saved: { class. pointer. whether the cache can serve it (no reference inside
  a container) }."
-CountingStorage >> _pbSaved: anAtom at: aPointer
-  self savedRecords add: { anAtom class. aPointer. (anAtom _pbStoredStateIn: self) notNil }.
-  ^ super _pbSaved: anAtom at: aPointer.
+CountingStorage >> _pbSaved: anAtom state: aState at: aPointer
+  self savedRecords add: { anAtom class. aPointer. (anAtom _pbCacheableState: aState) notNil }.
+  ^ super _pbSaved: anAtom state: aState at: aPointer.
 
 | c base dir st plain space db mismatches stub loads ptrs fresh s2 space2 seam other scanned reached gens |
 c := Check new.

@@ -1,4 +1,4 @@
-"EXPECT: ok 68"
+"EXPECT: ok 83"
 "Atom weight, stage 2 (plan Task 12). An atom whose class has a record shape (its persistedFields,
  when its slots are its state: _PBRecordShape keepsState:) and whose state holds exactly those
  fields, in that order, keeps its slots, its oid and the shared shape, never an envelope or a
@@ -43,6 +43,27 @@ StateCountingRecord >> state
   StateReads isNil ifFalse: [StateReads add: 1].
   ^ super state.
 
+"A registered shaped node that counts, during a save, the reads of its whole state (one per
+ saved atom: the walk builds it once and the push and the atom cache reuse it) and the stubs
+ made of it (one per reference the atom cache keeps: a stub is never stubbed again) (plan
+ Task 10, Step 0)."
+PBCountedKeyNode subclass: #SaveCountingNode classVariableNames: 'StateReads Stubs'.
+SaveCountingNode class >> typeName
+  ^ 'stagetwo.SaveCountingNode'.
+SaveCountingNode class >> reads
+  ^ StateReads size.
+SaveCountingNode class >> stubs
+  ^ Stubs size.
+SaveCountingNode class >> resetCounts
+  StateReads := OrderedCollection new.
+  Stubs := OrderedCollection new.
+SaveCountingNode >> state
+  StateReads isNil ifFalse: [StateReads add: 1].
+  ^ super state.
+SaveCountingNode >> _pbStubIn: aStorage
+  Stubs isNil ifFalse: [Stubs add: 1].
+  ^ super _pbStubIn: aStorage.
+
 "Draws n oids, on an actor."
 Object subclass: #Drawer.
 Drawer >> draw: n
@@ -59,6 +80,7 @@ keeps := [:anAtom |
   ((holds value: anAtom value: PBAtomEnvelope) or: [holds value: anAtom value: PBFrozenDict]) not
     and: [(anAtom instVarNamed: 'memo') == anAtom class _recordShape]].
 PBTypeRegistry register: BadNameNode.
+PBTypeRegistry register: SaveCountingNode.
 
 "--- built in memory ---"
 ok := PBKeys orderKey: 5.
@@ -196,6 +218,36 @@ base deleteAll.
   c that: 'a name starting with _ is missing' isTrue: ((PBKeySpec path: '_a') extract: rec) == PBMissing default.
   c that: 'a reserved name is missing' isTrue: ((PBKeySpec path: 'oid') extract: rec) == PBMissing default.
   c that: 'and the record builds no state' is: StateCountingRecord reads equals: 0.
+
+  "--- a save builds each state once and stubs each reference once ---"
+  rec := SaveCountingNode key: 1 orderKey: (PBKeys orderKey: 1) value: v left: nil right: nil.
+  rec := SaveCountingNode key: 2 orderKey: (PBKeys orderKey: 2) value: v left: rec right: nil.
+  SaveCountingNode resetCounts.
+  ptr := st save: rec.
+  c that: 'a save into a cached storage builds each saved atom''s state once' is: SaveCountingNode reads equals: 2.
+  c that: 'and makes one stub per reference it caches' is: SaveCountingNode stubs equals: 1.
+  stub := SaveCountingNode unloadedAt: ptr storage: st.
+  c that: 'the cached parent loads its child as a stub of the child''s record' is: stub left pointer equals: rec left pointer.
+  c that: 'which reads the child''s key' is: stub left key equals: 1.
+  c that: 'the cached state equals the saved one' is: stub state equals: rec state.
+  rec := SaveCountingNode key: 3 orderKey: (PBKeys orderKey: 3) value: v left: nil right: nil.
+  SaveCountingNode resetCounts.
+  rec _saveInto: plain.
+  c that: 'a save into a storage with no cache builds the state once' is: SaveCountingNode reads equals: 1.
+
+  "--- the attribute name rule answers the same reasons (PBAtomEnvelope _nameProblem:) ---"
+  c that: 'a valid name has no problem' isTrue: (PBAtomEnvelope _nameProblem: 'amount') isNil.
+  c that: 'nor one that only starts as a reserved one' isTrue: ((#('oids' 'context_' 'atom') collect: [:n |
+    PBAtomEnvelope _nameProblem: n]) allSatisfy: [:why | why isNil]).
+  c that: 'oid is reserved' is: (PBAtomEnvelope _nameProblem: 'oid') equals: 'the attribute name ''oid'' is reserved'.
+  c that: 'atom_pointer is reserved' is: (PBAtomEnvelope _nameProblem: 'atom_pointer')
+    equals: 'the attribute name ''atom_pointer'' is reserved'.
+  c that: 'context is reserved' is: (PBAtomEnvelope _nameProblem: 'context') equals: 'the attribute name ''context'' is reserved'.
+  c that: 'a leading _ is refused' is: (PBAtomEnvelope _nameProblem: '_x') equals: 'the attribute name ''_x'' starts with _'.
+  c that: 'the empty string is refused' is: (PBAtomEnvelope _nameProblem: '')
+    equals: 'an attribute name is a non-empty string, not '''''.
+  c that: 'nil is refused' is: (PBAtomEnvelope _nameProblem: nil) equals: 'an attribute name is a non-empty string, not nil'.
+  c that: 'a number is refused' is: (PBAtomEnvelope _nameProblem: 3) equals: 'an attribute name is a non-empty string, not 3'.
 
   "--- the oid pool ---"
   raw := ByteArray withAll: ((1 to: 32) asArray collect: [:i | 255]).
