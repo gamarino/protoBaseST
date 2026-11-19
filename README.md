@@ -24,7 +24,7 @@ written by protoBaseST passes the `proto_db` verifier with an identical dump), t
 languages as first and second committer, and a small ERP demo. What was not: anything outside
 those scenarios, speed, long runs, and review by anyone but the people who wrote it.
 
-**Cluster mode (0.2.0, unreleased).** Several protoBaseST processes can share one database
+**Cluster mode (0.2.0).** Several protoBaseST processes can share one database
 directory as a cluster: `proto_db`'s protocol, rule by rule (a majority lease with numbered
 terms, write permissions, a commit point of a majority of synced acceptances), at `v2.0.0rc4`,
 protocol 14. It runs over one shared directory only, one permission at a time, on a trusted
@@ -93,6 +93,9 @@ disjoint roots, and a third as many on one hot key ([docs/deviations.md](docs/de
 | protoCore | v3.6.0 | https://github.com/numaes/protoCore |
 | protoIO | v0.7.0 | https://github.com/gamarino/protoIO |
 | protoST | v0.12.0 | https://github.com/gamarino/protoST |
+
+These are the minimum versions; the full test suite also passes on protoCore 3.6.1 with protoST
+0.13.0 (the soak and the timer audit ran on the minimum versions).
 
 Build protoST 0.12.0 against protoCore 3.6.0 and protoIO 0.7.0 (see its own README); it provides
 `lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S40 and

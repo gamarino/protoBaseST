@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-11-19)
 
 The detailed, task-by-task log of this release is
 [docs/changelog-0.2.0-development.md](docs/changelog-0.2.0-development.md).
