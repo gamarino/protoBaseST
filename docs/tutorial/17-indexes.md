@@ -160,8 +160,10 @@ merge needs no index-specific rule at all.
 
 Two consequences, both explained in [the guide](../queries.md#index-maintenance-under-immutability-and-the-commit):
 the merge now runs index work during the commit, so it lengthens the commit
-([measured in T4: bench M3, the time of a blind write merged onto a current with 0, 1 and 3
-indexes, standalone and in a three-member cluster]); and if two transactions add an index of the
+(bench M3: standalone, a merged blind write costs what a read-modify-write costs, 34, 12 and 5
+commits per second with 0, 1 and 3 indexes on a 600-record dictionary; in a three-member cluster
+17, 6.8 and 1.1, since the build runs under the write permission;
+[deviations.md](../deviations.md#m3-a-blind-write-merged-onto-an-indexed-current-standalone-and-in-a-cluster)); and if two transactions add an index of the
 same name concurrently, the second commit is `PBConflictError`.
 
 ## What an index costs on every write

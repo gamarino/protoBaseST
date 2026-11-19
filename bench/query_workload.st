@@ -37,16 +37,27 @@
  member order, by oid, which differs between runs): (sum of (group position + 1) * id) mod
  (2^61 - 1), the side group last. When one process runs both plans of a size they must answer
  the same rows, groups and checksum, or the run fails; the runner also requires the build and
- fold units of a size to report the same work."
-Import from: 'protobase'.
+ fold units of a size to report the same work.
 
-| all units time p records report sizes m1 m2 emit commits |
-all := #('M1' 'M2').
+ M3, a blind write merged onto an indexed current (plan Task 4b): M1's dictionary and plans (idx0,
+ idx1, idx3; bench/_query_bench.st), then QUERY_M3_COMMITS (default 120) transactions, timed
+ together, each committing a new dictionary that holds M1's change j alone, without reading the
+ root: the commit rebases it onto the current version (rebaseOnto:), whose mutators maintain its
+ indexes, so every commit is a merge. The 120 keys (7919 j) mod 600 are distinct, so the final
+ content is M1's after 120 commits whatever the order of the commits; rows, queries and checksum
+ are M1's. bench/cluster_workload.st runs the same 120 commits in a three-member cluster (profiles
+ m3-idx0, m3-idx1, m3-idx3), verified against this unit's proto_db checksum."
+Import from: 'protobase'.
+Import from: '_query_bench'.
+
+| all units time p records report sizes m1 m2 emit commits blindCommits |
+all := #('M1' 'M2' 'M3').
 time := [:aBlock | | t0 | t0 := Time microsecondClockValue. aBlock value. Time microsecondClockValue - t0].
 p := (2 raisedTo: 61) - 1.
 sizes := (Smalltalk getenv: 'QUERY_M2_SIZES') ifNil: ['100 1000 10000 100000'].
 sizes := (sizes substrings: ' ') collect: [:each | each asInteger].
 commits := ((Smalltalk getenv: 'QUERY_M1_COMMITS') ifNil: ['200']) asInteger.
+blindCommits := ((Smalltalk getenv: 'QUERY_M3_COMMITS') ifNil: ['120']) asInteger.
 "The units to run: each argument, a bare id expanded."
 units := OrderedCollection new.
 (Smalltalk arguments isEmpty ifTrue: [all] ifFalse: [Smalltalk arguments]) do: [:arg |
@@ -55,7 +66,7 @@ units := OrderedCollection new.
   (all includes: parts first) ifFalse: [Error signal: 'query_workload: unknown workload ' , arg].
   parts size = 1
     ifTrue: [
-      parts first = 'M1' ifTrue: [#('idx0' 'idx1' 'idx3') do: [:plan | units addLast: { 'M1'. 600. plan }]].
+      (#('M1' 'M3') includes: parts first) ifTrue: [#('idx0' 'idx1' 'idx3') do: [:plan | units addLast: { parts first. 600. plan }]].
       parts first = 'M2' ifTrue: [sizes do: [:n | units addLast: { 'M2'. n. nil }]]]
     ifFalse: [
       parts size = 3 ifFalse: [Error signal: 'query_workload: a unit is <id>:<size>:<plan>, not ' , arg].
@@ -65,57 +76,40 @@ emit := [:id :n :rows :queries :plan :checksum :us |
     , ' plan=' , plan , ' checksum=' , checksum printString) displayNl.
   ('TIME id=' , id , ' impl=st size=' , n printString , ' plan=' , plan , ' us=' , us printString) displayNl].
 "rows, groups and the checksum of an index (see the header)."
-report := [:index | | g sum |
-  g := 0. sum := 0.
-  PBAvl keysAndValuesDo: [:key :group |
-    g := g + 1.
-    PBKeyGroups group: group do: [:e :k | sum := (sum + (g * (e at: 'id') * k)) \\ p]] over: index groups.
-  g := g + 1.
-  PBKeyGroups group: index side do: [:e :k | sum := (sum + (g * (e at: 'id') * k)) \\ p].
-  { index count. index groupCount. sum }].
+report := [:index | QueryBench indexReport: index].
 
-m1 := [:n :plan |
-  | person data space db tx people us indexes check |
-  person := [:id :name :i :years | PBObject withAll: { 'id' -> id. 'name' -> name.
-    'city' -> (#('Oslo' 'Rome' 'Paris' 'Lima' 'Kyiv' 'Quito') at: i \\ 6 + 1). 'age' -> years }].
+"M1 and M3: the dictionary of n records with the indexes of plan committed once, untimed; then
+ the transactions, timed together; then the read-back. aBlind false: each transaction reads the
+ dictionary and commits it with change j (M1); true: each commits a new dictionary holding change j
+ alone, never reading the root, so the commit merges it onto the current version (M3)."
+m1 := [:id :n :plan :count :aBlind |
+  | data space db tx people us check |
   data := Smalltalk getenv: 'QUERY_DATA'.
-  (data isNil or: [data isEmpty]) ifTrue: [Error signal: 'M1 needs QUERY_DATA, a new directory for its space'].
+  (data isNil or: [data isEmpty]) ifTrue: [Error signal: id , ' needs QUERY_DATA, a new directory for its space'].
   data := data asFileReference / plan.
   data ensureCreateDirectory.
   data := data pathString.
-  PBKeySpec registerExtractor: 'bench.m1.name_length' block: [:r | (r at: 'name') size] version: '1'.
-  indexes := plan = 'idx0' ifTrue: [#()] ifFalse: [
-    plan = 'idx1'
-      ifTrue: [{ PBEqualityIndex name: 'by_city' path: 'city' }]
-      ifFalse: [{ PBEqualityIndex name: 'by_city' path: 'city'. PBRangeIndex name: 'by_age' path: 'age'.
-        PBRangeIndex name: 'by_name_length' keySpec: (PBKeySpec extractor: 'bench.m1.name_length') }]].
-  (#('idx0' 'idx1' 'idx3') includes: plan) ifFalse: [Error signal: 'M1: unknown plan ' , plan].
+  people := QueryBench people: n plan: plan.
   space := PBObjectSpace storage: (PBFileStorage path: data).
   db := space newDatabase: 'bench'.
-  people := PBDictionary new.
-  0 to: n - 1 do: [:i |
-    people := people setAt: i value: (person value: i value: 'p' , i printString value: i
-      value: 18 + (7 * i \\ 23) + (i \\ 5 = 0 ifTrue: [0.5] ifFalse: [0]))].
-  indexes do: [:each | people := people addIndex: each].
   tx := db newTransaction.
   tx setRootObject: 'people' value: people.
   tx commit.
   us := time value: [
-    0 to: commits - 1 do: [:j |
-      | t |
+    0 to: count - 1 do: [:j |
+      | t change |
+      change := QueryBench change: j size: n.
       t := db newTransaction.
-      t setRootObject: 'people' value: ((t getRootObject: 'people') setAt: 7919 * j \\ n
-        value: (person value: n + j value: 'q' , j printString value: j value: 18 + (11 * j \\ 23))).
+      t setRootObject: 'people' value: ((aBlind ifTrue: [t newDictionary] ifFalse: [t getRootObject: 'people'])
+        setAt: (change at: 1) value: (change at: 2)).
       t commit]].
   tx := db newTransaction.
   people := tx getRootObject: 'people'.
   people validate.
-  check := 0.
-  people keysAndValuesDo: [:k :v | check := (check + ((k + 1) * (v at: 'id'))) \\ p].
-  people indexNames do: [:name | check := (check * 31 + ((report value: (people getIndex: name)) at: 3)) \\ p].
+  check := QueryBench checksumOf: people.
   tx abort.
   space close.
-  emit valueWithArguments: { 'M1'. n. people count. commits. plan. check. us }].
+  emit valueWithArguments: { id. n. people count. count. plan. check. us }].
 
 m2 := [:n :plans |
   | data empty results |
@@ -146,7 +140,8 @@ m2 := [:n :plans |
     emit valueWithArguments: { 'M2'. n. (r at: 2) at: 1. 1. r at: 1. (r at: 2) at: 3. r at: 3 }]].
 
 units do: [:unit |
-  (unit at: 1) = 'M1'
-    ifTrue: [m1 value: (unit at: 2) value: (unit at: 3)]
-    ifFalse: [m2 value: (unit at: 2) value: ((unit at: 3) isNil ifTrue: [#('build' 'fold')] ifFalse: [{ unit at: 3 }])]].
+  (unit at: 1) = 'M1' ifTrue: [m1 valueWithArguments: { 'M1'. unit at: 2. unit at: 3. commits. false }].
+  (unit at: 1) = 'M3' ifTrue: [m1 valueWithArguments: { 'M3'. unit at: 2. unit at: 3. blindCommits. true }].
+  (unit at: 1) = 'M2' ifTrue: [
+    m2 value: (unit at: 2) value: ((unit at: 3) isNil ifTrue: [#('build' 'fold')] ifFalse: [{ unit at: 3 }])]].
 'query_workload ok' displayNl.

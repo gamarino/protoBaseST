@@ -77,7 +77,7 @@ values (and keys and elements) pass through PBCodec canonical: at once:
                                order; always a new version
 
 Indexes (ProtoBase collections/base.py IndexedCollection; indexed queries, plan
-Task 4a, design spec 5.3). Every mutator answers one new version holding the new
+Tasks 4a and 4b, design spec 5.3). Every mutator answers one new version holding the new
 content and the new indexes, computed in the same step with the hook order of
 ProtoBase's mutator: one add event (PBIndexSet onAdd:) per element that appears,
 one remove event per element that leaves, one replace event (onReplace:with:)
@@ -94,9 +94,9 @@ reads back included.
   addIndex: anIndex            a new version holding the index, built over the
                                elements now (anIndex empty build: self: only its
                                definition is used); a name already present is
-                               PBValidationError
+                               PBValidationError; logs ('@index_add' name anIndex)
   removeIndex: aName           a new version without it; an absent name is
-                               PBValidationError
+                               PBValidationError; logs ('@index_remove' aName)
   validate                     the placement of the content (PBMisfiledError for
                                an entry its own key does not place, D58), then
                                every index's validate: against the elements
@@ -118,7 +118,9 @@ persisted, and a cell:
                  that derived the version, ProtoBase's ops: ('set' k v) and
                  ('remove' k) for the dictionaries, ('add' e) and ('remove' e)
                  for a set and a counted set, ('transform' e removes adds) for a
-                 counted set's rebase. Every call logs, a blind write (one that changes
+                 counted set's rebase, and the index-definition ops of every one
+                 of them, ('@index_add' name index) and ('@index_remove' name)
+                 (base.py _index_log: a PBList logs none). Every call logs, a blind write (one that changes
                  nothing) included; a PBDictionary logs a large value in its
                  stored form, the PBValueBox its node holds, so a replay reuses
                  the box (ProtoBase D51)
@@ -140,14 +142,23 @@ persisted, and a cell:
                                (element), keys compared by order key, in order
                                of last occurrence; for a PBCountedSet, the
                                composed counter transform per element (D26,
-                               see _netOps). current must be of the
-                               receiver's exact class (PBValidationError
-                               otherwise). Until Task 4b logs the index
-                               operations (plan call IP17), a receiver or a
-                               current with an index is PBNotSupportedError,
-                               and addIndex: and removeIndex: answer an
-                               incomplete log, so a commit never merges such
-                               a version. The
+                               see _netOps). The element ops are replayed
+                               first, through current's mutators, which keep
+                               its indexes (an extractor runs there, in the
+                               commit's build: its exception passes through
+                               unchanged and fails that commit, ruling IQ1);
+                               then the index-definition ops per name
+                               (base.py 615-631): an index the log created is
+                               added, built over the merged elements, and is
+                               PBConflictError naming it when current has one
+                               of that name already (created concurrently); an
+                               index the log removed is removed if current
+                               still has it; removed then added replaces
+                               current's; created then removed leaves current
+                               untouched. current must be of the receiver's
+                               exact class (PBValidationError otherwise), and
+                               writable (a vector index or an index of an
+                               unknown kind: PBNotSupportedError). The
                                answer's log is current's extended by the
                                replay, so a rebase onto a loaded current (what
                                a commit meets) is incomplete, and one onto a
@@ -527,12 +538,15 @@ PBIndexedCollection >> markConsumed
   ^ self.
 
 "current with the net effect of this version's log replayed through the
- public mutators (ProtoBase ConcurrentOptimized.rebase_onto). The order of the
+ public mutators (ProtoBase ConcurrentOptimized.rebase_onto, base.py 594-631).
+ The element ops first: the net ops of _netOps replayed through current's
+ mutators, which maintain its indexes (an extractor runs there, inside the
+ commit's build: its exception passes through unchanged, ruling IQ1). Then the
+ index-definition ops, per index name (_replayIndexOps:onto:). The order of the
  checks is protoBaseST's own: a class without a log (PBList) is refused first,
  where ProtoBase's List has no rebase_onto at all (an AttributeError); then a
  current of another class (ProtoBase's type check), then a current that cannot
- be written (_checkWritable:), then the interim refusal of plan call IP17 (a
- receiver or a current with an index, _refuseIndexedMergeOnto:)."
+ be written (_checkWritable:: a vector index or an index of an unknown kind)."
 PBIndexedCollection >> rebaseOnto: current
   | ops target |
   self class _logsOperations ifFalse: [
@@ -541,34 +555,58 @@ PBIndexedCollection >> rebaseOnto: current
   (current isClassObject not and: [current class == self class]) ifFalse: [
     ^ PBValidationError signal: 'Cannot rebase a ' , self class name , ' onto ' , (PBKeys _preview: current)].
   current _checkWritable: 'rebaseOnto:'.
-  self _refuseIndexedMergeOnto: current.
   ops := self _netOps.
   target := current.
   1 to: ops size do: [:i | target := self _replay: (ops at: i) onto: target].
+  ^ self _replayIndexOps: ((_PBOpLog opsOf: log) select: [:op | self class _isIndexOp: op]) onto: target.
+
+"Whether anOp is an index-definition op ('@index_add' or '@index_remove', base.py
+ _INDEX_ADD and _INDEX_REMOVE); element ops never start with '@'."
+PBIndexedCollection class >> _isIndexOp: anOp
+  ^ (anOp at: 1) = '@index_add' or: [(anOp at: 1) = '@index_remove'].
+
+"aTarget after the index-definition ops anIndexOps (oldest first), replayed per index name as
+ base.py rebase_onto does: the last op per name, in order of last occurrence (net_effect keyed
+ by the name), each judged by the first op of its name in the log. A name whose last op is a
+ removal is removed from aTarget when the log found the index there (its first op is a removal)
+ and aTarget still has it; an index the log created and removed leaves aTarget as it is. A name
+ whose last op is an addition: when aTarget has the name, an index the log did not find there
+ (its first op is an addition) was created concurrently, PBConflictError naming it (base.py
+ 627-628), and one it found is replaced; the index is then added from its definition, built
+ over aTarget's elements (addIndex:)."
+PBIndexedCollection >> _replayIndexOps: anIndexOps onto: aTarget
+  | names firstKind target |
+  anIndexOps isEmpty ifTrue: [^ aTarget].
+  names := anIndexOps collect: [:op | op at: 2].
+  firstKind := Dictionary new.
+  anIndexOps do: [:op | (firstKind includesKey: (op at: 2)) ifFalse: [firstKind at: (op at: 2) put: (op at: 1)]].
+  target := aTarget.
+  _PBOpLog lastOccurrencesOf: names do: [:name :i |
+    | op preexisting present |
+    op := anIndexOps at: i.
+    preexisting := (firstKind at: name) = '@index_remove'.
+    present := (target getIndex: name) notNil.
+    (op at: 1) = '@index_remove'
+      ifTrue: [(preexisting and: [present]) ifTrue: [target := target removeIndex: name]]
+      ifFalse: [
+        present ifTrue: [
+          preexisting ifFalse: [
+            ^ PBConflictError signal: 'Index ' , (PBCodec repr: name) , ' was created concurrently by another transaction'].
+          target := target removeIndex: name].
+        target := target addIndex: (op at: 3)]].
   ^ target.
 
-"Plan call IP17, interim until Task 4b logs the index operations ('@index_add',
- '@index_remove'): a merge whose receiver or current holds an index is
- PBNotSupportedError naming the indexes, since a replay could not carry an index
- definition yet. addIndex: and removeIndex: answer an incomplete log meanwhile, so a
- commit never merges such a version. Task 4b removes this refusal."
-PBIndexedCollection >> _refuseIndexedMergeOnto: aCurrent
-  { self. aCurrent } do: [:each |
-    | names |
-    names := each indexNames.
-    names isEmpty ifFalse: [
-      ^ PBNotSupportedError signal: self class name , ' rebaseOnto:: the '
-        , (each == self ifTrue: ['receiver'] ifFalse: ['current']) , ' has the indexes '
-        , (names inject: '' into: [:acc :n | acc isEmpty ifTrue: [n] ifFalse: [acc , ', ' , n]])
-        , '; merge onto an indexed current: Task 4b (plan call IP17: until the index operations are logged, a merge involving an index is refused)']].
-  ^ self.
+"The element ops of the log, oldest first: every op but the index-definition ones
+ (base.py rebase_onto's split)."
+PBIndexedCollection >> _elementOps
+  ^ (_PBOpLog opsOf: log) reject: [:op | self class _isIndexOp: op].
 
-"The ops rebaseOnto: replays (ProtoBase net_effect with the default op key):
- the last op per key, keys compared by order key, in order of last
- occurrence. O(n) in the length of the log."
+"The ops rebaseOnto: replays of the element ops (ProtoBase _net_ops: net_effect with
+ the default op key): the last op per key, keys compared by order key, in order of
+ last occurrence. O(n) in the length of the log."
 PBIndexedCollection >> _netOps
   | ops out |
-  ops := _PBOpLog opsOf: log.
+  ops := self _elementOps.
   out := OrderedCollection new.
   _PBOpLog lastOccurrencesOf: (_PBOpLog orderKeysOf: ops) do: [:okey :i | out addLast: (ops at: i)].
   ^ out asArray.
@@ -584,8 +622,7 @@ PBIndexedCollection >> _replay: anOp onto: aTarget
  fields of aChanges (field -> value Associations) changed, every other field
  carried over, in persistedFields order. Its log is the receiver's, and it is
  incomplete: a change the log does not describe (ProtoBase _with without an op).
- A PBList's writes come here, and the index-definition changes until Task 4b
- (plan call IP17)."
+ A PBList's writes come here, its index-definition changes included."
 PBIndexedCollection >> _withChanges: aChanges
   ^ self _withChanges: aChanges log: log complete: false.
 
@@ -675,9 +712,10 @@ PBIndexedCollection >> _indexSet
 "A new version holding anIndex built over the elements now (base.py add_index):
  only its definition is used, as anIndex empty build: self, never content it may
  hold. A name already present is PBValidationError, checked before the build; a
- build: that answers an index of another name is PBValidationError. Plan call IP17:
- until Task 4b logs '@index_add', the answer's log is incomplete, so a commit never
- merges it (last writer wins, as for a loaded version)."
+ build: that answers an index of another name is PBValidationError. A logged
+ collection logs ('@index_add' name anIndex), anIndex as given, which a merge adds
+ to the current version (rebaseOnto:); a PBList logs nothing (base.py
+ _index_log)."
 PBIndexedCollection >> addIndex: anIndex
   | set name built |
   self _checkWritable: 'addIndex:'.
@@ -689,13 +727,22 @@ PBIndexedCollection >> addIndex: anIndex
   ((built isClassObject not and: [built isKindOf: PBIndex]) and: [built name = name]) ifFalse: [
     ^ PBValidationError signal: 'Index ' , (PBCodec repr: name) , ' build: answered ' , (PBKeys _preview: built)
       , '; expected the same name'].
-  ^ self _withChanges: { 'indexes' -> (set withIndex: built) }.
+  ^ self _withIndexChanges: { 'indexes' -> (set withIndex: built) }
+    op: (PBTuple withAll: { '@index_add'. name. anIndex }).
 
 "A new version without the index aName (base.py remove_index); an absent name is
- PBValidationError. Its log is incomplete until Task 4b logs '@index_remove' (IP17)."
+ PBValidationError. A logged collection logs ('@index_remove' aName)."
 PBIndexedCollection >> removeIndex: aName
   self _checkWritable: 'removeIndex:'.
-  ^ self _withChanges: { 'indexes' -> (self _indexSet without: aName) }.
+  ^ self _withIndexChanges: { 'indexes' -> (self _indexSet without: aName) }
+    op: (PBTuple withAll: { '@index_remove'. aName }).
+
+"An index-definition change (base.py _index_log): logged as anOp by a class that
+ logs its operations, which keeps the log as complete as the receiver's; a plain
+ change for any other (a PBList)."
+PBIndexedCollection >> _withIndexChanges: aChanges op: anOp
+  self class _logsOperations ifFalse: [^ self _withChanges: aChanges].
+  ^ self _withChanges: aChanges op: anOp.
 
 "Checks this version (base.py validate): the placement of its content
  (_checkPlacement: PBMisfiledError for an entry its own key does not place,
@@ -1435,12 +1482,11 @@ PBCountedSet >> remove: anElement
 "The counter transform (removes, adds) applied to anElement as one
  adjustment, logged as ('transform' element removes adds) so that a rebased
  version can itself be rebased (ProtoBase CountedSet._transform). Only
- rebaseOnto: sends it; the receiver is the merge's target, so an indexed one is
- refused here too until Task 4b (plan call IP17)."
+ rebaseOnto: sends it, on the merge's target, whose indexes it maintains as
+ add: and remove: do."
 PBCountedSet >> _transform: anElement removes: aRemoves adds: anAdds
   | element |
   self _checkWritable: 'rebaseOnto:'.
-  self _refuseIndexedMergeOnto: self.
   element := self _canonical: anElement as: 'element' wrapping: self class elementWrapping by: self class wrapper.
   ^ self _step: element removes: aRemoves adds: anAdds
     op: (PBTuple withAll: { 'transform'. element. aRemoves. anAdds }).
@@ -1486,7 +1532,7 @@ PBCountedSet >> _step: aCanonical removes: aRemoves adds: anAdds op: anOp
       'indexes' -> (self _afterRemove: ((entries at: position) at: 1)) }
     op: anOp.
 
-"The ops rebaseOnto: replays (ProtoBase CountedSet._net_ops and
+"The ops rebaseOnto: replays of the element ops (ProtoBase CountedSet._net_ops and
  counter_net_effect, D26): per element, the composition of its ops as one
  counter transform (removes, adds). add is (0, 1), remove is (1, 0),
  transform its own pair, and (r1, a1) followed by (r2, a2) is
@@ -1497,7 +1543,7 @@ PBCountedSet >> _step: aCanonical removes: aRemoves adds: anAdds op: anOp
  identity transform (0, 0) is omitted. O(n) in the length of the log."
 PBCountedSet >> _netOps
   | ops keys net out |
-  ops := _PBOpLog opsOf: log.
+  ops := self _elementOps.
   keys := _PBOpLog orderKeysOf: ops.
   net := Dictionary new.
   1 to: ops size do: [:i |

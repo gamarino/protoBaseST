@@ -16,11 +16,10 @@ design (spec section 2) or a cut made while building, with its reason.
   barrier, no notify. A three-member cluster commits about half as many small transactions per
   second as one standalone process on disjoint roots, and a third as many on one hot key ([deviations.md](deviations.md#cluster-mode-commits-per-second)).
 - No cloud or tiered storage, no durability mode other than `fsync`, no Windows.
-- No merges onto indexed collections, no index queries, no vector-index writes or training.
-  Equality and range indexes are maintained by every write (0.3.0 in progress, plan Task 4a), but
-  a merge involving an indexed collection is refused until Task 4b, and a collection holding a
-  vector index stays read only. *(Planned for 0.3.0, not implemented: merges onto indexed
-  collections, a query planner and in-process pagers; drafts in
+- No index queries, no vector-index writes or training. Equality and range indexes are
+  maintained by every write and by merges onto indexed collections (0.3.0 in progress, plan Tasks
+  4a and 4b); a collection holding a vector index stays read only. *(Planned for 0.3.0, not
+  implemented: a query planner and in-process pagers; drafts in
   [chapters 17-19](tutorial/17-indexes.md) and [queries.md](queries.md).)*
 - No writes to `RepeatedKeysDictionary`.
 - No IANA time zones: no wall-clock conversion; a fixed pinned list of zone keys.
@@ -116,7 +115,7 @@ Not tested, or not proven:
 | Notify | Not done | `proto_db`'s notify is not ported. | Readers learn new commits by reading. |
 | The persister's timers at a tenth and ten times (final review M7) | Not done | The timer audit's persist row (`tests/audit/sim_timer_audit_persist_*`) scales `persistInterval` and `persistLag`, but the simulator reads neither, so those runs cannot exercise the persister's timers. The persister's liveness at those values is unaudited: its refresh period, and the lag write by a member that did not commit the root. | What would close it: count the persist parts out of the audit's run total (or drop them from the audit), and add a `tests/unit/cluster_persister.st` case at a tenth and at ten times the defaults that asserts `sync:` returns and that a non-committer persists a root once `persistLag` has passed. |
 | A real-process pause test (final review M8) | Not done | `tests/cluster` kills members with `kill -9` but never pauses one (`kill -STOP`, then `kill -CONT`). That is the real-clock, real-TCP check of a stale holder or owner, the property "safety never depends on timing" rests on. It is covered only in the simulator (a stalled clock) and in one process (`cluster_commit_path.st` (9)). | What would close it: a `tests/cluster/real_pause_holder.sh` that stops the holder once its root is built, waits until the others' lease on it has passed, resumes it, and checks with the verifier that the counters are exact and that the resumed holder's commit ends `#none` or unknown and is never applied twice. |
-| Index maintenance | **In progress for 0.3.0** ([indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md), drafts in [chapters 17-19](tutorial/17-indexes.md)): every write maintains equality and range indexes (Task 4a); merges onto indexed collections (Task 4b) and queries are not done | Built task by task; what is not done yet is refused explicitly rather than done partly. | Concurrent writers of one indexed root conflict where `proto_db` merges them. When the plan lands, this row leaves the table and the spec's deferred items (section 3.2: pager tokens, the query cache, `GroupBy` / `Join` / `Unnest` / `ValuesScan`, computed values, `rebuilt`) enter it. |
+| Index maintenance | **In progress for 0.3.0** ([indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md), drafts in [chapters 17-19](tutorial/17-indexes.md)): every write maintains equality and range indexes (Task 4a) and merges onto indexed collections maintain them too (Task 4b); queries are not done | Built task by task; what is not done yet is refused explicitly rather than done partly. | Indexes cannot be queried yet. When the plan lands, this row leaves the table and the spec's deferred items (section 3.2: pager tokens, the query cache, `GroupBy` / `Join` / `Unnest` / `ValuesScan`, computed values, `rebuilt`) enter it. |
 
 ## What would come next, if the workshop wants it
 

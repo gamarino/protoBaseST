@@ -17,9 +17,10 @@ from proto_db.core.dbobject import DBObject
 from proto_db.indexing import EqualityIndex, KeySpec, RangeIndex, register_extractor
 
 P = (1 << 61) - 1
-ALL = ["M1", "M2"]
+ALL = ["M1", "M2", "M3"]
 SIZES = [int(n) for n in os.environ.get("QUERY_M2_SIZES", "100 1000 10000 100000").split()]
 COMMITS = int(os.environ.get("QUERY_M1_COMMITS", "200"))
+BLIND_COMMITS = int(os.environ.get("QUERY_M3_COMMITS", "120"))
 CITIES = ["Oslo", "Rome", "Paris", "Lima", "Kyiv", "Quito"]
 
 
@@ -40,13 +41,15 @@ def report(index):
     return index.total_count, 0 if index.groups is None else index.groups.count, total
 
 
-def m1(n, plan):
+def m1(n, plan, id_="M1", count=COMMITS, blind=False):
+    """M1, or M3 when blind: each transaction commits a new dictionary holding change j alone,
+    never reading the root, so the commit merges it onto the current version."""
     def person(id_, name, i, years):
         return DBObject(id=id_, name=name, city=CITIES[i % 6], age=years)
 
     data = os.environ.get("QUERY_DATA")
     if not data:
-        raise SystemExit("M1 needs QUERY_DATA, a new directory for its space")
+        raise SystemExit(f"{id_} needs QUERY_DATA, a new directory for its space")
     data = Path(data) / plan
     data.mkdir(parents=True, exist_ok=True)
     register_extractor("bench.m1.name_length", lambda r: len(r.name), version="1")
@@ -71,9 +74,10 @@ def m1(n, plan):
         tx.set_root_object("people", people)
         tx.commit()
         t0 = time.perf_counter_ns()
-        for j in range(COMMITS):
+        for j in range(count):
             t = db.new_transaction()
-            t.set_root_object("people", t.get_root_object("people").set_at(
+            base = t.new_dictionary() if blind else t.get_root_object("people")
+            t.set_root_object("people", base.set_at(
                 7919 * j % n, person(n + j, f"q{j}", j, 18 + (11 * j % 23))))
             t.commit()
         us = (time.perf_counter_ns() - t0) // 1000
@@ -89,7 +93,7 @@ def m1(n, plan):
         tx.abort()
     finally:
         space.close()
-    emit("M1", n, rows, COMMITS, plan, check, us)
+    emit(id_, n, rows, count, plan, check, us)
 
 
 def records(n):
@@ -134,8 +138,8 @@ def main():
         if parts[0] not in ALL:
             raise SystemExit(f"py_query_workload: unknown workload {arg}")
         if len(parts) == 1:
-            if parts[0] == "M1":
-                units += [("M1", 600, plan) for plan in ("idx0", "idx1", "idx3")]
+            if parts[0] in ("M1", "M3"):
+                units += [(parts[0], 600, plan) for plan in ("idx0", "idx1", "idx3")]
             else:
                 units += [("M2", n, None) for n in SIZES]
         elif len(parts) == 3:
@@ -145,6 +149,8 @@ def main():
     for id_, n, plan in units:
         if id_ == "M1":
             m1(n, plan)
+        elif id_ == "M3":
+            m1(n, plan, "M3", BLIND_COMMITS, True)
         else:
             m2(n, ["build", "fold"] if plan is None else [plan])
     print("query_workload ok")

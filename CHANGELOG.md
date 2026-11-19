@@ -49,8 +49,22 @@
   against the elements) are new. The trees are node for node `proto_db`'s after the same
   operations (`tests/interop/index_ops_identical.sh`). Still refused: a collection holding a
   vector index or an index of an unknown kind (`PBNotSupportedError`), a change that evaluates an
-  unregistered extractor (`PBValidationError`, as in `proto_db`), and, until Task 4b, a merge involving
-  an indexed collection (`addIndex:` and `removeIndex:` answer an incomplete log).
+  unregistered extractor (`PBValidationError`, as in `proto_db`).
+- **Merges onto indexed collections** (plan Task 4b): `addIndex:` and `removeIndex:` log
+  `('@index_add' name index)` and `('@index_remove' name)` on the logged collection classes (never
+  `PBList`), and `rebaseOnto:` replays the element intents through the current version's mutators,
+  then the index definitions per name, as `proto_db`'s `rebase_onto`; an index both sides created
+  is `PBConflictError` naming it. The interim refusal of Task 4a (`PBNotSupportedError` for a merge
+  involving an index) is gone. An extractor runs in the commit's build: its exception passes
+  through unchanged and fails only its own commit, standalone, in a group commit and in a cluster
+  round (`tests/unit/idx_merge_extractor.st`). **Behaviour change in cluster mode:** an entry's
+  build error of any class now fails that commit alone; before, an error that was not a
+  `PBDBError` ended the whole round, as `proto_db` rc4 still does (`docs/deviations.md`).
+  Benchmark M3 (`bench/run_query.sh M3`, `bench/_query_bench.st`, profiles `m3-idx0/1/3` of
+  `bench/cluster_workload.st`): a blind write merged onto an indexed current, standalone against
+  `proto_db` and in a three-member cluster; figures in `docs/deviations.md#performance`.
+  Tests: `tests/unit/idx_merge.st`, `tests/unit/idx_indexed_roots.st`,
+  `tests/interop/index_both_directions.sh`, two new rows in `tests/interop/concurrency.sh` (29).
 - **Benchmark M1**: commits per second of single-record transactions on a 600-record dictionary
   with 0, 1 and 3 indexes. `bench/run_query.sh` now runs each unit (a size and a plan) in a
   process of its own with an explicit heap budget (`PROTOCORE_HEAP_LIMIT_CELLS`) and reports each

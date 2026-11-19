@@ -16,10 +16,10 @@ a      starts A, runs protoST's B to completion as a subprocess ($PROTOST _st_ca
        commits A; prints the outcome line and the dump
 b      one-shot: starts B and commits it; prints 'B=<outcome>'
 dump   prints the dump of the case's roots and cells, read in a new transaction
-expected  prints the outcome line and the dump the JSON records for the variant 'reference'
-       (ProtoBase's outcome), or 'st_as_a', 'py_as_a' or 'actors': protoBaseST's documented
-       outcome where the case has one (its 'protobasest' entry, allowed only on the ids of
-       REFUSAL_IDS and only with PBNotSupportedError in each outcome), the reference otherwise
+expected  prints the outcome line and the dump the JSON records (ProtoBase's outcome); the third
+       argument must be 'reference'. Every run of a case must give it: a case that records a
+       'protobasest' entry (a documented difference) is refused, since plan Task 4b removed the
+       last one
 
 Exit 0 when the mode ran, whatever the outcomes; any other failure exits non-zero.
 """
@@ -31,14 +31,12 @@ import sys
 from pathlib import Path
 
 from proto_db import CountedSet, DBObject, Dictionary, FileStorage, List, ObjectSpace, Set
+from proto_db.indexing import EqualityIndex
 from proto_db.errors import ProtoDBError
 
 HERE = Path(__file__).resolve().parent
 CASES = HERE / "concurrency_cases.json"
 VECTOR = HERE.parent / "conformance" / "vectors" / "database"
-# The ids that may record protoBaseST's documented refusal in place of ProtoBase's outcome
-# (until plan Task 4b, plan call IP17); the refusal must be PBNotSupportedError.
-REFUSAL_IDS = ("indexed-root",)
 
 
 def load_case(case_id):
@@ -106,6 +104,8 @@ def apply(tr, step, committed, in_setup=False):
         tr.set_root_object(args[0], setup_value(args[1]) if in_setup else args[1])
     elif op == "blind dict set root":
         tr.set_root_object(args[0], tr.new_dictionary().set_at(args[1], args[2]))
+    elif op == "blind dict add index":
+        tr.set_root_object(args[0], tr.new_dictionary().set_at(args[1], args[2]).add_index(EqualityIndex(args[3], "v")))
     elif op == "replace":
         tr.set_root_object(args[0], tr.new_dictionary().set_at(args[1], args[2]), replace=True)
     elif op == "list set":
@@ -190,6 +190,7 @@ def dump_lines(db, case):
     tr = db.new_transaction()
     lines = [f"root {name} = {render(tr.get_root_object(name))}" for name in case["roots"]]
     lines += [f"mutable {name} = {render(tr.get_mutable(name))}" for name in case["mutables"]]
+    lines += [f"indexes {name} = {','.join(tr.get_root_object(name).index_names())}" for name in case.get("indexes", [])]
     tr.abort()
     return lines
 
@@ -262,18 +263,12 @@ def dump(case, directory):
 
 
 def expected(case, variant):
-    if variant not in ("reference", "st_as_a", "py_as_a", "actors"):
-        raise SystemExit(f"py_case.py: unknown variant {variant!r}")
-    recorded = case["expected"]
+    if variant != "reference":
+        raise SystemExit(f"py_case.py: expected takes 'reference', not {variant!r}")
     if "protobasest" in case:
-        if case["id"] not in REFUSAL_IDS:
-            raise SystemExit(f"py_case.py: only {REFUSAL_IDS} may record protoBaseST's refusal, not {case['id']!r}")
-        for name, entry in case["protobasest"].items():
-            if "PBNotSupportedError" not in entry["outcome"]:
-                raise SystemExit(f"py_case.py: the refusal recorded for {case['id']!r} {name} is not "
-                                 f"PBNotSupportedError: {entry['outcome']}")
-        if variant != "reference":
-            recorded = case["protobasest"][variant]
+        raise SystemExit(f"py_case.py: {case['id']!r} records a protoBaseST difference; every case must give "
+                         "ProtoBase's outcome (plan Task 4b)")
+    recorded = case["expected"]
     print(recorded["outcome"])
     for line in recorded["dump"]:
         print(line)

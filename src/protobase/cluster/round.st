@@ -66,9 +66,12 @@ effect, proto_db _run_round's except BaseException): every commit of the round i
 PBUnexpectedError when nothing of it was built, PBOutcomeUnknownError otherwise, and a
 permission held is ended #unknown.
 
-Every PBCommitEntry's transaction is built with its own validation and merge: the round runs no
-application code. A cluster commit never writes space.root: the persisted root is the
-persister's (Task 25).
+Every PBCommitEntry's transaction is built with its own validation and merge. The one application
+code a build runs is an extractor, when a merge onto an indexed current evaluates it (indexed
+queries ruling IQ1): its exception passes through unchanged as that entry's PBBuildFailed, and the
+core fails that commit alone (PBCoordinatorCore >> roundBuildFailed:in:now:); the others of the
+round are built and replicated. A cluster commit never writes space.root: the persisted root is
+the persister's (Task 25).
 
 This module is a shell: it reads the monotonic clock (Time microsecondClockValue for the build
 and replication durations; the node's clock, the coordinator's _now, for the core) and uses

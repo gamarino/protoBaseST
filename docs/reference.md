@@ -251,7 +251,7 @@ it). An index on an unregistered extractor fails any change that evaluates the e
 | `indexNames`, `getIndex: aName`, `indexes` | The indexes, sorted; `nil` when absent. |
 | `opLog` | A `PBFrozenList` of `PBTuple`s: the intents that built this version (`proto_db`'s names: `('set' k v)`, `('remove' k)`, `('add' e)`, `('transform' e removes adds)`). |
 | `logComplete`, `isMergeable` | True for a version built by `new` and derived only by logged mutators; false for a loaded version and everything derived from it. A `PBList` has no log and is never mergeable. |
-| `rebaseOnto: current` | Replays the net effect of the log onto `current` (the last intent per key, by order key, in order of last occurrence). `current` of another class is `PBValidationError`; until plan Task 4b, an indexed receiver or `current` is `PBNotSupportedError`. |
+| `rebaseOnto: current` | Replays the net effect of the log onto `current` (the last intent per key, by order key, in order of last occurrence). `current` of another class is `PBValidationError`. The element intents are replayed first, through `current`'s mutators (which maintain its indexes), then the index-definition intents per name (see Indexes below). |
 | `markConsumed`, `consumed` | Set by the publisher after a commit: later versions are no longer mergeable, so a reused value replaces instead of replaying twice (D33). |
 
 **PBList.** Zero-based positions; a negative position counts from the end; a position out of
@@ -1156,11 +1156,11 @@ kind protoBaseST does not know is refused the same way, by the `PBIndexSet` hook
 
 | Message | Meaning |
 |---|---|
-| `addIndex: anIndex` | A new version holding the index, built over `elements` now (`anIndex empty build: self`). A name already present is `PBValidationError`. From Task 4b, logged as `('@index_add' name index)` on the logged collection classes (never `PBList`); until then the answer's log is incomplete (plan call IP17), so it is never merged. |
-| `removeIndex: aName` | A new version without it; an absent name is `PBValidationError`. From Task 4b, logged as `('@index_remove' name)`; until then the log is incomplete, as for `addIndex:`. |
+| `addIndex: anIndex` | A new version holding the index, built over `elements` now (`anIndex empty build: self`). A name already present is `PBValidationError`. Logged as `('@index_add' name index)` on the logged collection classes (never `PBList`), so a blind write that adds an index is merged. |
+| `removeIndex: aName` | A new version without it; an absent name is `PBValidationError`. Logged as `('@index_remove' name)`, never on `PBList`. |
 | `validate` | The placement of the content (`PBMisfiledError` for an entry its own key does not place), then every index's `validate:` against `elements`. Answers the receiver. |
 | every mutator | Answers content and indexes computed in one step, with the hook order of `proto_db`'s mutator: an add, remove or replace event per element that appears, leaves or changes (a `PBCountedSet` fires only when an element appears or disappears; a slice rebuilds every index); a blind write answers the receiver's index set itself. An index written by format 3 is rebuilt before the first change. |
-| `rebaseOnto: current` | (Task 4b; until then an indexed receiver or `current` is `PBNotSupportedError`.) Replays the element intents through `current`'s mutators, which maintain its indexes, then the index-definition intents; an index this log created that `current` also has is `PBConflictError`. Onto a collection with a vector or unknown index: `PBNotSupportedError`. |
+| `rebaseOnto: current` | Replays the element intents through `current`'s mutators, which maintain its indexes (an extractor runs there, in the commit's build; its exception passes through unchanged and fails only that commit), then the index-definition intents per name: an index this log created that `current` also has is `PBConflictError` naming it; one it removed is removed if `current` still has it; one created and removed leaves `current` as it is. Onto a collection with a vector or unknown index: `PBNotSupportedError`. |
 
 `PBIndexSet` gains `withIndex:` (a taken name is `PBValidationError`), `without:` (an absent name is
 `PBValidationError`), `onAdd:`, `onRemove:`, `onReplace:with:` (the hook on every index, the empty

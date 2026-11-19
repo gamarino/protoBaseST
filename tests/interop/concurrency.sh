@@ -7,11 +7,12 @@
 #      commits A; ProtoBase's own dump of the space must equal the one protoST printed;
 #   3. Python as A: py_case.py a starts A, runs _st_case.st b to completion, then commits A;
 #      protoST's dump of the space must equal the one Python printed.
-# Runs 2 and 3 must print the reference too, except where the case records protoBaseST's
-# documented refusal (its 'protobasest' entry: a blind write onto an indexed root, refused until
-# plan Task 4b logs the index operations, plan call IP17), whose difference is asserted exactly and printed as a NOTE. py_case.py expected refuses a
-# 'protobasest' entry on any other case, or one whose outcomes are not PBNotSupportedError. Every step is a process run to
-# completion, so nothing depends on timing. Exit 77 without the interop venv.
+# Runs 2 and 3 must print the reference too: no case records a difference (py_case.py expected refuses
+# a 'protobasest' entry; plan Task 4b removed the last one, the blind write onto an indexed root,
+# row 13, which now merges as ProtoBase's). Rows index-add-same-name and index-add-different-names
+# run concurrent addIndex: with each language as the first and as the second committer (runs 2 and
+# 3). Every step is a process run to completion, so nothing depends on timing. Exit 77 without the
+# interop venv.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -38,8 +39,6 @@ ids="$(step "$PY" -c 'import json; print(" ".join(c["id"] for c in json.load(ope
 count=0
 for id in $ids; do
     reference="$(step "$PY" py_case.py expected "$id" reference)" || exit 1
-    want_st="$(step "$PY" py_case.py expected "$id" st_as_a)" || exit 1
-    want_py="$(step "$PY" py_case.py expected "$id" py_as_a)" || exit 1
 
     space="$TMP/$id-reference"
     step "$PY" py_case.py setup "$id" "$space" > /dev/null
@@ -49,24 +48,20 @@ for id in $ids; do
     space="$TMP/$id-st-as-a"
     step "$PY" py_case.py setup "$id" "$space" > /dev/null
     out="$(step "$PROTOST" _st_case.st a "$id" "$space")" || exit 1
-    [[ "$out" == "$want_st" ]] || fail "$id, protoST as A:"$'\n'"$out"$'\n'"expected:"$'\n'"$want_st"
+    [[ "$out" == "$reference" ]] || fail "$id, protoST as A:"$'\n'"$out"$'\n'"expected:"$'\n'"$reference"
     other="$(step "$PY" py_case.py dump "$id" "$space")" || exit 1
     [[ "$other" == "$(dump_of "$out")" ]] || fail "$id, protoST as A: ProtoBase reads"$'\n'"$other"
 
     space="$TMP/$id-py-as-a"
     step "$PY" py_case.py setup "$id" "$space" > /dev/null
     out="$(step "$PY" py_case.py a "$id" "$space")" || exit 1
-    [[ "$out" == "$want_py" ]] || fail "$id, Python as A:"$'\n'"$out"$'\n'"expected:"$'\n'"$want_py"
+    [[ "$out" == "$reference" ]] || fail "$id, Python as A:"$'\n'"$out"$'\n'"expected:"$'\n'"$reference"
     other="$(step "$PROTOST" _st_case.st dump "$id" "$space")" || exit 1
     [[ "$other" == "$(dump_of "$out")" ]] || fail "$id, Python as A: protoBaseST reads"$'\n'"$other"
-
-    if [[ "$want_st" != "$reference" || "$want_py" != "$reference" ]]; then
-        echo "NOTE: $id: ProtoBase $(head -n 1 <<< "$reference"); protoBaseST refuses as documented" \
-            "(until plan Task 4b, call IP17): protoST as A $(head -n 1 <<< "$want_st"), Python as A $(head -n 1 <<< "$want_py")"
-    fi
     count=$((count + 1))
 done
 # The 13 rows of design spec 10.4, row 7 with its roles swapped (fix round 1), the counted set
-# blind adds and the 12 further counted set cases (plan Task 22 and its review).
-[[ "$count" -eq 27 ]] || fail "expected the 13 rows of design spec 10.4, the swapped row 7 and the 13 counted set cases, ran $count"
+# blind adds and the 12 further counted set cases (plan Task 22 and its review), and the two
+# concurrent addIndex: cases (indexed queries plan Task 4b).
+[[ "$count" -eq 29 ]] || fail "expected the 13 rows of design spec 10.4, the swapped row 7, the 13 counted set cases and the 2 addIndex: cases, ran $count"
 echo "concurrency table: $count cases, ProtoBase's outcomes in both assignments"

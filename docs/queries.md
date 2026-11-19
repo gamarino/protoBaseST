@@ -574,8 +574,13 @@ concurrent creation: that commit is `PBConflictError`.
 Three consequences follow, each explicit:
 
 - **The merge runs index work in the commit's build**, so an indexed root lengthens the commit.
-  [measured in T4: bench M3 (plan task 4b), the time of a blind write merged onto a current with 0,
-  1 and 3 indexes, standalone and in a three-member cluster.]
+  Bench M3 (120 blind writes merged onto a 600-record dictionary): standalone, protoBaseST
+  commits 34.2, 11.9 and 5.1 times per second with 0, 1 and 3 indexes (`proto_db` 141, 110 and
+  81), what a read-modify-write costs (M1); in a three-member cluster 17.4, 6.8 and 1.1, because
+  the build (34, 91 and 189 ms) runs under the write permission and, with three indexes, leaves
+  too little of it for the send, so rounds are refused and retried
+  ([deviations.md](deviations.md#m3-a-blind-write-merged-onto-an-indexed-current-standalone-and-in-a-cluster);
+  indicative only).
 - **Extractors run in the commit's build** ([above](#extractors-and-their-purity-contract)): an
   exception fails only that commit, unchanged.
 - **What is still refused.** A merge onto a collection holding a vector index or an index of an
@@ -624,7 +629,7 @@ same rows, checksum and plan. None exists yet.
 | Page k by rank against materialised; `count` by rank | Q5 | [measured in T9: Q5] |
 | Commits per second with 0, 1 and 3 indexes | M1 | Measured in T4a: protoBaseST 38, 11.9 and 5.2 commits/s, `proto_db` 150, 115 and 83; about 55 ms per index per commit against 2 ms ([deviations.md](deviations.md#m1-commits-per-second-with-0-1-and-3-indexes)) |
 | Bulk `addIndex:` against the fold of single additions | M2 | Measured in T3: build 3.1x faster than the fold at 10^4, protoBaseST 16.7x (10^2) to 38.3x (10^4) slower than `proto_db` ([deviations.md](deviations.md#m2-the-bulk-build-against-the-fold-of-single-additions)) |
-| Merges onto an indexed current, standalone and in a cluster | M3 | [measured in T4: M3, plan task 4b] |
+| Merges onto an indexed current, standalone and in a cluster | M3 | Measured in T4b: standalone protoBaseST 34.2, 11.9 and 5.1 commits/s with 0, 1 and 3 indexes, `proto_db` 141, 110 and 81; a three-member protoBaseST cluster 17.4, 6.8 and 1.1, its three-index build (189 ms) refused for the send reserve 135 to 210 times per 120 commits ([deviations.md](deviations.md#m3-a-blind-write-merged-onto-an-indexed-current-standalone-and-in-a-cluster)) |
 | `plan` and `explain` alone, 1 to 32 conjuncts, 0 to 8 indexes | P1 | [measured in T7: P1] |
 | Where the cost model switches between index and scan, and whether the timings cross there | P2 | [measured in T7: P2] |
 | The two-index intersection against the filter plan | P3 | [measured in T7: P3] |

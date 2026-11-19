@@ -8,15 +8,14 @@
 
   CaseTable load                    the cases (protoST Dictionaries parsed from the JSON)
   CaseTable case: anId              one case
-  CaseTable recordedFor: aCase variant: aString
-                                    the outcome and dump the JSON records for the variant
-                                    ('st_as_a', 'py_as_a' or 'actors'): the case's
-                                    'protobasest' entry, allowed only on the indexed-root case
-                                    with PBNotSupportedError in its outcome, else the reference
+  CaseTable expectedFor: aCase      the outcome and dump the JSON records (ProtoBase's); a case
+                                    recording a 'protobasest' entry (a documented difference) is
+                                    an error, since plan Task 4b removed the last one
   CaseTable databaseOf: aCase       'db' for a case on the database vector, 'cc' otherwise
   CaseTable setup: aCase in: aDir   creates the case's space in protoST (the vector is copied)
   CaseTable dump: aCase in: aDb     the dump lines (an Array of Strings), read in a new
-                                    transaction
+                                    transaction: the roots, the cells, then the index names of
+                                    the roots listed in 'indexes'
   CaseSide new start: steps in: aDb runs the steps that come before the transaction ('reuse
                                     committed'), starts it and runs the steps; answers self
   aSide commit                      commits, unless a step failed; answers the outcome:
@@ -51,24 +50,11 @@ CaseTable class >> case: anId
   ^ self load detect: [:each | (each at: 'id') = anId]
     ifNone: [Error signal: 'CaseTable: no case ' , anId printString].
 
-"The ids that may record protoBaseST's documented refusal in place of ProtoBase's outcome
- (design spec 7.4)."
-CaseTable class >> refusalIds
-  ^ #('indexed-root').
-
-CaseTable class >> recordedFor: aCase variant: aString
-  | entry |
-  (#('st_as_a' 'py_as_a' 'actors') includes: aString) ifFalse: [
-    ^ Error signal: 'CaseTable: unknown variant ' , aString printString].
-  (aCase includesKey: 'protobasest') ifFalse: [^ aCase at: 'expected'].
-  (self refusalIds includes: (aCase at: 'id')) ifFalse: [
-    ^ Error signal: 'CaseTable: only ' , self refusalIds printString , ' may record protoBaseST''s refusal, not '
-      , (aCase at: 'id') printString].
-  entry := (aCase at: 'protobasest') at: aString.
-  ((entry at: 'outcome') includesSubstring: 'PBNotSupportedError') ifFalse: [
-    ^ Error signal: 'CaseTable: the refusal recorded for ' , (aCase at: 'id') printString , ' ' , aString
-      , ' is not PBNotSupportedError: ' , (entry at: 'outcome')].
-  ^ entry.
+CaseTable class >> expectedFor: aCase
+  (aCase includesKey: 'protobasest') ifTrue: [
+    ^ Error signal: 'CaseTable: ' , (aCase at: 'id') printString
+      , ' records a protoBaseST difference; every case must give ProtoBase''s outcome (plan Task 4b)'].
+  ^ aCase at: 'expected'.
 
 CaseTable class >> usesVector: aCase
   ^ (aCase at: 'setup') anySatisfy: [:step | step first = 'vector database'].
@@ -155,6 +141,9 @@ CaseTable class >> dump: aCase in: aDatabase
     lines addLast: 'root ' , name , ' = ' , (self render: (t getRootObject: name))].
   (aCase at: 'mutables') do: [:name |
     lines addLast: 'mutable ' , name , ' = ' , (self render: (t getMutable: name))].
+  (aCase at: 'indexes' ifAbsent: [#()]) do: [:name |
+    lines addLast: 'indexes ' , name , ' = ' , ((t getRootObject: name) indexNames
+      inject: '' into: [:acc :each | acc isEmpty ifTrue: [each] ifFalse: [acc , ',' , each]])].
   t abort.
   ^ lines asArray.
 
@@ -169,6 +158,9 @@ CaseSide class >> apply: aStep to: t committed: aCommitted
   op = 'set root' ifTrue: [^ t setRootObject: (aStep at: 2) value: (aStep at: 3)].
   op = 'blind dict set root' ifTrue: [
     ^ t setRootObject: (aStep at: 2) value: (t newDictionary setAt: (aStep at: 3) value: (aStep at: 4))].
+  op = 'blind dict add index' ifTrue: [
+    ^ t setRootObject: (aStep at: 2) value: ((t newDictionary setAt: (aStep at: 3) value: (aStep at: 4))
+      addIndex: (PBEqualityIndex name: (aStep at: 5) path: 'v'))].
   op = 'replace' ifTrue: [
     ^ t setRootObject: (aStep at: 2) value: (t newDictionary setAt: (aStep at: 3) value: (aStep at: 4)) replace: true].
   op = 'list set' ifTrue: [^ t setRootObject: (aStep at: 2) value: (t newList appendLast: (aStep at: 3))].

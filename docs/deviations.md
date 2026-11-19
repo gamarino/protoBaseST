@@ -100,20 +100,20 @@ explicit.
 
 ## Collections and records
 
-- **Indexed collections are written, not yet merged** (0.3.0 in progress, plan Task 4a). Every
-  mutator maintains the collection's `PBEqualityIndex` and `PBRangeIndex` indexes in the same
-  step, with the hook order of `proto_db`'s mutator, so one sequence of operations gives the same
-  index nodes in both implementations (`tests/interop/index_ops_identical.sh`); a format-3 index is
-  rebuilt before the first change; `addIndex:`, `removeIndex:` and `validate` are provided. What
-  stays refused: a collection holding a `PBVectorIndex` or an index of a kind protoBaseST does not
-  know is read only (`PBNotSupportedError` naming it; see the table below), and, until Task 4b logs
-  the index operations (plan call IP17), **a merge involving an indexed collection**:
-  `rebaseOnto:` with an indexed receiver or `current` is `PBNotSupportedError` ("Task 4b"), and
-  `addIndex:` / `removeIndex:` answer a version whose log is incomplete, so a commit replaces
-  instead of merging. Index *queries* are not provided yet. `extend:` of nothing still answers
-  the receiver, as `proto_db`'s. *Cost:* a root written without being read (a blind write) onto a
-  current that holds an index is `PBNotSupportedError`, concurrent or not, and is not retried;
-  read the root first. `proto_db` merges it. Task 4b removes this.
+- **Indexed collections are written and merged; queries are not yet provided** (0.3.0 in
+  progress, plan Tasks 4a and 4b). Every mutator maintains the collection's `PBEqualityIndex` and
+  `PBRangeIndex` indexes in the same step, with the hook order of `proto_db`'s mutator, so one
+  sequence of operations gives the same index nodes in both implementations
+  (`tests/interop/index_ops_identical.sh`); a format-3 index is rebuilt before the first change;
+  `addIndex:`, `removeIndex:` and `validate` are provided, and the index definitions are logged
+  (`('@index_add' name index)`, `('@index_remove' name)`, never on `PBList`), so a blind write
+  onto an indexed current merges as in `proto_db` (`tests/unit/idx_merge.st`,
+  `tests/interop/index_both_directions.sh`, row 13 of `tests/interop/concurrency.sh`). What stays
+  refused: a collection holding a `PBVectorIndex` or an index of a kind protoBaseST does not know
+  is read only, a merge onto one included (`PBNotSupportedError` naming it; see the table below).
+  `extend:` of nothing still answers the receiver, as `proto_db`'s. *Cost:* a merge onto an
+  indexed current runs the index work and the extractors in the commit's build, at protoBaseST's
+  index speed (bench M3 below).
 - **`PBRepeatedKeysDictionary` is read only.** Its writes and merges are a non-goal. A new empty
   one is mergeable and its rebase answers `current` unchanged, as `proto_db`'s.
 - **Immutability is by convention** (decision 3). No instance is frozen at run time: a method
@@ -212,9 +212,8 @@ accept it. The space cannot contain what protoBaseST cannot write:
 
 Hence the interop round trip compares dumps with `compare_dumps.py --exact` (no normalisation of
 the opaque type), and `tests/interop/concurrency.sh` row 13 (a blind write onto an indexed root)
-uses a copy of the conformance database in all four runs and asserts protoBaseST's
-`PBNotSupportedError` in place of `proto_db`'s merge (until plan Task 4b, a merge onto an indexed
-current is refused, plan call IP17). Likewise `st_random_ops` covers the four
+uses a copy of the conformance database in all four runs; since plan Task 4b it expects
+`proto_db`'s merge from protoBaseST too. Likewise `st_random_ops` covers the four
 collections with writes, and `PBCountedSet` since Task 22.
 
 ## Reading
@@ -759,6 +758,21 @@ The detail:
   - A replicate that fails with an error (`PBReplicateFailed`) is decided by the error's class,
     as `proto_db`'s `nothing_sent`: a conflict, validation (`PBClosedError` included) or user
     error sent nothing; any other error, a failed flush included, leaves the outcome unknown.
+  - **An entry's build error in a cluster round** (indexed queries plan Task 4b, ruling IQ1,
+    controller ruling CR8). An error, of any class, that one entry's build raises fails that
+    commit alone, and the round builds the next entry (`PBCoordinatorCore >>
+    roundBuildFailed:in:now:`). `proto_db` rc4's `_permit_round` fails every entry of the round
+    and re-raises when the error is not a `ProtoDBError`. *Why:* a build runs application code,
+    an extractor in a merge onto an indexed current, and IQ1 requires its exception to fail only
+    the commit whose merge ran it, as `proto_db`'s own standalone round does
+    (`_standalone_round`); a cluster round that fails its neighbours too would make the same
+    program behave differently in the two modes. Nothing was sent when a build fails (every build
+    comes before the round's replicate), so failing one entry is safe. Unchanged: a base read
+    that failed with `PBUnexpectedError` after the permission expired is still a retryable
+    conflict (R212), and the re-commit's error still ends the round. *Cost:* a caller whose
+    neighbour's build failed with, say, a `ZeroDivide` commits here where `proto_db` would fail
+    it with that error (`tests/unit/idx_merge_extractor.st` case (d),
+    `tests/unit/cluster_round_rules.st` case 30).
   - A permission that arrives after the round closed is ended `#none` at once; `proto_db`'s
     closing thread never asked for one.
   - rc4's R148 texts ('its kept permission is still being ended', '... s of it spent waiting
@@ -913,8 +927,8 @@ The detail:
 > [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md) plans on purpose,
 > written early so the draft chapters ([17](tutorial/17-indexes.md),
 > [18](tutorial/18-queries-and-plans.md), [19](tutorial/19-ordered-reads-and-pages.md)) and the
-> guide ([queries.md](queries.md)) can link here. The entry "Indexed collections are written, not
-> yet merged" above says what holds today. Each entry becomes a deviation when its task is merged;
+> guide ([queries.md](queries.md)) can link here. The entry "Indexed collections are written and
+> merged; queries are not yet provided" above says what holds today. Each entry becomes a deviation when its task is merged;
 > the rows marked (Task 4a) are in force.
 
 | What | Difference from `proto_db` | Why | Cost |
@@ -1087,14 +1101,12 @@ What the figures say, and what they do not:
 
 ### Queries and indexes
 
-Planned for 0.3.0 (spec section 7.3, `bench/run_query.sh`). M1 and M2 are measured so far (below);
+Planned for 0.3.0 (spec section 7.3, `bench/run_query.sh`). M1, M2 and M3 are measured so far (below);
 the drafts cite these markers for the rest, each filled by the task named:
 
 - [measured in T8: Q1-Q4, point equality, `in` and ranges, compound conditions, ordering, indexed
   against a forced scan, in both implementations]
 - [measured in T9: Q5, page k by rank against materialised, and `count` by rank]
-- [measured in T4: M3 (plan task 4b), merges onto an indexed current, standalone and in a
-  three-member cluster]
 - [measured in T7: P1 planner overhead; P2 where the cost model switches between an index plan and
   a scan with a filter as selectivity varies, and whether the timings cross there; P3 the
   hand-built intersection against the filter plan]
@@ -1136,8 +1148,60 @@ Commits per second from the minimum of five runs of 200 commits (medians within 
 - **Peak RSS is the heap budget, not the live set**: protoCore keeps memory until it reaches its
   budget, so 5 GB is the budget being used, and 1.9 GB for idx0 is where that run stopped growing.
   `proto_db` stays under 50 MB. Not a measure of what the workload needs.
-- Not measured: commits per second under contention (merges onto indexed roots are Task 4b,
-  M3), and sizes other than 600.
+- Not measured: commits per second under contention (M3 below measures merges onto indexed
+  roots), and sizes other than 600.
+
+#### M3: a blind write merged onto an indexed current, standalone and in a cluster
+
+`RUNS=5 bench/run_query.sh M3`. **Indicative only.** Measured 2026-11-19 (09:20-09:49 UTC) on the
+machine of M1 and M2 (AMD Ryzen 5 5500U, 6 cores, 12 threads, Linux 7.0.0, DEV12), load average
+2.5 before and 4.6 after (other desktop sessions open, not controlled); protoBaseST at `6437d90`
+with the Task 4b working tree (committed as the Task 4b commit), the `pinned-360` build of M1
+(protoST 0.12.0 on protoCore 3.6.0); `proto_db` v2.0.0rc4 (`8e6127f`) on CPython 3.14.0. The
+workload: M1's dictionary of 600 records and plans (0, 1 and 3 indexes, one of them on an
+extractor), then 120 transactions, timed together, each committing **a new dictionary holding one
+record and never reading the root**, so every commit rebases it onto the current version, whose
+mutators maintain its indexes (`rebaseOnto:`, plan Task 4b). The 120 keys are distinct, so the
+final content does not depend on the order of the commits. Standalone: one process per unit, five
+rounds interleaved with `proto_db`, protost heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`.
+Cluster: `bench/run_cluster.sh`'s profile (three protost member processes on 127.0.0.1 over one
+shared directory on ZFS, `proto_db`'s default options: a 2000 ms lease), one writer per member,
+40 commits each, `run:retries: 1000`; every member with the budget 32000000 cells (about 2 GB).
+Every run self-reports the rows read back, the commits and M1's ordered checksum over the values
+and every index, and the read-back version must pass `validate`; all five standalone runs of
+each implementation and all five cluster runs agreed with `proto_db`'s standalone run of the same
+plan (there is no `proto_db` cluster run of this workload: its cluster is not driven here).
+
+| Indexes | `proto_db` commits/s | protoBaseST commits/s | protoBaseST / `proto_db` time (min) | protoBaseST, 3-member cluster, commits/s | peak RSS MB `proto_db` / protoBaseST / largest member |
+|---|---|---|---|---|---|
+| 0 | 141 (7.1 ms per commit) | 34.2 (29.3 ms) | 4.1x | 17.4 (57.6 ms) | 27 / 1481 / 1743 |
+| 1 | 110 (9.1 ms) | 11.9 (84.2 ms) | 9.2x | 6.8 (146 ms) | 31 / 4613 / 2060 |
+| 3 | 81 (12.4 ms) | 5.1 (197.6 ms) | 16.0x | 1.1 (879 ms) | 39 / 5077 / 2067 |
+
+Commits per second from the minimum of five runs (medians: standalone within 5 %; cluster 17.0,
+6.1 and 0.96 commits/s).
+
+- **A merged blind write costs what a read-modify-write costs**: the standalone figures are M1's
+  within a few per cent (34.2 against 38, 11.9 against 11.9, 5.1 against 5.2 commits/s). The
+  merge replays one `setAt:value:` through the current version's mutator, which does the same
+  index work as the writer's own `setAt:value:` in M1; it moves that work into the commit's
+  build, it does not add to it. The same holds in `proto_db` (141, 110, 81 against 150, 115, 83).
+- **In the cluster the build runs under the write permission, and with three indexes it no
+  longer fits.** The median build per commit was 34, 91 and 189 ms for 0, 1 and 3 indexes
+  (replication about 11 ms in every plan). A permission lasts at most 667 ms here (the 2000 ms
+  lease less the drift margin) and a send needs 167 ms of it (sendReserve); a group commit builds
+  a second entry only while sendReserve plus the longest build is left (CC11), and a round whose
+  builds leave less than sendReserve is refused and retried (R121). With 189 ms builds that
+  happened 135 to 210 times per run of 120 commits, and the block ran 309 to 450 times more than
+  once per commit, so the three-index cluster commits 1.1 times per second, 4.4 times slower
+  than standalone; with 0 and 1 index it is 2.0x and 1.7x slower (0 to 5 and 28 to 82 retries
+  per run). This is the cost queries.md names: an indexed root lengthens the build, which runs
+  under the cluster-wide permission. A longer `leaseDuration` raises the ceiling (not measured).
+- **Peak RSS is the heap budget, not the live set** (as M1): the standalone protost processes
+  grow to their 5 GB budget, the cluster members to their 2 GB one. Not a measure of what the
+  workload needs.
+- Not measured: `proto_db`'s cluster on this workload, a longer lease, more writers per member,
+  sizes other than 600.
 
 #### M2: the bulk build against the fold of single additions
 

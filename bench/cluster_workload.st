@@ -13,6 +13,19 @@
              cluster conflict (disjoint roots), but every one needs a write permission.
    conc-hot  four writers per process (actors), every writer of every member incrementing key 0
              of the shared root 'hot' (read-modify-write: conflicts, retried by run:retries: 1000).
+   m3-idx0, m3-idx1, m3-idx3
+             the query workload M3 (bench/query_workload.st, plan Task 4b): the root 'people' is
+             M1's dictionary of 600 records with the plan's indexes (bench/_query_bench.st); one
+             writer per process; member j commits changes j * each to j * each + each - 1 (TOTAL
+             at most 600), each a blind write: a new dictionary holding the change alone, never
+             reading the root, merged by the commit onto the current version, which maintains its
+             indexes; a retryable conflict (a permission refused for its send reserve, a commit
+             of another member first) is retried by run:retries: 1000, counted as attempts. The keys are distinct, so the final content does not depend on the order of
+             the commits. The verifier validates 'people', counts the records the changes wrote
+             (id >= 600) and computes M1's checksum (QueryBench checksumOf:); the expected
+             checksum is proto_db's for the same commits, which the caller passes in
+             CLUSTER_M3_EXPECTED as '<rows>:<commits>:<checksum>' (bench/run_query.sh M3 does): a run
+             without it fails; the verifier's checksum is then that same triple.
  A standalone run is one process with the TOTAL of the profile and the writers of one member.
 
  A node binds a PBTcpTransport on 127.0.0.1 (port 0), writes <out>/<id>.port, waits for
@@ -37,6 +50,8 @@
                 the replicate to the commit settled) and 'critical_commits'
    reserve_refusals, permits
                 the deltas of 'sends_refused_reserve' and 'permit_requests_sent'
+   rss_kb       the process's peak resident set so far (VmHWM of /proc/self/status), read after
+                its transactions
  n0 then waits for <out>/verify, commits a read barrier (a root '_read_barrier' of 'bench',
  which no profile counts), reads the space through the cluster and writes <out>/verify.result:
  'count=<transactions found> checksum=<...> expected=<...>'; a checksum other than the expected
@@ -51,6 +66,7 @@
  retries, or any other error writes <out>/<id>.error and exits 1: the runner refuses the run.
  Every wait on a file is bounded (300 s); no duration is asserted."
 Import from: 'protobase'.
+Import from: '_query_bench'.
 
 "The split of the root-independent work: PBClusterRound >> enqueue: saves the atoms of the
  commit, then hands the core PBRoundEnqueued (cluster/round.st); the time between the two is the
@@ -108,7 +124,7 @@ BenchWriter >> hot: each db: aDb
 
 | args role id out spaceDir profile nodes scale total each writers fail say writeFile until
   waitFor ids peers rank listener transport node space db options stats0 stats1 t0 t1 attempts
-  commits line delta crit expected checksumOf tinyRun hotRun setupRoots |
+  commits line delta crit expected checksumOf tinyRun hotRun setupRoots m3 m3Run peakRss |
 args := Smalltalk arguments.
 role := args isEmpty ifTrue: [''] ifFalse: [args first].
 (role = 'standalone' and: [args size = 4]) | (role = 'node' and: [args size = 6]) ifFalse: [
@@ -134,7 +150,11 @@ until := [:aBlock :aSeconds | | deadline |
 waitFor := [:aName |
   (until value: [(out / aName) exists] value: 300) ifFalse: [fail value: 'no ' , aName , ' within 300 s']].
 
-(#('tiny' 'conc-hot') includes: profile) ifFalse: [fail value: 'unknown profile ' , profile].
+(#('tiny' 'conc-hot' 'm3-idx0' 'm3-idx1' 'm3-idx3') includes: profile) ifFalse: [fail value: 'unknown profile ' , profile].
+m3 := profile beginsWith: 'm3-'.
+"Every member registers M3's extractor: a merge onto the indexed current runs it in whichever
+ member's commit builds the merge."
+m3 ifTrue: [QueryBench indexesOf: (profile copyFrom: 4 to: profile size)].
 (nodes notNil and: [nodes >= 1]) ifFalse: [fail value: 'nodes must be a positive Integer'].
 scale := ((Smalltalk getenv: 'CLUSTER_SCALE') ifNil: ['1']) asInteger.
 total := 120 * scale.
@@ -142,23 +162,45 @@ total \\ nodes = 0 ifFalse: [fail value: 'the total ' , total printString , ' do
 writers := profile = 'tiny' ifTrue: [1] ifFalse: [4].
 each := total // nodes.
 each \\ writers = 0 ifFalse: [fail value: 'the transactions of a member do not split over its writers'].
+(m3 and: [total > 600]) ifTrue: [fail value: 'M3 writes distinct keys of 600: at most 600 transactions, not ' , total printString].
+peakRss := [(('/proc/self/status' asFileReference contents lines detect: [:l | l beginsWith: 'VmHWM:']) subStrings at: 2)].
 
 "The checksum the read-back must give, for the profile, the member count and each."
-expected := profile = 'tiny'
+expected := m3
+  ifTrue: [(Smalltalk getenv: 'CLUSTER_M3_EXPECTED') ifNil: [fail value: 'M3 needs CLUSTER_M3_EXPECTED, proto_db''s rows:commits:checksum']]
+  ifFalse: [profile = 'tiny'
   ifTrue: [| s |
     s := 0.
     0 to: nodes - 1 do: [:j | 1 to: each do: [:i | | k | k := j * each + i. s := s + (k * (k \\ 1000))]].
     total printString , ':' , s printString]
-  ifFalse: ['1:' , total printString].
+  ifFalse: ['1:' , total printString]].
 "Answers { count. checksum } of the transaction tr, for the profile."
 checksumOf := [:tr |
-  profile = 'tiny'
+  m3
+    ifTrue: [| people c |
+      people := tr getRootObject: 'people'.
+      people validate.
+      c := 0.
+      people keysAndValuesDo: [:k :v | (v at: 'id') >= 600 ifTrue: [c := c + 1]].
+      { c. people count printString , ':' , c printString , ':' , (QueryBench checksumOf: people) printString }]
+    ifFalse: [profile = 'tiny'
     ifTrue: [| c s |
       c := 0. s := 0.
       0 to: nodes - 1 do: [:j |
         (tr getRootObject: 'kv-' , j printString) keysAndValuesDo: [:k :v | c := c + 1. s := s + (k * v)]].
       { c. c printString , ':' , s printString }]
-    ifFalse: [| n | n := (tr getRootObject: 'hot') getAt: 0. { n. '1:' , n printString }]].
+    ifFalse: [| n | n := (tr getRootObject: 'hot') getAt: 0. { n. '1:' , n printString }]]].
+"M3: member j's blind writes; answers { block runs. commits }."
+m3Run := [:aDb :j | | runs done |
+  runs := 0. done := 0.
+  0 to: each - 1 do: [:i | | change |
+    change := QueryBench change: j * each + i size: 600.
+    aDb run: [:tr |
+      runs := runs + 1.
+      tr setRootObject: 'people' value: (tr newDictionary setAt: (change at: 1) value: (change at: 2))]
+      retries: 1000.
+    done := done + 1].
+  { runs. done }].
 "The member's transactions; answer { block runs. commits }, a commit counted when run: returns
  normally (never the number planned: the runner checks the sum against the run's total)."
 tinyRun := [:aDb :j | | runs done |
@@ -179,7 +221,8 @@ hotRun := [:aDb | | actors futures |
 setupRoots := [:aDb |
   aDb run: [:tr |
     0 to: nodes - 1 do: [:j | tr setRootObject: 'kv-' , j printString value: tr newDictionary].
-    tr setRootObject: 'hot' value: (tr newDictionary setAt: 0 value: 0)]].
+    tr setRootObject: 'hot' value: (tr newDictionary setAt: 0 value: 0).
+    m3 ifTrue: [tr setRootObject: 'people' value: (QueryBench people: 600 plan: (profile copyFrom: 4 to: profile size))]]].
 
 role = 'standalone' ifTrue: [
   [space := PBObjectSpace storage: (PBFileStorage path: spaceDir).
@@ -188,7 +231,8 @@ role = 'standalone' ifTrue: [
    writeFile value: id , '.ready' value: 'ok'.
    waitFor value: 'go'.
    t0 := Time utcMicroseconds.
-   attempts := profile = 'tiny' ifTrue: [tinyRun value: db value: 0] ifFalse: [hotRun value: db].
+   attempts := m3 ifTrue: [m3Run value: db value: 0] ifFalse: [
+     profile = 'tiny' ifTrue: [tinyRun value: db value: 0] ifFalse: [hotRun value: db]].
    t1 := Time utcMicroseconds.
    commits := attempts at: 2.
    attempts := attempts at: 1.
@@ -199,7 +243,7 @@ role = 'standalone' ifTrue: [
     on: Error do: [:e | fail value: e class name , ': ' , e messageText printString].
   (line at: 2) = expected ifFalse: [fail value: 'checksum ' , (line at: 2) , ', expected ' , expected].
   writeFile value: id , '.result' value: 'commits=' , commits printString , ' attempts=' , attempts printString
-    , ' t0=' , t0 printString , ' t1=' , t1 printString.
+    , ' t0=' , t0 printString , ' t1=' , t1 printString , ' rss_kb=' , peakRss value.
   writeFile value: 'verify.result' value: 'count=' , (line at: 1) printString , ' checksum=' , (line at: 2)
     , ' expected=' , expected.
   Smalltalk exit: 0].
@@ -237,7 +281,8 @@ waitFor value: 'go'.
 stats0 := node stats.
 BenchSplit reset.
 t0 := Time utcMicroseconds.
-attempts := [profile = 'tiny' ifTrue: [tinyRun value: db value: rank] ifFalse: [hotRun value: db]]
+attempts := [m3 ifTrue: [m3Run value: db value: rank] ifFalse: [
+    profile = 'tiny' ifTrue: [tinyRun value: db value: rank] ifFalse: [hotRun value: db]]]
   on: Error do: [:e | fail value: 'commit: ' , e class name , ': ' , e messageText printString].
 t1 := Time utcMicroseconds.
 stats1 := node stats.
@@ -251,7 +296,8 @@ writeFile value: id , '.result' value: 'commits=' , commits printString , ' atte
   , ' build_us=' , (crit value: 'build') printString , ' replication_us=' , (crit value: 'replication') printString
   , ' critical=' , (delta value: 'critical_commits') printString
   , ' reserve_refusals=' , (delta value: 'sends_refused_reserve') printString
-  , ' permits=' , (delta value: 'permit_requests_sent') printString.
+  , ' permits=' , (delta value: 'permit_requests_sent') printString
+  , ' rss_kb=' , peakRss value.
 say value: 'committed ' , commits printString , ' in ' , ((t1 - t0) // 1000) printString , ' ms'.
 
 rank = 0 ifTrue: [
