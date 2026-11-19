@@ -1545,7 +1545,9 @@ Bytes on disk and tree node identity with `proto_db` are unchanged
 from `PROTOCORE_HEAP_TRACE` after a churn, 10^5 objects kept, minus an empty run, heap budget
 `PROTOCORE_HEAP_LIMIT_CELLS=32000000`), 2026-11-19, same machine and binary as below, load
 average 2.8 to 3.6 (the bench's own processes included); before at `138730d`, after at `70a4969`,
-both clean. Retained is the median live cells per object (the quartiles are within about 1 cell);
+both clean. Retained is the object run's median live count minus the empty run's median, per
+object; the interquartile range of a run's live counts is 0.5 to 2.3 cells per object (the empty
+run's 1.6), re-derived from the recorded raw outputs;
 allocated is the cells allocated per object built:
 
 | object | retained before | retained after | allocated before | allocated after |

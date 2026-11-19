@@ -3,8 +3,10 @@
 # bench/atom_weight/probe.st on $PROTOST and this checkout's src (or $AW_SRC):
 #
 #   retained  cells kept live per object: n objects kept, then churn; the median of the live
-#             counts (L=, PROTOCORE_HEAP_TRACE=1) of the GC cycles after it, minus kind none's,
-#             over n (the quartiles are printed too)
+#             counts (L=, PROTOCORE_HEAP_TRACE=1) of the GC cycles after it, minus kind none's
+#             median, over n. The spread printed beside it is the run's own interquartile range
+#             over n (the empty run's is printed in the header): the quartiles of two runs are
+#             not subtracted position by position, which would mix two independent spreads
 #   alloc     cells allocated per object: protoCore's cell allocator (proto::Cell::operator new)
 #             counted under gdb between the probe's markers (count.py), last of three rounds, over n
 #
@@ -67,13 +69,15 @@ echo "src commit: $(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) $(git -C "
 echo "load average: $(cut -d' ' -f1-3 /proc/loadavg); keep n=$KEEP_N, alloc n=$ALLOC_N; churn $CHURN; heap limit $PROTOCORE_HEAP_LIMIT_CELLS cells"
 r="$(keep none)" || { echo "$r"; exit 1; }
 read -r b1 b2 b3 bc <<< "$r"
-echo "| kind | retained per object (q1 / median / q3) | allocated per object |"
-echo "|---|---|---|"
+awk -v n="$KEEP_N" -v b1="$b1" -v b3="$b3" -v c="$bc" \
+    'BEGIN { printf "empty run: %d cycles, interquartile range %.2f cells per object\n", c, (b3-b1)/n }'
+echo "| kind | retained per object (median) | interquartile range per object | allocated per object |"
+echo "|---|---|---|---|"
 for k in "${kinds[@]}"; do
     r="$(keep "$k")" || { echo "$r"; exit 1; }
     read -r q1 md q3 c <<< "$r"
     a="$(alloc "$k")" || { echo "$a"; exit 1; }
-    awk -v k="$k" -v n="$KEEP_N" -v an="$ALLOC_N" -v q1="$q1" -v md="$md" -v q3="$q3" -v b1="$b1" -v b2="$b2" -v b3="$b3" -v a="$a" \
-        'BEGIN { printf "| %s | %.2f / %.2f / %.2f | %.1f |\n", k, (q1-b1)/n, (md-b2)/n, (q3-b3)/n, a/an }'
+    awk -v k="$k" -v n="$KEEP_N" -v an="$ALLOC_N" -v q1="$q1" -v md="$md" -v q3="$q3" -v b2="$b2" -v a="$a" \
+        'BEGIN { printf "| %s | %.2f | %.2f | %.1f |\n", k, (md-b2)/n, (q3-q1)/n, a/an }'
 done
 echo "load average after: $(cut -d' ' -f1-3 /proc/loadavg)"

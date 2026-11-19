@@ -487,8 +487,9 @@ PBAtom >> _setOid: anOid pointer: aPointer storage: aStorage
    (aPointer and aStorage given, and anOid when the caller knows it: a decoded
    twin) gets them in one write group; an atom made in memory gets anOid when
    one is given, and nothing else. No field is written nil: an unset instance
-   variable reads as nil."
-  (memo isNil and: [pointer isNil]) ifFalse: [^ PBUserError signal: 'PBAtom is initialised once'].
+   variable reads as nil. A second call is refused once any of these fields or the
+   state is set, so an oid drawn or given is never replaced."
+  (memo isNil and: [pointer isNil and: [oid isNil]]) ifFalse: [^ PBUserError signal: 'PBAtom is initialised once'].
   aPointer isNil ifTrue: [
     anOid isNil ifFalse: [oid := anOid].
     ^ self].
