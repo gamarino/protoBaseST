@@ -67,7 +67,7 @@ c that: 'supports: answers per operator and per kind, on the index''s own key on
 "=== unsupported terms and orders (test_plan_on_unsupported_term_raises_not_supported,
      test_estimate_on_unsupported_term_raises_not_supported, test_ordered_iteration_is_unsupported_by_default) ==="
 unsupported := t value: 'city' value: '<' value: 1.
-c that: 'an unsupported term, or order, is PBNotSupportedError'
+c that: 'an unsupported term, or order, is PBNotSupportedError; the order key is checked first (a key spec or a term path), then descending, then the order'
   is: { refused value: [byCity plan: unsupported]. refused value: [byCity estimate: unsupported].
     refused value: [byCity plan: (t value: 'zip' value: '==' value: 1)]. refused value: [range estimate: (t value: 'zip' value: '==' value: 1)].
     refused value: [byCity orderedPlan: (PBKeySpec path: 'city') descending: false].
@@ -75,11 +75,17 @@ c that: 'an unsupported term, or order, is PBNotSupportedError'
     refused value: [range orderedPlan: (PBKeySpec path: 'other') descending: false].
     refused value: [range orderedPlan: (PBKeySpec path: 'age') descending: nil].
     refused value: [byCity supports: #('city' '==' 'x')].
+    refused value: [range orderedPlan: 42 descending: nil].
+    [range orderedPlan: 42 descending: nil] on: PBValidationError do: [:e | e return: e messageText].
+    refused value: [byCity orderedPlan: 'city' descending: nil].
+    ((range build: { rec value: { 'age' -> 2 }. rec value: { 'age' -> 1 } }) orderedPlan: 'age' descending: false) execute asArray
+      collect: [:e | e at: 'age'].
     [byCity plan: unsupported] on: PBNotSupportedError do: [:e | e return: e messageText].
     [byCity orderedPlan: (PBKeySpec path: 'city') descending: false] on: PBNotSupportedError do: [:e | e return: e messageText].
     [range orderedPlan: (PBKeySpec path: 'other') descending: true] on: PBNotSupportedError do: [:e | e return: e messageText] }
   equals: { PBNotSupportedError. PBNotSupportedError. PBNotSupportedError. PBNotSupportedError. PBNotSupportedError.
     PBNotSupportedError. PBNotSupportedError. PBValidationError. PBValidationError.
+    PBValidationError. 'A term path must be a String or nil, not a SmallInteger'. PBValidationError. #(1 2).
     'Index ''by_city'' (EqualityIndex on city) does not support ''<'' on ''city'''.
     'Index ''by_city'' cannot iterate in the order of city'. 'Index ''by_age'' cannot iterate in the order of other' }.
 

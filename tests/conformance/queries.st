@@ -19,8 +19,10 @@
      value by its wire form);
    - a different tree is a near tie only when it is a different choice (the sequence of node
      names and index names differs: a node that differs in anything else is a defect) and the root
-     costs agree within IP8 (ruling IQ4, deviation R2: a log2 that differs in the last bit can
-     reorder two candidates of equal model cost); it is reported by name, and its rows must still be proto_db's as a multiset (or, with a
+     costs agree within IP8 but are not bit-equal (ruling IQ4, deviation R2: a log2 that differs in
+     the last bit can reorder two candidates of equal model cost; bit-equal costs ranked otherwise
+     are a tie-break defect and fail); a near tie fails unless its case is in the allowlist below
+     with its reason, and the number of near ties must be the expected one (0); it is reported by name, and its rows must still be proto_db's as a multiset (or, with a
      window, as many); any other difference fails.
  It prints 'near ties: N', then 'query vectors ok'."
 Import from: 'protobase'.
@@ -32,7 +34,7 @@ NoAtoms >> refTo: aSegmentBytes offset: anInteger tag: aTag
   ^ Error signal: 'the query vectors hold no atom references'.
 
 | dir manifest blob data space db snap roots extractor fails nearTies tree closeTo nodeBytes rowBytes sameTree
-  decode keysOf count atomRef out choicesOf theirChoicesOf |
+  decode keysOf count atomRef out choicesOf theirChoicesOf allowedTies expectedNearTies |
 dir := 'vectors-queries'.
 fails := OrderedCollection new.
 nearTies := OrderedCollection new.
@@ -115,6 +117,11 @@ rowBytes := [:row :counted |
       ifFalse: [MessagePack encode: { 'v'. PBCodec toWire: row atomRef: atomRef }]]].
 decode := [:bytes | PBCodec fromWire: (MessagePack decodeOrdered: bytes strictKeys: false) resolver: NoAtoms new].
 keysOf := [:order | order isNil ifTrue: [nil] ifFalse: [order asArray collect: [:pair | PBSortKey key: (pair at: 1) descending: (pair at: 2)]]].
+"The near ties this vector set is known to have, each case id with its reason (ruling IQ4,
+ deviation R2); any other near tie fails, and so does a change of their number. Measured at Task 7:
+ none."
+allowedTies := Dictionary new.
+expectedNearTies := 0.
 count := 0.
 (data at: 'cases') do: [:case |
   | id coll source where plan wrap mine problems rootCost theirCost got want |
@@ -144,6 +151,11 @@ count := 0.
            and: [(choicesOf value: plan explain) ~= (theirChoicesOf value: (case at: 'plan'))])
          ifTrue: [
            nearTies add: id.
+           rootCost = theirCost ifTrue: [
+             fails add: id , ': another plan at a bit-equal cost (' , rootCost printString
+               , '): R2 cannot explain it, only a tie-break defect can'].
+           (allowedTies includesKey: id) ifFalse: [
+             fails add: id , ': a near tie not in the allowlist (proto_db chose ' , (theirChoicesOf value: (case at: 'plan')) printString , ')'].
            ((case at: 'limit') isNil and: [(case at: 'offset') = 0])
              ifTrue: [(got asSortedCollection: [:a :b | a hex <= b hex]) asArray = (want asSortedCollection: [:a :b | a hex <= b hex]) asArray
                ifFalse: [fails add: id , ': a near tie whose rows differ from proto_db''s']]
@@ -153,6 +165,10 @@ count := 0.
     on: Error do: [:e | fails add: id , ': ' , e class name , ': ' , e messageText printString. e return: nil]].
 space close.
 count = (data at: 'cases') size ifFalse: [fails add: 'only ' , count printString , ' cases ran'].
+nearTies size = expectedNearTies ifFalse: [
+  fails add: nearTies size printString , ' near ties, ' , expectedNearTies printString , ' expected'].
+(allowedTies keys reject: [:each | nearTies includes: each]) do: [:each |
+  fails add: 'the allowed near tie ' , each , ' did not occur (a stale allowlist entry)'].
 nearTies do: [:each | ('near tie: ' , each) displayNl].
 ('near ties: ' , nearTies size printString) displayNl.
 ('cases: ' , count printString) displayNl.

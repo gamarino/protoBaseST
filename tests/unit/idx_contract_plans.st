@@ -13,16 +13,17 @@
                        a valid estimate
    mutationSequence    (b) 30 random add, remove and replace steps: validate: passes and the terms of
                        the step's pivots answer what a scan of the model answers, at every step
-   persistence         (c) saved and loaded through a fresh storage, the index answers every term
-                       as before
+   persistence         (c) saved and loaded through a fresh storage by its tag, the index has its
+                       class, definition and explain, answers every term as before and as a scan,
+                       and keeps working: loaded, then added; loaded, then removed
    unsupportedRaises   (e) a term the index does not support is refused by plan: and estimate:
                        (PBNotSupportedError); a term on a foreign path is never supported
    hooksDoNotMutate    (g) withAdded:, withRemoved:, withReplaced:with:, build: and empty leave the
                        receiver's state and explain as they were, and answer an index of its class
                        and name
    empty               (h) empty of a populated index holds nothing and keeps the definition
-   orderedIteration    for the index's own key spec and another (the records' 'id', a foreign
-                       path of the values): when supportsOrder:, orderedPlan:descending: answers every
+   orderedIteration    an order on a foreign path is never supported; for the index's own key
+                       spec, when supportsOrder:, orderedPlan:descending: answers every
                        stored occurrence in the total order of the keys (unorderable keys last),
                        descending the exact reverse of the key-group order, each group the same
                        multiset; otherwise it is refused (PBNotSupportedError)
@@ -136,9 +137,23 @@ Contract >> answers: anIndex over: anArray terms: aTerms
         ^ 'plan of ' , term describe printString , ' differs from the scan']]].
   ^ nil.
 
-"Answers nil, or the failure of aBlock (its answer, or the error it signalled)."
+"Answers nil, or the failure of aBlock: its own failure String, or a PBCorruptionError's (what
+ validate: signals), as proto_db's failing_seeds counts AssertionError and ProtoCorruptionError.
+ Any other error answers { #error. its text }: a failure of the contract for a correct index, but
+ never a rejection of a planted defect (the teeth below count Strings only)."
 Contract >> run: aBlock
-  ^ [aBlock value] on: Error do: [:e | e return: e class name , ': ' , e messageText printString].
+  ^ [[aBlock value] on: PBCorruptionError do: [:e | e return: 'PBCorruptionError: ' , e messageText printString]]
+    on: Error do: [:e | e return: { #error. e class name , ': ' , e messageText printString }].
+
+"Nil, or what makes anIndex inconsistent with the elements anArray (index_contract.py
+ assert_consistent): validate: (PBCorruptionError) and plan == the scan for every supported term."
+Contract >> consistent: anIndex over: anArray terms: aTerms
+  anIndex validate: anArray.
+  ^ self answers: anIndex over: anArray terms: aTerms.
+
+"Nil when aTermOrNil is nil, else the failure: the term described, then aText."
+Contract >> term: aTermOrNil failing: aText
+  ^ aTermOrNil isNil ifTrue: [nil] ifFalse: [aTermOrNil describe printString , aText].
 
 "--- the checks ---"
 
@@ -146,7 +161,7 @@ Contract >> planMatchesScan
   ^ self run: [ | elements index |
     elements := self elements.
     index := self newIndex build: elements.
-    (self termsFor: elements) detect: [:term |
+    self term: ((self termsFor: elements) detect: [:term |
       (index supports: term) and: [ | plan est info |
         plan := index plan: term.
         est := plan estimate.
@@ -155,7 +170,8 @@ Contract >> planMatchesScan
           or: [(self exact: plan execute) ~= (self exact: plan execute)
           or: [((info at: 'index') at: 'index') ~= 'idx'
           or: [est rows < 0 or: [est cost < 0]]]]]]
-      ifNone: [nil]].
+      ifNone: [nil])
+      failing: ' answers otherwise than a scan, twice, with an explain and an estimate'].
 
 Contract >> mutationSequence
   ^ self run: [ | pool model index failure |
@@ -182,30 +198,50 @@ Contract >> mutationSequence
         failure isNil ifFalse: [failure := 'step ' , step printString , ': ' , failure]]].
     failure].
 
+"(c), index_contract.py check_persistence: saved, then loaded through a fresh storage by the tag it
+ was saved under (PBTypeRegistry: the plants of _qplants.st are registered under names of their
+ own), the index is of the same class with the same definition (name, key spec) and explain,
+ answers every term as before and consistently with the elements, and keeps working: loaded, then
+ added, and loaded, then removed (a victim by position)."
 Contract >> persistence
-  ^ self run: [ | elements index storage pointer loaded dir |
+  ^ self run: [ | elements index storage pointer tag loaded dir terms extra at rest |
     elements := self elements.
     index := self newIndex build: elements.
+    terms := self termsFor: elements.
     dir := Contract directory.
     storage := PBFileStorage path: dir.
     index _saveInto: storage.
     pointer := index pointer.
+    tag := index tag.
     storage close.
-    loaded := kind unloadedAt: pointer storage: (PBFileStorage path: dir).
-    loaded explain = index explain
-      ifFalse: ['the loaded index explains otherwise']
-      ifTrue: [self answers: loaded over: elements terms: (self termsFor: elements)]].
+    loaded := PBTypeRegistry unloadedAtomFor: tag at: pointer storage: (PBFileStorage path: dir).
+    loaded class == index class ifFalse: [^ 'the loaded index is a ' , loaded class name].
+    { loaded name. loaded keySpec } = { index name. index keySpec } ifFalse: [^ 'the loaded index has another definition'].
+    loaded explain = index explain ifFalse: [^ 'the loaded index explains otherwise'].
+    (terms collect: [:t | (loaded supports: t) ifTrue: [self exact: (loaded plan: t) execute] ifFalse: [nil]])
+      = (terms collect: [:t | (index supports: t) ifTrue: [self exact: (index plan: t) execute] ifFalse: [nil]])
+      ifFalse: [^ 'the loaded index answers otherwise than the saved one'].
+    (self consistent: loaded over: elements terms: terms) ifNotNil: [:f | ^ '(loaded) ' , f].
+    extra := (set = 'people' ifTrue: [QData people: 1 seed: seed + 500] ifFalse: [QData values: 1 seed: seed + 500]) first.
+    (self consistent: (loaded withAdded: extra) over: elements , { extra } terms: (self termsFor: elements , { extra }))
+      ifNotNil: [:f | ^ '(loaded, then added) ' , f].
+    at := (random next * elements size) truncated + 1.
+    rest := (elements copyFrom: 1 to: at - 1) , (elements copyFrom: at + 1 to: elements size).
+    (self consistent: (loaded withRemoved: (elements at: at)) over: rest terms: terms)
+      ifNotNil: [:f | ^ '(loaded, then removed) ' , f].
+    nil].
 
 Contract >> unsupportedRaises
   ^ self run: [ | elements index |
     elements := self elements.
     index := self newIndex build: elements.
-    (self termsFor: elements) detect: [:term |
+    self term: ((self termsFor: elements) detect: [:term |
       ((term path = 'zz_contract_foreign_path') and: [index supports: term])
         or: [(index supports: term) not and: [
           ([index plan: term. false] on: PBNotSupportedError do: [:e | e return: true]) not
             or: [([index estimate: term. false] on: PBNotSupportedError do: [:e | e return: true]) not]]]]
-      ifNone: [nil]].
+      ifNone: [nil])
+      failing: ' is supported on a foreign path, or not refused'].
 
 Contract >> hooksDoNotMutate
   ^ self run: [ | elements index before snapshot answers |
@@ -255,15 +291,15 @@ Contract >> before: a as: b
   (a at: 1) = 1 ifTrue: [^ false].
   ^ ((a at: 2) compareWith: (b at: 2)) < 0.
 
-"For the index's own key spec and another one (the path 'id' of the records, a foreign path of
- the values)."
+"index_contract.py check_ordered_iteration: an order on the foreign path is never supported; on the
+ index's own key spec, the order if supported, else a refusal."
 Contract >> orderedIteration
   ^ self run: [ | elements index |
     elements := self elements.
     index := self newIndex build: elements.
-    { self keySpec. set = 'people' ifTrue: [PBKeySpec path: 'id'] ifFalse: [PBKeySpec path: 'zz_contract_foreign_path'] }
-      inject: nil into: [:failure :spec |
-        failure ifNil: [self orderedIteration: index spec: spec over: elements]]].
+    (index supportsOrder: (PBKeySpec path: 'zz_contract_foreign_path'))
+      ifTrue: ['the index claims to order by the foreign path']
+      ifFalse: [self orderedIteration: index spec: self keySpec over: elements]].
 
 Contract >> orderedIteration: index spec: aKeySpec over: elements
   | up down ups downs |
@@ -315,14 +351,16 @@ fails := OrderedCollection new.
       checks do: [:check | | contract failure |
         contract := Contract kind: k set: s seed: seed.
         failure := contract perform: check.
-        failure isNil ifFalse: [fails add: contract label , ' ' , check , ': ' , failure]]]]].
+        failure isNil ifFalse: [fails add: contract label , ' ' , check , ': ' , failure printString]]]]].
 fails do: [:each | ('FAIL ' , each) displayNl].
 c that: 'the whole contract holds for PBEqualityIndex and PBRangeIndex, on records and values, every seed'
   is: fails size equals: 0.
 
-"test_contract_rejects_broken_index: proto_db's table of (defect, check)."
+"test_contract_rejects_broken_index: proto_db's table of (defect, check), less its
+ check_collections rows (check (f) is qry_prop_equals_scan.st's). A defect is rejected only by a
+ check's own failure String (a PBCorruptionError's included), never by another error."
 teeth := {
-  { NoopRemoveIndex. #mutationSequence }. { NoopRemoveIndex. #hookEquivalences }.
+  { NoopRemoveIndex. #mutationSequence }. { NoopRemoveIndex. #persistence }.
   { DroppingPlanIndex. #planMatchesScan }. { DroppingPlanIndex. #mutationSequence }. { DroppingPlanIndex. #persistence }.
   { PathBlindIndex. #unsupportedRaises }. { LenientPlanIndex. #unsupportedRaises }.
   { MutatingIndex. #hooksDoNotMutate }. { ContentKeepingBuildIndex. #hookEquivalences }.
@@ -330,7 +368,7 @@ teeth := {
   { WrongOrderIndex. #orderedIteration }. { UnstableOrderIndex. #orderedIteration }. { OrderClaimingIndex. #orderedIteration } }.
 caught := teeth select: [:pair |
   seeds anySatisfy: [:seed | sets anySatisfy: [:s |
-    ((Contract kind: pair first set: s seed: seed) perform: pair last) notNil]]].
+    ((Contract kind: pair first set: s seed: seed) perform: pair last) isString]]].
 (teeth reject: [:pair | caught includes: pair]) do: [:pair |
   ('NOT CAUGHT ' , pair first name , ' by ' , pair last) displayNl].
 c that: 'every planted defect is rejected by the check aimed at it' is: caught size equals: teeth size.

@@ -14,6 +14,10 @@
 # must be one of the table's figures, so a new hand-computed figure fails until it is tied to a key.
 # Figures are corrected from the generated output, never by hand. The plan each tiny collection
 # gets (the text says the planner scans one element and looks two up) is checked too.
+# Limits: coverage enforces only figures written with a decimal point; an integer figure (1200,
+# 1261) is checked only when an entry ties it, so a new hand-written integer passes unnoticed. And a
+# figure shown with fewer decimals passes when the value rounds to it ('2.6' for 2.585), by design:
+# the text may round, but never to another number.
 # Once examples/queries/reading_plans.st exists (Task 8 moves it out of pending/), its literal
 # figures are checked by the same entries and the program is run: its last line must be its EXPECT
 # line, so protoBaseST's planner computes the same figures. Until then only the text is checked.

@@ -67,7 +67,7 @@ IP15), answering the plan classes of plans.st:
   plan: aTerm        a PBIndexPlan: an IndexLookup ('==', 'in', '?N'), an IndexRange ('?!N'
                      and the range operators) or an IndexComplement ('!='); with rank access
                      (windowFrom:to:, exactRows) when the index is weighted
-  supportsOrder: aKeySpec, orderedPlan: aKeySpec descending: aBoolean
+  supportsOrder: aKeySpec, orderedPlan: aKey descending: aBoolean
                      PBRangeIndex only: every occurrence in key order (IndexOrderedScan),
                      descending its exact reverse
   estimate: and plan: of a term the index does not support, and orderedPlan:descending: of
@@ -282,13 +282,16 @@ PBIndex >> plan: aTerm
 PBIndex >> supportsOrder: aKeySpec
   ^ false.
 
-"Every stored occurrence in the order of aKeySpec, descending when aBoolean (a Boolean, else
- PBValidationError), as a PBIndexPlan (base.py ordered_plan with plans.py ordered_index_scan's
- checks): PBNotSupportedError unless supportsOrder: aKeySpec."
-PBIndex >> orderedPlan: aKeySpec descending: aBoolean
+"Every stored occurrence in the order of aKey, descending when aBoolean, as a PBIndexPlan (base.py
+ ordered_plan with plans.py ordered_index_scan's checks, in its order): aKey is a PBKeySpec or a
+ term path (PBKeySpec forTermPath:, PBValidationError for anything else); then aBoolean must be a
+ Boolean (PBValidationError); then PBNotSupportedError unless supportsOrder: the key spec."
+PBIndex >> orderedPlan: aKey descending: aBoolean
+  | spec |
+  spec := (aKey isClassObject not and: [aKey isKindOf: PBKeySpec]) ifTrue: [aKey] ifFalse: [PBKeySpec forTermPath: aKey].
   (aBoolean == true or: [aBoolean == false]) ifFalse: [
     ^ PBValidationError signal: 'descending must be a Boolean, not ' , (PBKeySpec _repr: aBoolean)].
-  (self supportsOrder: aKeySpec) ifFalse: [^ self _cannotOrderBy: aKeySpec].
+  (self supportsOrder: spec) ifFalse: [^ self _cannotOrderBy: spec].
   ^ self _orderedPlan: aBoolean.
 
 "The refusal of an order this index does not offer, for every kind: plans.py ordered_index_scan's

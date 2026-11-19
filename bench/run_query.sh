@@ -18,8 +18,9 @@
 # implementation must report the same work (rows, queries, plan and checksum) as proto_db's first
 # run of the unit; the build and fold units of one M2 size must report the same rows, queries and
 # checksum, and so must the two forced plans of a P2 point and P3's two plans; P units also carry
-# model= (the plan the planner chooses) in their work, and their MODEL lines (the model costs, from
-# proto_db's and protoBaseST's first runs) are printed, never compared; anything else is a failure (exit 1), and the runner prints 'verified' only when all
+# model= (the plan the planner chooses) in their work, and their MODEL lines (the model costs of the
+# plans compared, in thousandths, rounded) must equal proto_db's first run's too, and are printed;
+# anything else is a failure (exit 1), and the runner prints 'verified' only when all
 # agree. Timings are reported as the minimum and the median over the runs, never asserted, with
 # each implementation's peak resident set (the largest over its runs of the unit, /usr/bin/time).
 #
@@ -131,6 +132,9 @@ for ((r = 1; r <= RUNS; r++)); do
             [[ -s "$out.work" ]] || fail "$impl $unit run $r reported no work"
             cmp -s "$out.work" "$dir/py.1.work" || {
                 diff "$dir/py.1.work" "$out.work"; fail "$impl $unit run $r: the work differs from proto_db's"; }
+            grep '^MODEL ' "$out" | sed 's/ impl=[a-z]*//' > "$out.model"
+            cmp -s "$out.model" "$dir/py.1.model" || {
+                diff "$dir/py.1.model" "$out.model"; fail "$impl $unit run $r: the model costs differ from proto_db's"; }
         done
     done
 done

@@ -2,17 +2,24 @@
  tests/unit/test_index_contract.py at v2.0.0rc4, its broken ScanIndex variants), each a subclass of
  a correct index kind with one hook broken, used by tests/unit/idx_contract_plans.st to prove that
  the contract has teeth: each must be rejected by the check aimed at its defect. A helper: nothing
- here runs on import. The class comments name proto_db's variant each one plants."
+ here runs on import but the registration of the plants' type names (tests.qplants.<class>), so
+ a saved plant loads as itself. The class comments name proto_db's variant each one plants."
 Import from: 'protobase'.
 
 "NoopRemoveIndex: withRemoved: answers an index with unchanged content."
 PBEqualityIndex subclass: #NoopRemoveIndex.
+
+NoopRemoveIndex class >> typeName
+  ^ 'tests.qplants.NoopRemoveIndex'.
 
 NoopRemoveIndex >> withRemoved: anElement
   ^ self.
 
 "DroppingPlanIndex: plan: silently drops the first match."
 PBEqualityIndex subclass: #DroppingPlanIndex.
+
+DroppingPlanIndex class >> typeName
+  ^ 'tests.qplants.DroppingPlanIndex'.
 
 DroppingPlanIndex >> plan: aTerm
   | inner |
@@ -27,11 +34,17 @@ DroppingPlanIndex >> plan: aTerm
  with the index's own key."
 PBEqualityIndex subclass: #PathBlindIndex.
 
+PathBlindIndex class >> typeName
+  ^ 'tests.qplants.PathBlindIndex'.
+
 PathBlindIndex >> supports: aTerm
   ^ self class supportedOperators includes: aTerm op.
 
 "LenientPlanIndex: plan: on an unsupported term answers an empty plan instead of refusing."
 PBEqualityIndex subclass: #LenientPlanIndex.
+
+LenientPlanIndex class >> typeName
+  ^ 'tests.qplants.LenientPlanIndex'.
 
 LenientPlanIndex >> plan: aTerm
   (self supports: aTerm) ifFalse: [
@@ -44,6 +57,9 @@ LenientPlanIndex >> plan: aTerm
  what a broken subclass could do."
 PBEqualityIndex subclass: #MutatingIndex.
 
+MutatingIndex class >> typeName
+  ^ 'tests.qplants.MutatingIndex'.
+
 MutatingIndex >> withAdded: anElement
   | added |
   added := super withAdded: anElement.
@@ -52,6 +68,9 @@ MutatingIndex >> withAdded: anElement
 
 "ContentKeepingBuildIndex: build: folds onto the receiver instead of an empty index."
 PBEqualityIndex subclass: #ContentKeepingBuildIndex.
+
+ContentKeepingBuildIndex class >> typeName
+  ^ 'tests.qplants.ContentKeepingBuildIndex'.
 
 ContentKeepingBuildIndex >> build: aCollection
   | index |
@@ -62,17 +81,26 @@ ContentKeepingBuildIndex >> build: aCollection
 "ForgetfulEmptyIndex: empty answers the receiver, content kept."
 PBEqualityIndex subclass: #ForgetfulEmptyIndex.
 
+ForgetfulEmptyIndex class >> typeName
+  ^ 'tests.qplants.ForgetfulEmptyIndex'.
+
 ForgetfulEmptyIndex >> empty
   ^ self.
 
 "WrongOrderIndex: a descending ordered scan answers the ascending order."
 PBRangeIndex subclass: #WrongOrderIndex.
 
+WrongOrderIndex class >> typeName
+  ^ 'tests.qplants.WrongOrderIndex'.
+
 WrongOrderIndex >> orderedPlan: aKeySpec descending: aBoolean
   ^ super orderedPlan: aKeySpec descending: false.
 
 "UnstableOrderIndex: orders by a hash of the key instead of its order key."
 PBRangeIndex subclass: #UnstableOrderIndex.
+
+UnstableOrderIndex class >> typeName
+  ^ 'tests.qplants.UnstableOrderIndex'.
 
 UnstableOrderIndex >> orderedPlan: aKeySpec descending: aBoolean
   | rows spec |
@@ -85,5 +113,11 @@ UnstableOrderIndex >> orderedPlan: aKeySpec descending: aBoolean
 "OrderClaimingIndex: claims ordered iteration on every key but cannot provide it."
 PBEqualityIndex subclass: #OrderClaimingIndex.
 
+OrderClaimingIndex class >> typeName
+  ^ 'tests.qplants.OrderClaimingIndex'.
+
 OrderClaimingIndex >> supportsOrder: aKeySpec
   ^ true.
+
+"Registered under names of their own, so a saved plant loads as itself (check (c))."
+PBTypeRegistry register: NoopRemoveIndex; register: DroppingPlanIndex; register: PathBlindIndex; register: LenientPlanIndex; register: MutatingIndex; register: ContentKeepingBuildIndex; register: ForgetfulEmptyIndex; register: WrongOrderIndex; register: UnstableOrderIndex; register: OrderClaimingIndex.
