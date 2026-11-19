@@ -496,81 +496,86 @@ AuditFamilies class >> floorKeys
  strict run), bisected to two commits that change the core's schedules, never its safety (no
  violation in any part at any of them): f38159e/62fb443 (R149/R149a, the renewal back-off and
  the fenced term) and 4f9b095 (Task 22b: a re-commit's base is read by its build, no longer
- probed, R233); Tasks 23 to 29 changed none of the counts. A run that moves to checkSafe, or a
- commit no longer acknowledged, fails its part."
+ probed, R233); Tasks 23 to 29 changed none of the counts. Re-measured in Task 31 (the whole
+ audit at 02d9826, task-31-report.md): 36 parts dropped by 1 to 7 commits (four by one strict
+ run), 21 rose, 14 kept, 0 violations in every part; the cause is 02d9826 (the simulator hands
+ the acceptor's reports to the dispatcher in the order handed, as the real shell does), which
+ changes every schedule: at 63005b7 on the same protoST the parts reproduce the old floors
+ exactly (acquireTimeout skewed 1: 523, renewal tenfold 1: 65). A run that moves to checkSafe,
+ or a commit no longer acknowledged, fails its part."
 AuditFamilies class >> floors
   ^ {
-    { 'acquireTimeout skewed 1'. 60. 523 }.
-    { 'acquireTimeout tenfold 1'. 60. 523 }.
-    { 'acquireTimeout tenth 1'. 60. 459 }.
+    { 'acquireTimeout skewed 1'. 60. 522 }.
+    { 'acquireTimeout tenfold 1'. 60. 522 }.
+    { 'acquireTimeout tenth 1'. 60. 458 }.
     { 'backoff skewed 1'. 60. 457 }.
-    { 'backoff tenfold 1'. 60. 461 }.
+    { 'backoff tenfold 1'. 60. 463 }.
     { 'backoff tenth 1'. 29. 218 }.
     { 'backoff tenth 2'. 29. 215 }.
     { 'driftMargin skewed 1'. 21. 221 }.
-    { 'driftMargin skewed 2'. 22. 208 }.
-    { 'driftMargin tenth 1'. 30. 242 }.
-    { 'driftMargin tenth 2'. 30. 233 }.
-    { 'gatherAttempts skewed 1'. 60. 461 }.
-    { 'gatherAttempts tenfold 1'. 60. 460 }.
-    { 'gatherAttempts tenth 1'. 60. 462 }.
-    { 'idleEnd skewed 1'. 60. 463 }.
-    { 'idleEnd tenfold 1'. 60. 462 }.
-    { 'idleEnd tenth 1'. 60. 465 }.
-    { 'leaseDuration skewed 1'. 60. 459 }.
+    { 'driftMargin skewed 2'. 21. 212 }.
+    { 'driftMargin tenth 1'. 30. 241 }.
+    { 'driftMargin tenth 2'. 30. 232 }.
+    { 'gatherAttempts skewed 1'. 60. 460 }.
+    { 'gatherAttempts tenfold 1'. 60. 459 }.
+    { 'gatherAttempts tenth 1'. 60. 461 }.
+    { 'idleEnd skewed 1'. 60. 462 }.
+    { 'idleEnd tenfold 1'. 60. 461 }.
+    { 'idleEnd tenth 1'. 60. 466 }.
+    { 'leaseDuration skewed 1'. 60. 457 }.
     { 'leaseDuration tenfold 1'. 20. 155 }.
     { 'leaseDuration tenfold 2'. 19. 146 }.
-    { 'leaseDuration tenfold 3'. 19. 154 }.
-    { 'leaseDuration tenth 1'. 60. 465 }.
-    { 'ownerIdleRelease skewed 1'. 30. 239 }.
-    { 'ownerIdleRelease skewed 2'. 30. 227 }.
-    { 'ownerIdleRelease tenfold 1'. 60. 463 }.
-    { 'ownerIdleRelease tenth 1'. 60. 475 }.
-    { 'permissionDeadline skewed 1'. 60. 464 }.
-    { 'permissionDeadline tenfold 1'. 26. 217 }.
+    { 'leaseDuration tenfold 3'. 19. 153 }.
+    { 'leaseDuration tenth 1'. 60. 468 }.
+    { 'ownerIdleRelease skewed 1'. 30. 240 }.
+    { 'ownerIdleRelease skewed 2'. 30. 226 }.
+    { 'ownerIdleRelease tenfold 1'. 60. 462 }.
+    { 'ownerIdleRelease tenth 1'. 60. 476 }.
+    { 'permissionDeadline skewed 1'. 60. 468 }.
+    { 'permissionDeadline tenfold 1'. 25. 210 }.
     { 'permissionDeadline tenfold 2'. 26. 202 }.
-    { 'permissionDeadline tenth 1'. 60. 469 }.
-    { 'permitFloor skewed 1'. 60. 463 }.
-    { 'permitFloor tenth 1'. 60. 463 }.
-    { 'persist skewed 1'. 60. 463 }.
-    { 'persist tenfold 1'. 60. 463 }.
-    { 'persist tenth 1'. 60. 463 }.
-    { 'renewBackoff skewed 1'. 60. 463 }.
-    { 'renewBackoff tenfold 1'. 60. 462 }.
-    { 'renewBackoff tenth 1'. 60. 463 }.
-    { 'renewal skewed 1'. 18. 148 }.
+    { 'permissionDeadline tenth 1'. 60. 467 }.
+    { 'permitFloor skewed 1'. 60. 462 }.
+    { 'permitFloor tenth 1'. 60. 462 }.
+    { 'persist skewed 1'. 60. 462 }.
+    { 'persist tenfold 1'. 60. 462 }.
+    { 'persist tenth 1'. 60. 462 }.
+    { 'renewBackoff skewed 1'. 60. 462 }.
+    { 'renewBackoff tenfold 1'. 60. 461 }.
+    { 'renewBackoff tenth 1'. 60. 462 }.
+    { 'renewal skewed 1'. 19. 152 }.
     { 'renewal skewed 2'. 20. 153 }.
-    { 'renewal skewed 3'. 19. 155 }.
-    { 'renewal tenfold 1'. 8. 65 }.
-    { 'renewal tenfold 2'. 4. 48 }.
-    { 'renewal tenfold 3'. 6. 59 }.
+    { 'renewal skewed 3'. 19. 154 }.
+    { 'renewal tenfold 1'. 8. 63 }.
+    { 'renewal tenfold 2'. 6. 48 }.
+    { 'renewal tenfold 3'. 8. 59 }.
     { 'renewal tenfold 4'. 6. 54 }.
-    { 'renewal tenfold 5'. 6. 49 }.
-    { 'renewal tenfold 6'. 5. 38 }.
-    { 'renewal tenfold 7'. 7. 58 }.
-    { 'renewal tenfold 8'. 5. 49 }.
-    { 'renewal tenth 1'. 60. 457 }.
-    { 'requestTimeout skewed 1'. 60. 468 }.
-    { 'requestTimeout tenfold 1'. 30. 237 }.
+    { 'renewal tenfold 5'. 5. 47 }.
+    { 'renewal tenfold 6'. 5. 44 }.
+    { 'renewal tenfold 7'. 6. 57 }.
+    { 'renewal tenfold 8'. 5. 48 }.
+    { 'renewal tenth 1'. 60. 456 }.
+    { 'requestTimeout skewed 1'. 60. 469 }.
+    { 'requestTimeout tenfold 1'. 30. 239 }.
     { 'requestTimeout tenfold 2'. 30. 240 }.
     { 'requestTimeout tenth 1'. 60. 470 }.
     { 'retryHold skewed 1'. 60. 468 }.
-    { 'retryHold tenfold 1'. 60. 466 }.
+    { 'retryHold tenfold 1'. 60. 468 }.
     { 'retryHold tenth 1'. 60. 473 }.
     { 'sendReserve skewed 1'. 60. 473 }.
-    { 'sendReserve tenth 1'. 60. 476 }.
-    { 'startupGrace skewed 1'. 60. 461 }.
-    { 'startupGrace tenfold 1'. 60. 463 }.
-    { 'startupGrace tenth 1'. 60. 460 }.
-    { 'straggle skewed 1'. 60. 466 }.
-    { 'straggle tenfold 1'. 60. 465 }.
-    { 'straggle tenth 1'. 60. 456 }.
-    { 'turnSilence skewed 1'. 60. 466 }.
-    { 'turnSilence tenfold 1'. 60. 461 }.
-    { 'turnSilence tenth 1'. 60. 463 }.
-    { 'wakeSpread skewed 1'. 60. 450 }.
-    { 'wakeSpread tenfold 1'. 60. 457 }.
-    { 'wakeSpread tenth 1'. 60. 447 } }.
+    { 'sendReserve tenth 1'. 60. 477 }.
+    { 'startupGrace skewed 1'. 60. 460 }.
+    { 'startupGrace tenfold 1'. 60. 462 }.
+    { 'startupGrace tenth 1'. 60. 461 }.
+    { 'straggle skewed 1'. 60. 465 }.
+    { 'straggle tenfold 1'. 60. 466 }.
+    { 'straggle tenth 1'. 60. 459 }.
+    { 'turnSilence skewed 1'. 60. 465 }.
+    { 'turnSilence tenfold 1'. 60. 460 }.
+    { 'turnSilence tenth 1'. 60. 465 }.
+    { 'wakeSpread skewed 1'. 60. 452 }.
+    { 'wakeSpread tenfold 1'. 60. 459 }.
+    { 'wakeSpread tenth 1'. 60. 455 } }.
 
 "The parts whose floors are not measured yet: { 'row mode part'. why }. Each is declared in
  floors with { 0. 0 }; the index (sim_timer_audit.st check (8)) refuses a floor of 0 on any part

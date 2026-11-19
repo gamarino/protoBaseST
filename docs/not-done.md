@@ -71,10 +71,20 @@ Not tested, or not proven:
   caller's single wait on its commit's `Future` still does, while the worker serves other actors
   (K23 in [deviations.md](deviations.md#known-protost-limits)). Hot keys were measured with four
   writers per process and at most three processes, nothing heavier.
-- **Cluster mode, not yet proven.** The timer audit (every timer at a tenth, ten times and
-  skewed, 3420 simulator runs) and the long soak (5000 seeds per family, `PBST_SIM_SEEDS`) run
-  only in the final verification (Task 30); until then the claim that timers decide liveness
-  only rests on the default seeds and the audit's earlier per-part runs. The real-process tests
+- **Cluster mode, verified in a simulator, not proven.** In the final verification (Tasks 30
+  and 31) the long soak ran every simulator family at commit 02d9826 on protoCore 3.6.0 and protoST
+  0.12.0: sim_harness, sim_base_choice, sim_rejoin, sim_base_seeds_a, sim_base_seeds_b and
+  sim_grants at 5000 seeds each, sim_leases_terms_a and sim_leases_terms_b at 2000, sim_acceptance
+  and sim_permits at 1000, sim_round_rules at 400 and sim_leases at 100 (five families one after
+  another, then the other seven at once; each run is deterministic per seed), and every one passed
+  (`PBST_SIM_SEEDS`). An earlier soak (Task 30) failed one check of sim_rejoin at 7 of its 5000
+  seeds, with no safety violation: the simulator let the acceptor's reports reach the dispatcher out
+  of order, which no real shell does. It was fixed in 02d9826 and the whole soak ran again. Then the
+  full timer audit (81 parts, 3420 simulator runs) ran twice at the final code: the first run had no
+  violation but missed 36 floors by 1 to 7 commits, because 02d9826 changes every schedule
+  (bisected), so the floors were re-measured from it (7cbac4a); the second run passed whole at
+  7cbac4a in 2 h 22 min, serially. So the claim that timers decide liveness only rests on those
+  seeds and that audit, in one simulator. The real-process tests
   (Tasks 27 and 28: `kill -9` of the owner, of a voter, of a holder at three points of its
   round, of the whole cluster, and a lost log) ran three times each with drawn seeds: strong
   evidence, not a proof. Nothing ran on several hosts, on a network file system, with more than

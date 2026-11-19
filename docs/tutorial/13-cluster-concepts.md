@@ -8,8 +8,9 @@ Previous: [12. What is refused, and why](12-refusals.md). Next: [14. A three-nod
 > tested: the protocol core, the simulator that tests it, the transports, the coordinator shell,
 > the shared tier, commits, reads and the persister, real processes killed with `kill -9`, and a
 > first measurement (chapter 16). The final verification of the
-> [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md) (Task 30: the full timer audit
-> and the long soak) has not run yet. This chapter explains the design; chapters 14 to 16 run it.
+> [cluster plan](../superpowers/plans/2026-11-13-cluster-mode.md) has run: the long soak and the
+> full timer audit passed at the final code (chapter 16 gives the seed counts). This chapter
+> explains the design; chapters 14 to 16 run it.
 
 This chapter has no new API to learn. It is the reasoning that the next three chapters assume.
 Every rule here is `proto_db`'s: protoBaseST follows its cluster protocol rule by rule, including

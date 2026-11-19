@@ -135,10 +135,11 @@ The claim that timers decide only liveness is meant to be tested, not just state
 tenth of its default, at ten times, and skewed between members, 3420 simulator runs in all, and the
 safety checker must pass every one. Its state today, honestly:
 
-- the audit's per-part figures were measured when it was built; since the renewal back-off
-  changed, the full run is not repeated task by task: it runs once, in the final verification
-  phase (Task 30), on the commit that is to be released;
-- the *renewBackoff* parts have no measured floors yet: they are measured in Task 30;
+- in the final verification the full timer audit (81 parts, 3420 simulator runs) ran twice at the
+  final code: the first run had no violation but missed 36 floors by 1 to 7 commits, because 02d9826
+  changes every schedule (bisected), so the floors were re-measured from it (7cbac4a); the second
+  run passed whole at 7cbac4a in 2 h 22 min, serially;
+- the *renewBackoff* parts got their floors in Task 30, re-measured with the others in Task 31;
 - the *persist* row tests nothing: the persister is a shell outside the simulator (Task 25), so no
   rule reads its knobs and its runs equal the runs at the defaults; `cluster_persister.st` tests
   the persister itself.
@@ -333,10 +334,16 @@ Be as sceptical as the design is:
 - `proto_db`'s 298 cluster tests at `v2.0.0rc4` each have a row in
   `tests/unit/cluster_checklist.tsv`: 223 ported, 75 not applicable (tiered storage, DEPTH 1, a
   Python-only API), none deferred. A ported row is a check of the same property, not the same code.
-- **The full timer audit and the long soak run only in the final verification (Task 30)**, which
-  also measures the *renewBackoff* floors (above); the soak raises every simulator family to 5000
-  seeds. Until then, "timers decide liveness only" rests on the default seeds and the audit's
-  earlier runs.
+- **The final verification passed, in a simulator:** the long soak ran every simulator family at
+  commit 02d9826 on protoCore 3.6.0 and protoST 0.12.0: sim_harness, sim_base_choice, sim_rejoin,
+  sim_base_seeds_a, sim_base_seeds_b and sim_grants at 5000 seeds each, sim_leases_terms_a and
+  sim_leases_terms_b at 2000, sim_acceptance and sim_permits at 1000, sim_round_rules at 400 and
+  sim_leases at 100 (five families one after another, then the other seven at once; each run is
+  deterministic per seed), and every one passed. An earlier soak (Task 30) failed one check of
+  sim_rejoin at 7 of its 5000 seeds, with no safety violation: the simulator let the acceptor's
+  reports reach the dispatcher out of order, which no real shell does. It was fixed in 02d9826 and
+  the whole soak ran again. The timer audit passed as described above. "Timers decide liveness
+  only" rests on those seeds, not on a proof.
 - The figures above are one machine's, on one workload shape, with at most three members. Failover
   time and latency per commit were not measured, and nothing heavier than four writers per
   process was tried.
