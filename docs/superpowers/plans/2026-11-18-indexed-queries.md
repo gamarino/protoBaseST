@@ -678,7 +678,7 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
     predicate: aBlockPredicate`; `PBUnion class >> withAll:`; `PBIntersect class >> withAll:`;
     `PBProject class >> source: aPlan fields: anArrayOrBlock`; `PBSort class >> source: aPlan
     keys: anArrayOfSortKeys`; `PBLimit class >> source: aPlan limit: n offset: m`;
-    `PBCount class >> source: aPlan`; `PBDistinct class >> source: aPlan`;
+    `PBCountPlan class >> source: aPlan` (renamed from PBCount: that name is the cluster counter effect; controller ruling at Task 6); `PBDistinct class >> source: aPlan`;
     `PBSortKey class >> key: aPathOrFieldOrBlock descending: aBoolean` (IP14).
     Row identity for `Union` / `Intersect` / `Distinct` is `element_identity` (`base.py:22-53`).
   - On indexes: `supports: aTerm`, `estimate: aTerm` → `PBEstimate` (D30, `keyed.py:596-622`),
