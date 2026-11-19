@@ -237,6 +237,7 @@ As built:
 | 29 | The cluster benchmark runs each member as a process of its own on loopback, beside a standalone run of the same workload; the root-independent split is measured by a benchmark-only subclass of the round (`BenchRound`), not by a new product statistic; no `proto_db` figure is shown, since `proto_db`'s cluster was not run on the same shape. | Compare like with like; a measurement task changes no product code. | A `proto_db` comparison needs its own driver. |
 | 29 | The timer table of the reference is generated from `PBClusterConfig timerTable` and guarded (`tests/docs/timer_table_sync.sh`). | A copied table goes stale. | None. |
 | 30 | The timer audit's row `persist` stays outside the simulator audit: its only reader is the persister, a shell actor the simulator does not run; the declaration names that source and class, and the index fails on any other reader. `AcceptFamilies powerLoss:` keeps its between-terms schedule and gains `powerLossInTerm:` (crashes inside a term, then one more commit). The audit's floors are re-measured; the drops are named (R149/R149a, and Task 22b's base read by the build). | The persister is `proto_db`'s `PlainTier.persist`, beside the coordinator; `proto_db`'s power-loss tests keep their load running after the revive. | The persister's timers are tested only where it runs (`cluster_persister.st`, `tests/cluster`). |
+| Queries 4b | **(maintainer, 2026-11-19)** An entry's build error of any class fails only that commit in a cluster round too (`PBCoordinatorCore >> roundBuildFailed:in:now:`), a documented deviation from rc4's `_permit_round`, which fails the whole round on an error that is not a `ProtoDBError`. | One rule in every mode: standalone and in a group commit rc4 already fails only the commit whose build raised (`_standalone_round`, review M2); an extractor's exception must not fail its round-mates in a cluster only. Nothing is sent before every build, so failing one entry is safe. An unsent proposal asks `proto_db` to adopt the rule. | A program that relied on a round-mate's build error failing its own cluster commit; none found. Reverting is one branch of the core and case 30 of `tests/unit/cluster_round_rules.st`. |
 
 ### Known, not adopted: `proto_db` D62 (the runtime registry, format 5)
 
@@ -278,16 +279,18 @@ Still open (checked against `v2.0.0rc4`):
   reach a member's port can send it any message, so a cluster must run on a trusted network.
   *Why:* the assumption is real and unstated; operators read the guide, not the code.
   *Precedent:* protoBaseST states it, and offers optional HMAC authentication (CC4).
-- **IQ1 (Task 4b): one rule for an unexpected build error in both commit paths.** *Not sent;
-  a maintainer question.* *Proposal:* `_permit_round` (`transactions.py:1660-1717` at rc4) should
-  fail only the entry whose build raised an error that is not a `ProtoDBError`, as
-  `_standalone_round` does, instead of failing every unfinished entry with a copy and re-raising.
-  *Why:* the build runs application code, an extractor in a merge onto an indexed current; today
-  one failing extractor fails only its own commit standalone and in a group commit, but every
-  commit of the round in a cluster, so the same program behaves differently in the two modes.
-  Nothing is sent before the builds of a round, so failing one entry alone is safe. *Precedent:*
-  none; protoBaseST follows rc4 (`tests/unit/idx_merge_extractor.st` case (c),
-  `tests/unit/cluster_round_rules.st` case 30).
+- **IQ1 (Task 4b): one rule for an unexpected build error in both commit paths.** *Not sent.*
+  *Proposal:* rc4's cluster round should adopt the per-commit rule: `_permit_round`
+  (`transactions.py:1660-1717` at rc4) should fail only the entry whose build raised an error that
+  is not a `ProtoDBError`, as `_standalone_round` does (`transactions.py:1149-1157`), instead of
+  failing every unfinished entry with a copy and re-raising. *Why:* the build runs application
+  code, an extractor in a merge onto an indexed current; under rc4 one failing extractor fails
+  only its own commit standalone and in a group commit, but every commit of the round in a
+  cluster, so the same program behaves differently in the two modes. Nothing is sent before the
+  builds of a round, so failing one entry alone is safe. *Precedent:* protoBaseST does it, by the
+  maintainer's decision of 2026-11-19 (`PBCoordinatorCore >> roundBuildFailed:in:now:`;
+  `tests/unit/idx_merge_extractor.st` case (c), `tests/unit/cluster_round_rules.st` case 30;
+  [deviations.md](deviations.md#cluster-mode)).
 - **CC6: bind the node id in the acceptor log (lesson L27), for Phase D.** *Proposal:* record the
   node id in the acceptor log (a new entry kind, or a header field at the next log format), and
   refuse to open a log whose id is not the node's. *Why:* over shared storage the file name

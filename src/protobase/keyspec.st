@@ -29,8 +29,8 @@ declared when it is registered is its identity across processes (proto_db R101):
 it answers for some element needs a new name or a new version. During a merge it runs in the
 commit's build (the publisher, or the cluster round), and an exception it raises passes through
 extract: unchanged (ruling IQ1, plan call IP2: exactly as proto_db's KeySpec.extract, which does
-not wrap it): it fails only that commit, standalone and in a group commit; in a cluster round, as
-in proto_db rc4, the whole round fails.
+not wrap it): it fails only that commit, standalone, in a group commit and in a cluster round
+(in the cluster a deviation from proto_db rc4, docs/deviations.md).
 
 Messages follow proto_db's, with protoST's names (String for str, nil for None, a block for a
 function); a value is quoted as Python's repr does for a String (PBCodec repr:)."

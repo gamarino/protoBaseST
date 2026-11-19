@@ -751,11 +751,13 @@ The spec was approved on 2026-11-18 with these answers to the open questions it 
 | IQ7 | Propose a portable plan digest to `proto_db`. | **Stays a proposal; nothing is sent upstream.** | The same. Pager tokens stay deferred. |
 | IQ8 | Release vehicle. | **0.3.0, after 0.2.0**, as proposed (IC10). | `CHANGELOG.md` gets a 0.3.0 section. |
 
-*Correction at Task 4b (IQ1):* rc4's cluster round fails the whole round on a non-ProtoDBError
-build error (`_permit_round`, `transactions.py:1660-1717`, catches only `ProtoConflictError` and
-`ProtoDBError` per entry); protoBaseST follows rc4. So an extractor's exception fails only its own
-commit standalone and in a group commit, and the whole round in a cluster. The inconsistency is a
-maintainer question and an unsent proposal (`decisions.md`, "Proposals to `proto_db`").
+*Correction at Task 4b (IQ1), then the maintainer's decision (2026-11-19):* rc4's cluster round
+fails the whole round on a non-ProtoDBError build error (`_permit_round`,
+`transactions.py:1660-1717`, catches only `ProtoConflictError` and `ProtoDBError` per entry). The
+maintainer chose per-commit failure in the cluster as well: an extractor's exception fails only its
+own commit standalone, in a group commit and in a cluster round, as rc4's standalone round does
+(`transactions.py:1149-1157`). In the cluster this is a documented deviation (`deviations.md`,
+cluster mode) and an unsent proposal (`decisions.md`, "Proposals to `proto_db`").
 
 **Controller rulings 2026-11-18** (on gaps the documentation drafts found):
 

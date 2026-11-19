@@ -1,23 +1,24 @@
 "EXPECT: ok 4"
 "Indexed queries, plan Task 4b, ruling IQ1 (spec 9.2, plan call IP2, Review Focus 1, controller
- ruling CR8, corrected at Task 4b review): an extractor runs inside the commit, in the merge the
- build makes, and an exception it raises passes through unchanged, exactly as proto_db rc4:
- standalone and in a group commit it fails only the commit whose merge ran it (KeySpec.extract,
- _standalone_round: one commit's error, even an unexpected one, is that commit's alone); in a
- cluster round it fails the whole round (_permit_round catches only ProtoConflictError and
- ProtoDBError per entry; any other error fails every unfinished entry with a copy of it).
+ ruling CR8; the maintainer's decision of 2026-11-19): an extractor runs inside the commit, in
+ the merge the build makes, and an exception it raises passes through unwrapped and fails only
+ the commit whose merge ran it, standalone, in a group commit and in a cluster round. Standalone
+ and in a group commit this is proto_db rc4's rule (KeySpec.extract, _standalone_round: one
+ commit's error, even an unexpected one, is that commit's alone); in a cluster round it is a
+ documented deviation, since rc4's _permit_round fails the whole round on an error that is not a
+ ProtoDBError (docs/deviations.md).
 
  The root 'd' is a PBDictionary of five records with an equality index on the extractor 'flaky',
  which raises ZeroDivide for a record whose 'bad' is true (the exception it raised is kept, to
  compare with the one each commit reports) and answers the id otherwise. Unchanged means the
  class and the text the block raised, never a wrapper: protoST's Future wait signals an equal
- exception (same class and text), not the same object, so identity is not what a caller sees. Each writer blind-writes
- 'd' (a new dictionary holding one record; the root is never read), so the extractor runs only
+ exception (same class and text), not the same object, so identity is not what a caller
+ sees. Each writer blind-writes 'd' (a new dictionary holding one record; the root is never read), so the extractor runs only
  when the commit merges that write onto the current version.
  (a) Standalone: the commit of a bad record fails with ZeroDivide, the class and text the block
  raised; nothing of it is in the root; then the next commit succeeds, and its record is indexed
- (two checks). (b) Group commit (D52), one extractor fails: three writers queued one after the other on a storage that
- holds the root lock until the three have saved their atoms, so one round builds the three in
+ (two checks). (b) Group commit (D52), one extractor fails: three writers queued one after
+ the other on a storage that holds the root lock until the three have saved their atoms, so one round builds the three in
  queue order, the middle one's merge running the extractor on its bad record: the first and the
  third commit, their records in the new root, with one publish; the middle one fails with
  the block's ZeroDivide. (c) The cluster round of a one-node cluster (PBClusterRound over an
@@ -25,9 +26,10 @@
  permit is held until the three commits are queued, so they join one round; the lease is 20 s
  with the least drift margin R78b allows, so a permission is believed for 6.6 s and the send
  reserve cannot split the round (R121); the startup grace is 3 s, since its default, lease plus
- margin, would outlast the 30 s permit wait): rc4's outcome, all three commits fail with
- ZeroDivide (class and text), none of their records is in the root, the trace shows one permit and no replicate (one round, nothing sent), and the round
- runner still serves the next round: a fourth commit succeeds. Spaces go to
+ margin, would outlast the 30 s permit wait): only the middle commit fails, with ZeroDivide
+ (class and text); the first and the third commit, their records in the root; the trace shows one
+ permit and one replicate (one round); and the round runner still serves the next round: a fourth
+ commit succeeds. Spaces go to
  out/idx_merge_extractor (git ignores out/), a new directory per run."
 Import from: 'protobase'.
 Import from: '_check'.
@@ -124,7 +126,7 @@ c that: 'group commit: one extractor fails: only the commit whose merge ran it f
   equals: { { 'ok'. #('ZeroDivide' 'ZeroDivide'). 'ok' }. true. { 7. #(1 2 3 4 5 10 12). 7. true }. 1 }.
 space close.
 
-"(c) the cluster round of a one-node cluster: rc4's outcome."
+"(c) the cluster round of a one-node cluster: only the failing commit fails (maintainer, 2026-11-19)."
 SeamRound setUp.
 kit := CommitKit ids: #('s0') dir: dir / 'cluster'
   options: (Dictionary new at: #leaseDuration put: 20000; at: #driftMargin put: 13400; at: #startupGrace put: 3000; at: #requestTimeout put: 300; yourself).
@@ -145,9 +147,9 @@ results := writers asArray collect: [:fut | kit settle: fut].
 trace := seam calls: #('permit' 'replicate').
 w := Writer new asActor.
 f := kit settle: (w write: (record value: 23 value: false) in: db).
-c that: 'cluster round: as rc4, the failing extractor fails every commit of the round with its class and text; one round, nothing sent; the next round is served'
+c that: 'cluster round: only the commit whose merge ran the failing extractor fails, with its class and text; the others commit in one round; the next round is served'
   is: { results. (results at: 2) = ok value. trace. f. outcome value: db }
-  equals: { { #('ZeroDivide' 'ZeroDivide'). #('ZeroDivide' 'ZeroDivide'). #('ZeroDivide' 'ZeroDivide') }. true. #('permit').
-    'ok'. { 6. #(1 2 3 4 5 23). 6. true } }.
+  equals: { { 'ok'. #('ZeroDivide' 'ZeroDivide'). 'ok' }. true. #('permit' 'replicate').
+    'ok'. { 8. #(1 2 3 4 5 20 22 23). 8. true } }.
 kit shutdown.
 c report displayNl.

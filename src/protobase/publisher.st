@@ -74,9 +74,8 @@ extractor (PBKeySpec registerExtractor:block:version:), when a merge onto an
 indexed current evaluates it (ruling IQ1, as proto_db, whose KeySpec.extract
 runs it in the commit): its exception, of whatever class, passes through
 unchanged (never wrapped) and is that entry's build error alone (steps 3 and 4),
-so only the commit whose merge ran it fails and the others of the round go on. (In
-a cluster round, as in proto_db rc4, such an error fails the whole round:
-cluster/round.st.)
+so only the commit whose merge ran it fails and the others of the round go on, as
+in a cluster round (cluster/round.st).
 An extractor must be pure and quick: a slow one delays the round, under the root
 lock."
 

@@ -191,15 +191,15 @@ the transaction's intents through the current version's mutators
 ([below](#merges-of-blind-writes)), so the current version's extractors run during the commit's
 build, in the publisher (standalone) or in the round's build (cluster). That is application code in
 the commit, which the publisher otherwise never runs. Ruling IQ1 accepts it, exactly as `proto_db`
-does: **an exception raised by an extractor fails only the commit whose merge ran it, standalone and
-in a group commit; in a cluster round, as in `proto_db` rc4, the whole round fails, and it passes
-through unwrapped.** There is no protoBaseST error class for it and no wrapping, because
+does: **an exception raised by an extractor fails only the commit whose merge ran it, standalone, in
+a group commit and in a cluster round, and it passes through unwrapped.** There is no protoBaseST error class for it and no wrapping, because
 `proto_db`'s `KeySpec.extract` does not wrap either (plan call IP2). The caller of that commit sees
-the block's exception (as a copy: same class, text and fields, not the same object); standalone,
-other commits, before and after it, are not affected. In a cluster round every commit of that
-round fails with it, because `proto_db` rc4's `_permit_round` fails the round on any build error
-that is not a `ProtoDBError`; the inconsistency between the modes is an open maintainer question
-and an unsent proposal ([decisions.md](decisions.md#proposals-to-proto_db)). So an extractor
+the block's exception (as a copy: same class, text and fields, not the same object); other
+commits, before and after it and in the same round, are not affected. In a cluster round this is a
+deviation from `proto_db` rc4, whose `_permit_round` fails the whole round on a build error that is
+not a `ProtoDBError`: the maintainer chose one rule for every mode (2026-11-19;
+[deviations.md](deviations.md#cluster-mode), and an unsent proposal in
+[decisions.md](decisions.md#proposals-to-proto_db)). So an extractor
 that can fail should say in its own message what it was extracting. Outside a merge the same
 exception appears at the mutator call, in the transaction's own thread.
 
@@ -612,8 +612,7 @@ Three consequences follow, each explicit:
   ([deviations.md](deviations.md#m3-a-blind-write-merged-onto-an-indexed-current-standalone-and-in-a-cluster);
   indicative only).
 - **Extractors run in the commit's build** ([above](#extractors-and-their-purity-contract)): an
-  exception fails only that commit, standalone and in a group commit; in a cluster round, as in
-  `proto_db` rc4, the whole round fails.
+  exception fails only that commit, standalone, in a group commit and in a cluster round.
 - **What is still refused.** A merge onto a collection holding a vector index or an index of an
   unknown kind is `PBNotSupportedError`, as any change to it is.
 

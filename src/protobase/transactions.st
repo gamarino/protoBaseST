@@ -670,8 +670,8 @@ PBTransaction >> _sameToken: aToken as: anotherToken
  replay runs its mutators, which maintain its indexes, then the logged index
  definitions (PBIndexedCollection >> rebaseOnto:; an index created by this log
  and concurrently is PBConflictError). An extractor runs here, in the build, and
- its exception passes through unwrapped and fails only this commit (ruling IQ1; in a cluster round,
- as in proto_db rc4, the whole round fails);
+ its exception passes through unwrapped and fails only this commit, standalone, in a group commit
+ and in a cluster round (ruling IQ1);
  a vector index or an index of an unknown kind on aCurrent is PBNotSupportedError."
 PBTransaction >> _merged: aValue onto: aCurrent
   aCurrent == PBTxState missing ifTrue: [^ aValue].

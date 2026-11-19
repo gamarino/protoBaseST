@@ -276,8 +276,9 @@ The merge of the previous sections replays intents through the current version's
 during a merge the publisher runs the current version's extractors. That is application code inside
 the commit, which the publisher otherwise never runs. The maintainer's ruling IQ1 accepts it,
 exactly as `proto_db` does: **an exception raised by an extractor fails only the commit whose merge
-ran it, standalone and in a group commit; in a cluster round, as in `proto_db` rc4, the whole round
-fails** (every commit of the round gets that exception). protoBaseST adds no error class of its
+ran it, standalone, in a group commit and in a cluster round.** (In a cluster round this is the
+maintainer's choice and a deviation from `proto_db` rc4, which fails the whole round; see
+[deviations.md](../deviations.md#cluster-mode).) protoBaseST adds no error class of its
 own and does not wrap it, because `proto_db`'s `KeySpec.extract` does not either
 (`keyspec.py`, `KeySpec.extract`). The caller receives a copy of the exception: the same class,
 text and fields, but not the same object, where `proto_db` raises the object itself
@@ -315,5 +316,5 @@ without a name").
 - An index costs a tree update per write: index what you query.
 - `MISSING` is not `nil`; an absent key satisfies no comparison.
 - An extractor is a named, pure block, registered in every process that changes the collection; if
-  it fails during a merge, only that commit fails, with the block's exception (standalone and in a
-  group commit; in a cluster round, as in `proto_db` rc4, the whole round fails).
+  it fails during a merge, only that commit fails, with the block's exception (standalone, in a
+  group commit and in a cluster round).

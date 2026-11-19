@@ -766,6 +766,22 @@ The detail:
   - A replicate that fails with an error (`PBReplicateFailed`) is decided by the error's class,
     as `proto_db`'s `nothing_sent`: a conflict, validation (`PBClosedError` included) or user
     error sent nothing; any other error, a failed flush included, leaves the outcome unknown.
+  - **An entry's build error in a cluster round fails only that commit** (indexed queries
+    ruling IQ1; the maintainer's decision of 2026-11-19). An error that one entry's build raises,
+    of any class, even one that is not a `PBDBError` (an extractor's exception in a merge onto an
+    indexed current), fails that commit alone, and the round builds the next entry
+    (`PBCoordinatorCore >> roundBuildFailed:in:now:`). `proto_db` rc4's `_permit_round`
+    (`transactions.py:1660-1717`) catches only `ProtoConflictError` and `ProtoDBError` per entry
+    and fails the whole round on any other error. *Why:* the maintainer's decision, for one rule in
+    every mode: rc4's standalone and group-commit round already fails only the commit whose build
+    raised (`_standalone_round`, `transactions.py:1149-1157`, review M2), and the same program
+    should not fail its neighbours' commits in a cluster only. Nothing is sent before a build
+    fails (every build comes before the round's replicate), so failing one entry is safe.
+    Unchanged: a base read that failed with `PBUnexpectedError` after the permission expired is
+    still a retryable conflict (R212), and the re-commit's error still ends the round. *Cost:* a
+    commit whose round-mate's build failed with, say, a `ZeroDivide` commits here where `proto_db`
+    rc4 would fail it with that error (`tests/unit/idx_merge_extractor.st` case (c),
+    `tests/unit/cluster_round_rules.st` case 30).
   - A permission that arrives after the round closed is ended `#none` at once; `proto_db`'s
     closing thread never asked for one.
   - rc4's R148 texts ('its kept permission is still being ended', '... s of it spent waiting
@@ -949,11 +965,12 @@ The detail:
 | Pagers | In-process only: no portable token, no `resumePager:` (ruling IQ3). The pager's `explain` has no `'portable'` key, which `proto_db`'s `Pager.explain` has (`pager.py:221-224`); a pager here is never portable (ruling CR7). | The token's plan digest is over Python's `repr` of the plan, which protoST cannot reproduce byte for byte (spec 3.2; a portable digest is proposal IQ7, not sent). | A page sequence cannot be resumed by another process or language. |
 | Deferred | No query result cache, and so no `extractor_generation` (the registration generation that keys it); no `GroupBy`, `Agg`, `Join`, `Unnest` (`select_many`) or `ValuesScan`; no computed values, `startswith` / `endswith` or field-to-field comparisons; no collection `rebuilt` (misfiled format-3 repair) (ruling IQ3, spec 3.2). | Each is either not portable today or not an optimisation; a block condition covers computed values meanwhile. | Programs that need them wait, or use a block. |
 
-Not a deviation, but worth knowing: an extractor runs inside the commit when a blind write is
-merged onto a collection with an extractor index, and an exception it raises passes through
-unwrapped and fails only that commit, standalone and in a group commit; in a cluster round, as in
-`proto_db` rc4, the whole round fails. Exactly as in `proto_db` (ruling IQ1 as corrected at Task 4b;
-plan call IP2), apart from the identity of the exception (see "Group commit" above).
+Worth knowing: an extractor runs inside the commit when a blind write is merged onto a collection
+with an extractor index, and an exception it raises passes through unwrapped and fails only that
+commit, standalone, in a group commit and in a cluster round (ruling IQ1; plan call IP2). That is
+`proto_db`'s rule standalone and in a group commit; in a cluster round it is a deviation by the
+maintainer's decision of 2026-11-19 (see "Cluster mode": rc4 fails the whole round), and the
+exception reaches the caller as a copy (see "Group commit" above).
 Purity is a documented contract ([queries.md](queries.md#extractors-and-their-purity-contract)).
 
 ## Errors and messages
