@@ -135,3 +135,5 @@ _PBAcceptor>>_setCells:rules:tier:
 PBPersister>>_setTier:coordinator:writer:interval:lag:stats:
 PBClusterCoordinator>>_setConfig:rules:acceptorClass:cells:run:
 PBOwnStepFailed>>_setMessage:error:
+PBKeySpec>>_setKind:arg:segments:
+PBKeySpec class>>_initializeRegistry

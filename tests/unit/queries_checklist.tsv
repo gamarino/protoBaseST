@@ -58,25 +58,25 @@ test_index_key_neutrality.py::test_an_extractor_index_has_the_same_bytes_however
 test_index_contract.py::test_index_contract	deferred	7	Contract over every index kind: structure half in Task 3, whole contract with plans in Task 7.
 test_index_contract.py::test_scan_index_is_registered	deferred	3	Registry of contract index kinds, set up with the Task 3 contract test.
 test_index_contract.py::test_contract_rejects_broken_index	deferred	7	Contract over every index kind: structure half in Task 3, whole contract with plans in Task 7.
-test_keyspec.py::test_path_reads_record_attributes_and_absent_is_missing	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_dotted_path_through_records_and_mappings	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_private_and_reserved_names_are_never_read	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_path_reads_persisted_attributes_of_other_atoms_only	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_path_extraction_loads_lazy_stubs	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_element_returns_the_element_itself	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_invalid_paths_are_rejected	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_named_extractor_registry	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_extractor_results_are_canonical	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_unregistered_extractor_fails_at_use_with_a_clear_message	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_extractor_names_cannot_be_redefined	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_register_extractor_validates	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_extractor_name_validated_on_construction	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_keyspec_is_a_frozen_value	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_direct_construction_is_validated	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_plain_data_round_trip	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_malformed_data_is_corruption	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_term_paths	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
-test_keyspec.py::test_describe	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_path_reads_record_attributes_and_absent_is_missing	ported	tests/unit/idx_keyspec.st	path steps read records, maps and other atoms
+test_keyspec.py::test_dotted_path_through_records_and_mappings	ported	tests/unit/idx_keyspec.st	path steps read records, maps and other atoms
+test_keyspec.py::test_private_and_reserved_names_are_never_read	ported	tests/unit/idx_keyspec.st	private and reserved names are never read
+test_keyspec.py::test_path_reads_persisted_attributes_of_other_atoms_only	ported	tests/unit/idx_keyspec.st	path steps read records, maps and other atoms
+test_keyspec.py::test_path_extraction_loads_lazy_stubs	ported	tests/unit/idx_keyspec.st	path extraction loads stubs
+test_keyspec.py::test_element_returns_the_element_itself	ported	tests/unit/idx_keyspec.st	element answers the element itself
+test_keyspec.py::test_invalid_paths_are_rejected	ported	tests/unit/idx_keyspec.st	invalid paths and names are refused
+test_keyspec.py::test_named_extractor_registry	ported	tests/unit/idx_keyspec.st	extractor results are canonical
+test_keyspec.py::test_extractor_results_are_canonical	ported	tests/unit/idx_keyspec.st	extractor results are canonical
+test_keyspec.py::test_unregistered_extractor_fails_at_use_with_a_clear_message	ported	tests/unit/idx_keyspec.st	an unregistered extractor fails at use, naming it
+test_keyspec.py::test_extractor_names_cannot_be_redefined	ported	tests/unit/idx_keyspec.st	a name keeps its block and version
+test_keyspec.py::test_register_extractor_validates	ported	tests/unit/idx_keyspec.st	invalid paths and names are refused
+test_keyspec.py::test_extractor_name_validated_on_construction	ported	tests/unit/idx_keyspec.st	invalid paths and names are refused
+test_keyspec.py::test_keyspec_is_a_frozen_value	ported	tests/unit/idx_keyspec.st	key specs are frozen values
+test_keyspec.py::test_direct_construction_is_validated	ported	tests/unit/idx_keyspec.st	data round trip and corruption
+test_keyspec.py::test_plain_data_round_trip	ported	tests/unit/idx_keyspec.st	data round trip and corruption
+test_keyspec.py::test_malformed_data_is_corruption	ported	tests/unit/idx_keyspec.st	data round trip and corruption
+test_keyspec.py::test_term_paths	ported	tests/unit/idx_keyspec.st	term paths and describe
+test_keyspec.py::test_describe	ported	tests/unit/idx_keyspec.st	term paths and describe
 test_terms.py::test_operator_vocabulary_uses_the_0_1_spellings	deferred	5	Term and expression language, ported with Task 5.
 test_terms.py::test_term_is_frozen_and_compares_by_value	deferred	5	Term and expression language, ported with Task 5.
 test_terms.py::test_equality_follows_values_semantics	deferred	5	Term and expression language, ported with Task 5.

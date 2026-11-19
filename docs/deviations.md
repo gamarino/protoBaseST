@@ -928,8 +928,8 @@ Purity is a documented contract ([queries.md](queries.md#extractors-and-their-pu
 ## Errors and messages
 
 - The error classes mirror `proto_db/errors.py` with `PB` for `Proto`. `proto_db`'s extra classes
-  that a prototype of this size never raises (`StalePager`, `Misfiled`, `NotAuthorized`,
-  `BacklogFull`, `WriteRefused`) are omitted. `PBDBError` has no `code` API yet. `PBReferenceError`
+  that a prototype of this size never raises (`StalePager`, `NotAuthorized`, `BacklogFull`,
+  `WriteRefused`) are omitted; `PBMisfiledError` exists (indexed queries, 0.3.0). `PBDBError` has no `code` API yet. `PBReferenceError`
   exists.
 - Error texts quote names as Python's `repr` does (`PBCodec repr:`). One known imperfection:
   `repr:` leaves non-printable code points at or above U+0100 unescaped, where Python escapes

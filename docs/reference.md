@@ -1049,9 +1049,11 @@ For tests, tools and readers of the format. An application does not need them.
   (the deadline in monotonic microseconds), `future`, `transaction`,
   `databaseName`, `isCreateDatabase`, `willRetry`, `deadline`, `writtenAtoms`.
 
-## Indexed queries (planned, not yet implemented)
+## Indexed queries (in progress, 0.3.0)
 
-> **Planned for 0.3.0; nothing in this section exists in `src/protobase/` yet.** It is the API of
+> **Planned for 0.3.0 and built task by task.** "Key specs and extractors" below is implemented
+> (`src/protobase/keyspec.st`), and so are `PBMemberKeys` and `PBMisfiledError`; every other
+> message of this section is not implemented yet. It is the API of
 > the approved [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md)
 > (sections 5.2 and 5.5) and of its implementation plan's interfaces, written early so the
 > chapters can cite it. Until each task lands, the messages below are listed as pending in the
@@ -1081,9 +1083,10 @@ For tests, tools and readers of the format. An application does not need them.
 |---|---|
 | `PBKeySpec path: 'address.zip'`, `element`, `extractor: aName` | The three kinds. A path is a non-empty dotted String, not starting with `@`, without blank segments; an extractor name has no whitespace and no leading `@`. Otherwise `PBValidationError`. |
 | `PBKeySpec forTermPath: aStringOrNil` | The key spec a term path names: `nil` is the element, `'@name'` an extractor, anything else a path. |
-| `PBKeySpec fromData: aTuple`, `asData` | From and to the persisted tuple `('path' 'a.b')`, `('element' nil)`, `('extractor' name)`. |
-| `kind`, `arg`, `termPath`, `describe` | `describe` is the path, `'<element>'` or `'@name'`, as `explain` shows it. |
-| `extract: anElement` | The key, or `PBMissing default` when a path step finds no attribute or map key. Steps read a `PBObject`'s own attributes and a map's keys; names starting with `_` and reserved names are never read. An extractor's answer passes through `PBCodec canonical:`; an exception its block raises passes through unchanged. |
+| `PBKeySpec fromData: aTuple`, `asData` | From and to the persisted tuple `('path' 'a.b')`, `('element' nil)`, `('extractor' name)`: `asData` answers a `PBTuple`; `fromData:` takes a `PBTuple`, a `PBFrozenList` or an `Array` of two items, and malformed data is `PBCorruptionError`. |
+| `kind`, `arg`, `termPath`, `describe` | `kind` is `'path'`, `'element'` or `'extractor'`; `termPath` is the path, `nil` or `'@name'`; `describe` is the path, `'<element>'` or `'@name'`, as `explain` shows it. |
+| `extract: anElement` | The key, or `PBMissing default` when a path step finds no attribute or map key, or steps through any other value; an explicit `nil` stays `nil`. Steps read a `PBObject`'s own attributes, another atom's persisted fields and a map's keys; names starting with `_` and reserved names are never read from an atom. An extractor's answer passes through `PBCodec canonical:`; an exception its block raises passes through unchanged. |
+| `=`, `hash` | By value: kind and argument. |
 
 **The extractor registry** (process-wide; one `Atom` of an immutable dictionary, changed by
 compare-and-swap):
@@ -1094,11 +1097,25 @@ compare-and-swap):
 | `PBKeySpec unregisterExtractor: aName` | `PBValidationError` when not registered. Stored indexes are not rebuilt. |
 | `PBKeySpec extractorVersion: aName`, `isExtractorRegistered: aName` | The declared version (`PBValidationError` when not registered); whether it is registered. |
 
+Using an extractor that is not registered is `PBValidationError`: "No key extractor is registered
+under 'name'; call PBKeySpec registerExtractor: 'name' block: aBlock version: aStringOrNil in this
+process before using an index or term that names it".
+
 An index or term that names an unregistered extractor answers lookups from its stored trees; any
 change to its collection, a `validate`, or a scan that must extract signals `PBValidationError`
 naming the extractor. The block must be pure: the purity contract is in
 [queries.md](queries.md#extractors-and-their-purity-contract). During a merge it runs in the
 commit's build; an exception it raises fails only that commit and reaches the caller unchanged.
+
+**Member keys** (`PBMemberKeys`, class side, `proto_db`'s `keyed.py`): an element of a key group is
+filed under its member key, the `PBTuple` `((0, element) | (1, surrogate), exact token)`.
+
+| Message | Meaning |
+|---|---|
+| `PBMemberKeys memberKeyOf: anElement` | The member key: `(0, element)` for an orderable element, `(1, surrogate)` for an unorderable one, then `PBKeys exactToken:` of the element. |
+| `PBMemberKeys surrogate: aValue` | An orderable stand-in: `('l', items)` for a list, `('d', pairs)` for a map (pairs in key order), `('t', items)` for a tuple holding an unorderable value, `('n')` for a NaN, `('v', value)` otherwise. |
+| `PBMemberKeys lowestOf: aValue`, `highestOf: aValue` | The order keys enclosing every member key whose equality part is the value's. |
+| `PBMemberKeys checkDepth: anElement`, `depthLimits` | The element, or `PBValidationError` when its member key would nest deeper than `PBCodec maxValueDepth` (1022); the limits are 1018 containers for an orderable element, 254 nested lists, 169 nested maps. |
 
 ### Indexes
 

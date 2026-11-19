@@ -132,7 +132,8 @@ key (`proto_db`, `indexing/keyspec.py:165-267`):
 | `PBKeySpec extractor: 'name_length'` | the answer of the block registered under that name | `'@name_length'` |
 
 **Path steps.** A step reads an own attribute of a record (`PBObject`, never an inherited
-behaviour), or a key of a map (`PBFrozenDict`). Private names (starting with `_`) and the format's
+behaviour), a persisted field of another atom (a collection's `count`), or a key of a map
+(`PBFrozenDict`). Private names (starting with `_`) and the format's
 reserved names are never read. A step through an absent attribute, through a value that is neither a
 record nor a map, or through `nil`, yields `MISSING` (`keyspec.py:149-162`). In protoBaseST
 `MISSING` is `PBMissing default`, the value the format already decodes as `@missing`, and

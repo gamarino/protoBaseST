@@ -3,19 +3,6 @@
 # own lines when it defines them; the list is empty at release (PENDING_FINAL=1, Task 10).
 # Columns: selector<TAB>task
 # Task 2: key specs and the extractor registry
-arg	2
-asData	2
-describe	2
-element	2
-extract:	2
-extractor:	2
-extractorVersion:	2
-forTermPath:	2
-fromData:	2
-isExtractorRegistered:	2
-registerExtractor:block:version:	2
-termPath	2
-unregisterExtractor:	2
 # Task 3: key-group indexes
 countOfKey:	3
 explain	3

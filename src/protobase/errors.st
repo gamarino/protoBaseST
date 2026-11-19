@@ -2,8 +2,7 @@
 
 Mirrors proto_db/errors.py at ProtoBase v2.0.0rc1 (plan call C14), with PB in place of Proto,
 so that on: PBLockingError do: means the same in Smalltalk and in Python. ProtoBase classes
-that are outside this prototype (pager tokens, misfiled entries, authorization,
-backlog and refused writes) have no counterpart here, and the errors carry no code or message API yet:
+that are outside this prototype (pager tokens, authorization, backlog and refused writes) have no counterpart here, and the errors carry no code or message API yet:
 they are added, additively, when a task needs them."
 
 Error subclass: #PBDBError.
@@ -23,6 +22,9 @@ PBUserError comment: 'An error caused by incorrect use of the API. Counterpart o
 
 PBDBError subclass: #PBCorruptionError.
 PBCorruptionError comment: 'Stored data failed an integrity check. Counterpart of ProtoBase ProtoCorruptionError.'.
+
+PBCorruptionError subclass: #PBMisfiledError.
+PBMisfiledError comment: 'A collection or index holds an entry where its own key does not place it. The known cause is format-3 data written through a built-in subclass''s own conversion (a (str, Enum) member written as ''Color.RED'' but filed as ''red''; proto_db decision D58): the entry cannot be found. Counterpart of proto_db ProtoMisfiledError.'.
 
 PBCorruptionError subclass: #PBClusterProtocolError.
 PBClusterProtocolError comment: 'Bytes received on a cluster connection that are not a valid message of protocol 14: not one msgpack map, a key that is not a string, a missing v, type or from, another version, an unknown type, a missing or ill-typed field, an ill-typed optional field, a root of a format version this node does not read (5 or above). The receiver drops the connection. Counterpart of proto_db ClusterProtocolError (proto_db/cluster/protocol.py).'.
