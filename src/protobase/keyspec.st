@@ -252,7 +252,7 @@ PBKeySpec >> _step: aValue name: aName
     (PBAtomEnvelope _nameProblem: aName) isNil ifFalse: [^ PBMissing default].
     (aValue isKindOf: PBObject) ifTrue: [
       ^ (aValue hasDefinedAttr: aName) ifTrue: [aValue at: aName] ifFalse: [PBMissing default]].
-    ^ aValue state at: aName ifAbsent: [PBMissing default]].
+    ^ aValue _stateAt: aName ifAbsent: [PBMissing default]].
   ^ PBMissing default.
 
 "How a term names this key: the path, nil (the element) or '@name' (an extractor)."

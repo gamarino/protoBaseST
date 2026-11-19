@@ -1,4 +1,4 @@
-"EXPECT: ok 58"
+"EXPECT: ok 60"
 "Atom weight, stage 2 (plan Task 12). An atom whose class has a record shape (its persistedFields,
  when its slots are its state: _PBRecordShape keepsState:) and whose state holds exactly those
  fields, in that order, keeps its slots, its oid and the shared shape, never an envelope or a
@@ -159,6 +159,10 @@ base deleteAll.
   c that: 'a payload with a key twice is refused as before' signals: PBCorruptionError
     containing: 'the payload has the keys #(''t'' ''t'' ''oid''), not exactly t, oid and s'
     during: [PBAtomEnvelope decode: bytes expecting: 0].
+
+  "A key path reads a shaped atom's field as its state does, and misses what it does not hold."
+  c that: 'a key path reads a shaped atom''s field' is: ((PBKeySpec path: 'key') extract: node) equals: (node state at: 'key').
+  c that: 'and misses an absent one' isTrue: ((PBKeySpec path: 'nothing') extract: node) == PBMissing default.
 
   "--- the oid pool ---"
   raw := ByteArray withAll: ((1 to: 32) asArray collect: [:i | 255]).

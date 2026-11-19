@@ -679,6 +679,17 @@ PBAtom >> stateAt: aName
 PBAtom >> _absentField: aName
   ^ nil.
 
+"As state at: aName ifAbsent: aBlock, without making the state of an atom
+ that keeps its slots (plan Task 12): the per-row field read of a key path
+ (PBKeySpec >> _step:name:)."
+PBAtom >> _stateAt: aName ifAbsent: aBlock
+  | m i |
+  m := memo.
+  m isNil ifTrue: [m := self _loaded].
+  i := m _pbIndexOfField: aName.
+  i = 0 ifTrue: [^ aBlock value].
+  ^ m _pbFieldAt: i over: slots.
+
 "The atom's oid (16 bytes): the record's for a stored atom (a stub loads it);
  for an atom that is not stored, the one drawn on first need (ProtoBase D21)."
 PBAtom >> oid
