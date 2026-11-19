@@ -122,9 +122,11 @@ explicit.
   one is mergeable and its rebase answers `current` unchanged, as `proto_db`'s.
 - **Immutability is by convention** (decision 3). No instance is frozen at run time: a method
   that assigns an instance variable after construction would compile. A test
-  (`tests/unit/values_immutable.st`) scans for it. Two runtime-only fields are exceptions, both
-  `Atom` cells and neither persisted: the memo of a lazy load and the consumed mark of an
-  operation log.
+  (`tests/unit/values_immutable.st`) scans for it. The runtime-only fields are the exceptions,
+  none persisted: what a lazy load fills (the oid, the slots and the memo), the saved place, a
+  keyed node's order key, an index's parsed key spec, each written once by a compare-and-swap
+  from nil on its instance variable (plan Tasks 11 and 12), and the consumed mark of an
+  operation log, an `Atom`.
 - **Application records.** Accessors only answer the stored value (decision A4). A behaviour name
   that is also a stored attribute, in any implementation, is a defect: a record holding a
   reserved name is refused when loaded (`PBCorruptionError`). There are no generated setters.
@@ -1587,8 +1589,25 @@ of 3; peak RSS in MB (the largest over the runs):
 - Q1's processes peak at the heap budget either way (protoCore keeps memory until it reaches
   it), so their RSS says nothing about the live set; the M2 peaks below the budget dropped by
   13% to 46%.
-- Stage 2 (plan Task 12: no envelope or state dictionary for a shaped atom, a decode fast path)
-  is not done here.
+- Stage 2 (plan Task 12: no envelope or state dictionary for a shaped atom, a decode fast path,
+  a cheaper oid draw) follows.
+
+#### Atom weight, stage 2: shaped atoms keep only their slots
+
+Plan Task 12 ([decisions.md](decisions.md), row Queries 12). An atom whose class has a record
+shape whose slots are its persisted fields, in order, and whose record holds exactly those
+fields, keeps its slots and its oid; its memo is the class's shape, shared, and `state` builds a
+`PBFrozenDict` over the slots on each call (equal, never identical, to the dictionary it was
+built or decoded from). Every other atom keeps the envelope as before: `PBObject` (no shape),
+a record whose fields are in another order or with a field absent, a subclass that reorders its
+slot fields, an opaque atom. The atom cache keeps the oid and values Array of a shaped record,
+else the envelope. The decoder reads the payload keys in one pass, reads a record whose names
+equal its shape's persisted fields straight into one values Array (`persistedNamesValid` keeps
+classes declaring an invalid name on the checked path, with their errors), and decodes a list or
+a `@tup` of scalars on the wire Array itself. The oid pool keeps the unused rest of its batch as
+one immutable ByteArray and marks a batch by concatenating slices: the old batch built an
+Array of 1024 oids by `at:put:`, about 276 of the ~303 cells of a draw. Bytes on disk, tree node
+identity with `proto_db` and every error text are unchanged.
 
 ## Known protoST limits
 

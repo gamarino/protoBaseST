@@ -4,9 +4,10 @@
  failure, one per storage instance.
 
  - What a save caches is what a decode gives: for every record a workload writes (every
-   kind of root, every scalar kind, references), the cached envelope has the oid, tag,
-   keys, values (atoms as stubs of the same class and pointer) and slots of a decode of
-   the record by a storage with no cache.
+   kind of root, every scalar kind, references), a stub loaded from the cache has the
+   oid, the kind of memo (the record shape, or an envelope of the same type tag), the
+   keys, values (atoms as stubs of the same class and pointer) and slots of a stub
+   loaded by a storage with no cache (plan Task 12: the cache keeps what the atom keeps).
  - A hit decodes nothing; a stub of another class at a cached pointer is decoded, and
    refused, as before.
  - The bound holds (two generations), an evicted record is decoded again, correctly; 0
@@ -71,15 +72,18 @@ c that: 'a storage with no cache' is: { plain atomCacheEntries. plain atomCacheS
 c that: 'the workload cached what it saved' isTrue: st atomCacheSize > 0.
 mismatches := OrderedCollection new.
 loads := st loads.
-st savedRecords do: [:each | | cls p cached decoded cs ds |
+st savedRecords do: [:each | | cls p cached decoded cs ds cm dm |
   cls := each at: 1.
   p := each at: 2.
-  cached := (cls unloadedAt: p storage: st) _envelope.
-  decoded := (cls unloadedAt: p storage: plain) _envelope.
+  cached := cls unloadedAt: p storage: st.
+  decoded := cls unloadedAt: p storage: plain.
   cs := cached state.
   ds := decoded state.
-  (cached oid = decoded oid and: [(PBTypeRegistry nameOfTag: cached tag) = (PBTypeRegistry nameOfTag: decoded tag)
-      and: [cs keys asArray = ds keys asArray and: [cached slots size = decoded slots size]]])
+  cm := cached _loaded.
+  dm := decoded _loaded.
+  (cached oid = decoded oid and: [cm class == dm class
+      and: [((cm isKindOf: PBAtomEnvelope) not or: [(PBTypeRegistry nameOfTag: cm tag) = (PBTypeRegistry nameOfTag: dm tag)])
+      and: [cs keys asArray = ds keys asArray and: [cached _slots size = decoded _slots size]]]])
     ifFalse: [mismatches add: p]
     ifTrue: [
       1 to: cs size do: [:i | | a b |
@@ -89,9 +93,9 @@ st savedRecords do: [:each | | cls p cached decoded cs ds |
             ifTrue: [(b isKindOf: PBAtom) and: [a class == b class and: [a pointer = b pointer]]]
             ifFalse: [a class == b class and: [a = b]])
           ifFalse: [mismatches add: p -> (cs keys at: i)]].
-      1 to: cached slots size do: [:i | | a b |
-        a := cached slots at: i.
-        b := decoded slots at: i.
+      1 to: cached _slots size do: [:i | | a b |
+        a := cached _slots at: i.
+        b := decoded _slots at: i.
         ((a isKindOf: PBAtom) ifTrue: [a pointer = b pointer] ifFalse: [a = b]) ifFalse: [mismatches add: p -> i]]]].
 c that: 'every record saved is cached as its decode' is: mismatches asArray equals: #().
 c that: 'the records the saves cached were served without a decode' is: st loads - loads
@@ -163,8 +167,10 @@ db newTransactionDo: [:tr | | d |
 c that: 'a transaction scanned the whole tree, then wrote one key' is: scanned equals: 300.
 reached := OrderedCollection new.
 gens := ((st instVarNamed: 'atomCache') instVarNamed: 'cell') value.
-{ gens at: 1. gens at: 2 } do: [:g | g do: [:entry |
-  (entry at: 3) state do: [:v | (v isKindOf: PBAtom) ifTrue: [reached add: v]]]].
+{ gens at: 1. gens at: 2 } do: [:g | g do: [:entry | | record |
+  record := entry at: 4.
+  ((record isKindOf: PBAtomEnvelope) ifTrue: [record state _values] ifFalse: [record])
+    do: [:v | (v isKindOf: PBAtom) ifTrue: [reached add: v]]]].
 c that: 'the cache holds references' isTrue: reached notEmpty.
 c that: 'every one an unloaded stub: nothing the transactions loaded or built is reachable from it'
   is: (reached count: [:v | v isLoaded or: [(v instVarNamed: 'pointer') isNil]]) equals: 0.

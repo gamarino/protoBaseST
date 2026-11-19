@@ -6,15 +6,20 @@
 # field (slots, oid, saved, memo, a keyed node's order key, an index's key spec object) once, by
 # compare-and-swap from nil on the instance variable (setInstVar:from:to:); the loser of a race
 # answers the winner's value (Task 16b; Task 11, spec 4.1 decision 3 as amended 2026-11-19).
-# PBAtom>>_installState: and PBKeyNode>>_installState:orderKey: are initialisers of a fresh atom.
+# PBAtom>>_publishOid:slots:memo: and PBAtom>>_publishEnvelope: publish what a load fills (oid,
+# slots, memo) the same way, one field at a time (Task 12).
+# PBAtom>>_installSlots:memo: and PBKeyNode>>_installSlots:memo:orderKey: are initialisers of a
+# fresh atom.
 PBAtom>>_slots
 PBAtom>>_publishOid:
 PBAtom>>_publishSaved:
 PBAtom>>_publishMemo:
+PBAtom>>_publishOid:slots:memo:
+PBAtom>>_publishEnvelope:
 PBKeyNode>>_publishOrderKey:
 PBIndex>>_publishKeySpec:
-PBAtom>>_installState:
-PBKeyNode>>_installState:orderKey:
+PBAtom>>_installSlots:memo:
+PBKeyNode>>_installSlots:memo:orderKey:
 PBNode class>>_initializeShapes
 _PBSequence>>_setItems:
 PBFrozenDict>>_setKeys:values:index:

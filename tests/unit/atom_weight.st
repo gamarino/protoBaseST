@@ -88,7 +88,7 @@ base deleteAll.
   "memo"
   blank := PBObject basicNew.
   won := race value: #_publishMemo: value: blank value: envelope value value: envelope value.
-  c that: 'raced envelopes: both answer the installed one' isTrue: (won notNil and: [won == blank _envelope]).
+  c that: 'raced envelopes: both answer the installed one' isTrue: (won notNil and: [won == blank _loaded]).
   c that: 'the atom is loaded' isTrue: blank isLoaded.
   c that: 'an envelope is installed once' isTrue:
     (twice value: #_publishMemo: value: PBObject basicNew value: envelope value value: envelope value).

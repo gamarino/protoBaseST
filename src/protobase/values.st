@@ -134,10 +134,11 @@ _PBSequence subclass: #PBFrozenList.
 "A Python tuple: the tuple kind (@tup). Orderable when its items are."
 _PBSequence subclass: #PBTuple.
 
-"A tuple holding anArray itself, not a copy (withAll: copies): the private
- constructor for a caller that made anArray fresh, a brace for instance, and
+"A sequence (a PBTuple or a PBFrozenList) holding anArray itself, not a copy
+ (withAll: copies): the private constructor for a caller that made anArray
+ fresh (a brace, or the decoder's own wire Array, PBCodec fromWireValue:) and
  never touches it again."
-PBTuple class >> _trustedOn: anArray
+_PBSequence class >> _trustedOn: anArray
   ^ self basicNew _setItems: anArray.
 
 "=== PBFrozenDict ============================================================"
@@ -226,6 +227,11 @@ PBFrozenDict >> _valuesIfKeys: anArray
   keys == anArray ifTrue: [^ values].
   keys = anArray ifTrue: [^ values].
   ^ nil.
+
+"The values Array itself, in order: never to be changed (a storage copies it
+ before it changes a value: PBFileStorage >> _pbOwnValues:)."
+PBFrozenDict >> _values
+  ^ values.
 
 "Whether the keys are anArray itself (a state built on a shared key Array)."
 PBFrozenDict >> _hasKeys: anArray

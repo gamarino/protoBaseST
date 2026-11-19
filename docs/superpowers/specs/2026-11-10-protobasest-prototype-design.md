@@ -678,8 +678,12 @@ From the bottom up. Each layer depends only on the layers below it.
 
 **Structures (layer 5).**
 - A reference decodes to an unloaded atom (a pointer plus its storage) that loads its record
-  when a message needs its state. The loaded state is memoised in an `Atom`. Two concurrent
-  loads give equal values, so the race is harmless. This is `proto_db`'s lazy loading, which
+  when a message needs its state. The loaded record is kept once, each field written by a
+  compare-and-swap from nil: an atom whose class has a record shape and whose record holds
+  exactly the shape's fields keeps its slots and its oid, and its state is derived on demand;
+  any other atom keeps the decoded envelope. Two concurrent loads give equal values, so the
+  race is harmless. *Amended 2026-11-19 (plan Tasks 11 and 12): this read "The loaded state is
+  memoised in an `Atom`".* This is `proto_db`'s lazy loading, which
   the spec calls implementation-specific.
 - New versions are built in memory by path copying. AVL insert and remove keep the invariants
   of spec §"AVL nodes": height, count, balance, key order and `weight`.

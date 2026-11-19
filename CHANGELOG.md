@@ -175,6 +175,18 @@
   of 19.7 s ([deviations.md](docs/deviations.md#atom-weight-stage-1-construction-cleanup-write-once-fields-by-compare-and-swap)).
   No public selector, byte on disk or tree node changes. Tests: `tests/unit/atom_weight.st`;
   bench: `bench/run_atom_weight.sh`.
+- **Shaped atoms keep only their slots** (plan Task 12, stage 2 of the atom weight work): an atom
+  whose class has a record shape, and whose record holds exactly the shape's fields in its order,
+  keeps its slots and its oid and no envelope or state dictionary; `state` answers a
+  `PBFrozenDict` over the slots, made on demand and equal to the old one. Other atoms (`PBObject`,
+  records in another order or with an absent field, subclasses that reorder their slots, opaque
+  atoms) keep the envelope. The atom cache keeps what the atom keeps. The decoder reads a record
+  whose names equal its class's shape without building associations or checking each name, and
+  decodes lists and tuples of scalars without the general walk. Drawing an oid no longer builds
+  a 1024-element Array per batch. Figures in
+  [deviations.md](docs/deviations.md#atom-weight-stage-2-shaped-atoms-keep-only-their-slots).
+  No public selector, byte on disk, error text or tree node changes. Tests:
+  `tests/unit/atom_weight_stage2.st`.
 
 ## 0.2.0 (2026-11-19)
 
