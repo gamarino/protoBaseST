@@ -1222,7 +1222,7 @@ Commits per second from the minimum of five runs (medians: standalone within 5 %
 `RUNS=5 bench/run_query.sh P1 P2 P3`. **Indicative only.** Measured 2026-11-19 (about 12:09-12:28 UTC) on
 the machine of M1 to M3 (AMD Ryzen 5 5500U, 6 cores, 12 threads, Linux 7.0.0, DEV12), load average
 2.6 before and 3.0 after (other desktop sessions open, not controlled); protoBaseST at `1ebabee`
-with the Task 7 working tree (committed as the Task 7 commit; the only source edit during the run
+with the Task 7 working tree (committed as the Task 7 commit `9b3bcc7`; the only source edit during the run
 renamed the planner's internal candidate accessor, no change of behaviour), the `pinned-360` build
 (protoST 0.12.0 on protoCore 3.6.0); `proto_db` v2.0.0rc4 (`8e6127f`) on CPython 3.14.0. One
 process per unit, five rounds interleaved, protost heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`.
