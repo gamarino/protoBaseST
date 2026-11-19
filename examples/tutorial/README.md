@@ -46,6 +46,7 @@ check; a lesson that stops on an unexpected error leaves that directory behind.
 | 11 | [11_indexed_interop.sh](11_indexed_interop.sh) | Indexes written by Python, changed and merged onto by protoST, validated by Python (0.3.0, in progress) | [11](../../docs/tutorial/11-python-interop.md#indexes-from-both-sides) |
 | 17 | [17_indexes.st](17_indexes.st) | Indexes are part of the collection version; key specs; extractors (0.3.0, in progress) | [17](../../docs/tutorial/17-indexes.md) |
 | 18 | [18_queries_and_plans.st](18_queries_and_plans.st) | `PBQuery`, `PBField`, `explain`, and why the planner sometimes scans (0.3.0, in progress) | [18](../../docs/tutorial/18-queries-and-plans.md) |
+| 19 | [19_ordered_reads_and_pages.st](19_ordered_reads_and_pages.st) | Ordered reads, windows by rank, the obvious paging against a pager, stable pages over one snapshot (0.3.0, in progress) | [19](../../docs/tutorial/19-ordered-reads-and-pages.md) |
 
 Helpers (never run as tests, because their names start with `_`): `_lesson.st` (the checks),
 `_crash_writer.st` (the process lesson 10 kills), `_interop_write.st` and `_interop_read.st` (the

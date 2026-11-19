@@ -160,3 +160,4 @@ _PBCandidate>>_setPlan:names:scans:cost:
 PBPlanner>>_setBase:indexes:
 PBField>>_setPath:spec:
 PBQuery>>_setSource:ops:
+PBPager>>_setPlan:pageSize:rows:ranked:

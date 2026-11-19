@@ -238,7 +238,19 @@ PlannerBench class >> p3: n plan: aPlan
                         g == v or x == 3 (an unindexed branch); not, not (few == q mod 4)
   Q4:2000:<s>-index|-scan  20 queries, ordered by r descending, the first 5: all, no condition
                         (the planner streams the range index); sel, where g == v (ten rows);
-                        unsel, where few == q mod 4 (a quarter of the rows)"
+                        unsel, where few == q mod 4 (a quarter of the rows)
+  Q5:<n>:<p>            paging (plan Task 9), n in QUERY_Q5_SIZES (default 2000 10000), pages of 50
+                        of the records ordered by r, every page k from 0 to the last: page-rank,
+                        a PBPager over the indexed records (an IndexOrderedScan, by rank);
+                        page-mat, a PBPager over the records without indexes (a Sort over the
+                        scan, materialised once and sliced); page-skip, the obvious way, each page
+                        read from the indexed query by skipping its first 50 k rows (do:, stopping
+                        after the page: O(offset + page size) per page). rows n, queries the
+                        number of pages, the checksum of (position + 1) * (id + 1) over the pages
+                        concatenated. count-index and count-scan: 20 counts of r >= n q // 20 (q
+                        from 0), by rank over the indexed records, by walking a Filter over the scan
+                        without them; rows the sum of the counts, the checksum the sum of
+                        (q + 1) * count. Each pager checks its byRank and fails the unit otherwise."
 Object subclass: #QueryUnits.
 
 QueryUnits class >> sizes
@@ -255,7 +267,13 @@ QueryUnits class >> unitsOf: anId
     out add: { 'Q3'. 2000. p , '-index' }; add: { 'Q3'. 2000. p , '-scan' }]].
   anId = 'Q4' ifTrue: [#('all' 'sel' 'unsel') do: [:p |
     out add: { 'Q4'. 2000. p , '-index' }; add: { 'Q4'. 2000. p , '-scan' }]].
+  anId = 'Q5' ifTrue: [self q5Sizes do: [:n |
+    #('page-rank' 'page-mat' 'page-skip' 'count-index' 'count-scan') do: [:p | out add: { 'Q5'. n. p }]]].
   ^ out asArray.
+
+QueryUnits class >> q5Sizes
+  ^ (((Smalltalk getenv: 'QUERY_Q5_SIZES') ifNil: ['2000 10000']) substrings: ' ')
+    collect: [:each | each asInteger].
 
 QueryUnits class >> records: n indexed: aBoolean
   | coll |
@@ -347,3 +365,48 @@ QueryUnits class >> q4: n plan: aPlan
       c := cond value: q.
       ((c isNil ifTrue: [query] ifFalse: [query where: c]) orderBy: 'r' descending: true) take: 5]
     on: coll plan: aPlan ordered: true.
+
+"Q5, paging (the header): the pages of 50 of the records ordered by r, or 20 counts."
+QueryUnits class >> q5: n plan: aPlan
+  | p us rows check query pager pages model counts |
+  p := QueryBench modulus.
+  (#('page-rank' 'page-mat' 'page-skip' 'count-index' 'count-scan') includes: aPlan) ifFalse: [
+    ^ Error signal: 'Q5: unknown plan ' , aPlan].
+  query := (PBQuery from: (self records: n indexed: (#('page-mat' 'count-scan') includes: aPlan) not)) orderBy: 'r'.
+  (aPlan beginsWith: 'count') ifTrue: [
+    query := PBQuery from: (self records: n indexed: aPlan = 'count-index').
+    us := PlannerBench time: [
+      counts := (0 to: 19) asArray collect: [:q | (query where: (PBField path: 'r') >= (n * q // 20)) count]].
+    rows := counts inject: 0 into: [:a :b | a + b].
+    check := 0.
+    counts doWithIndex: [:count :q | check := (check + (q * count)) \\ p].
+    model := PlannerBench shapeOf: (query where: (PBField path: 'r') >= (n * 19 // 20)) explainCount.
+    ^ { rows. 20. aPlan. check. us. model. nil }].
+  aPlan = 'page-skip'
+    ifTrue: [
+      us := PlannerBench time: [
+        pages := (0 to: n + 49 // 50 - 1) asArray collect: [:k | self skip: 50 * k take: 50 of: query]].
+      model := PlannerBench shapeOf: query explain]
+    ifFalse: [
+      us := PlannerBench time: [
+        pager := query pagerSize: 50.
+        pages := (0 to: pager pages - 1) asArray collect: [:k | pager page: k]].
+      pager byRank = (aPlan = 'page-rank') ifFalse: [^ Error signal: 'Q5 ' , aPlan , ': byRank is ' , pager byRank printString].
+      model := PlannerBench shapeOf: pager plan explain].
+  rows := 0. check := 0.
+  pages do: [:page | page do: [:e |
+    rows := rows + 1.
+    check := (check + (rows * ((e at: 'id') + 1))) \\ p]].
+  ^ { rows. pages size. aPlan. check. us. model. nil }.
+
+"Rows anOffset .. anOffset + aCount - 1 of aQuery, the obvious way: its rows one by one, the first
+ anOffset skipped, stopping after the window (O(anOffset + aCount))."
+QueryUnits class >> skip: anOffset take: aCount of: aQuery
+  | out n |
+  out := OrderedCollection new.
+  n := 0.
+  aQuery do: [:e |
+    n >= anOffset ifTrue: [out addLast: e].
+    n := n + 1.
+    n >= (anOffset + aCount) ifTrue: [^ out asArray]].
+  ^ out asArray.

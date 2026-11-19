@@ -142,6 +142,23 @@
   point equality against size, `in` and ranges, compound conditions and ordering, the planner's
   choice against a forced scan, through the query front end in both implementations; figures in
   [deviations.md](docs/deviations.md#queries-and-indexes).
+- **Pagers** (plan Task 9, `src/protobase/pager.st`, a port of `proto_db`'s `query/pager.py`,
+  `Pager`): `PBPager on:pageSize:` over a query, a plan or a collection, and `PBQuery >>
+  pagerSize:`; `page:` (zero-based, an empty `Array` past the last page), `rows`, `pages`,
+  `byRank`, `explain` (`'pager'` with `'page_size'` and `'by_rank'`, then `'plan'`; no
+  `'portable'`), `plan`, `pageSize`. A plan with rank access is paged in O(log n + page size); any
+  other is run once and sliced. Every page comes from the versions the plan was built on, so no row
+  is shown twice or skipped whatever commits meanwhile. Portable tokens and the query result cache
+  stay deferred (spec 3.2). Tests: `tests/unit/qry_pager.st` (`test_pager.py`'s in-process
+  behaviours, `byRank` against `proto_db`'s `Pager` for 23 plan shapes) and
+  `tests/unit/qry_pager_stability.st` (three writer actors and three reader actors,
+  `test_pager_stability.py` less its query-cache half). Chapter 19's program runs
+  (`examples/tutorial/19_ordered_reads_and_pages.st`), and `examples/queries/paging.st` is new;
+  `examples/queries/pending/` is empty.
+- **Benchmark Q5** (`bench/run_query.sh Q5`): every page of an ordered query by a pager by rank,
+  by a pager that materialises once and by skipping each page's offset, and counts by rank against
+  counting a filtered scan, in both implementations; figures in
+  [deviations.md](docs/deviations.md#queries-and-indexes).
 - **Benchmark M1**: commits per second of single-record transactions on a 600-record dictionary
   with 0, 1 and 3 indexes. `bench/run_query.sh` now runs each unit (a size and a plan) in a
   process of its own with an explicit heap budget (`PROTOCORE_HEAP_LIMIT_CELLS`) and reports each

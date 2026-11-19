@@ -5,7 +5,7 @@
 > **In progress for protoBaseST 0.3.0.** This guide explains the design of the approved
 > [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md). Indexes, their
 > maintenance in every write and merge, the expression language, the planner and the query front
-> end (`PBQuery`, `PBField`) are implemented; pagers (plan Task 9) are not yet. Everything below
+> end (`PBQuery`, `PBField`) and pagers (`PBPager`) are implemented. Everything below
 > about `proto_db` is read from its code and documentation at `v2.0.0rc4` and cited by file. Every
 > code block comes from a program of [examples/queries/](../examples/queries/README.md) that runs
 > as a test and checks what it shows; the section that quotes one names it. Figures marked
@@ -670,12 +670,33 @@ lesson check: 'a window of any plan with rank access'
 **Windows.** A `Limit` over a plan with rank access seeks its window in O(log n + its size)
 (`'by_rank'` in `explain`). A `Count` over one reads the count.
 
-**Pagers** (spec 5.7). `PBPager on: aPlanOrQuery pageSize: n`, or `aQuery pagerSize: n`, holds one
-plan built on one snapshot. With rank access page k costs O(log n + page size); otherwise the
-result is materialised once and sliced. A pager never shows a row twice and never skips one,
-whatever commits meanwhile, because the snapshot's versions do not change. It lives in one process:
-`proto_db`'s portable pager tokens are deferred (spec 3.2), because the token's plan digest is
-computed over Python's `repr` of the plan.
+**Pagers** (spec 5.7; `proto_db`'s `query/pager.py`, `Pager`). `PBPager on: aSource pageSize: n`,
+or `aQuery pagerSize: n`, holds one plan built on one snapshot; the source is a query, a plan or a
+collection (its scan). With rank access page k costs O(log n + page size); otherwise the plan runs
+once, when a page first needs it, and its result is kept and sliced. A pager never shows a row
+twice and never skips one, whatever commits meanwhile, because the snapshot's versions do not
+change. Pages are numbered from 0; past the last page, `page:` answers an empty `Array`.
+
+<!-- example: examples/queries/paging.st -->
+
+The same 600 people, from [examples/queries/paging.st](../examples/queries/paging.st):
+
+```smalltalk
+pager := (q orderBy: 'age') pagerSize: 50.
+lesson check: 'an ordered index scan is paged by rank' isTrue: pager byRank.
+lesson check: 'twelve pages of fifty, numbered from 0' is: { pager rows. pager pages } equals: #(600 12).
+lesson check: 'page 0 is the fifty youngest' is: ((pager page: 0) collect: [:p | p at: 'age']) asSet asSortedCollection asArray equals: #(18 19 20 21 22).
+lesson check: 'past the last page: an empty page' is: (pager page: 12) equals: #().
+lesson check: 'explain: the pager, then the plan it pages'
+    is: (pager explain at: 'pager') equals: (PBFrozenDict withAssociations: { 'page_size' -> 50. 'by_rank' -> true }).
+byAgeThenName := ((q orderBy: 'age') thenBy: 'name') pagerSize: 50.
+lesson check: 'two sort keys have no rank: the result is materialised once' isTrue: byAgeThenName byRank not.
+lesson check: 'and sliced: its pages are the query''s rows'
+    is: (byAgeThenName page: 3) equals: ((((q orderBy: 'age') thenBy: 'name') asArray) copyFrom: 151 to: 200).
+```
+
+A pager lives in one process: `proto_db`'s portable pager tokens are deferred (spec 3.2), because
+the token's plan digest is computed over Python's `repr` of the plan.
 
 [measured in T9: bench Q5, the time of page k for every k, by rank and materialised, and `count` by
 rank.] Measured in T8 (bench Q4, 2000 elements, 20 queries of `take: 5`, the minimum;

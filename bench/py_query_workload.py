@@ -5,6 +5,7 @@ verifies the work and prints the timings.
 
 Usage: python py_query_workload.py [units...]     (a unit is <id>:<size>:<plan>, or a bare id)
 """
+import itertools
 import os
 import sys
 import time
@@ -22,8 +23,10 @@ from proto_db.query.planner import plan_query
 from proto_db.query.plans import Filter, Intersect
 
 P = (1 << 61) - 1
-ALL = ["M1", "M2", "M3", "P1", "P2", "P3", "Q1", "Q2", "Q3", "Q4"]
+ALL = ["M1", "M2", "M3", "P1", "P2", "P3", "Q1", "Q2", "Q3", "Q4", "Q5"]
 Q1_SIZES = [int(n) for n in os.environ.get("QUERY_Q1_SIZES", "100 1000 10000").split()]
+Q5_SIZES = [int(n) for n in os.environ.get("QUERY_Q5_SIZES", "2000 10000").split()]
+Q5_PLANS = ["page-rank", "page-mat", "page-skip", "count-index", "count-scan"]
 SIZES = [int(n) for n in os.environ.get("QUERY_M2_SIZES", "100 1000 10000 100000").split()]
 COMMITS = int(os.environ.get("QUERY_M1_COMMITS", "200"))
 BLIND_COMMITS = int(os.environ.get("QUERY_M3_COMMITS", "120"))
@@ -243,6 +246,8 @@ def q_units(id_):
               "Q3": ["and", "or2", "ormix", "not"], "Q4": ["all", "sel", "unsel"]}
     if id_ == "Q1":
         return [("Q1", n, p) for n in Q1_SIZES for p in ("index", "scan")]
+    if id_ == "Q5":
+        return [("Q5", n, p) for n in Q5_SIZES for p in Q5_PLANS]
     return [(id_, 2000, f"{p}-{f}") for p in points[id_] for f in ("index", "scan")]
 
 
@@ -324,9 +329,42 @@ def q4(n, plan):
     return q_run(lambda query, q: query.where(cond(q)).order_by("r", descending=True).take(5), coll, plan, True)
 
 
+def q5(n, plan):
+    """Paging (query_workload.st's header): pages of 50 ordered by r, or 20 counts."""
+    if plan not in Q5_PLANS:
+        raise SystemExit(f"Q5: unknown plan {plan}")
+    if plan.startswith("count"):
+        query = from_collection(q_records(n, plan == "count-index"))
+        t0 = time.perf_counter_ns()
+        counts = [query.where(F.r >= n * q // 20).count() for q in range(20)]
+        us = (time.perf_counter_ns() - t0) // 1000
+        check = sum((q + 1) * c for q, c in enumerate(counts)) % P
+        return sum(counts), 20, plan, check, us, shape(query.where(F.r >= n * 19 // 20).explain_count()), None
+    query = from_collection(q_records(n, plan != "page-mat")).order_by("r")
+    t0 = time.perf_counter_ns()
+    if plan == "page-skip":
+        # The obvious way: each page read by skipping its offset, stopping after the page.
+        pages = [list(itertools.islice(iter(query), 50 * k, 50 * k + 50)) for k in range(-(-n // 50))]
+        model = shape(query.explain())
+    else:
+        pager = query.pager(50)
+        pages = [pager.page(k) for k in range(pager.pages)]
+    us = (time.perf_counter_ns() - t0) // 1000
+    if plan != "page-skip":
+        if pager.by_rank != (plan == "page-rank"):
+            raise SystemExit(f"Q5 {plan}: by_rank is {pager.by_rank}")
+        model = shape(pager.plan.explain())
+    rows = check = 0
+    for page in pages:
+        for e in page:
+            rows += 1
+            check = (check + rows * (e.id + 1)) % P
+    return rows, len(pages), plan, check, us, model, None
+
+
 def planner_unit(id_, n, plan):
     rows, queries, plan, check, us, model, line = {"P1": p1, "P2": p2, "P3": p3,
-                                                   "Q1": q1, "Q2": q2, "Q3": q3, "Q4": q4}[id_](n, plan)
+                                                   "Q1": q1, "Q2": q2, "Q3": q3, "Q4": q4, "Q5": q5}[id_](n, plan)
     print(f"WORK id={id_} impl=py size={n} rows={rows} queries={queries} plan={plan} checksum={check} model={model}")
     print(f"TIME id={id_} impl=py size={n} plan={plan} us={us}")
     if line is not None:

@@ -1,18 +1,17 @@
 # Pending query examples
 
-> **Draft.** The program here is written against the approved API of the
-> [indexed-queries spec](../../../docs/superpowers/specs/2026-11-18-indexed-queries-design.md)
-> (section 5) and **has never run**: it needs pagers (plan Task 9). The programs of chapters 11, 17
-> and 18 and `reading_plans` were moved out by plan Task 8 and run as tests.
+> **Empty.** Every program written here before its API was moved out once the API landed, and runs
+> as a test: the programs of chapters 11, 17 and 18 and `reading_plans` by plan Task 8, chapter 19's
+> by plan Task 9. The table below records where each went.
 
 This directory holds the programs of the query chapters, written before the API they need, as
 the cluster chapters' programs were (`examples/cluster/pending/`). Their extensions,
 `.st.pending`, `.sh.pending` and `.py.pending`, keep them out of `tests/run_tests.sh`, which runs
 only `*.st` and `*.sh` files.
 
-| Program | Quoted by | Waits for (spec section 11) | Moved by (plan) | Moves to |
+| Program | Quoted by | Waited for (spec section 11) | Moved by (plan) | Moved to |
 |---|---|---|---|---|
-| `19_ordered_reads_and_pages.st.pending` | [chapter 19](../../../docs/tutorial/19-ordered-reads-and-pages.md) | T9 | Task 9 | `examples/tutorial/19_ordered_reads_and_pages.st` |
+| `19_ordered_reads_and_pages.st.pending` | [chapter 19](../../../docs/tutorial/19-ordered-reads-and-pages.md) | T9 | Task 9 | [examples/tutorial/19_ordered_reads_and_pages.st](../../tutorial/19_ordered_reads_and_pages.st) |
 
 Each program checks its own results in the house style (`lesson check:`, chapter 1), so once it
 runs it proves what its chapter shows. A tutorial program imports `_lesson` as it will from

@@ -1,14 +1,15 @@
 # 19. Ordered reads and pages
 
-<!-- example: examples/queries/pending/19_ordered_reads_and_pages.st.pending -->
-Program, pending: [examples/queries/pending/19_ordered_reads_and_pages.st.pending](../../examples/queries/pending/19_ordered_reads_and_pages.st.pending).
+<!-- example: examples/tutorial/19_ordered_reads_and_pages.st -->
+Program: [examples/tutorial/19_ordered_reads_and_pages.st](../../examples/tutorial/19_ordered_reads_and_pages.st).
 Previous: [18. Queries and the planner](18-queries-and-plans.md). Back to the [index](README.md).
 
-> **Draft: the API in this chapter is not implemented.** It is planned for protoBaseST 0.3.0 by
-> the approved [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md)
-> (sections 5.5 and 5.7). Every block below comes from a program written against the spec's API
-> that **has never run**. Rank access and pagers are `proto_db`'s, read from its code and cited.
-> Figures marked `[measured in T<n>: ...]` do not exist yet.
+> **In progress for protoBaseST 0.3.0** (the approved
+> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md), sections 5.5
+> and 5.7). Every block below comes from the chapter's program, which runs as a test and checks
+> what it shows. Rank access and pagers are `proto_db`'s (`proto_db/indexing/keyed.py`, "Rank
+> access"; `proto_db/query/pager.py`, `Pager`), read from its code and cited; the
+> [reference](../reference.md#pagers) lists every message.
 
 A report shows people by age, fifty to a page, and the user asks for page 50. This chapter is about
 the two questions behind that request: what page 50 costs, and whether page 50 is still the page
@@ -87,9 +88,20 @@ produces 2550 rows to show 50, and the user who pages to the end has paid for th
 per page. And each call runs the query again, on whatever is committed by then (next section).
 
 A `PBPager` holds one plan, built once, and serves page k of it. When the plan offers rank access,
-`page:` seeks the page; otherwise the pager runs the plan once, keeps the result, and slices it, so
-a block key costs one full run, not one per page. `byRank` says which, and `explain` on a pager
-shows its plan. Pages are numbered from 0, as `proto_db`'s and as `PBList` positions.
+`page:` seeks the page; otherwise the pager runs the plan once, when the first page is asked for,
+keeps the result, and slices it, so a block key costs one full run, not one per page. `byRank`
+says which, and `explain` on a pager shows `'page_size'` and `'by_rank'` above its plan's explain.
+Pages are numbered from 0, as `proto_db`'s and as `PBList` positions; past the last page, `page:`
+answers an empty `Array`. A pager is made from a query (`pagerSize:`), or by
+`PBPager on: aSource pageSize: n` from a query, a plan or a collection.
+
+What page k costs, for a page of size s over n rows:
+
+| Way | Page k | Every page, k = 0 to n/s − 1 |
+|---|---|---|
+| Run the query and skip k pages | O(k s + s) when it stops after the page (the block above reads all n rows every time): the rows before the page are produced and dropped | O(n² / s) |
+| A pager by rank | O(log n + s): one descent of the weighted index, then the page | O(n + (n / s) log n) |
+| A pager over a plan without rank | the whole plan once, then O(s) per page | one run of the plan, then O(n) |
 
 How much the seek saves is a measurement: [measured in T9: bench Q5, the time of page k for every
 k from the first to the last, by rank and by skipping, on an ordered index scan of 10^4 and 10^5

@@ -59,7 +59,7 @@ increments merge (chapter 6).
 
 > **Indexed queries (0.3.0, in progress).** Maintained indexes, a query front end (`PBQuery`,
 > `PBField`) and a cost-based planner are in [chapters 17](17-indexes.md) and
-> [18](18-queries-and-plans.md); pagers come with [chapter 19](19-ordered-reads-and-pages.md). This
+> [18](18-queries-and-plans.md), and pagers in [chapter 19](19-ordered-reads-and-pages.md). This
 > section shows the two ways a question is answered without them, which chapter 17 starts from.
 
 Without an index, a question is answered in one of two ways.

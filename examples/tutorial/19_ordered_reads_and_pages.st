@@ -1,12 +1,5 @@
 "EXPECT: 19 ordered reads and pages ok (15 checks)"
-"PENDING: runs once Task T9 (PBPager) of the indexed-queries plan lands, on top of T1 to T8.
- Written against the API of docs/superpowers/specs/2026-11-18-indexed-queries-design.md,
- sections 5.5 and 5.7; it has never run. The test runner does not run it (the .st.pending
- extension). When the task is merged, move it to examples/tutorial/19_ordered_reads_and_pages.st,
- run it, correct the EXPECT count, and fix the program and docs/tutorial/19-ordered-reads-and-pages.md
- together wherever the built API differs.
-
- Lesson 19: ordered reads and pages.
+"Lesson 19: ordered reads and pages.
  Tutorial chapter: docs/tutorial/19-ordered-reads-and-pages.md
 
  What it teaches:
@@ -18,7 +11,7 @@
  - a pager reads one snapshot: every row once, whatever is committed meanwhile; a new query per
    page, by offset, shows a row twice when a commit lands between pages.
 
- Run it (from examples/tutorial, once moved): STPATH=<repository>/src protost 19_ordered_reads_and_pages.st"
+ Run it (from examples/tutorial): STPATH=<repository>/src protost 19_ordered_reads_and_pages.st"
 Import from: 'protobase'.
 Import from: '_lesson'.
 

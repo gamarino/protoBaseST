@@ -1062,12 +1062,12 @@ For tests, tools and readers of the format. An application does not need them.
 > collection messages of "Collections gain" (Tasks 4a and 4b), "Terms and expressions" (Task 5,
 > `src/protobase/terms.st`), and "Plans and explain" with the indexes' access paths and rank access
 > (Task 6, `src/protobase/plans.st`), `PBPlanner` (Task 7, `src/protobase/planner.st`), and
-> `PBField` and `PBQuery` (Task 8, `src/protobase/query.st`); `pagerSize:` and "Pagers" (Task 9)
-> are not implemented yet. It is the API of
-> the approved [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md)
+> `PBField` and `PBQuery` (Task 8, `src/protobase/query.st`), and `pagerSize:` and "Pagers"
+> (Task 9, `src/protobase/pager.st`): every message of this section is implemented. It is the API
+> of the approved [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md)
 > (sections 5.2 and 5.5) and of its implementation plan's interfaces, written early so the
-> chapters can cite it. Until each task lands, the messages below are listed as pending in the
-> documentation guard. The concepts are in
+> chapters could cite it; the final task of the plan (Task 10) completes the documentation pass
+> and removes the "in progress" marks. The concepts are in
 > [queries.md](queries.md); the tutorial is chapters [17](tutorial/17-indexes.md),
 > [18](tutorial/18-queries-and-plans.md) and [19](tutorial/19-ordered-reads-and-pages.md).
 
@@ -1080,7 +1080,7 @@ For tests, tools and readers of the format. An application does not need them.
 | `F.city == "Oslo"`, `F.age > 70`, `&`, `\|`, `~` | `(PBField path: 'city') eq: 'Oslo'`, `(PBField path: 'age') > 70`, `&`, `\|`, `not` |
 | `from_collection(c).where(p).order_by(k).skip(n).take(n)` | `((((PBQuery from: c) where: p) orderBy: k) skip: n) take: n` |
 | `select(...)` | `project:`, `collect:` (`select:` is **not** defined on `PBQuery`) |
-| `count()`, `first()`, `first_or_none()`, `to_list()`, `explain()`, `plan()`, `pager(n)` | `count`, `first`, `firstOrNil`, `asArray`, `explain`, `plan`, `pagerSize:` (Task 9) |
+| `count()`, `first()`, `first_or_none()`, `to_list()`, `explain()`, `plan()`, `pager(n)` | `count`, `first`, `firstOrNil`, `asArray`, `explain`, `plan`, `pagerSize:` |
 | `count(p)`, `first(p)`, `first_or_none(p)`, `explain_count()` | `count:`, `first:`, `firstOrNil:`, `explainCount` |
 | `F.a.between(a, b, inclusive=(lo, hi))`, `F.a.between_closed(a, b)`, `F.a.range(a, b, bounds)` | `between:and:inclusive:`, `betweenClosed:and:`, `range:to:`, `range:to:bounds:` |
 | `plan_query(source, where, order_by, limit, offset)` | `PBPlanner plan:where:orderBy:limit:offset:` |
@@ -1226,7 +1226,7 @@ A query keeps the collection version it was built from: later writes do not chan
 | `count: aCondition`, `first: aCondition`, `firstOrNil: aCondition` | The same, for the query with `where: aCondition` added (an expression or a one-argument block). |
 | `explainCount` | The explain of the plan `count` runs: a `Count` over the query's plan (`explain_count()`). |
 | `explain`, `plan` | The plan that runs, explained; the plan itself. |
-| `pagerSize: n` | `PBPager on: self pageSize: n` (Task 9; not implemented yet). |
+| `pagerSize: n` | `PBPager on: self pageSize: n` ("Pagers" below). |
 
 `select:` is not defined on `PBQuery`: Smalltalk's `select:` filters, so `proto_db`'s
 projection name would read backwards (ruling IQ2).
@@ -1298,20 +1298,27 @@ The meaning of every node, field and estimate, with three worked plans, is
 
 ### Pagers
 
-**`PBPager`** serves pages of one plan on one snapshot, in this process (no portable token;
-deferred).
+**`PBPager`** (`src/protobase/pager.st`, a port of `proto_db`'s `query/pager.py`, `Pager`) serves
+pages of one plan on one snapshot, in this process: portable tokens and the query result cache are
+deferred (spec 3.2). Every page comes from the versions the plan was built on, so a pager never
+shows a row twice and never skips one, whatever is committed or written meanwhile. The concepts,
+and what a page costs, are in [queries.md](queries.md#ordered-reads-windows-and-pages) and
+[chapter 19](tutorial/19-ordered-reads-and-pages.md).
 
 | Message | Meaning |
 |---|---|
-| `PBPager on: aPlanOrQuery pageSize: n` | `n` ≥ 1, else `PBValidationError`. |
-| `page: k` | Page k, **zero-based** as `proto_db`'s, as an `Array`. By rank when the plan offers it, else from a result materialised once. |
-| `rows`, `pages` | The exact number of rows; of pages (0 for an empty result). |
-| `byRank` | True when pages are sought by rank (O(log n + page size)). |
-| `explain` | `{ 'pager' -> { 'page_size'. 'by_rank' }. 'plan' -> the plan's explain }`. |
+| `PBPager on: aSource pageSize: n` | A pager of `n` rows per page. aSource is a `PBQuery` (its plan), a `PBQueryPlan`, or a `PBIndexedCollection` (its scan), as `proto_db`'s `cache.as_plan`; `n` an Integer ≥ 1. Anything else is `PBValidationError` (the page size is checked first). |
+| `aQuery pagerSize: n` | `PBPager on: aQuery pageSize: n` (`Queryable.pager`). |
+| `page: k` | Page k, **zero-based** as `proto_db`'s, as a new `Array`; an empty `Array` past the last page. k is an Integer ≥ 0, else `PBValidationError`. By rank when the plan offers it; otherwise the plan runs once, when a page or `rows` first needs it, and its result is kept and sliced. |
+| `rows`, `pages` | The exact number of rows; of pages, `ceiling(rows / n)` (0 for an empty result). |
+| `byRank` | True when pages are sought by rank, O(log n + page size): the plan knows its exact row count and offers rank access (`exactRows`, `byRank` of "Plans and explain"). |
+| `explain` | A `PBFrozenDict`: `'pager'` → `{ 'page_size'. 'by_rank' }` and `'plan'` → the plan's `explain`. No `'portable'` key (tokens are deferred). |
+| `plan`, `pageSize` | The plan paged; the rows per page. |
+| `printOn:` | `PBPager(page size 50, by rank)` or `PBPager(page size 50, materialised)`. |
 
 ## The module and its files
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`, `keyspec`,
-`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `keygroups`, `collections`, `records`, `indexes`, `terms`, `plans`, `roots`, `publisher`,
+`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `keygroups`, `collections`, `records`, `indexes`, `terms`, `plans`, `planner`, `query`, `pager`, `roots`, `publisher`,
 `round`, `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar`, `uuid` and `net`.

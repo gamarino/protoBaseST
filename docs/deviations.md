@@ -100,8 +100,8 @@ explicit.
 
 ## Collections and records
 
-- **Indexed collections are written, merged and queried; pagers are not yet provided** (0.3.0 in
-  progress, plan Tasks 4a to 8). Every mutator maintains the collection's `PBEqualityIndex` and
+- **Indexed collections are written, merged, queried and paged** (0.3.0 in progress, plan Tasks
+  4a to 9). Every mutator maintains the collection's `PBEqualityIndex` and
   `PBRangeIndex` indexes in the same step, with the hook order of `proto_db`'s mutator, so one
   sequence of operations gives the same index nodes in both implementations
   (`tests/interop/index_ops_identical.sh`); a format-3 index is rebuilt before the first change;
@@ -116,8 +116,8 @@ explicit.
   index speed (bench M3 below). The term and expression language is provided (plan Task 5:
   `PBTerm`, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate`, `PBExpression compile:`): a condition
   is built, described and evaluated on one element. The planner (Task 7) and the query front end
-  (Task 8: `PBField`, `PBQuery`) answer conditions with the collection's indexes; pagers
-  (`pagerSize:`, `PBPager`) are plan Task 9.
+  (Task 8: `PBField`, `PBQuery`) answer conditions with the collection's indexes, and pagers
+  (Task 9: `pagerSize:`, `PBPager`) serve pages of one plan, by rank when it offers rank access.
 - **`PBRepeatedKeysDictionary` is read only.** Its writes and merges are a non-goal. A new empty
   one is mergeable and its rebase answers `current` unchanged, as `proto_db`'s.
 - **Immutability is by convention** (decision 3). No instance is frozen at run time: a method
@@ -238,7 +238,8 @@ collections with writes, and `PBCountedSet` since Task 22.
   provided. A stale index that must order format-3 zone datetimes (IANA zones, which have no order
   key here) makes the collection unwritable: its first change is `PBNotSupportedError` naming the
   zone.
-- **`snapshot_ref` byte references, pagers and residency** are not provided.
+- **`snapshot_ref` byte references, portable pager tokens and residency** are not provided (in-process
+  pagers are, plan Task 9).
 - **Format 5 is refused** (`proto_db` 2.0.0rc4, the runtime registry D62: the features `parents`,
   envelope key `p`, and `registry`, the types `ModuleList` and `Catalog`, aliases 22 and 23).
   protoBaseST reads formats 2 to 4 and writes 4, as `proto_db` writes for data without a
@@ -938,11 +939,9 @@ The detail:
 > [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md) plans on purpose,
 > written early so the draft chapters ([17](tutorial/17-indexes.md),
 > [18](tutorial/18-queries-and-plans.md), [19](tutorial/19-ordered-reads-and-pages.md)) and the
-> guide ([queries.md](queries.md)) can link here. The entry "Indexed collections are written, merged
-> and queried; pagers are not yet provided" above says what holds today. Each entry becomes a deviation when its task is merged;
-> the rows marked with a task (4a to 8), and the rows on opaque predicates, `=` on the field
-> builder, index constructors, extractor blocks, `isExtractorRegistered:`, projection and
-> selection blocks, are in force; the pager row is not yet.
+> guide ([queries.md](queries.md)) can link here. The entry "Indexed collections are written, merged,
+> queried and paged" above says what holds today. Each entry became a deviation when its task was
+> merged; every row is in force (the tasks 4a to 9 have landed).
 
 | What | Difference from `proto_db` | Why | Cost |
 |---|---|---|---|
@@ -966,7 +965,9 @@ The detail:
 | Ordered index plans (Task 6; key check order, Task 7) | `orderedPlan: aKey descending: aBoolean` takes the key to order by and checks it as `plans.py`'s `ordered_index_scan` does, in its order: the key (a `PBKeySpec`, or a term path through `PBKeySpec forTermPath:`, `PBValidationError` for anything else), then the direction (`PBValidationError` unless a Boolean), then `supportsOrder:` (`PBNotSupportedError` for another key); `proto_db`'s `ordered_plan(descending)` takes the direction only, and `ordered_index_scan` checks the key. | One message carries both checks of `proto_db`'s pair, so no caller can ask an index for an order it does not have. | One argument more; its refusal is `ordered_index_scan`'s sentence ("Index 'n' cannot iterate in the order of k") for every kind, `base.py`'s "does not provide ordered iteration" having no entry point here. |
 | `windowFrom:to:` (Task 6) | Always answers an `Array`: by rank when the plan offers rank access, otherwise read through `do:` and stopped after the window. `proto_db`'s `window(start, stop)` answers `None` without rank access; `byRank` answers whether it does here. | A caller asking for rows wants rows; whether they were sought is a separate question. | None for results; a caller that needs the cost bound asks `byRank`. |
 | The count node (Task 6) | `Count` is built by `PBCountPlan source:`; the class `PBCount` is the cluster coordinator's counter effect (0.2.0). | protoST classes share one namespace. | A name to learn: `explain` still says `'Count'`. |
-| Pagers | In-process only: no portable token, no `resumePager:` (ruling IQ3). The pager's `explain` has no `'portable'` key, which `proto_db`'s `Pager.explain` has (`pager.py:221-224`); a pager here is never portable (ruling CR7). | The token's plan digest is over Python's `repr` of the plan, which protoST cannot reproduce byte for byte (spec 3.2; a portable digest is proposal IQ7, not sent). | A page sequence cannot be resumed by another process or language. |
+| Pagers (Task 9) | In-process only: no portable token, no `resumePager:` (ruling IQ3). The pager's `explain` has no `'portable'` key, which `proto_db`'s `Pager.explain` has (`pager.py:221-224`); a pager here is never portable (ruling CR7). | The token's plan digest is over Python's `repr` of the plan, which protoST cannot reproduce byte for byte (spec 3.2; a portable digest is proposal IQ7, not sent). | A page sequence cannot be resumed by another process or language. |
+| A pager's materialised result (Task 9) | A pager whose plan has no rank access runs the plan when a page or `rows` first needs it and keeps the result in an `Atom` set once from nil; two actors asking at the same moment may both run the plan, and every page is then served from the one result installed. `proto_db`'s `Pager._materialized` takes a `threading.Lock`, so it runs the plan once; it also accepts a `cache=` (the query result cache), deferred here (row "Deferred"). | No lock is held across allocation (Global Constraints); the plan reads immutable versions, so both runs answer the same rows. | Under a race on the first page, the plan's work is done twice, once wasted; the pages are the same. |
+| `pagerSize:` (Task 9) | `aQuery pagerSize: n` is `proto_db`'s `Queryable.pager(n)`; `PBPager on: aSource pageSize: n` its `Pager(source, n)`, with the same sources (a plan, a query, a collection) and the same refusals (a page size an Integer ≥ 1, a page number an Integer ≥ 0, `PBValidationError` for `ProtoValidationError`). | A keyword selector names its argument. | None. |
 | `where:` and the list syntax (Task 8) | `where:` takes a `PBExpression` or a one-argument block only (ruling CR6); the 0.1 list syntax is `PBExpression compile:`'s (and `PBPlanner`'s), so `q where: #('city' '==' 'Oslo')` is `PBValidationError` with the text `where: expects a PBExpression or a one-argument block, got a Array`. `proto_db`'s `Queryable.where` accepts a list too (`test_where_accepts_expressions_and_the_list_syntax`). | An Array is also a Smalltalk collection value: one way in keeps the refusal of a Boolean (`aField = v`) exact, and the list syntax stays one message away. | `where: (PBExpression compile: aList)`. |
 | Single-value projection (Task 8) | `project:` always answers maps (a `PBFrozenDict` per row), from an Array of paths or `PBField`s or a map of output names; `proto_db`'s `select("name")` answers the bare values. A single value is `collect: [:e \| e at: 'name']`. | `project:` has one result shape; a block names a computed answer. | One message more for a bare value. |
 | Query sources (Task 8) | `PBQuery from:` takes a `PBIndexedCollection`, a `PBQueryPlan` or a `PBQuery` (answered as is); a protoST collection (an `Array`, an `OrderedCollection`) is `PBValidationError`. `proto_db`'s `from_collection` also takes any iterable, through `ValuesScan` (deferred, row below). | `ValuesScan` is deferred (ruling IQ3). | Host collections are filtered with Smalltalk's own `select:`. |

@@ -61,12 +61,17 @@
  the units): point equality against size, in and ranges, compound conditions, and ordering, each
  through the query front end, the planner's choice over the indexed records (-index) against the
  same records without indexes (-scan). Their WORK lines carry model=, the plan's node names,
- compared with proto_db's like the rest."
+ compared with proto_db's like the rest.
+
+ Q5, paging (plan Task 9; QueryUnits again): every page of 50 of the records ordered by r, by a
+ pager that seeks by rank (page-rank), by a pager that materialises a Sort once (page-mat) and by
+ skipping each page's offset (page-skip), at QUERY_Q5_SIZES (default 2000 10000); and 20 counts of
+ a range by rank (count-index) against counting a filtered scan (count-scan)."
 Import from: 'protobase'.
 Import from: '_query_bench'.
 
 | all units time p records report sizes m1 m2 emit commits blindCommits |
-all := #('M1' 'M2' 'M3' 'P1' 'P2' 'P3' 'Q1' 'Q2' 'Q3' 'Q4').
+all := #('M1' 'M2' 'M3' 'P1' 'P2' 'P3' 'Q1' 'Q2' 'Q3' 'Q4' 'Q5').
 time := [:aBlock | | t0 | t0 := Time microsecondClockValue. aBlock value. Time microsecondClockValue - t0].
 p := (2 raisedTo: 61) - 1.
 sizes := (Smalltalk getenv: 'QUERY_M2_SIZES') ifNil: ['100 1000 10000 100000'].

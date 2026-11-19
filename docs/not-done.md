@@ -19,16 +19,17 @@ design (spec section 2) or a cut made while building, with its reason.
 - No vector-index writes, training or vector search (planned). Equality and range indexes are
   maintained by every write and by merges onto indexed collections, and queried through
   `PBQuery` and a cost-based planner (0.3.0 in progress; [chapters 17-18](tutorial/17-indexes.md),
-  [queries.md](queries.md)); a collection holding a vector index stays read only. *(Still to
-  come in 0.3.0: in-process pagers, [chapter 19](tutorial/19-ordered-reads-and-pages.md).)*
+  [queries.md](queries.md)), and paged in process (0.3.0 in progress;
+  [chapter 19](tutorial/19-ordered-reads-and-pages.md)); a collection holding a vector index stays
+  read only.
 - No writes to `RepeatedKeysDictionary`.
 - No IANA time zones: no wall-clock conversion; a fixed pinned list of zone keys.
 - No runtime registry and no symbol kind (`@sym`): format 5 (`proto_db` 2.0.0rc4, D62) is
   known, not adopted, and refused.
-- No pagers yet (0.3.0, plan Task 9), no `snapshot_ref` byte references, no residency. *(Not
+- No portable pager tokens, no `snapshot_ref` byte references, no residency: a pager lives in one
+  process (0.3.0 in progress, [chapter 19](tutorial/19-ordered-reads-and-pages.md)). *(Not
   planned: portable pager tokens, the query result cache, `GroupBy` / `Join` / `Unnest`,
-  computed values, `snapshot_ref`, residency. The planner and the query front end are in 0.3.0,
-  in progress.)*
+  computed values, `snapshot_ref`, residency.)*
 - No `rebuilt()` of misfiled format-3 collections: `validate` reports them (`PBMisfiledError`),
   nothing repairs them (deferred, spec 3.2).
 - No frozen instances: immutability is a convention, checked by a test, not enforced at run time.
@@ -121,9 +122,10 @@ Not tested, or not proven:
 
 In the order the cost of the omission is felt:
 
-1. Pagers (0.3.0, plan Task 9; [chapter 19](tutorial/19-ordered-reads-and-pages.md)). Index
-   maintenance, merges onto indexed collections, index queries and the planner are in 0.3.0 (in
-   progress; [queries.md](queries.md), [chapters 17-18](tutorial/17-indexes.md)).
+1. Portable pager tokens, which another process can resume (deferred, spec 3.2: they need a
+   plan digest both languages compute, proposal IQ7). Index maintenance, merges onto indexed
+   collections, index queries, the planner and in-process pagers are in 0.3.0 (in progress;
+   [queries.md](queries.md), [chapters 17-19](tutorial/17-indexes.md)).
 2. The `@sym` kind, once format 5 defines it, with the explicit symbol wrapper in protoST.
 3. A time-zone database in protoST, so zoned datetimes have a wall clock.
 4. Speed of the record and node paths, which is protoST VM work more than library work.

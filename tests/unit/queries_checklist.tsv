@@ -219,9 +219,9 @@ test_linq.py::test_impure_leading_predicate_still_lets_the_planner_order	ported	
 test_linq.py::test_near_and_lambda_split_like_two_wheres	n/a	excluded: vector	The near[] operator is excluded by spec 3.3, never ported.
 test_linq.py::test_in_rejects_a_mapping	ported	tests/unit/qry_field.st	in: takes a collection of values, never a map or a String; any other collection is read as a sequence; a between needs bounds of one rank
 test_linq.py::test_queryable_of_a_queryable_keeps_its_operators	ported	tests/unit/qry_query.st	sources: a collection, its scan, another plan or a query (answered as is); anything else is PBValidationError; a query over a collection answers its rows
-test_pager.py::test_ranked_pages_equal_the_ordered_result	deferred	9	In-process paging by rank or materialised once, ported with Task 9.
-test_pager.py::test_unranked_pages_come_from_one_cached_result	deferred	9	In-process paging by rank or materialised once, ported with Task 9.
-test_pager.py::test_pages_are_stable_while_writers_insert_before_and_after_the_page	deferred	9	In-process paging by rank or materialised once, ported with Task 9.
+test_pager.py::test_ranked_pages_equal_the_ordered_result	ported	tests/unit/qry_pager.st	ranked pages equal the ordered result
+test_pager.py::test_unranked_pages_come_from_one_cached_result	ported	tests/unit/qry_pager.st	unranked pages come from one materialised result
+test_pager.py::test_pages_are_stable_while_writers_insert_before_and_after_the_page	ported	tests/unit/qry_pager.st	pages are stable while writers insert before and after the page and remove
 test_pager.py::test_a_token_resumes_the_same_pages_in_a_later_transaction	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
 test_pager.py::test_resuming_refuses_another_semantics_version	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
 test_pager.py::test_a_pager_of_a_written_root_is_refused_and_plan_pagers_have_no_token	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
@@ -300,4 +300,4 @@ test_query_cache_soundness.py::test_plan_families_with_equal_keys_give_equal_res
 test_index_weights_concurrency.py::test_weights_are_exact_after_concurrent_merges_and_retries	ported	tests/unit/idx_indexed_roots.st	index weights are exact, the indexes validate and rank windows equal execution on every snapshot after concurrent merges and retries; the blind writes merged
 test_indexed_roots.py::test_appends_to_an_indexed_list	ported	tests/unit/idx_indexed_roots.st	appends to an indexed List from 4 actors: each record once, in its writer's order; the indexes answer like a scan
 test_indexed_roots.py::test_blind_set_at_on_an_indexed_dictionary	ported	tests/unit/idx_indexed_roots.st	blind setAt: into an indexed Dictionary from 4 actors: every own key, a written value on each shared key, no conflict; the indexes answer like a scan
-test_pager_stability.py::test_pagers_and_cached_queries_stay_on_their_snapshot_under_writers	deferred	9	Pagers stay on their snapshot under writers; the cached-query half is deferred with the query cache and is dropped and noted when Task 9 ports it.
+test_pager_stability.py::test_pagers_and_cached_queries_stay_on_their_snapshot_under_writers	ported	tests/unit/qry_pager_stability.st	every reader saw exactly its snapshot's rows on every pager: none twice, none skipped

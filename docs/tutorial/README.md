@@ -66,15 +66,14 @@ chapters 14 to 16 runs. What a cluster costs, measured on one machine, is in cha
 
 > **In progress.** These chapters were written before the code, from the approved
 > [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md). The programs
-> of chapters 17 and 18 run as tests; chapter 19's needs pagers (plan Task 9) and still lives in
-> [examples/queries/pending/](../../examples/queries/pending/README.md). A figure not measured yet
-> is a `[measured in T<n>: ...]` marker. The concepts are in [queries.md](../queries.md).
+> of chapters 17, 18 and 19 run as tests. A figure not measured yet is a `[measured in T<n>: ...]`
+> marker. The concepts are in [queries.md](../queries.md).
 
 | # | Chapter | Program |
 |---|---|---|
 | 17 | [Indexes](17-indexes.md) | `17_indexes.st` |
 | 18 | [Queries and the planner](18-queries-and-plans.md) | `18_queries_and_plans.st` |
-| 19 | [Ordered reads and pages](19-ordered-reads-and-pages.md) | `19_ordered_reads_and_pages.st.pending` (pending, plan Task 9) |
+| 19 | [Ordered reads and pages](19-ordered-reads-and-pages.md) | `19_ordered_reads_and_pages.st` |
 
 Chapter 11 also gains a section, "Indexes, from both sides" (`11_indexed_interop.sh`).
 

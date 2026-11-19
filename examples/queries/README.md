@@ -1,7 +1,7 @@
 # The query examples
 
-> **In progress for protoBaseST 0.3.0.** Every program of this directory runs as a test. The one
-> program that needs pagers (plan Task 9) is still in [pending/](pending/README.md).
+> **In progress for protoBaseST 0.3.0.** Every program of this directory runs as a test;
+> [pending/](pending/README.md) is empty.
 
 Programs for indexed queries: the guide [docs/queries.md](../../docs/queries.md) quotes the ones
 in this directory, and the query chapters of the tutorial (17-19, and chapter 11's section
@@ -26,7 +26,7 @@ Each program was written by the plan task named (the indexed-queries plan,
 | [compound.st](compound.st) | AND, OR and NOT, with `explain` | "How the planner chooses" | Task 8 |
 | [ranges.st](ranges.st) | ranges, ordered reads and windows by rank | "Ordered reads, windows and pages" | Task 8 |
 | [merge_indexed.st](merge_indexed.st) | blind writes merged onto an indexed root; a concurrent index creation | "Merges of blind writes" | Task 8 |
-| `paging.st` | pagers, by rank and materialised | "Ordered reads, windows and pages" | Task 9 |
+| [paging.st](paging.st) | pagers, by rank and materialised | "Ordered reads, windows and pages" | Task 9 |
 
 Run one with `STPATH=<repository>/src protost <program>` from this directory, or all of them with
 `tests/run_tests.sh examples/queries`.

@@ -147,7 +147,7 @@ program that checks its own results and is run by the tests.
 |---|---|
 | [The tutorial, chapters 1-12](docs/tutorial/README.md) | A single process: first commit, values and versions, records, collections and queries, transactions and conflicts, blind writes, mutables and history, bytes, actors, crash recovery, Python interop, refusals. |
 | [Cluster mode, chapters 13-16](docs/tutorial/13-cluster-concepts.md) | Several processes sharing one database: [the ideas](docs/tutorial/13-cluster-concepts.md), [a three-node cluster](docs/tutorial/14-a-three-node-cluster.md), [failures and recovery](docs/tutorial/15-failures-and-recovery.md), [operating a cluster](docs/tutorial/16-operating-a-cluster.md). |
-| [Queries, chapters 17-19](docs/tutorial/17-indexes.md) **(0.3.0, in progress)** | [Indexes](docs/tutorial/17-indexes.md) and [queries and the planner](docs/tutorial/18-queries-and-plans.md) run; [ordered reads and pages](docs/tutorial/19-ordered-reads-and-pages.md) is a draft until pagers land. |
+| [Queries, chapters 17-19](docs/tutorial/17-indexes.md) **(0.3.0, in progress)** | [Indexes](docs/tutorial/17-indexes.md) and [queries and the planner](docs/tutorial/18-queries-and-plans.md) and [ordered reads and pages](docs/tutorial/19-ordered-reads-and-pages.md) run. |
 | [A small ERP](docs/tutorial/erp.md) | A guided build of a real application, with the reasoning at each step. |
 | [Coming from GemStone/S](docs/tutorial/gemstone.md), [Coming from Soil](docs/tutorial/soil.md) | Orientation for readers who know those systems. |
 
@@ -235,9 +235,9 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 | [docs/tutorial/](docs/tutorial/README.md) | The chaptered tutorial: chapters 1-12 on a single process, chapters 13-16 on cluster mode, each quoting a program of `examples/tutorial/` or `examples/cluster/`; and two orientation chapters, coming from GemStone/S and coming from Soil, with their sources. |
 | [examples/cluster/](examples/cluster/README.md) | The cluster chapters' programs, run by the tests; `pending/` is for those that need API still being built (none today). |
 | [examples/tutorial/](examples/tutorial/README.md) | Small programs, one concept each, each checking its own results; run by the tests. |
-| [docs/reference.md](docs/reference.md) | Every public class and message; the indexed-query API in a section marked in progress (pagers to come). |
+| [docs/reference.md](docs/reference.md) | Every public class and message; the indexed-query API, pagers included, in a section marked in progress. |
 | [docs/queries.md](docs/queries.md) | **0.3.0, in progress:** indexed queries and the query planner, the conceptual guide, including how to read `explain`. |
-| [examples/queries/](examples/queries/README.md) | **0.3.0, in progress:** the programs of the guide, run as tests; the one that needs pagers is still in `pending/`. |
+| [examples/queries/](examples/queries/README.md) | **0.3.0, in progress:** the programs of the guide, run as tests; `pending/` is empty. |
 | [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from `proto_db`. |
 | [docs/not-done.md](docs/not-done.md) | What is not done, and what is not proven. |
 | [docs/decisions.md](docs/decisions.md) | The choices, with what each costs if it is wrong. |

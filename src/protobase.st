@@ -37,6 +37,7 @@ Import from: 'protobase/terms'.
 Import from: 'protobase/plans'.
 Import from: 'protobase/planner'.
 Import from: 'protobase/query'.
+Import from: 'protobase/pager'.
 Import from: 'protobase/roots'.
 Import from: 'protobase/publisher'.
 Import from: 'protobase/cluster/round'.
