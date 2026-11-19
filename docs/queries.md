@@ -335,9 +335,9 @@ an offset add a `Limit` on top.
 intersect". Under this model `Intersect(a, b)` costs `cost(a) + rows(a) + cost(b) + rows(b)`, never
 less than `Filter(a, b)` at `cost(a) + rows(a)`, so `proto_db` does not enumerate intersections at all
 (`planner.py`, module docstring, "Access paths and cost"; `query-planner.rst`). That is a claim of
-the model; measured in T7 (bench P3, 2000 records, 5 runs): the hand-built intersection took 3.8x the
-filter plan's time in `proto_db` and 11.6x in protoBaseST (model: 2.4x), so the claim holds at both
-speeds ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
+the model; measured in T7 (bench P3, one size and one selectivity: 2000 records, 29 rows, 5 runs): the
+hand-built intersection took 3.9x the filter plan's time in `proto_db` and 13.2x in protoBaseST
+(model: 2.4x), so the claim holds at both speeds on that data ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
 
 **The crossover where scanning wins.** For a tiny collection the scan and its filter (two units per
 element) are cheaper than any descent. With one element, a matching lookup costs 1 + log2 3 ≈ 2.58
@@ -345,10 +345,11 @@ against the scan's 2 (model estimates), and the planner scans; with two elements
 lookup costs 3 and the scan 4, and it looks up. In the model, then, the switch in collection size
 comes at once, so size is not what bench P2 sweeps (ruling CR2). Whether the timings cross where the
 model says is a measurement: measured in T7 (bench P2, 2000 records, both plans forced): the model switches to the scan only
-between 99 % and 100 % of a unique range key, and for `ne:` on an index of n groups, and the
-timings do not cross there: at both switch points the index plan is still the faster, by 4 % and 30
-% in protoBaseST and 31 % and 24 % in `proto_db`; below the switch the index wins in proportion to
-the rows. The model is slightly pessimistic about the index, never wrong about the answer
+between 99 % and 100 % of a unique range key, and for `ne:` on an index of n groups. It switches
+early: in `proto_db` the forced index plan is still faster at both points (by 31 % and 19 %), and
+in protoBaseST the `ne:` complement is 30 % faster than the scan it rejects, while on the range
+key the two plans converge, within the run's noise. Below the switch the index wins in proportion
+to the rows. The model is slightly pessimistic about the index, never wrong about the answer
 ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
 
 **`!=` and the complement.** An `IndexComplement` is charged a full pass over the index (total + G
@@ -372,8 +373,8 @@ always be equal.
 **No fallback.** Nothing in the query path catches an error to answer something else. A malformed
 query is `PBValidationError`; an unsupported one `PBNotSupportedError`.
 
-Measured in T7 (bench P1): `plan` and `explain` alone take 0.04 to 4.6 ms a query in `proto_db`
-and 0.76 to 45 ms in protoBaseST, from one conjunct without an index to 32 conjuncts over 8 indexes;
+Measured in T7 (bench P1): `plan` and `explain` alone take 0.04 to 4.5 ms a query in `proto_db`
+and 0.71 to 47 ms in protoBaseST, from one conjunct without an index to 32 conjuncts over 8 indexes;
 the cost grows with conjuncts times indexes ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
 
 ## Reading a plan
@@ -660,9 +661,9 @@ same rows, checksum and plan. None exists yet.
 | Commits per second with 0, 1 and 3 indexes | M1 | Measured in T4a: protoBaseST 38, 11.9 and 5.2 commits/s, `proto_db` 150, 115 and 83; about 55 ms per index per commit against 2 ms ([deviations.md](deviations.md#m1-commits-per-second-with-0-1-and-3-indexes)) |
 | Bulk `addIndex:` against the fold of single additions | M2 | Measured in T3: build 3.1x faster than the fold at 10^4, protoBaseST 16.7x (10^2) to 38.3x (10^4) slower than `proto_db` ([deviations.md](deviations.md#m2-the-bulk-build-against-the-fold-of-single-additions)) |
 | Merges onto an indexed current, standalone and in a cluster | M3 | Measured in T4b: standalone protoBaseST 34.2, 11.9 and 5.1 commits/s with 0, 1 and 3 indexes, `proto_db` 141, 110 and 81; a three-member protoBaseST cluster 17.4, 6.8 and 1.1, its three-index build (189 ms) refused for the send reserve 135 to 210 times per 120 commits ([deviations.md](deviations.md#m3-a-blind-write-merged-onto-an-indexed-current-standalone-and-in-a-cluster)) |
-| `plan` and `explain` alone, 1 to 32 conjuncts, 0 to 8 indexes | P1 | Measured in T7: 0.76 to 45 ms a query in protoBaseST, 0.04 to 4.6 ms in `proto_db` ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
-| Where the cost model switches between index and scan, and whether the timings cross there | P2 | Measured in T7: the model switches to the scan at 99-100 % of a unique key and for `!=` on n groups; the forced index plan is still 4 % to 31 % faster there ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
-| The two-index intersection against the filter plan | P3 | Measured in T7: the intersection takes 3.8x (`proto_db`) and 11.6x (protoBaseST) the filter plan's time; model 2.4x ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
+| `plan` and `explain` alone, 1 to 32 conjuncts, 0 to 8 indexes | P1 | Measured in T7: 0.71 to 47 ms a query in protoBaseST, 0.04 to 4.5 ms in `proto_db` ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
+| Where the cost model switches between index and scan, and whether the timings cross there | P2 | Measured in T7: the model switches to the scan at 99-100 % of a unique key and for `!=` on n groups, early: in `proto_db` the forced index plan is still 31 % and 19 % faster there; in protoBaseST the `!=` complement 30 %, the range plans within noise ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
+| The two-index intersection against the filter plan | P3 | Measured in T7 at one size and selectivity: the intersection takes 3.9x (`proto_db`) and 13.2x (protoBaseST) the filter plan's time; model 2.4x ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
 | protoBaseST against `proto_db` on every workload above | all | [measured in T10: the full `bench/run_query.sh` comparison, recorded in deviations.md#performance with date, machine, load, commits and binaries] |
 
 ## Sources

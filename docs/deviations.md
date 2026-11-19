@@ -1219,84 +1219,91 @@ Commits per second from the minimum of five runs (medians: standalone within 5 %
 
 #### P1, P2, P3: the planner's overhead, the cost model against timings, the intersection
 
-`RUNS=5 bench/run_query.sh P1 P2 P3`. **Indicative only.** Measured 2026-11-19 (about 12:09-12:28 UTC) on
-the machine of M1 to M3 (AMD Ryzen 5 5500U, 6 cores, 12 threads, Linux 7.0.0, DEV12), load average
-2.6 before and 3.0 after (other desktop sessions open, not controlled); protoBaseST at `1ebabee`
-with the Task 7 working tree (committed as the Task 7 commit `9b3bcc7`; the only source edit during the run
-renamed the planner's internal candidate accessor, no change of behaviour), the `pinned-360` build
-(protoST 0.12.0 on protoCore 3.6.0); `proto_db` v2.0.0rc4 (`8e6127f`) on CPython 3.14.0. One
-process per unit, five rounds interleaved, protost heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`.
-The data and work are `bench/_query_bench.st` (`PlannerBench`) and `bench/py_query_workload.py`.
-Every run self-reports its rows, queries, checksum and `model=`, the node names of the plan the
-planner chooses; all ten runs of every unit agreed with `proto_db`'s first, so on every unit the
-two planners chose the same plan; the two forced plans of a P2 point, and P3's two plans, answered
-the same rows and checksum. Times are the minimum of five (medians within 10 % of it, but P1 32
-conjuncts over 2 indexes in protoBaseST, 20 %, and `proto_db`'s scan at `r < 2000`, 18 %).
+`RUNS=5 bench/run_query.sh P1 P2 P3`. **Indicative only, and noisy**: measured on a committed tree
+under a heavy desktop load. The runner's provenance line, unmodified:
+`2026-11-19T13:31Z; protoBaseST b68bec7; protoST 0.12.0` (the run ended then; it took about 20
+minutes). Machine of M1 to M3 (AMD Ryzen 5 5500U, 6 cores, 12 threads, Linux 7.0.0-43, DEV12); load
+average 5.5 before and 8.9 after (other sessions running, not controlled); the `pinned-360` build
+(protoST 0.12.0 on protoCore 3.6.0); `proto_db` v2.0.0rc4 (`8e6127f`) on CPython 3.14.0. One process
+per unit, five rounds interleaved, protost heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`. The
+data and work are `bench/_query_bench.st` (`PlannerBench`) and `bench/py_query_workload.py`. Every
+run self-reports its rows, queries, checksum and `model=`, the node names of the plan the planner
+chooses, and P2 and P3 runs a MODEL line with the model costs of the plans compared; all ten runs of
+every unit agreed with `proto_db`'s first run on both (the runner compares them), so on every unit
+the two planners chose the same plan at the same model costs; the two forced plans of a P2 point,
+and P3's two plans, answered the same rows and checksum. Times are the minimum of five; the medians
+are up to 50 % above it in this run (load), so differences under about 15 % are noise.
+
+**Sizes.** The workloads use 1000 records (P1) and 2000 (P2, P3), not the 10^4 first drafted:
+building a 10^4-record `PBList` with three indexes took about 30 s per process in protoST (untimed
+setup, paid by every one of the 330 processes of a run). Size is not the variable of P2 (ruling CR2);
+P3 is measured at one size and one selectivity only.
 
 **P1, planner overhead**: `plan` and `explain` of 200 conditions, no execution, on a `PBList` of
 1000 records with 0, 2 or 8 indexes (alternately range and equality on eight fields).
 
 | Conjuncts | Indexes | `proto_db` ms per query | protoBaseST ms per query | ratio |
 |---|---|---|---|---|
-| 1 | 0 | 0.04 | 0.76 | 19.9x |
-| 1 | 2 | 0.07 | 1.86 | 25.1x |
-| 1 | 8 | 0.10 | 2.41 | 25.0x |
-| 8 | 0 | 0.11 | 2.54 | 23.9x |
-| 8 | 2 | 0.27 | 4.92 | 18.2x |
-| 8 | 8 | 0.67 | 11.2 | 16.8x |
-| 32 | 0 | 0.31 | 9.07 | 29.0x |
-| 32 | 2 | 1.38 | 17.9 | 13.0x |
-| 32 | 8 | 4.64 | 45.5 | 9.8x |
+| 1 | 0 | 0.04 | 0.71 | 16.8x |
+| 1 | 2 | 0.08 | 1.94 | 24.0x |
+| 1 | 8 | 0.09 | 2.53 | 27.3x |
+| 8 | 0 | 0.11 | 2.70 | 23.8x |
+| 8 | 2 | 0.27 | 4.95 | 18.1x |
+| 8 | 8 | 0.71 | 11.0 | 15.5x |
+| 32 | 0 | 0.33 | 9.11 | 27.4x |
+| 32 | 2 | 1.41 | 18.2 | 12.9x |
+| 32 | 8 | 4.52 | 47.0 | 10.4x |
 
 The cost grows with conjuncts times indexes, as `planner.py`'s design says (one candidate per
-supported conjunct, each estimated): 32 conjuncts over 8 indexes cost protoBaseST 45 ms a query,
-`proto_db` 4.6 ms. The ratio falls as the work becomes estimating (index descents) rather than
-building expressions and explains.
+supported conjunct, each estimated): 32 conjuncts over 8 indexes cost protoBaseST 47 ms a query,
+`proto_db` 4.5 ms.
 
 **P2, the cost model against timings**: 2000 records; a `PBRangeIndex` on a unique key `r`,
 `PBEqualityIndex`es on `few` (4 key groups) and `many` (2000 groups). Each point runs the index's
-own plan and a `Filter` over the scan, both forced, five executions timed together. Model costs are
-`proto_db`'s and protoBaseST's alike (they agree to the unit).
+own plan and a `Filter` over the scan, both forced, five executions timed together. The model costs
+are compared by the runner: `proto_db`'s and protoBaseST's are equal (in thousandths).
 
 | Term | rows | model: index / scan cost | planner chooses | `proto_db` ms index / scan | protoBaseST ms index / scan |
 |---|---|---|---|---|---|
-| `r < 2` | 2 | 15.0 / 4000 | IndexRange | 0.07 / 27.9 | 1.5 / 678 |
-| `r < 20` | 20 | 51.0 / 4000 | IndexRange | 0.23 / 27.1 | 9.8 / 684 |
-| `r < 200` | 200 | 411 / 4000 | IndexRange | 1.8 / 27.4 | 66 / 675 |
-| `r < 1000` | 1000 | 2011 / 4000 | IndexRange | 8.7 / 28.0 | 333 / 701 |
-| `r < 1800` | 1800 | 3611 / 4000 | IndexRange | 16.0 / 27.8 | 605 / 727 |
-| `r < 1980` | 1980 | 3971 / 4000 | IndexRange | 17.4 / 27.8 | 670 / 697 |
-| `r < 2000` | 2000 | 4011 / 4000 | scan + Filter | 19.2 / 28.0 | 676 / 707 |
-| `few != 0` (4 groups) | 1500 | 2005 / 4000 | IndexComplement | 3.5 / 26.9 | 112 / 627 |
-| `many != 0` (2000 groups) | 1999 | 4001 / 4000 | scan + Filter | 20.7 / 27.2 | 443 / 632 |
+| `r < 2` | 2 | 15.0 / 4000 | IndexRange | 0.08 / 28.7 | 1.5 / 693 |
+| `r < 20` | 20 | 51.0 / 4000 | IndexRange | 0.24 / 28.5 | 6.8 / 767 |
+| `r < 200` | 200 | 411 / 4000 | IndexRange | 1.9 / 27.1 | 73 / 782 |
+| `r < 1000` | 1000 | 2011 / 4000 | IndexRange | 9.5 / 27.9 | 341 / 817 |
+| `r < 1800` | 1800 | 3611 / 4000 | IndexRange | 19.5 / 29.6 | 693 / 761 |
+| `r < 1980` | 1980 | 3971 / 4000 | IndexRange | 18.7 / 31.8 | 850 / 728 |
+| `r < 2000` | 2000 | 4011 / 4000 | scan + Filter | 21.4 / 30.8 | 883 / 800 |
+| `few != 0` (4 groups) | 1500 | 2005 / 4000 | IndexComplement | 4.2 / 30.5 | 111 / 760 |
+| `many != 0` (2000 groups) | 1999 | 4001 / 4000 | scan + Filter | 26.2 / 32.3 | 492 / 708 |
 
 - **The model switches** to the scan between 99 % and 100 % selectivity on the unique range
   index, and for `!=` when the index has n groups (CR1: the complement wins below n − 1 groups).
-- **The timings do not cross there.** At both points where the model picks the scan the forced
-  index plan is still faster: by 4 % (range, protoBaseST) and 31 % (`proto_db`) at 100 %, by 30 %
-  (protoBaseST) and 24 % (`proto_db`) for `!=` on n groups. In protoBaseST the two plans converge
-  near the switch (0.96x at 99 % and at 100 %); in `proto_db` the index range stays about 30 %
-  cheaper than the scan and filter even when it reads everything. So the model's switch is late
-  rather than wrong in protoBaseST and slightly pessimistic about the index in both: where it
-  chooses the scan it gives up 4 % to 31 %. Below the switch, the index wins by a factor that
-  follows the rows (about 450x at 2 rows in protoBaseST, 1.04x at 1980). Why a full index pass beats a scan with
-  a filter that the model prices 0.3 % cheaper was not measured; the model charges a scanned
-  element 2 units (read, test) and an index row 1 plus its group's share.
-- Not measured: other sizes (ruling CR2: the model's switch does not move with size for a unique
-  key), and equality indexes with many rows per group.
+- **In `proto_db` the model switches early**: at both switch points it chooses the scan while the
+  forced index plan is still faster, by 31 % (range, `r < 2000`) and 19 % (`!=` on n groups).
+- **In protoBaseST the range point converges and is within noise**: near the switch the two plans
+  take about the same time (index against scan 0.91x at 90 %, 1.17x at 99 %, 1.10x at 100 % in
+  this run; 0.83x, 0.96x and 0.96x in an earlier run on an uncommitted tree under lighter load), so
+  no crossing is resolved there. For `!=` on n groups the model switches early in protoBaseST too:
+  the complement is 30 % faster than the scan it rejects (and was in the earlier run).
+- Below the switch the index wins in proportion to the rows (about 460x at 2 rows in protoBaseST).
+  Why a full index pass beats a scan with a filter that the model prices 0.3 % cheaper in
+  `proto_db` was not measured; the model charges a scanned element 2 units (read, test) and an
+  index row 1 plus its group's share.
+- Ruling CR2, as written: the model's crossover in collection size is only one or two elements,
+  so size is not the variable swept.
 
-**P3, intersect**: 2000 records, `x == 3` on a `PBEqualityIndex` (200 rows) and `y == 2` on a
-`PBRangeIndex` (286 rows); 29 rows answer. The hand-built `PBIntersect` of both index plans costs
-978.8 in the model, the planner's plan (`Filter <- IndexLookup` of `x`) 403.6.
+**P3, intersect** (one size, one selectivity): 2000 records, `x == 3` on a `PBEqualityIndex`
+(200 rows) and `y == 2` on a `PBRangeIndex` (286 rows); 29 rows answer. The hand-built
+`PBIntersect` of both index plans costs 978.8 in the model, the planner's plan
+(`Filter <- IndexLookup` of `x`) 403.6.
 
 | Plan | `proto_db` ms (5 runs) | protoBaseST ms (5 runs) |
 |---|---|---|
-| `Intersect (IndexLookup x, IndexRange y)` | 11.9 | 865 |
-| `Filter <- IndexLookup` (planner) | 3.1 | 74 |
+| `Intersect (IndexLookup x, IndexRange y)` | 12.2 | 1139 |
+| `Filter <- IndexLookup` (planner) | 3.1 | 86 |
 
-The model's claim holds at both speeds: the intersection is 3.8x slower in `proto_db` and 11.6x in
-protoBaseST (model: 2.4x). Where protoBaseST's intersection spends the extra time was not
-profiled.
+The model's claim holds at both speeds on this data: the intersection is 3.9x slower in `proto_db`
+and 13.2x in protoBaseST (model: 2.4x). Where protoBaseST's intersection spends the extra time was
+not profiled. Other sizes and selectivities were not measured.
 
 **Peak RSS** (0.7 to 5 GB for protoBaseST against about 30 MB) is the heap budget being used, not
 the live set (see M1).

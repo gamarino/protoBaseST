@@ -129,9 +129,9 @@ better input costs `cost(a) + rows(a)`: the intersection can never be cheaper
 intersections would only add untested code.
 
 That is the model's claim. Whether it holds in time, at protoST's speed, is a measurement:
-measured in T7 (bench P3, 2000 records, 5 runs): the hand-built intersection took 3.8x the
-filter plan's time in `proto_db` and 11.6x in protoBaseST (model: 2.4x), so the claim holds at both
-speeds ([deviations.md](../deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
+measured in T7 (bench P3, one size and one selectivity: 2000 records, 29 rows, 5 runs): the
+hand-built intersection took 3.9x the filter plan's time in `proto_db` and 13.2x in protoBaseST
+(model: 2.4x), so the claim holds at both speeds on that data ([deviations.md](../deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
 
 ## Why the planner sometimes scans
 
@@ -151,10 +151,11 @@ two cities the lookup costs 3 and the scan 4. That is the model's crossover in c
 it is too small to be worth measuring (ruling CR2). What matters to a program is whether the
 timings agree with the model where it switches for a reason other than size, the selectivity of the
 condition: measured in T7 (bench P2, 2000 records, both plans forced): the model switches to the scan only
-between 99 % and 100 % of a unique range key, and for `ne:` on an index of n groups, and the
-timings do not cross there: at both switch points the index plan is still the faster, by 4 % and 30
-% in protoBaseST and 31 % and 24 % in `proto_db`; below the switch the index wins in proportion to
-the rows. The model is slightly pessimistic about the index, never wrong about the answer
+between 99 % and 100 % of a unique range key, and for `ne:` on an index of n groups. It switches
+early: in `proto_db` the forced index plan is still faster at both points (by 31 % and 19 %), and
+in protoBaseST the `ne:` complement is 30 % faster than the scan it rejects, while on the range
+key the two plans converge, within the run's noise. Below the switch the index wins in proportion
+to the rows. The model is slightly pessimistic about the index, never wrong about the answer
 ([deviations.md](../deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
 
 ## `not (age = 30)` is not `age ne: 30`
