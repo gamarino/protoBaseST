@@ -1,0 +1,303 @@
+# proto_db index and query tests (tag v2.0.0rc4) and where each is ported; see queries_checklist.sh for the row rules.
+# columns: proto_db file::function, status, task or reason class, reason (or check label for ported rows)
+test_equality_index.py::test_definition_type_name_and_str_key	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_equality_index.py::test_supported_operators	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_equality_index.py::test_answers_match_a_scan_with_value_semantics	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_equality_index.py::test_missing_keys_are_recorded_and_never_match_ne	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_equality_index.py::test_duplicates_are_counted	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_equality_index.py::test_removing_an_absent_element_raises	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_equality_index.py::test_unorderable_keys_and_elements	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_equality_index.py::test_estimates	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_equality_index.py::test_explain_reports_the_structure	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_equality_index.py::test_validate_detects_stale_and_miscounted_entries	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_equality_index.py::test_build_equals_fold_and_ignores_the_receiver	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_equality_index.py::test_persistence_roundtrip_keeps_answers	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_equality_index.py::test_readers_unaffected_by_concurrent_writers	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_range_index.py::test_definition_and_type_name	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_range_index.py::test_supported_operators_and_ordering	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_range_index.py::test_range_operators_stay_within_the_operand_rank	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_range_index.py::test_between_variants_inclusivity	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_range_index.py::test_presence_equality_and_unorderable_keys	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_range_index.py::test_ordered_iteration_follows_the_total_order	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_range_index.py::test_range_estimates_use_subtree_counts	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_range_index.py::test_validate_detects_corruption	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_range_index.py::test_build_equals_fold	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_range_index.py::test_readers_unaffected_by_concurrent_writers	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
+test_range_index.py::test_plans_return_the_stored_values_not_an_equal_representative	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_index_base.py::test_index_requires_every_abstract_hook	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_definition_is_validated	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_index_is_immutable	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_definition_must_name_name_and_key_spec	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_abstract_base_type_name	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_concrete_index_classes_must_name_their_type	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_with_rejects_unknown_fields	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_with_replaced_defaults_to_remove_then_add	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_build_starts_from_empty_and_folds_with_added	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_build_accepts_any_iterable	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_empty_keeps_the_whole_definition	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_explain_default	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_supports_checks_the_key_path	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_plan_on_unsupported_term_raises_not_supported	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_estimate_on_unsupported_term_raises_not_supported	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_ordered_iteration_is_unsupported_by_default	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_ordered_scan_index	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_validate_detects_an_inconsistent_index	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_validate_covers_missing_keys_and_stale_keys	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_validate_only_checks_supported_terms	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_validate_skips_unorderable_keys	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_key_spec_survives_persistence	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_base.py::test_index_attached_to_a_collection_persists	deferred	4a	Attaches an index to a collection and persists it, so it needs addIndex: from Task 4a.
+test_index_base.py::test_index_plan	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_index_plan_without_term_needs_an_estimate	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_index_plan_default_kind_and_validation	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_index_plan_concurrent_execution	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_element_identity	deferred	3	Index base hooks and definition rules, ported with Task 3.
+test_index_key_neutrality.py::test_an_element_index_has_the_same_bytes_however_the_value_was_built	deferred	3	Index bytes do not depend on how the value was built, a Task 3 structure check.
+test_index_key_neutrality.py::test_a_field_index_has_the_same_bytes_however_the_value_was_built	deferred	3	Index bytes do not depend on how the value was built, a Task 3 structure check.
+test_index_key_neutrality.py::test_an_extractor_index_has_the_same_bytes_however_the_key_was_built	deferred	3	Index bytes do not depend on how the value was built, a Task 3 structure check.
+test_index_contract.py::test_index_contract	deferred	7	Contract over every index kind: structure half in Task 3, whole contract with plans in Task 7.
+test_index_contract.py::test_scan_index_is_registered	deferred	3	Registry of contract index kinds, set up with the Task 3 contract test.
+test_index_contract.py::test_contract_rejects_broken_index	deferred	7	Contract over every index kind: structure half in Task 3, whole contract with plans in Task 7.
+test_keyspec.py::test_path_reads_record_attributes_and_absent_is_missing	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_dotted_path_through_records_and_mappings	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_private_and_reserved_names_are_never_read	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_path_reads_persisted_attributes_of_other_atoms_only	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_path_extraction_loads_lazy_stubs	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_element_returns_the_element_itself	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_invalid_paths_are_rejected	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_named_extractor_registry	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_extractor_results_are_canonical	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_unregistered_extractor_fails_at_use_with_a_clear_message	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_extractor_names_cannot_be_redefined	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_register_extractor_validates	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_extractor_name_validated_on_construction	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_keyspec_is_a_frozen_value	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_direct_construction_is_validated	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_plain_data_round_trip	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_malformed_data_is_corruption	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_term_paths	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_keyspec.py::test_describe	deferred	2	Key spec path, extractor and registry rules, ported with Task 2.
+test_terms.py::test_operator_vocabulary_uses_the_0_1_spellings	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_term_is_frozen_and_compares_by_value	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_equality_follows_values_semantics	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_missing_never_matches_a_comparison	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_not_equal_is_present_and_not_equal	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_is_none_covers_missing_and_none	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_range_operators_stay_within_the_value_rank	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_between_variants	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_in	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_unorderable_keys_only_match_presence_and_not_equal	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_path_none_is_the_element_itself	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_dotted_and_extractor_paths	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_near_is_not_answered_by_the_scan_oracle	n/a	excluded: vector	The near[] operator is excluded by spec 3.3 and refuses with PBNotSupportedError.
+test_terms.py::test_near_values_are_canonical_and_hashable	n/a	excluded: vector	The near[] operator is excluded by spec 3.3 and refuses with PBNotSupportedError.
+test_terms.py::test_near_query_validation	n/a	excluded: vector	The near[] operator is excluded by spec 3.3 and refuses with PBNotSupportedError.
+test_terms.py::test_near_terms_need_a_near_query	n/a	excluded: vector	The near[] operator is excluded by spec 3.3 and refuses with PBNotSupportedError.
+test_terms.py::test_in_over_a_set_is_stored_in_a_canonical_order	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_invalid_terms_are_rejected	deferred	5	Term and expression language, ported with Task 5.
+test_terms.py::test_describe	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_term_is_an_expression_and_stays_hashable	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_and_or_flatten_nested_same_type	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_and_or_need_two_expression_operands	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_not_not_simplifies	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_nodes_are_immutable_hashable_and_comparable	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_repr_is_readable	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_describe_is_json_serialisable	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_iter_terms_walks_the_tree_in_order	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_compile_every_operator	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_compile_prefix_stream_operators	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_compile_implicit_and_and_nested_lists	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_compile_round_trips_nested_trees	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_compile_rejects_invalid_input	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_evaluate_term_is_the_scan_oracle	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_evaluate_truth_tables	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_not_of_a_comparison_on_a_missing_key_is_true	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_mixed_types_and_equal_but_distinct_values	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_and_or_short_circuit	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_evaluate_near_is_not_a_scan_predicate	n/a	excluded: vector	The near[] operator is excluded by spec 3.3 and refuses with PBNotSupportedError.
+test_expressions.py::test_evaluate_rejects_non_expressions	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_contains_semantics	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_truthiness_operators	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_module_reexports_term	n/a	Python-only API	Checks which Python module re-exports Term, which has no protoST counterpart.
+test_expressions.py::test_term_equality_and_hash_follow_values_equal	deferred	5	Term and expression language, ported with Task 5.
+test_expressions.py::test_contains_on_dicts_and_collection_atoms	deferred	5	Term and expression language, ported with Task 5.
+test_planner.py::test_no_where_is_the_scan_itself	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_collection_scan_plan_source_uses_the_collection_indexes	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_other_plan_sources_get_a_filter_on_top	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_where_accepts_the_list_syntax	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_invalid_arguments_raise	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_picks_the_cheapest_index_and_keeps_the_rest_as_residual	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_cheaper_index_wins_over_a_dearer_one_on_the_same_term	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_estimate_ties_break_by_index_name	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_ne_term_alone_prefers_the_index_complement_over_scan_plus_filter	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_and_keeps_every_unindexed_conjunct_in_order	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_duplicate_conjuncts_are_planned_once	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_no_index_means_scan_plus_filter_of_the_whole_predicate	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_or_fully_indexed_uses_union	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_or_with_an_unindexed_branch_falls_back_to_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_or_with_a_negated_branch_falls_back_to_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_unselective_union_loses_to_the_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_or_conjunct_inside_and_is_an_access_path	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_union_keeps_list_duplicates_exactly	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_normalize_de_morgan_and_presence_only	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_not_presence_uses_the_index_and_not_comparison_stays_residual	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_not_over_and_becomes_a_scan_filtered_by_the_disjunction	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_not_over_or_of_presence_terms_is_indexed	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_mixed_type_values_by_element	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_mixed_type_values_and_missing_by_path	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_order_by_uses_a_range_index_when_present	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_order_by_single_path_string_and_filter_on_ordered_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_order_by_without_ordering_index_sorts	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_order_by_two_keys_sorts_even_with_an_index_on_the_first	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_selective_where_then_sort_beats_ordered_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_range_and_order_on_the_same_key_picks_by_cost	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_limit_and_offset_apply_after_ordering	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_near_without_index_raises	n/a	excluded: vector	The kNN planner rules are excluded by spec 3.3, never ported.
+test_planner.py::test_near_with_index_uses_vector_search_never_a_filter	n/a	excluded: vector	The kNN planner rules are excluded by spec 3.3, never ported.
+test_planner.py::test_near_in_a_disjunction_forces_a_union_with_a_filtered_scan_branch	n/a	excluded: vector	The kNN planner rules are excluded by spec 3.3, never ported.
+test_planner.py::test_near_where_with_order_by_never_filters_on_the_ordered_scan	n/a	excluded: vector	The kNN planner rules are excluded by spec 3.3, never ported.
+test_planner.py::test_explain_is_exactly_the_executed_node_tree	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_planning_is_per_version	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_property_planned_result_equals_the_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_query_plans.py::test_estimate_is_frozen_and_validated	deferred	6	Plan operator base and CollectionScan, ported with Task 6.
+test_query_plans.py::test_query_plan_is_abstract	deferred	6	Plan operator base and CollectionScan, ported with Task 6.
+test_query_plans.py::test_collection_scan_plan	deferred	6	Plan operator base and CollectionScan, ported with Task 6.
+test_query_plans.py::test_collection_scan_plan_on_empty_collection	deferred	6	Plan operator base and CollectionScan, ported with Task 6.
+test_linq.py::test_regression_linq_over_a_collection_returns_the_rows_not_an_empty_list	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_sources_collection_plan_iterable_and_queryable	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_invalid_sources_raise	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_queryable_is_immutable	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_field_paths	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_field_predicates_are_pure_terms	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_combinators_build_expressions	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_predicates_evaluate_like_the_scan_oracle	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_indexed_equality_uses_the_index	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_indexed_in_uses_the_index	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_indexed_between_uses_a_range_and_executes	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_indexed_and_uses_one_index_and_a_residual	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_indexed_or_uses_a_union	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_consecutive_wheres_are_merged_into_one_planned_predicate	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_where_accepts_expressions_and_the_list_syntax	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_lambda_becomes_a_visible_python_filter	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_mixed_and_is_split_into_index_and_python_filter	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_mixed_and_with_several_parts	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_or_or_not_with_a_lambda_is_one_whole_python_filter	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_untranslatable_field_extras_become_python_filters	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
+test_linq.py::test_computed_values_follow_missing_and_none_semantics	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
+test_linq.py::test_near_without_a_vector_index_raises_instead_of_falling_back	n/a	excluded: vector	The near[] operator is excluded by spec 3.3, never ported.
+test_linq.py::test_errors_raised_by_user_code_propagate	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_between_inclusive_default	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_between_exclusive	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_between_sugars	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_between_range_bounds	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_datetime_between	n/a	Python-only API	Uses Python datetime values, which have no protoST counterpart in this port.
+test_linq.py::test_order_by_then_by_stability_and_direction	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_then_by_needs_a_preceding_order_by	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_order_by_can_stream_an_ordered_index	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_skip_and_take_compose_like_slicing	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_where_after_take_is_applied_on_top	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_order_and_window_are_pushed_into_the_planner	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_select_forms	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_where_after_select_filters_the_projection	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_distinct_keeps_equal_but_distinct_values_apart	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_distinct_and_count	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_filter_projection_pagination	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_lambda_where_with_window	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_join_inner_and_left	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
+test_linq.py::test_group_by_with_aggregates	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
+test_linq.py::test_group_by_defaults_and_raw_aggregations	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
+test_linq.py::test_select_many	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
+test_linq.py::test_select_many_top_n_per_category	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
+test_linq.py::test_count_first_and_first_or_none	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_iteration_executes_the_explained_plan	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_values_scan_and_distinct_nodes	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
+test_linq.py::test_missing_is_public_api	n/a	Python-only API	Checks Python module exports or bound-method misuse, with no protoST equivalent.
+test_linq.py::test_builder_names_are_child_fields_not_internals	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
+test_linq.py::test_bound_builder_methods_are_rejected_as_keys_and_predicates	n/a	Python-only API	Checks Python module exports or bound-method misuse, with no protoST equivalent.
+test_linq.py::test_group_by_key_rename_keeps_any_aggregation_name	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
+test_linq.py::test_impure_leading_predicate_still_lets_the_planner_order	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_near_and_lambda_split_like_two_wheres	n/a	excluded: vector	The near[] operator is excluded by spec 3.3, never ported.
+test_linq.py::test_in_rejects_a_mapping	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_linq.py::test_queryable_of_a_queryable_keeps_its_operators	deferred	8	Query front end behaviour (PBQuery, PBField, block predicates), ported with Task 8.
+test_pager.py::test_ranked_pages_equal_the_ordered_result	deferred	9	In-process paging by rank or materialised once, ported with Task 9.
+test_pager.py::test_unranked_pages_come_from_one_cached_result	deferred	9	In-process paging by rank or materialised once, ported with Task 9.
+test_pager.py::test_pages_are_stable_while_writers_insert_before_and_after_the_page	deferred	9	In-process paging by rank or materialised once, ported with Task 9.
+test_pager.py::test_a_token_resumes_the_same_pages_in_a_later_transaction	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_resuming_refuses_another_semantics_version	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_a_pager_of_a_written_root_is_refused_and_plan_pagers_have_no_token	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_snapshot_at_reads_a_past_version_and_refuses_writes	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_snapshot_references_are_validated	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_a_token_resumes_in_another_process	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_queryable_conveniences_cached_and_pager	n/a	deferred: cache	The query result cache is deferred by spec 3.2, and this test relies on it.
+test_pager.py::test_a_token_or_entry_of_another_database_is_refused	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_a_recreated_database_refuses_the_old_incarnations_tokens	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_malformed_and_foreign_tokens_raise_a_client_error	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_a_token_whose_plan_changed_is_refused_as_stale	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_a_token_names_extractors_by_name_and_declared_version	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_extractor_tokens_resume_in_processes_with_other_hash_seeds	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_a_forged_atom_operand_in_a_token_is_a_client_error	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_a_pager_whose_plan_has_no_structured_digest_has_no_token	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_pager.py::test_resume_reads_the_database_identity_once_per_handle	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
+test_vector_index.py::test_definition_type_names_and_validation	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_supports_only_near_on_its_key_with_matching_dimension_and_metric	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_exact_backend_equals_brute_force	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_exact_backend_equals_brute_force_at_extreme_magnitudes	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_results_are_nearest_first_and_ties_follow_the_member_key	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_duplicates_are_counted_and_equal_values_come_back_exactly	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_invalid_vectors_are_kept_aside_and_never_returned	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_zero_vectors_have_cosine_similarity_zero	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_with_removed_of_an_absent_element_raises	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_ivf_flat_with_full_probe_equals_exact	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_ivf_flat_trains_on_growth_and_stays_consistent	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_ivf_flat_partial_probe_has_good_recall_and_widens_for_k	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_ivf_flat_training_depends_on_the_data_and_seed_only	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_ivf_flat_round_trip_through_file_storage_keeps_centroids	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_validate_detects_structural_corruption	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_near_k_and_predicate_returns_k_among_the_matching	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_near_k_with_threshold_and_predicate_and_threshold_only_post_filter	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_several_near_terms_and_disjunctions_keep_set_semantics	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_oracle_with_predicate_callable_and_expression_agree	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_commit_through_a_transaction_and_query_after_reopen	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_linq_near_k_and_lambda_is_k_nearest_among_the_lambda_matches	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_python_predicate_expression_node	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_eight_threads_query_one_version	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_missing_hnswlib_raises_not_supported_at_first_use	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_importing_the_vector_modules_does_not_import_hnswlib	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_hnsw_recall_at_10_on_2000_random_vectors	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_hnsw_index_contract_in_a_child_process	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_hnsw_cache_under_eight_concurrent_readers_and_predicates	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_vector_contract_rejects_broken_variants	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_closing_a_space_releases_its_derived_vector_structures	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_query_cache.py::test_equal_queries_on_one_version_share_a_key_and_an_entry	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_a_commit_to_the_collection_changes_the_key_and_another_root_does_not	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_exact_operands_give_distinct_keys	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_uncacheable_plans_report_why_and_are_never_stored	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_registered_extractor_generation_is_part_of_the_key	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_results_are_frozen_and_equal_on_hit_and_miss	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_atoms_are_held_by_reference_not_pinned	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_the_byte_bound_holds_and_large_results_are_refused	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_explain_shows_the_key_and_whether_it_is_cached	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_a_disabled_cache_still_answers	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_atoms_nested_in_result_values_are_references_too	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_aggregates_are_keyed_by_the_decimal_context	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_index_plans_are_keyed_by_structured_arguments_not_display_strings	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_an_index_plan_without_cache_arguments_is_not_cacheable	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_keyspec_subclasses_and_index_subclasses_must_opt_in	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_key_bytes_count_in_the_bound	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_a_shared_result_cannot_be_changed	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_a_disabled_cache_counts_no_misses_and_no_refusals	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_query_cache.py::test_every_key_holds_the_decimal_context_and_exceptions_are_never_cached	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
+test_index_equals_scan.py::test_planned_query_equals_scan	deferred	7	Property that a planned query equals the scan, ported with Task 7.
+test_index_equals_scan.py::test_every_access_path_was_exercised	deferred	7	Property that a planned query equals the scan, ported with Task 7.
+test_index_rank.py::test_built_index_windows_equal_execution	deferred	6	Rank access windows and weights of the index plans, ported with Task 6.
+test_index_rank.py::test_incremental_writes_keep_weights_exact	deferred	6	Rank access windows and weights of the index plans, ported with Task 6.
+test_index_rank.py::test_window_bounds_are_validated	deferred	6	Rank access windows and weights of the index plans, ported with Task 6.
+test_index_rank.py::test_an_unweighted_index_offers_no_window_and_still_answers	deferred	6	Rank access windows and weights of the index plans, ported with Task 6.
+test_index_rank.py::test_sorted_and_filtered_index_plans_window_by_rank	deferred	6	Rank access windows and weights of the index plans, ported with Task 6.
+test_query_cache_soundness.py::test_cached_results_equal_fresh_execution_across_commits	n/a	deferred: cache	The cache soundness property is ported only with the deferred query result cache.
+test_query_cache_soundness.py::test_equal_keys_mean_equal_results	n/a	deferred: cache	The cache soundness property is ported only with the deferred query result cache.
+test_query_cache_soundness.py::test_plan_families_with_equal_keys_give_equal_results	n/a	deferred: cache	The cache soundness property is ported only with the deferred query result cache.
+test_index_weights_concurrency.py::test_weights_are_exact_after_concurrent_merges_and_retries	deferred	4b	Index weights after concurrent merges onto indexed currents, ported with Task 4b.
+test_indexed_roots.py::test_appends_to_an_indexed_list	deferred	4b	Appends and blind writes on indexed roots merge concurrently, ported with Task 4b.
+test_indexed_roots.py::test_blind_set_at_on_an_indexed_dictionary	deferred	4b	Appends and blind writes on indexed roots merge concurrently, ported with Task 4b.
+test_pager_stability.py::test_pagers_and_cached_queries_stay_on_their_snapshot_under_writers	deferred	9	Pagers stay on their snapshot under concurrent writers, ported with Task 9.
