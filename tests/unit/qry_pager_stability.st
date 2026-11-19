@@ -16,7 +16,9 @@ Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_queries'.
 
-"A writer: commits until it made aCount commits or the readers are done."
+"A writer: commits until the readers are done (aStop), aCount being only a safety cap, as
+ proto_db's MAX_COMMITS: the writers outlive every reader, so commits land between the pages of
+ every pager by construction, not by the relative speed of the actors."
 Object subclass: #PageWriter.
 
 "Commits aCount changes to the root 'items' of db, drawing them from QData random: aSeed; adds one
@@ -97,7 +99,7 @@ progress := Atom on: 0.
 done := Atom on: 0.
 stop := Atom on: false.
 writers := (1 to: 3) asArray collect: [:s |
-  PageWriter new asActor write: db seed: s commits: 150 progress: progress done: done stop: stop].
+  PageWriter new asActor write: db seed: s commits: 1500 progress: progress done: done stop: stop].
 readers := {
   PageReader new asActor read: db query: [:q | q orderBy: 'k'] size: 23 progress: progress done: done.
   PageReader new asActor read: db query: [:q | (q where: ((PBField path: 'k') >= 1000)) orderBy: 'k' descending: true]

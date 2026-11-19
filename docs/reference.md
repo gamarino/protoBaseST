@@ -1309,7 +1309,7 @@ and what a page costs, are in [queries.md](queries.md#ordered-reads-windows-and-
 |---|---|
 | `PBPager on: aSource pageSize: n` | A pager of `n` rows per page. aSource is a `PBQuery` (its plan), a `PBQueryPlan`, or a `PBIndexedCollection` (its scan), as `proto_db`'s `cache.as_plan`; `n` an Integer ≥ 1. Anything else is `PBValidationError` (the page size is checked first). |
 | `aQuery pagerSize: n` | `PBPager on: aQuery pageSize: n` (`Queryable.pager`). |
-| `page: k` | Page k, **zero-based** as `proto_db`'s, as a new `Array`; an empty `Array` past the last page. k is an Integer ≥ 0, else `PBValidationError`. By rank when the plan offers it; otherwise the plan runs once, when a page or `rows` first needs it, and its result is kept and sliced. |
+| `page: k` | Page k, **zero-based** as `proto_db`'s, as a new `Array`; a new empty `Array` past the last page. k is an Integer ≥ 0, else `PBValidationError`. By rank when the plan offers it; otherwise the plan runs once, when a page, `rows` or `pages` first needs it, and its result is kept and sliced. |
 | `rows`, `pages` | The exact number of rows; of pages, `ceiling(rows / n)` (0 for an empty result). |
 | `byRank` | True when pages are sought by rank, O(log n + page size): the plan knows its exact row count and offers rank access (`exactRows`, `byRank` of "Plans and explain"). |
 | `explain` | A `PBFrozenDict`: `'pager'` → `{ 'page_size'. 'by_rank' }` and `'plan'` → the plan's `explain`. No `'portable'` key (tokens are deferred). |

@@ -88,11 +88,11 @@ produces 2550 rows to show 50, and the user who pages to the end has paid for th
 per page. And each call runs the query again, on whatever is committed by then (next section).
 
 A `PBPager` holds one plan, built once, and serves page k of it. When the plan offers rank access,
-`page:` seeks the page; otherwise the pager runs the plan once, when the first page is asked for,
-keeps the result, and slices it, so a block key costs one full run, not one per page. `byRank`
+`page:` seeks the page; otherwise the pager runs the plan once, when a page, `rows` or `pages`
+first needs it, keeps the result, and slices it, so a block key costs one full run, not one per page. `byRank`
 says which, and `explain` on a pager shows `'page_size'` and `'by_rank'` above its plan's explain.
 Pages are numbered from 0, as `proto_db`'s and as `PBList` positions; past the last page, `page:`
-answers an empty `Array`. A pager is made from a query (`pagerSize:`), or by
+answers a new empty `Array`. A pager is made from a query (`pagerSize:`), or by
 `PBPager on: aSource pageSize: n` from a query, a plan or a collection.
 
 What page k costs, for a page of size s over n rows:

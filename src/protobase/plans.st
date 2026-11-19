@@ -378,7 +378,7 @@ PBQueryPlan >> windowFrom: aStart to: aStop
   self _checkWindowFrom: aStart to: aStop.
   rows := self _rankWindowFrom: aStart to: aStop.
   rows isNil ifFalse: [^ rows].
-  (aStop notNil and: [aStop <= aStart]) ifTrue: [^ #()].
+  (aStop notNil and: [aStop <= aStart]) ifTrue: [^ Array new: 0].
   out := OrderedCollection new.
   n := 0.
   self _rows: [:each |
@@ -814,7 +814,7 @@ PBLimit >> _rankWindowFrom: aStart to: aStop
   | end |
   end := aStop isNil ifTrue: [limit] ifFalse: [limit isNil ifTrue: [aStop] ifFalse: [aStop min: limit]].
   (end notNil and: [end <= aStart]) ifTrue: [
-    ^ (source _rankWindowFrom: 0 to: 0) isNil ifTrue: [nil] ifFalse: [#()]].
+    ^ (source _rankWindowFrom: 0 to: 0) isNil ifTrue: [nil] ifFalse: [Array new: 0]].
   ^ source _rankWindowFrom: offset + aStart to: (end isNil ifTrue: [nil] ifFalse: [offset + end]).
 
 "min(limit, max(source rows - offset, 0)) when the source's row count is exact."

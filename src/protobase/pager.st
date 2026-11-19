@@ -24,7 +24,7 @@ meanwhile, and it needs no lock and no pinning: every committed version stays re
                               plan's explain (no 'portable': tokens are deferred, ruling CR7)
   plan, pageSize              the plan paged and the rows per page
 
-A plan without rank access is executed once, when a page or rows first needs it, and its result
+A plan without rank access is executed once, when a page, rows or pages first needs it, and its result
 kept by the pager: the one mutable state, an Atom set once from nil (spec 12.6). Two actors asking
 at the same moment may both execute the plan; one result is installed and every page is served
 from it, so the pages always come from one result. proto_db takes a lock instead (pager.py
@@ -115,7 +115,7 @@ PBPager >> page: anInteger
   stop := start + pageSize.
   ranked ifTrue: [^ plan windowFrom: start to: stop].
   all := self _materialized.
-  start >= all size ifTrue: [^ #()].
+  start >= all size ifTrue: [^ Array new: 0].
   ^ all copyFrom: start + 1 to: (stop min: all size).
 
 "=== PBPager: explain and printing ==============================================="

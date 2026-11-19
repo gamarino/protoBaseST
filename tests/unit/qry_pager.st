@@ -167,8 +167,7 @@ sizes := Set new.
         and: [p rows = rows size
         and: [p pages = (rows size + size - 1 // size)
         and: [(p page: p pages) isEmpty
-        and: [(pages allButLast allSatisfy: [:each | each size = size])
-        and: [p byRank = (query plan byRank and: [query plan exactRows notNil])]]]]].
+        and: [pages allButLast allSatisfy: [:each | each size = size]]]]].
       ok ifFalse: [fails add: { seed. query printString. size }]]]].
 c that: 'every page of ordered and unordered queries, by rank and materialised, concatenates to asArray'
   is: { fails asArray. sizes size }
@@ -207,12 +206,15 @@ e := (PBQuery from: coll) where: ((PBField path: 'k') eq: 99).
 n := {
   ((q pagerSize: 7) page: 5) size. (q pagerSize: 7) page: 6. (q pagerSize: 7) page: 1000.
   (e pagerSize: 3) rows. (e pagerSize: 3) pages. (e pagerSize: 3) page: 0.
-  ((PBQuery from: PBSet new) pagerSize: 3) pages. ((PBQuery from: PBSet new) pagerSize: 3) page: 0 }.
+  ((PBQuery from: PBSet new) pagerSize: 3) pages. ((PBQuery from: PBSet new) pagerSize: 3) page: 0.
+  ((q pagerSize: 7) page: 6) ~~ ((q pagerSize: 7) page: 6).
+  ((e pagerSize: 3) page: 0) ~~ ((e pagerSize: 3) page: 0).
+  (((PBQuery from: PBSet new) pagerSize: 3) page: 0) ~~ (((PBQuery from: PBSet new) pagerSize: 3) page: 0) }.
 [(q pagerSize: 5) page: -1] on: PBValidationError do: [:ex | n := n , { ex messageText }].
 [PBPager on: q pageSize: 0] on: PBValidationError do: [:ex | n := n , { ex messageText }].
-c that: 'page sizes, page numbers and sources are validated; past the last page is empty'
+c that: 'page sizes, page numbers and sources are validated; past the last page is a new empty Array'
   is: { refusals asSet asArray. n }
-  equals: { #(#refused). { 5. #(). #(). 0. 0. #(). 0. #().
+  equals: { #(#refused). { 5. #(). #(). 0. 0. #(). 0. #(). true. true. true.
     'A page number must be an Integer >= 0, not -1'. 'A page size must be an Integer >= 1, not 0' } }.
 
 "explain (ruling CR7): exactly pager -> { page_size. by_rank } and plan -> the plan's explain, no

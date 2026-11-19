@@ -853,7 +853,7 @@ PBList >> _scanWindowFrom: aStart to: aStop
   | stop out left |
   (self _redefinesDoBelow: PBList) ifTrue: [^ nil].
   stop := aStop isNil ifTrue: [self count] ifFalse: [aStop min: self count].
-  aStart >= stop ifTrue: [^ #()].
+  aStart >= stop ifTrue: [^ Array new: 0].
   out := OrderedCollection new.
   left := stop - aStart.
   self _window: [:v |
@@ -1043,7 +1043,7 @@ PBDictionary >> _scanWindowFrom: aStart to: aStop
   | stop out left |
   (self _redefinesDoBelow: PBDictionary) ifTrue: [^ nil].
   stop := aStop isNil ifTrue: [self count] ifFalse: [aStop min: self count].
-  aStart >= stop ifTrue: [^ #()].
+  aStart >= stop ifTrue: [^ Array new: 0].
   out := OrderedCollection new.
   left := stop - aStart.
   self _window: [:v |
