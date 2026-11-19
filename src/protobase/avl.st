@@ -123,7 +123,7 @@ Import from: 'protobase/keys'.
 
 "=== the node classes ========================================================"
 
-PBAtom subclass: #PBNode.
+PBAtom subclass: #PBNode classVariableNames: 'PosShape KeyShape CountedKeyShape'.
 
 PBNode class >> typeName
   ^ 'proto_db.avl._Node'.
@@ -200,13 +200,14 @@ PBPosNode >> count
   slots == nil ifTrue: [^ self _slots at: 5].
   ^ slots at: 5.
 
-"A keyed node also holds a cell for the order key of its key (ProtoBase
- KeyNode._okey), never persisted: a node a write builds fills it when it is
- built (the put's order key, or the copied node's), a stored node on first
- use (orderKey). It is filled once, by compare-and-swap, like the oid cell:
- the value is derived from the immutable key, so two racing first readers
- compute equal values and both answer the installed one."
-PBNode subclass: #PBKeyNode instanceVariableNames: 'orderKeyCell'.
+"A keyed node also holds the order key of its key (ProtoBase KeyNode._okey),
+ never persisted: a node a write builds gets it when it is built (the put's
+ order key, or the copied node's), in the write group of its state
+ (_installState:orderKey:); a stored node fills it on first use (orderKey),
+ once, by a compare-and-swap from nil, like the oid: the value is derived from
+ the immutable key, so two racing first readers compute equal values and both
+ answer the installed one."
+PBNode subclass: #PBKeyNode instanceVariableNames: 'orderKey'.
 
 PBKeyNode class >> typeName
   ^ 'proto_db.avl.KeyNode'.
@@ -246,28 +247,31 @@ PBKeyNode >> count
   slots == nil ifTrue: [^ self _slots at: 6].
   ^ slots at: 6.
 
-PBKeyNode >> _setOid: anOid pointer: aPointer storage: aStorage
-  "Runs once, on a fresh instance (every constructor of an atom calls it)."
-  super _setOid: anOid pointer: aPointer storage: aStorage.
-  orderKeyCell := Atom on: nil.
-  ^ self.
-
 "The order key of the key (PBKeys orderKey:), computed once per node."
 PBKeyNode >> orderKey
-  | okey |
-  okey := orderKeyCell value.
-  okey isNil ifFalse: [^ okey].
-  self _publishOrderKey: (PBKeys orderKey: self key).
-  ^ orderKeyCell value.
+  orderKey isNil ifFalse: [^ orderKey].
+  ^ self _publishOrderKey: (PBKeys orderKey: self key).
 
 "The cached order key, or nil when it was not needed yet (a stub)."
 PBKeyNode >> knownOrderKey
-  ^ orderKeyCell value.
+  ^ orderKey.
 
-"Installs anOrderKey, the order key of the key, unless one is installed; answers
- the node."
+"Installs anOrderKey, the order key of the key, unless one is installed, by a
+ compare-and-swap from nil (PBAtom's write-once publishers); answers the
+ installed order key."
 PBKeyNode >> _publishOrderKey: anOrderKey
-  orderKeyCell value: anOrderKey ifCurrent: nil.
+  self setInstVar: #orderKey from: nil to: anOrderKey.
+  ^ orderKey.
+
+"As PBAtom >> _installState:, for a node a write builds: its envelope, its
+ slots and anOrderKey, the order key of its key, in one write group."
+PBKeyNode >> _installState: anEnvelope orderKey: anOrderKey
+  | envelopeSlots |
+  memo isNil ifFalse: [^ PBUserError signal: 'PBAtom: the state is installed once'].
+  envelopeSlots := anEnvelope slots.
+  memo := anEnvelope.
+  slots := envelopeSlots.
+  orderKey := anOrderKey.
   ^ self.
 
 PBKeyNode subclass: #PBCountedKeyNode.
@@ -311,6 +315,24 @@ PBValueBox class >> slotFields
 PBValueBox >> value
   slots == nil ifTrue: [^ self _slots at: 1].
   ^ slots at: 1.
+
+"The record shapes of the built-in node classes, which every write that builds
+ a node reads: kept in class variables, set once when the module loads, so the
+ write reads its shape without the lookup of _PBRecordShape for:. Any other
+ class, an application subclass included, takes that lookup."
+PBNode class >> _recordShape
+  self == PBCountedKeyNode ifTrue: [^ CountedKeyShape].
+  self == PBKeyNode ifTrue: [^ KeyShape].
+  self == PBPosNode ifTrue: [^ PosShape].
+  ^ super _recordShape.
+
+PBNode class >> _initializeShapes
+  "Runs once, when the module loads, before the classes are registered."
+  PosShape := _PBRecordShape for: PBPosNode.
+  KeyShape := _PBRecordShape for: PBKeyNode.
+  CountedKeyShape := _PBRecordShape for: PBCountedKeyNode.
+
+PBNode _initializeShapes.
 
 { PBNode. PBPosNode. PBKeyNode. PBCountedKeyNode. PBValueBox } do: [:each | PBTypeRegistry register: each].
 
@@ -449,20 +471,6 @@ PBKeyNode >> _pbKeyNodeIn: anOwner
 PBNode >> withLeft: aLeft right: aRight
   ^ self subclassResponsibility.
 
-"A new node of this class whose built-in slots are anArray, the values a write
- computed for a copy of this node. The fields past them, an application
- subclass's own, which the writes do not know, are carried from this node
- unchanged: present when present here, with the same value, absent when absent
- (review R2-I1). A class's slot layout starts with its superclass's
- (_PBRecordShape build:), so those fields follow the built-in prefix. The
- built-in classes have none and take the plain constructor."
-PBNode >> _copyWithSlots: anArray
-  | own |
-  own := slots == nil ifTrue: [self _slots] ifFalse: [slots].
-  own size > anArray size ifFalse: [^ PBNode _new: self class values: anArray].
-  ^ self class _unsavedWithSlots: anArray , (own copyFrom: anArray size + 1 to: own size)
-    state: (self class _recordShape stateOfSlots: anArray carrying: self state).
-
 "A new positional node holding aValue (boxed when large) over aLeft and aRight;
  height and count are computed from the children. A subclass is
  PBNotSupportedError (positional trees are not subclassable: see
@@ -499,8 +507,9 @@ PBPosNode class >> _checkRecordClass
  has (ProtoBase passes _okey the same way). The key's order is the caller's
  concern (PBAvl)."
 PBKeyNode class >> key: aKey orderKey: anOrderKey value: aValue left: aLeft right: aRight
-  ^ (PBNode _new: self values: (self _fieldsKey: aKey value: aValue left: aLeft right: aRight))
-    _publishOrderKey: anOrderKey.
+  ^ (self basicNew _setOid: nil pointer: nil storage: nil)
+    _installState: (self _envelopeOfSlots: (self _fieldsKey: aKey value: aValue left: aLeft right: aRight))
+    orderKey: anOrderKey.
 
 "As key:orderKey:value:left:right:, computing the order key."
 PBKeyNode class >> key: aKey value: aValue left: aLeft right: aRight
@@ -512,23 +521,40 @@ PBKeyNode class >> _fieldsKey: aKey value: aValue left: aLeft right: aRight
     _PBTree heightOf: aLeft and: aRight. _PBTree countOf: aLeft and: aRight }.
 
 PBKeyNode >> withLeft: aLeft right: aRight
-  ^ (self _copyWithSlots: (self class _fieldsKey: self key value: self storedValue left: aLeft right: aRight))
-    _publishOrderKey: self orderKey.
+  ^ self _copyWithSlots: (self class _fieldsKey: self key value: self storedValue left: aLeft right: aRight).
 
 "A new node of this class with this node's key and children, holding aValue
  (ProtoBase KeyNode._with_value: the stored key object is kept)."
 PBKeyNode >> withValue: aValue
-  ^ (self _copyWithSlots: (self class _fieldsKey: self key value: aValue left: self left right: self right))
-    _publishOrderKey: self orderKey.
+  ^ self _copyWithSlots: (self class _fieldsKey: self key value: aValue left: self left right: self right).
+
+"A new node of this class whose built-in slots are anArray, the values a write
+ computed for a copy of this node, holding this node's order key (the key is
+ the same). The fields past them, an application subclass's own, which the
+ writes do not know, are carried from this node unchanged: present when present
+ here, with the same value, absent when absent (review R2-I1). A class's slot
+ layout starts with its superclass's (_PBRecordShape build:), so those fields
+ follow the built-in prefix. The built-in classes have none and take the plain
+ envelope."
+PBKeyNode >> _copyWithSlots: anArray
+  | own envelope |
+  own := slots == nil ifTrue: [self _slots] ifFalse: [slots].
+  envelope := own size > anArray size
+    ifTrue: [self class _envelopeOfSlots: anArray , (own copyFrom: anArray size + 1 to: own size)
+      state: (self class _recordShape stateOfSlots: anArray carrying: self state)]
+    ifFalse: [self class _envelopeOfSlots: anArray].
+  ^ (self class basicNew _setOid: nil pointer: nil storage: nil) _installState: envelope orderKey: self orderKey.
 
 "As PBKeyNode's, for a value that is a (payload, count) pair (PBValidationError
  otherwise, ProtoBase _value_count); weight is the count plus the children's
  weights."
 PBCountedKeyNode class >> _fieldsKey: aKey value: aValue left: aLeft right: aRight
+  "One brace: PBKeyNode's six values, then weight."
   | own |
   own := _PBTree countOfPair: aValue.
-  ^ (super _fieldsKey: aKey value: aValue left: aLeft right: aRight)
-    copyWith: own + (_PBTree weightOf: aLeft) + (_PBTree weightOf: aRight).
+  ^ { aKey. _PBTree boxed: aValue. aLeft. aRight.
+    _PBTree heightOf: aLeft and: aRight. _PBTree countOf: aLeft and: aRight.
+    own + (_PBTree weightOf: aLeft) + (_PBTree weightOf: aRight) }.
 
 "=== the helpers of the writes ==============================================="
 

@@ -51,9 +51,9 @@ c that: 'keys in order pass' is: (PBAvl check: (key value: 2 value: (key value: 
 c that: 'a cached order key that is not the key''s' signals: PBCorruptionError containing: 'cached order key' during: [
   PBAvl check: ((key value: 5 value: (key value: 1 value: nil value: nil value: 1 value: 1)
     value: (key value: 3 value: nil value: nil value: 1 value: 1) value: 2 value: 3)
-    _publishOrderKey: (PBKeys orderKey: 2))].
+    _publishOrderKey: (PBKeys orderKey: 2); yourself)].
 cached := (key value: 2 value: (key value: 1 value: nil value: nil value: 1 value: 1)
-  value: (key value: 3 value: nil value: nil value: 1 value: 1) value: 2 value: 3) _publishOrderKey: (PBKeys orderKey: 2.0).
+  value: (key value: 3 value: nil value: nil value: 1 value: 1) value: 2 value: 3) _publishOrderKey: (PBKeys orderKey: 2.0); yourself.
 c that: 'a cached order key equal to the key''s passes' isTrue: (PBAvl check: cached) == cached.
 c that: 'a CountedKeyNode under a KeyNode root' signals: PBCorruptionError containing: 'kind' during: [
   PBAvl check: (key value: 2 value: (cnt value: 1 value: (PBTuple withAll: #(0 1)) value: nil value: nil value: 1 value: 1 value: 1) value: nil value: 2 value: 2)].

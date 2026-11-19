@@ -94,10 +94,10 @@ Import from: 'protobase/keygroups'.
 
 "=== PBIndex ================================================================="
 
-"keySpecCell holds the PBKeySpec of the persisted key_spec once it is asked for
- (keySpecObject): published by compare-and-swap, and carried into each version a
- hook derives (_with:)."
-PBAtom subclass: #PBIndex instanceVariableNames: 'keySpecCell'.
+"keySpecObject holds the PBKeySpec of the persisted key_spec once it is asked for
+ (keySpecObject): a runtime-only field written once, by a compare-and-swap from nil
+ (_publishKeySpec:), and carried into each version a hook derives (_with:)."
+PBAtom subclass: #PBIndex instanceVariableNames: 'keySpecObject'.
 
 PBIndex class >> typeName
   ^ 'proto_db.indexing.Index'.
@@ -127,6 +127,7 @@ PBIndex class >> isAbstract
  anything else, a String included, is PBValidationError). The fields are set in proto_db's
  constructor order, persistedFields."
 PBIndex class >> name: aString keySpec: aPBKeySpec
+  | index |
   self isAbstract ifTrue: [
     ^ PBUserError signal: self name , ' is abstract: make a PBEqualityIndex or a PBRangeIndex'].
   ((aString isString and: [aString isSymbol not]) and: [aString notEmpty]) ifFalse: [
@@ -134,8 +135,9 @@ PBIndex class >> name: aString keySpec: aPBKeySpec
   PBCodec _checkUTF8: aString.
   (aPBKeySpec isClassObject not and: [aPBKeySpec isKindOf: PBKeySpec]) ifFalse: [
     ^ PBValidationError signal: 'key_spec must be a PBKeySpec, not a ' , aPBKeySpec class name].
-  ^ (self _unsavedWithState: (PBFrozenDict withAssociations: (self _emptyFieldsName: aString keySpec: aPBKeySpec)))
-    _publishKeySpec: aPBKeySpec.
+  index := self _unsavedWithState: (PBFrozenDict withAssociations: (self _emptyFieldsName: aString keySpec: aPBKeySpec)).
+  index _publishKeySpec: aPBKeySpec.
+  ^ index.
 
 "The convenience for a single path: name: aString keySpec: (PBKeySpec path: aPath)."
 PBIndex class >> name: aString path: aPath
@@ -145,17 +147,12 @@ PBIndex class >> name: aString path: aPath
 PBIndex class >> _emptyFieldsName: aString keySpec: aPBKeySpec
   ^ { 'name' -> aString. 'key_spec' -> aPBKeySpec asData }.
 
-PBIndex >> _setOid: anOid pointer: aPointer storage: aStorage
-  "Runs once, on a fresh instance (every constructor of an atom calls it)."
-  super _setOid: anOid pointer: aPointer storage: aStorage.
-  keySpecCell := Atom on: nil.
-  ^ self.
-
-"Installs aPBKeySpec as this version's key spec object, unless one is installed (nil installs
- nothing); answers the index."
+"Installs aPBKeySpec as this version's key spec object unless one is installed (nil installs
+ nothing), by a compare-and-swap from nil (PBAtom's write-once publishers); answers the installed
+ one, or nil while none is."
 PBIndex >> _publishKeySpec: aPBKeySpec
-  aPBKeySpec isNil ifFalse: [keySpecCell value: aPBKeySpec ifCurrent: nil].
-  ^ self.
+  aPBKeySpec isNil ifFalse: [self setInstVar: #keySpecObject from: nil to: aPBKeySpec].
+  ^ keySpecObject.
 
 "The index name."
 PBIndex >> name
@@ -171,16 +168,14 @@ PBIndex >> keySpec
  asked, never when the index is read."
 PBIndex >> keySpecObject
   | spec data problem |
-  spec := keySpecCell value.
-  spec isNil ifFalse: [^ spec].
+  keySpecObject isNil ifFalse: [^ keySpecObject].
   data := self keySpec.
   problem := nil.
   spec := [PBKeySpec fromData: data] on: PBCorruptionError do: [:e | problem := e messageText. e return: nil].
   problem isNil ifFalse: [
     ^ PBValidationError signal: 'Index ' , (PBKeySpec _repr: self name) , ' (' , self class kindName
       , ') has a key spec this process cannot use: ' , problem].
-  self _publishKeySpec: spec.
-  ^ keySpecCell value.
+  ^ self _publishKeySpec: spec.
 
 "How proto_db's messages name the index: Index 'n' (EqualityIndex on a.b)."
 PBIndex >> _subject
@@ -203,7 +198,7 @@ PBIndex >> totalCount
  order, with the fields aFields names (an Array of Associations, or a PBFrozenDict) changed. A
  field the receiver does not hold is PBValidationError. The receiver never changes."
 PBIndex >> _with: aFields
-  | changes state names values unknown |
+  | changes state names values unknown index |
   changes := (aFields isKindOf: PBFrozenDict) ifTrue: [aFields associations] ifFalse: [aFields].
   state := self state.
   unknown := (changes reject: [:each | state includesKey: each key]) collect: [:each | each key].
@@ -216,8 +211,9 @@ PBIndex >> _with: aFields
     change := changes detect: [:each | each key = f] ifNone: [nil].
     change isNil ifTrue: [state at: f] ifFalse: [change value]].
   "The parsed key spec is carried over unless the change replaces it."
-  ^ (self class _unsavedWithState: (state _withValues: values))
-    _publishKeySpec: ((changes anySatisfy: [:each | each key = 'key_spec']) ifTrue: [nil] ifFalse: [keySpecCell value]).
+  index := self class _unsavedWithState: (state _withValues: values).
+  index _publishKeySpec: ((changes anySatisfy: [:each | each key = 'key_spec']) ifTrue: [nil] ifFalse: [keySpecObject]).
+  ^ index.
 
 "--- hooks (base.py Index) ---"
 
@@ -732,7 +728,7 @@ PBKeyGroupIndex >> _misfiled: aString
  unorderable one; two slots are one when their order keys are equal."
 PBKeyGroupIndex >> _slot: aKey
   (PBMemberKeys orderKeyOrNil: aKey) isNil ifTrue: [^ PBTuple withAll: #(1)].
-  ^ PBTuple withAll: { 0. aKey }.
+  ^ PBTuple _trustedOn: { 0. aKey }.
 
 "Whether aKey is the member key of anElement (keyed.py member_key_matches): the whole key on an
  index with current tokens; on one written by format 3 everything but the token, which is only
@@ -781,7 +777,7 @@ PBKeyGroupIndex >> _checkGroup: aGroup slot: aSlot into: aStored
 "The identity of an occurrence in the stored multiset: (slot, element identity, exact token),
  one order key, that of (slot, member key)."
 PBKeyGroupIndex >> _storedIdentity: anElement slot: aSlot
-  ^ PBKeys orderKey: (PBTuple withAll: { aSlot. PBMemberKeys memberKeyOf: anElement }).
+  ^ PBKeys orderKey: (PBTuple _trustedOn: { aSlot. PBMemberKeys memberKeyOf: anElement }).
 
 "Checks this index against the elements of aCollection (anything answering do:): the key order
  of the key tree (PBMisfiledError for a key stored out of order), the AVL invariants of every

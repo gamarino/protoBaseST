@@ -259,7 +259,7 @@ PBTerm class >> path: aStringOrNil op: anOperator value: aValue
     (keys at: 1) rank = (keys at: 2) rank ifFalse: [
       ^ PBValidationError signal: 'Operator ' , (PBKeySpec _repr: anOperator) , ' needs bounds of one type rank, not '
         , (PBKeySpec _repr: low) , ', ' , (PBKeySpec _repr: high)].
-    canonical := PBTuple withAll: { low. high }.
+    canonical := PBTuple _trustedOn: { low. high }.
     ^ self _path: aStringOrNil op: anOperator value: canonical spec: spec valueKey: (PBKeys orderKey: canonical) operandKeys: keys].
   aValue isNil ifFalse: [
     ^ PBValidationError signal: 'Operator ' , (PBKeySpec _repr: anOperator) , ' takes no value, got ' , (PBKeySpec _repr: aValue)].

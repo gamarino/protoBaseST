@@ -90,19 +90,19 @@ PBMemberKeys class >> _surrogateChildren: v
 PBMemberKeys class >> _surrogateLeaf: v
   ((v isFloat or: [v isClassObject not and: [v isKindOf: Decimal]]) and: [v isNaN]) ifTrue: [
     ^ PBTuple withAll: #('n')].
-  ^ PBTuple withAll: { 'v'. v }.
+  ^ PBTuple _trustedOn: { 'v'. v }.
 
 PBMemberKeys class >> _surrogateOf: v results: anArray
   | pairs okeys order |
-  (v isKindOf: PBFrozenList) ifTrue: [^ PBTuple withAll: { 'l'. PBTuple withAll: anArray }].
-  (v isKindOf: PBTuple) ifTrue: [^ PBTuple withAll: { 't'. PBTuple withAll: anArray }].
+  (v isKindOf: PBFrozenList) ifTrue: [^ PBTuple _trustedOn: { 'l'. PBTuple withAll: anArray }].
+  (v isKindOf: PBTuple) ifTrue: [^ PBTuple _trustedOn: { 't'. PBTuple withAll: anArray }].
   "A map: (key surrogate, value surrogate) pairs, sorted by the key surrogate's order key
    (keyed.py _dict_surrogate). Two keys of one map never have equal surrogates."
   pairs := (1 to: anArray size // 2) asArray collect: [:i |
-    PBTuple withAll: { anArray at: 2 * i - 1. anArray at: 2 * i }].
+    PBTuple _trustedOn: { anArray at: 2 * i - 1. anArray at: 2 * i }].
   okeys := pairs collect: [:p | PBKeys orderKey: (p at: 1)].
   order := (1 to: pairs size) asArray sort: [:i :j | (okeys at: i) <= (okeys at: j)].
-  ^ PBTuple withAll: { 'd'. PBTuple withAll: (order collect: [:i | pairs at: i]) }.
+  ^ PBTuple _trustedOn: { 'd'. PBTuple withAll: (order collect: [:i | pairs at: i]) }.
 
 "=== member keys =============================================================="
 
@@ -145,7 +145,7 @@ PBMemberKeys class >> _orderKeyOf: anOrderKey token: aToken
  unorderable) and whose exact token is aToken: the one construction memberKeyOf: and
  memberKeyAndOrderKeyOf: share."
 PBMemberKeys class >> _memberKeyOf: anElement orderKey: anOrderKeyOrNil token: aToken
-  ^ PBTuple withAll: { self _equalityPart: anElement orderKey: anOrderKeyOrNil. aToken }.
+  ^ PBTuple _trustedOn: { self _equalityPart: anElement orderKey: anOrderKeyOrNil. aToken }.
 
 "The order key of the exact token aToken: the atom token's is made once."
 PBMemberKeys class >> _orderKeyOfToken: aToken
@@ -159,8 +159,8 @@ PBMemberKeys class >> _equalityPart: anElement
 
 "As _equalityPart:, for a caller that has the element's order key (nil when it is unorderable)."
 PBMemberKeys class >> _equalityPart: anElement orderKey: anOrderKeyOrNil
-  anOrderKeyOrNil isNil ifFalse: [^ PBTuple withAll: { 0. anElement }].
-  ^ PBTuple withAll: { 1. self surrogate: anElement }.
+  anOrderKeyOrNil isNil ifFalse: [^ PBTuple _trustedOn: { 0. anElement }].
+  ^ PBTuple _trustedOn: { 1. self surrogate: anElement }.
 
 "The order key below every member key whose equality part is aValue's: the one-item tuple
  (equality part), which orders before every (equality part, token)."
@@ -269,7 +269,7 @@ Object subclass: #PBKeyGroups.
 
 "keyed.py EMPTY_GROUP: (None, 0)."
 PBKeyGroups class >> empty
-  ^ PBTuple withAll: { nil. 0 }.
+  ^ PBTuple _trustedOn: { nil. 0 }.
 
 "aGroup with one more occurrence of anElement, whose member key is aKey (keyed.py _group_add)."
 PBKeyGroups class >> group: aGroup with: anElement memberKey: aKey
@@ -282,10 +282,10 @@ PBKeyGroups class >> group: aGroup with: anElement memberKey: aKey orderKey: anO
   members := aGroup at: 1.
   node := PBAvl keyAt: members orderKey: anOrderKey.
   entry := node isNil
-    ifTrue: [PBTuple withAll: { anElement. 1 }]
-    ifFalse: [PBTuple withAll: { node value at: 1. (node value at: 2) + 1 }].
+    ifTrue: [PBTuple _trustedOn: { anElement. 1 }]
+    ifFalse: [PBTuple _trustedOn: { node value at: 1. (node value at: 2) + 1 }].
   members := (PBAvl keyPut: members key: aKey orderKey: anOrderKey value: entry nodeClass: PBCountedKeyNode) at: 1.
-  ^ PBTuple withAll: { members. (aGroup at: 2) + 1 }.
+  ^ PBTuple _trustedOn: { members. (aGroup at: 2) + 1 }.
 
 "aGroup with one occurrence of anElement fewer, or nil when it holds none (keyed.py
  _group_remove): only the member whose member key is anElement's is taken, never an equal member
@@ -301,9 +301,9 @@ PBKeyGroups class >> group: aGroup without: anElement
   entry := node value.
   members := (entry at: 2) = 1
     ifTrue: [(PBAvl keyRemove: members orderKey: okey) at: 1]
-    ifFalse: [(PBAvl keyPut: members key: key orderKey: okey value: (PBTuple withAll: { entry at: 1. (entry at: 2) - 1 })
+    ifFalse: [(PBAvl keyPut: members key: key orderKey: okey value: (PBTuple _trustedOn: { entry at: 1. (entry at: 2) - 1 })
       nodeClass: PBCountedKeyNode) at: 1].
-  ^ PBTuple withAll: { members. (aGroup at: 2) - 1 }.
+  ^ PBTuple _trustedOn: { members. (aGroup at: 2) - 1 }.
 
 "Evaluates aBlock with each stored element of aGroup and its count, in member order (keyed.py
  _group_iter yields each occurrence; the count stands for them)."
@@ -320,9 +320,9 @@ PBKeyGroups class >> group: aGroup elementsDo: aBlock
 PBKeyGroups class >> sortedMembers: anArray total: anInteger
   | sorted |
   sorted := anArray asArray sort: [:a :b | (a at: 1) <= (b at: 1)].
-  ^ PBTuple withAll: {
+  ^ PBTuple _trustedOn: {
     PBAvl keyFromSortedOrderKeys: (sorted collect: [:each |
-        { each at: 1. each at: 2. PBTuple withAll: { each at: 3. each at: 4 } }])
+        { each at: 1. each at: 2. PBTuple _trustedOn: { each at: 3. each at: 4 } }])
       nodeClass: PBCountedKeyNode.
     anInteger }.
 

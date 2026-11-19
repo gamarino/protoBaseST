@@ -98,7 +98,7 @@ PBKeySpec class >> registerExtractor: aName block: aBlock version: aStringOrNil
       ((entry at: 1) == aBlock and: [(entry at: 2) = aStringOrNil]) ifTrue: [^ self].
       ^ PBValidationError signal: 'Extractor ' , (self _repr: aName) , ' is already registered with another block or version'].
     Extractors
-      value: (PBFrozenDict withAssociations: (current associations copyWith: aName -> (PBTuple withAll: { aBlock. aStringOrNil })))
+      value: (PBFrozenDict withAssociations: (current associations copyWith: aName -> (PBTuple _trustedOn: { aBlock. aStringOrNil })))
       ifCurrent: current ] whileFalse.
 
 "Removes the registration of aName (keyspec.py unregister_extractor); PBValidationError when it is
@@ -270,7 +270,7 @@ PBKeySpec >> describe
 
 "The persisted form, the PBTuple (kind, arg)."
 PBKeySpec >> asData
-  ^ PBTuple withAll: { kind. arg }.
+  ^ PBTuple _trustedOn: { kind. arg }.
 
 PBKeySpec >> = anObject
   (anObject isClassObject not and: [anObject class == PBKeySpec]) ifFalse: [^ false].

@@ -745,7 +745,7 @@ PBTransaction >> _tokenOf: aValue
     atoms add: anAtom.
     PBCodec tokenRef value: anAtom]).
   atoms isEmpty ifTrue: [^ bytes].
-  ^ PBTuple withAll: { bytes. PBTuple withAll: (atoms collect: [:each | each pointer]) }.
+  ^ PBTuple _trustedOn: { bytes. PBTuple withAll: (atoms collect: [:each | each pointer]) }.
 
 PBTransaction >> printOn: aStream
   aStream nextPutAll: 'PBTransaction('; print: database name; nextPutAll: ', version '; print: dbRoot version;

@@ -88,9 +88,9 @@ a new segment is started the same way (a single larger record goes alone in
 its segment), as ProtoBase's FileStorage rolls over. A sealed segment is kept
 open until the next sync, which every publish makes first. Nothing appended is ever truncated or rewritten: a pointer
 pushAtom: answers stays valid for the life of the storage (the atom keeps it
-in its saved cell), and a record no published root reaches is an orphan,
+in its saved field), and a record no published root reaches is an orphan,
 harmless, as in ProtoBase. An orphan may repeat the oid of a reachable record
-(the loser of a lost race on an atom's saved cell writes one), so any tool
+(the loser of a lost race on an atom's saved field writes one), so any tool
 that scans segments by oid (checker, compaction, replication) considers only
 the records reachable from a root.
 

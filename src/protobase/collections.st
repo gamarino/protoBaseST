@@ -751,14 +751,14 @@ PBIndexedCollection >> addIndex: anIndex
     ^ PBValidationError signal: 'Index ' , (PBCodec repr: name) , ' build: answered ' , (PBKeys _preview: built)
       , '; expected the same name'].
   ^ self _withIndexChanges: { 'indexes' -> (set withIndex: built) }
-    op: (PBTuple withAll: { '@index_add'. name. anIndex }).
+    op: (PBTuple _trustedOn: { '@index_add'. name. anIndex }).
 
 "A new version without the index aName (base.py remove_index); an absent name is
  PBValidationError. A logged collection logs ('@index_remove' aName)."
 PBIndexedCollection >> removeIndex: aName
   self _checkWritable: 'removeIndex:'.
   ^ self _withIndexChanges: { 'indexes' -> (self _indexSet without: aName) }
-    op: (PBTuple withAll: { '@index_remove'. aName }).
+    op: (PBTuple _trustedOn: { '@index_remove'. aName }).
 
 "An index-definition change (base.py _index_log): logged as anOp by a class that
  logs its operations, which keeps the log as complete as the receiver's; a plain
@@ -1088,7 +1088,7 @@ PBDictionary >> setAt: aKey value: aValue
   stored := _PBTree boxed: (self _canonical: aValue as: 'value').
   value := _PBTree unboxed: stored.
   put := PBAvl keyPut: (self stateAt: 'root') key: key value: stored nodeClass: PBKeyNode.
-  op := PBTuple withAll: { 'set'. key. stored }.
+  op := PBTuple _trustedOn: { 'set'. key. stored }.
   (put at: 2) ifTrue: [
     ^ self _withChanges: { 'root' -> (put at: 1). 'indexes' -> (self _afterReplace: (put at: 3) with: value) } op: op].
   ^ self _withChanges: { 'root' -> (put at: 1). 'count' -> (self count + 1). 'indexes' -> (self _afterAdd: value) } op: op.
@@ -1100,7 +1100,7 @@ PBDictionary >> removeAt: aKey
   self _checkWritable: 'removeAt:'.
   key := self _canonical: aKey as: 'key'.
   removed := PBAvl keyRemove: (self stateAt: 'root') key: key.
-  op := PBTuple withAll: { 'remove'. key }.
+  op := PBTuple _trustedOn: { 'remove'. key }.
   (removed at: 2) ifFalse: [^ self _withChanges: #() op: op].
   ^ self _withChanges: {
       'root' -> (removed at: 1). 'count' -> (self count - 1). 'indexes' -> (self _afterRemove: (removed at: 3)) }
@@ -1204,18 +1204,18 @@ PBHashDictionary >> setAt: aKey value: aValue
   found := _PBBuckets find: key in: (self stateAt: 'root') pairs: true owner: self.
   entries := found at: 2.
   position := found at: 3.
-  op := PBTuple withAll: { 'set'. key. value }.
+  op := PBTuple _trustedOn: { 'set'. key. value }.
   position > 0 ifTrue: [
     old := (entries at: position) at: 2.
     entries := entries copy.
-    entries at: position put: (PBTuple withAll: { (entries at: position) at: 1. value }).
+    entries at: position put: (PBTuple _trustedOn: { (entries at: position) at: 1. value }).
     ^ self _withChanges: {
         'root' -> ((PBAvl keyPut: (self stateAt: 'root') key: (found at: 1) value: (PBTuple withAll: entries) nodeClass: PBKeyNode) at: 1).
         'indexes' -> (self _afterReplace: old with: value) }
       op: op].
   ^ self _withChanges: {
       'root' -> ((PBAvl keyPut: (self stateAt: 'root') key: (found at: 1)
-        value: (PBTuple withAll: (entries copyWith: (PBTuple withAll: { key. value }))) nodeClass: PBKeyNode) at: 1).
+        value: (PBTuple withAll: (entries copyWith: (PBTuple _trustedOn: { key. value }))) nodeClass: PBKeyNode) at: 1).
       'count' -> (self count + 1).
       'indexes' -> (self _afterAdd: value) }
     op: op.
@@ -1227,7 +1227,7 @@ PBHashDictionary >> removeAt: aKey
   self _checkWritable: 'removeAt:'.
   key := self _canonical: aKey as: 'key'.
   found := _PBBuckets find: key in: (self stateAt: 'root') pairs: true owner: self.
-  op := PBTuple withAll: { 'remove'. key }.
+  op := PBTuple _trustedOn: { 'remove'. key }.
   (found at: 3) = 0 ifTrue: [^ self _withChanges: #() op: op].
   ^ self _withChanges: {
       'root' -> (_PBBuckets without: found in: (self stateAt: 'root')).
@@ -1390,7 +1390,7 @@ PBSet >> add: anElement
   self _checkWritable: 'add:'.
   element := self _canonical: anElement as: 'element' wrapping: self class elementWrapping by: self class wrapper.
   found := _PBBuckets find: element in: (self stateAt: 'root') pairs: false owner: self.
-  op := PBTuple withAll: { 'add'. element }.
+  op := PBTuple _trustedOn: { 'add'. element }.
   (found at: 3) > 0 ifTrue: [^ self _withChanges: #() op: op].
   ^ self _withChanges: {
       'root' -> ((PBAvl keyPut: (self stateAt: 'root') key: (found at: 1)
@@ -1407,7 +1407,7 @@ PBSet >> remove: anElement
   self _checkWritable: 'remove:'.
   element := self _canonical: anElement as: 'element'.
   found := _PBBuckets find: element in: (self stateAt: 'root') pairs: false owner: self.
-  op := PBTuple withAll: { 'remove'. element }.
+  op := PBTuple _trustedOn: { 'remove'. element }.
   (found at: 3) = 0 ifTrue: [^ self _withChanges: #() op: op].
   ^ self _withChanges: {
       'root' -> (_PBBuckets without: found in: (self stateAt: 'root')).
@@ -1531,7 +1531,7 @@ PBCountedSet >> add: anElement
   | element |
   self _checkWritable: 'add:'.
   element := self _canonical: anElement as: 'element' wrapping: self class elementWrapping by: self class wrapper.
-  ^ self _step: element removes: 0 adds: 1 op: (PBTuple withAll: { 'add'. element }).
+  ^ self _step: element removes: 0 adds: 1 op: (PBTuple _trustedOn: { 'add'. element }).
 
 "A counted set with one occurrence fewer of anElement (the last one takes
  the element out); when it is absent, a new version with the same content
@@ -1541,7 +1541,7 @@ PBCountedSet >> remove: anElement
   | element |
   self _checkWritable: 'remove:'.
   element := self _canonical: anElement as: 'element'.
-  ^ self _step: element removes: 1 adds: 0 op: (PBTuple withAll: { 'remove'. element }).
+  ^ self _step: element removes: 1 adds: 0 op: (PBTuple _trustedOn: { 'remove'. element }).
 
 "The counter transform (removes, adds) applied to anElement as one
  adjustment, logged as ('transform' element removes adds) so that a rebased
@@ -1553,7 +1553,7 @@ PBCountedSet >> _transform: anElement removes: aRemoves adds: anAdds
   self _checkWritable: 'rebaseOnto:'.
   element := self _canonical: anElement as: 'element' wrapping: self class elementWrapping by: self class wrapper.
   ^ self _step: element removes: aRemoves adds: anAdds
-    op: (PBTuple withAll: { 'transform'. element. aRemoves. anAdds }).
+    op: (PBTuple _trustedOn: { 'transform'. element. aRemoves. anAdds }).
 
 "The version where aCanonical occurs as often as the counter transform
  (removes, adds) makes it, with anOp logged (ProtoBase CountedSet._step and
@@ -1576,7 +1576,7 @@ PBCountedSet >> _step: aCanonical removes: aRemoves adds: anAdds op: anOp
   total := self totalCount + final - n.
   (n > 0 and: [final > 0]) ifTrue: [
     entries := entries copy.
-    entries at: position put: (PBTuple withAll: { (entries at: position) at: 1. final }).
+    entries at: position put: (PBTuple _trustedOn: { (entries at: position) at: 1. final }).
     ^ self _withChanges: {
         'root' -> ((PBAvl keyPut: root key: (found at: 1) value: (PBTuple withAll: entries) nodeClass: PBKeyNode) at: 1).
         'total_count' -> total }
@@ -1584,7 +1584,7 @@ PBCountedSet >> _step: aCanonical removes: aRemoves adds: anAdds op: anOp
   final > 0 ifTrue: [
     ^ self _withChanges: {
         'root' -> ((PBAvl keyPut: root key: (found at: 1)
-          value: (PBTuple withAll: (entries copyWith: (PBTuple withAll: { aCanonical. final }))) nodeClass: PBKeyNode) at: 1).
+          value: (PBTuple withAll: (entries copyWith: (PBTuple _trustedOn: { aCanonical. final }))) nodeClass: PBKeyNode) at: 1).
         'count' -> (self count + 1).
         'total_count' -> total.
         'indexes' -> (self _afterAdd: aCanonical) }
@@ -1634,7 +1634,7 @@ PBCountedSet >> _netOps
     | entry |
     entry := net at: okey.
     ((entry at: 2) = 0 and: [(entry at: 3) = 0]) ifFalse: [
-      out addLast: (PBTuple withAll: { 'net'. entry at: 1. entry at: 2. entry at: 3 })]].
+      out addLast: (PBTuple _trustedOn: { 'net'. entry at: 1. entry at: 2. entry at: 3 })]].
   ^ out asArray.
 
 PBCountedSet >> _replay: anOp onto: aTarget

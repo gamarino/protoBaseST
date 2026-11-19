@@ -134,6 +134,12 @@ _PBSequence subclass: #PBFrozenList.
 "A Python tuple: the tuple kind (@tup). Orderable when its items are."
 _PBSequence subclass: #PBTuple.
 
+"A tuple holding anArray itself, not a copy (withAll: copies): the private
+ constructor for a caller that made anArray fresh, a brace for instance, and
+ never touches it again."
+PBTuple class >> _trustedOn: anArray
+  ^ self basicNew _setItems: anArray.
+
 "=== PBFrozenDict ============================================================"
 
 "ProtoBase FrozenDict: the map kind (@map). Insertion order is kept and is

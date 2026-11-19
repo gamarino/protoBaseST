@@ -2,11 +2,20 @@
 # variable. Each is a private initialiser called once by a class-side constructor
 # (or, for PBMissing, PBZoneKeys and _PBOidPool, once when the module loads). One entry per line:
 # Class>>selector or Class class>>selector.
-# PBAtom>>_slots and PBAtom>>_installState: are not initialisers: they publish the runtime-only
-# slots field once, by compare-and-swap from nil (setInstVar:from:to:), always from the installed
-# envelope (Task 16b).
+# PBAtom>>_slots and the _publish... methods are not initialisers: each publishes a runtime-only
+# field (slots, oid, saved, memo, a keyed node's order key, an index's key spec object) once, by
+# compare-and-swap from nil on the instance variable (setInstVar:from:to:); the loser of a race
+# answers the winner's value (Task 16b; Task 11, spec 4.1 decision 3 as amended 2026-11-19).
+# PBAtom>>_installState: and PBKeyNode>>_installState:orderKey: are initialisers of a fresh atom.
 PBAtom>>_slots
+PBAtom>>_publishOid:
+PBAtom>>_publishSaved:
+PBAtom>>_publishMemo:
+PBKeyNode>>_publishOrderKey:
+PBIndex>>_publishKeySpec:
 PBAtom>>_installState:
+PBKeyNode>>_installState:orderKey:
+PBNode class>>_initializeShapes
 _PBSequence>>_setItems:
 PBFrozenDict>>_setKeys:values:index:
 PBOrderKey>>_setRank:payload:
@@ -43,8 +52,6 @@ PBTxState class>>_initializeMarks
 PBOrderKey class>>_initializeInfinities
 _PBLoadResolver>>_setStorage:chain:
 _PBNameMap>>_setEntries:
-PBKeyNode>>_setOid:pointer:storage:
-PBIndex>>_setOid:pointer:storage:
 _PBPlace>>_setPointer:storage:
 PBIndexedCollection>>_setLog:complete:
 _PBOpLog>>_setPrevious:op:
