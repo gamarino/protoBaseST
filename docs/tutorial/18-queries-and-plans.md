@@ -127,9 +127,11 @@ better input costs `cost(a) + rows(a)`: the intersection can never be cheaper
 intersections would only add untested code.
 
 That is the model's claim. Whether it holds in time, at protoST's speed, is a measurement:
-measured in T7 (bench P3, one size and one selectivity: 2000 records, 29 rows, 5 runs): the
-hand-built intersection took 3.9x the filter plan's time in `proto_db` and 13.2x in protoBaseST
-(model: 2.4x), so the claim holds at both speeds on that data ([deviations.md](../deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
+measured (bench P3, one size and one selectivity: 2000 records, 29 rows, 5 runs): the hand-built
+intersection took 3.7x the filter plan's time in `proto_db`, so the claim holds there. In
+protoBaseST it took 13.2x at T7, but 0.91x after Task 8's fix round 1 made identity keys cheap, so
+at protoST's speed the claim does not hold on that data; the planner still chooses the filter, as
+`proto_db`'s does ([deviations.md](../deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
 
 ## Why the planner sometimes scans
 
@@ -189,7 +191,10 @@ lesson check: 'an unindexed branch: one scan for the whole OR'
 A disjunction gets a `Union` of index plans only when every branch has one. If one branch needs a
 scan, a union that includes that scan always costs more than the scan alone, filtered by the whole
 `|`. A union keeps each element with its largest multiplicity over its branches, so it answers
-the same multiset as a scan.
+the same multiset as a scan. Measured in T8 (bench Q3, 2000 records, 20 queries, the minimum;
+[deviations.md](../deviations.md#q1-q4-queries-indexed-against-a-forced-scan)): the Union of two
+lookups of about 500 rows took 19 ms per query against 235 ms for the scan; `proto_db` 2.7 against
+12.6 ms.
 
 ## Blocks: what no index can answer
 

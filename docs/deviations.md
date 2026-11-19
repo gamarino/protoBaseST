@@ -970,6 +970,7 @@ The detail:
 | Single-value projection (Task 8) | `project:` always answers maps (a `PBFrozenDict` per row), from an Array of paths or `PBField`s or a map of output names; `proto_db`'s `select("name")` answers the bare values. A single value is `collect: [:e \| e at: 'name']`. | `project:` has one result shape; a block names a computed answer. | One message more for a bare value. |
 | Query sources (Task 8) | `PBQuery from:` takes a `PBIndexedCollection`, a `PBQueryPlan` or a `PBQuery` (answered as is); a protoST collection (an `Array`, an `OrderedCollection`) is `PBValidationError`. `proto_db`'s `from_collection` also takes any iterable, through `ValuesScan` (deferred, row below). | `ValuesScan` is deferred (ruling IQ3). | Host collections are filtered with Smalltalk's own `select:`. |
 | First of nothing (Task 8) | `first` of an empty query is `PBUserError` ("first of an empty query; use firstOrNil when no row is expected"); `proto_db` raises `ProtoUserError` too, with its own text. | The hierarchy maps one to one; the text names the protoST message. | None. |
+| Benchmark sizes (Task 8) | Bench Q1 measures 10^2 to 10^4 records by default, not the spec's 10^2 to 10^5 (spec 7.3). | A 10^5 process with only the one index Q1 uses took 336 s and peaked at 5.4 GB in protoST (the budget is about 5 GB), and a run needs ten per size ([Q1-Q4](#q1-q4-queries-indexed-against-a-forced-scan)). | The largest size is 10^4; `QUERY_Q1_SIZES` adds 10^5 for a run that can afford it. |
 | Deferred | No query result cache, and so no `extractor_generation` (the registration generation that keys it); no `GroupBy`, `Agg`, `Join`, `Unnest` (`select_many`) or `ValuesScan`; no computed values, `startswith` / `endswith` or field-to-field comparisons; no collection `rebuilt` (misfiled format-3 repair) (ruling IQ3, spec 3.2). | Each is either not portable today or not an optimisation; a block condition covers computed values meanwhile. | Programs that need them wait, or use a block. |
 
 Worth knowing: an extractor runs inside the commit when a blind write is merged onto a collection
@@ -1148,64 +1149,74 @@ the drafts cite these markers for the rest, each filled by the task named:
 
 #### Q1-Q4: queries, indexed against a forced scan
 
-`RUNS=5 bench/run_query.sh Q1 Q2 Q3 Q4`, plan Task 8. The runner's provenance line, unmodified:
-`2026-11-19T14:41Z; protoBaseST b7c7944 (src or bench modified or untracked); protoST 0.12.0`: the
-tree measured is the Task 8 commit's (no file under `src/` or `bench/` changed after the run). The
-run took 26 minutes; load average 2.09 before and 2.38 after, on the machine of M1 to M3 (AMD
-Ryzen 5 5500U, 6 cores, 12 threads, Linux 7.0.0-43, DEV12); the `pinned-360` build (protoST 0.12.0
-on protoCore 3.6.0); `proto_db` v2.0.0rc4 on CPython 3.14.0. One process per unit, five rounds
+`RUNS=5 bench/run_query.sh Q1 Q2 Q3 Q4 P3`, plan Task 8, re-run after its fix round 1 on a clean,
+committed tree. The runner's provenance line, unmodified:
+`2026-11-19T15:38Z; protoBaseST 90bad75; protoST 0.12.0`. The run took 23 minutes; load average
+2.07 before and 2.77 after, with no other heavy process, on the machine of M1 to M3 (AMD Ryzen 5
+5500U, 6 cores, 12 threads, Linux 7.0.0-43, DEV12); the `pinned-360` build (protoST 0.12.0 on
+protoCore 3.6.0); `proto_db` v2.0.0rc4 on CPython 3.14.0. One process per unit, five rounds
 interleaved, heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`. The data and the units are
 `bench/_query_bench.st` (`QueryUnits`) and `bench/py_query_workload.py`: records with `g` (ten
-records per value), `r` (unique), `few` (four values) and `x` (ten values, never indexed); plan
-`-index` queries them with equality indexes on `g` and `few` and a range index on `r`, and the
-planner chooses; plan `-scan` queries the same records without indexes. Each unit times 20
-queries, each built, planned and run to an `Array` through the query front end (`PBQuery`,
-`from_collection`). Every run self-reports its rows, queries, checksum and the plan's node names;
-all ten runs of every unit agreed with `proto_db`'s first (the runner printed `verified`), so both
-planners chose the same plan everywhere, and each `-index` unit answered the rows of its `-scan`.
-Times are microseconds for the 20 queries, minimum / median of five.
+records per value), `r` (unique), `few` (four values) and `x` (ten values, never indexed). Plan
+`-index` queries them with an equality index on `g` (Q1: that index only) and, for Q2-Q4, an
+equality index on `few` and a range index on `r`, and the planner chooses; plan `-scan` queries the
+same records without indexes. Each unit times 20 queries, each built, planned and run to an
+`Array` through the query front end (`PBQuery`, `from_collection`). Every run self-reports its rows,
+queries, checksum and the plan's node names; all ten runs of every unit agreed with `proto_db`'s
+first (the runner printed `verified`), so both planners chose the same plan everywhere, and each
+`-index` unit answered the rows of its `-scan`. Times are microseconds for the 20 queries, minimum
+/ median of five; peak RSS is the largest over a unit's runs, in MB, `proto_db` / protoBaseST.
+Q4's point `all` (no condition) is an addition to spec 7.3: with a condition both implementations
+sort over a lookup, so `all` is the only Q4 point where the planner streams an ordered index.
 
-| Unit | Plan chosen (`-index`) | `proto_db` index | protoBaseST index | `proto_db` scan | protoBaseST scan |
-|---|---|---|---|---|---|
-| Q1, 10^2 records, `g == v` | `IndexLookup` | 1895 / 2201 | 16611 / 19234 | 6065 / 7008 | 110345 / 122752 |
-| Q1, 10^3 | `IndexLookup` | 2031 / 2443 | 22323 / 23800 | 56615 / 58487 | 1185207 / 1270557 |
-| Q1, 10^4 | `IndexLookup` | 2161 / 2359 | 21430 / 23117 | 563365 / 580746 | 11300424 / 11492430 |
-| Q2, `in:` 1 value (2000 records) | `IndexLookup` | 2567 / 2663 | 27182 / 29024 | 131227 / 139529 | 2662616 / 2738812 |
-| Q2, `in:` 10 values | `IndexLookup` | 4972 / 5102 | 89665 / 92676 | 302275 / 312386 | 3321469 / 3455636 |
-| Q2, `in:` 100 values | `IndexLookup` | 27887 / 30916 | 677160 / 699260 | 1626866 / 1851017 | 8608120 / 10090916 |
-| Q2, range 0.1 % | `IndexRange` | 2575 / 2676 | 27681 / 33104 | 133910 / 152144 | 2976089 / 3213743 |
-| Q2, range 1 % | `IndexRange` | 3347 / 3409 | 48754 / 50495 | 142377 / 154105 | 2954070 / 3290579 |
-| Q2, range 10 % | `IndexRange` | 10682 / 11826 | 223871 / 248798 | 141363 / 149952 | 3124123 / 3156057 |
-| Q2, range 50 % | `IndexRange` | 38035 / 43124 | 984756 / 1063682 | 137510 / 142546 | 3117209 / 3237259 |
-| Q3, AND (`g == v & x < 5`) | `Filter <- IndexLookup` | 4174 / 4718 | 49346 / 52818 | 139115 / 144766 | 3350482 / 3361401 |
-| Q3, OR of two indexed branches | `Union` of two `IndexLookup` | 58569 / 61017 | 6257466 / 6400945 | 258888 / 263521 | 5026352 / 5104205 |
-| Q3, OR with an unindexed branch | `Filter <- CollectionScan` | 260951 / 267994 | 5027242 / 5423544 | 253380 / 271698 | 4877629 / 5267519 |
-| Q3, NOT (`not (few == v)`) | `Filter <- CollectionScan` | 149390 / 155069 | 2774622 / 2901026 | 153978 / 161907 | 2617715 / 2751127 |
-| Q4, `orderBy: r` `take: 5`, no condition | `Limit <- IndexOrderedScan` | 2330 / 2455 | 18271 / 20805 | 100394 / 102987 | 3600695 / 3966887 |
-| Q4, selective (`g == v`, ten rows) | `Limit <- Sort <- IndexLookup` | 4638 / 4896 | 50803 / 53517 | 115579 / 116435 | 2607986 / 2672346 |
-| Q4, unselective (`few == v`, 500 rows) | `Limit <- Sort <- IndexLookup` | 34977 / 36117 | 1156430 / 1211319 | 133569 / 141030 | 3388479 / 3422629 |
+| Unit | Plan chosen (`-index`) | `proto_db` index | protoBaseST index | `proto_db` scan | protoBaseST scan | Peak RSS index; scan |
+|---|---|---|---|---|---|---|
+| Q1, 10^2 records, `g == v` | `IndexLookup` | 1785 / 1931 | 14329 / 15158 | 6345 / 6504 | 117643 / 120145 | 25 / 148; 24 / 152 |
+| Q1, 10^3 | `IndexLookup` | 2065 / 2214 | 16614 / 17862 | 55044 / 56536 | 1253409 / 1297072 | 26 / 744; 25 / 832 |
+| Q1, 10^4 | `IndexLookup` | 2147 / 2204 | 16854 / 18694 | 545171 / 550601 | 11073528 / 11757011 | 39 / 5088; 29 / 5088 |
+| Q2, `in:` 1 value (2000 records) | `IndexLookup` | 2555 / 2598 | 29200 / 29713 | 132556 / 135944 | 2496193 / 2644884 | 31 / 2626; 25 / 1701 |
+| Q2, `in:` 10 values | `IndexLookup` | 4889 / 4983 | 87886 / 91332 | 303499 / 307919 | 3232368 / 3372979 | 31 / 2654; 25 / 1705 |
+| Q2, `in:` 100 values | `IndexLookup` | 27768 / 28914 | 642911 / 655602 | 1541370 / 1650731 | 8026655 / 8254401 | 31 / 2822; 25 / 1773 |
+| Q2, range 0.1 % | `IndexRange` | 2475 / 2621 | 24743 / 26337 | 132992 / 138976 | 2886970 / 2893763 | 31 / 2626; 25 / 1785 |
+| Q2, range 1 % | `IndexRange` | 3177 / 3258 | 45674 / 48758 | 133402 / 144826 | 2896411 / 2908670 | 31 / 2634; 25 / 1785 |
+| Q2, range 10 % | `IndexRange` | 9543 / 9600 | 213744 / 218714 | 137104 / 143286 | 2848140 / 2968641 | 31 / 2674; 25 / 1801 |
+| Q2, range 50 % | `IndexRange` | 39988 / 43190 | 973328 / 991265 | 136358 / 141660 | 2896923 / 2985878 | 31 / 2910; 25 / 1837 |
+| Q3, AND (`g == v & x < 5`) | `Filter <- IndexLookup` | 4103 / 4197 | 47227 / 49104 | 139702 / 147769 | 3222087 / 3323021 | 31 / 2630; 25 / 1757 |
+| Q3, OR of two indexed branches | `Union` of two `IndexLookup` | 54714 / 57769 | 382118 / 386269 | 252187 / 253677 | 4693198 / 4795787 | 31 / 2786; 25 / 2406 |
+| Q3, OR with an unindexed branch | `Filter <- CollectionScan` | 250269 / 260422 | 4681005 / 4757859 | 247941 / 259061 | 4583162 / 4739753 | 31 / 4091; 25 / 2398 |
+| Q3, NOT (`not (few == v)`) | `Filter <- CollectionScan` | 147109 / 147684 | 2599471 / 2730049 | 150480 / 152606 | 2554866 / 2693507 | 31 / 3407; 25 / 1745 |
+| Q4, `orderBy: r` `take: 5`, no condition | `Limit <- IndexOrderedScan` | 2300 / 2462 | 19977 / 20685 | 98970 / 99285 | 3442564 / 3571788 | 31 / 2626; 26 / 1806 |
+| Q4, selective (`g == v`, ten rows) | `Limit <- Sort <- IndexLookup` | 4568 / 4896 | 51278 / 52218 | 115025 / 117884 | 2499579 / 2635541 | 31 / 2630; 25 / 1693 |
+| Q4, unselective (`few == v`, 500 rows) | `Limit <- Sort <- IndexLookup` | 36205 / 38321 | 1136992 / 1158193 | 129762 / 137303 | 3236612 / 3262506 | 31 / 2862; 26 / 1877 |
 
-What it shows. **A point lookup by index does not grow with the collection**: about 1 ms per query
-in protoBaseST from 10^2 to 10^4 records (`proto_db` about 0.1 ms), where the scan grows with it,
-5.5 ms to 565 ms per query (`proto_db` 0.3 to 28 ms); at 10^4 records the index answers about 530
-times faster than the scan in protoBaseST. **protoBaseST is 8 to 36 times slower than `proto_db`**
-on every unit but one, about 10x on index lookups and ordered streams and about 20x on scans, which
-is the speed of a protoST walk over immutable records. **The exception is Q3's Union**: 107x
-`proto_db`'s time, and slower than its own scan of the same records (6.3 s against 5.0 s for 20
-queries of about 500 rows), where `proto_db`'s Union is 4.4x faster than its scan. Its answers are
-right (the runner checked them). The cause, found in review: a constant cost of about 430 µs per row
-in the identity key of `PBUnion`, `PBIntersect` and `PBDistinct` (a member tuple built and dropped, a
-nested tuple order key, and four dictionary operations each recomputing that key's uncached
-hash). Fix round 1 keys an atom by its oid's bytes, builds no member tuple, and looks each row up
-once; this table predates the fix, and the re-run follows it. The planner's choices are
-`proto_db`'s, and both implementations sort the unselective Q4 over a lookup rather than filter an
-ordered scan, as the model says.
+What it shows.
 
-**Sizes.** Q1 stops at 10^4 records, not the spec's 10^5: protoST's build of a 10^5-record
-`PBList` with three indexes had used more than 5 CPU minutes and 5 GB before its first query, in a
-probe stopped there, and the run needs ten such processes per size (two plans, five rounds). The
-size is `QUERY_Q1_SIZES`. Peak resident sets of protost (up to 5 GB) are not a figure of the
-work: protoCore keeps memory until it needs it.
+- **A point lookup by an index does not grow with the collection.** In protoBaseST it takes about
+  0.8 ms per query from 10^2 to 10^4 records, and `proto_db` about 0.1 ms. The scan grows with the
+  collection: 5.9 ms to 554 ms per query in protoBaseST, 0.3 to 27 ms in `proto_db`. At 10^4 records
+  protoBaseST's index answers about 650 times faster than its scan.
+- **protoBaseST is 5 to 35 times slower than `proto_db`** on every unit. Most of it is the speed of
+  a protoST walk over immutable records: about 7x to 12x on lookups, unions and ordered streams, and
+  about 20x on scans. The `in:` scans are faster relative to `proto_db` (5x and 11x), because
+  `proto_db` tests `in` slowly on a scan.
+- **The Union is now cheap.** The first run of Task 8 measured the Union of two lookups at 107x
+  `proto_db`'s time, slower than its own scan. The cause was the identity key of `PBUnion`,
+  `PBIntersect` and `PBDistinct`: a constant cost of about 430 µs per row, from a member tuple built
+  and dropped, a nested tuple order key, and four dictionary operations each recomputing that key's
+  uncached hash. Fix round 1 keys an atom by its oid's bytes, builds no member tuple, and looks each
+  row up once. The Union is now 7.0x `proto_db`, and 12x faster than its own scan; `proto_db`'s is
+  4.6x faster than its scan.
+- **The planner's choices are `proto_db`'s.** Both implementations sort the unselective Q4 over a
+  lookup rather than filter an ordered scan, as the model says.
+
+**Sizes.** Q1 stops at 10^4 records, not at the spec's 10^5. With every index, a 10^5 probe was
+stopped after more than 5 CPU minutes and 5 GB, before its first query. With only the `by_g` index
+the index plan uses, one 10^5 process took 336 s and peaked at 5.4 GB (the budget is about 5 GB),
+and answered its 20 lookups in 32.5 ms against `proto_db`'s 2.0 ms. Outputs are in
+`bench/out/q1-probe/`, which git ignores. Q1 needs ten such processes per size, so 10^5 is not run
+by default (`QUERY_Q1_SIZES` sets the sizes); see "Benchmark sizes" in the table of indexed-query
+deviations. Peak resident sets of protost (up to 5 GB) are not a figure of the work: protoCore
+keeps memory until it needs it.
 
 #### M1: commits per second with 0, 1 and 3 indexes
 
@@ -1382,14 +1393,23 @@ are compared by the runner: `proto_db`'s and protoBaseST's are equal (in thousan
 `PBIntersect` of both index plans costs 978.8 in the model, the planner's plan
 (`Filter <- IndexLookup` of `x`) 403.6.
 
-| Plan | `proto_db` ms (5 runs) | protoBaseST ms (5 runs) |
-|---|---|---|
-| `Intersect (IndexLookup x, IndexRange y)` | 12.2 | 1139 |
-| `Filter <- IndexLookup` (planner) | 3.1 | 86 |
+| Plan | `proto_db` ms (5 runs) | protoBaseST ms (5 runs), Task 7 | protoBaseST ms (5 runs), Task 8 fix round 1 |
+|---|---|---|---|
+| `Intersect (IndexLookup x, IndexRange y)` | 12.2 (re-run: 11.1) | 1139 | 65.5 |
+| `Filter <- IndexLookup` (planner) | 3.1 (re-run: 3.0) | 86 | 71.9 |
 
-The model's claim holds at both speeds on this data: the intersection is 3.9x slower in `proto_db`
-and 13.2x in protoBaseST (model: 2.4x). Where protoBaseST's intersection spends the extra time was
-not profiled. Other sizes and selectivities were not measured.
+At Task 7 the model's claim held at both speeds on this data. The intersection was 3.9x slower
+than the filter in `proto_db` and 13.2x in protoBaseST (model: 2.4x).
+
+Task 8's fix round 1 made the intersection's identity keys cheap, and P3 was re-run in the Q1-Q4
+run above (provenance `90bad75`, all runs verified). In `proto_db` the intersection is still 3.7x
+slower. **In protoBaseST it is now 9 % faster than the filter plan** (65.5 against 71.9 ms). The
+filter evaluates `y == 2` on each of the 200 rows of the lookup, and a term evaluation in protoST
+now costs more per row than an identity key. So the model's claim does not hold at protoST's speed
+on this data.
+
+The planner still chooses the filter plan, as `proto_db`'s does: plans are ported, not retuned
+(spec 5.6). Other sizes and selectivities were not measured.
 
 **Peak RSS** (0.7 to 5 GB for protoBaseST against about 30 MB) is the heap budget being used, not
 the live set (see M1).
