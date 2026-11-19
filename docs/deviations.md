@@ -1097,9 +1097,10 @@ drafts cite these markers for the rest, each filled by the task named:
 `QUERY_M2_SIZES="100 1000 10000" RUNS=3 bench/run_query.sh M2`. **Indicative only.** Measured
 2026-11-19 (03:55-03:58 local) on an AMD Ryzen 5 5500U (6 cores, 12 threads, Linux 7.0.0, DEV12),
 load average 2.6 before and 2.9 after (other desktop sessions open; their load was not controlled); protoBaseST at
-the Task 3 commit (parent `cc09aec`), protoST 0.12.0 on protoCore 3.6.0 (the `pinned-360` release
-builds, `build_release/protost`, as built); `proto_db` v2.0.0rc4 in the interop venv on CPython
-3.14.0. The workload is an `EqualityIndex` on the path `age` over n records (about a quarter as many
+`e52b691` (the Task 3 commit; the fix round changed no code the benchmark runs), protoST 0.12.0
+(`b7e206a`, tag v0.12.0) on protoCore 3.6.0 (`799d7615`, tag v3.6.0), the `pinned-360` release
+builds (`build_release/protost`, as built; their sources match the tags file for file);
+`proto_db` v2.0.0rc4 (`8e6127f`) in the interop venv on CPython 3.14.0. The workload is an `EqualityIndex` on the path `age` over n records (about a quarter as many
 distinct ages as records, Integers and Floats, some absent, some nil), built by `build:` and by the
 fold of `withAdded:` from `empty`. Every run self-reports its rows and an ordered checksum over the
 stored occurrences; the runner refuses any run whose work differs from `proto_db`'s first run, and

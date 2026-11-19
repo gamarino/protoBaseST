@@ -622,7 +622,7 @@ same rows, checksum and plan. None exists yet.
 | Ordered scan against sort, with `take:` | Q4 | [measured in T8: Q4] |
 | Page k by rank against materialised; `count` by rank | Q5 | [measured in T9: Q5] |
 | Commits per second with 0, 1 and 3 indexes | M1 | [measured in T4: M1, plan task 4a] |
-| Bulk `addIndex:` against the fold of single additions | M2 | Measured in T3: build 3.1x faster than the fold at 10^4, protoBaseST 30x-38x slower than `proto_db` ([deviations.md](deviations.md#m2-the-bulk-build-against-the-fold-of-single-additions)) |
+| Bulk `addIndex:` against the fold of single additions | M2 | Measured in T3: build 3.1x faster than the fold at 10^4, protoBaseST 16.7x (10^2) to 38.3x (10^4) slower than `proto_db` ([deviations.md](deviations.md#m2-the-bulk-build-against-the-fold-of-single-additions)) |
 | Merges onto an indexed current, standalone and in a cluster | M3 | [measured in T4: M3, plan task 4b] |
 | `plan` and `explain` alone, 1 to 32 conjuncts, 0 to 8 indexes | P1 | [measured in T7: P1] |
 | Where the cost model switches between index and scan, and whether the timings cross there | P2 | [measured in T7: P2] |

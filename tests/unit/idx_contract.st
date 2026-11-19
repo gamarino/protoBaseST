@@ -3,7 +3,7 @@
  (tests/contracts/index_contract.py at v2.0.0rc4; the plan half, plan == scan, joins in Task 7)
  for PBEqualityIndex and PBRangeIndex, on QData values: 300 (the element key spec, every value
  rank) and QData people: 300 (the path 'age', mixed numbers, absent and nil), for the seeds
- 1..PBST_PROP_SEEDS (default 5, plan call IP16):
+ 1..PBST_PROP_SEEDS (default 8, proto_db's contract count; plan call IP16):
    (b) random add, remove and replace sequences keep validate: passing, and the stored multiset
        (membersDo:) equals the model's (QData bagOf:)
    withReplaced:with: equals withRemoved: then withAdded:, node for node
@@ -16,8 +16,9 @@
        same class, name and key spec
    (d) readers are unaffected by concurrent writers: four actors derive versions from one index
        while it is read, and every version they answer validates against its own model
- The sizes keep the default run near four minutes: (b) 80 steps from 60 elements, validate: every
- eighth; 8 replacements on 80 elements; the saved indexes hold 120 elements; readers dump 5 times.
+ (b) runs at proto_db's cadence (30 steps, validate: and the oracle after each). The other checks
+ are smaller than first written, to bound the run time: 8 replacements on 80 elements, saved
+ indexes of 120 elements, readers dumping 5 times.
  Saves go to out/idx_contract (git ignores out/); each seed writes a new segment there."
 Import from: 'random'.
 Import from: 'protobase'.
@@ -70,7 +71,7 @@ IdxReader >> run
 
 | c seeds kinds sets fails expect dump fold bag random draw base storage saved |
 c := Check new.
-seeds := (1 to: (QData seeds: 5)) asArray.
+seeds := (1 to: (QData seeds: 8)) asArray.
 kinds := { PBEqualityIndex. PBRangeIndex }.
 fails := OrderedCollection new.
 expect := [:label :actual :expected |
@@ -87,9 +88,10 @@ sets := [:seed | {
   { 'values'. PBKeySpec element. QData values: 300 seed: seed }.
   { 'people'. PBKeySpec path: 'age'. QData people: 300 seed: seed } }].
 
-"(b) random add, remove and replace keep validate: passing: validate: every eighth step, the last
- among them (each validate: rescans the model; every step would take minutes), the stored multiset
- against the model's every twentieth step."
+"(b) random add, remove and replace keep validate: passing, at proto_db's cadence
+ (check_mutation_sequence, index_contract.py 244-278): from empty or, half the time, from the build
+ of 0 to 14 elements, 30 steps, each followed by assert_consistent's structure half: validate:
+ and the stored multiset against the model (the oracle)."
 fails := OrderedCollection new.
 seeds do: [:seed |
   random := Random seed: seed.
@@ -98,9 +100,12 @@ seeds do: [:seed |
     kinds do: [:k |
       | index model pool |
       pool := set last.
-      model := OrderedCollection withAll: (pool copyFrom: 1 to: 60).
-      index := (k name: 'idx' keySpec: (set at: 2)) build: model.
-      1 to: 80 do: [:step |
+      model := OrderedCollection new.
+      index := k name: 'idx' keySpec: (set at: 2).
+      random next < 0.5 ifTrue: [
+        ((random next * 15) truncated) timesRepeat: [model addLast: (pool at: (draw value: pool size))].
+        index := index build: model].
+      1 to: 30 do: [:step |
         | r label |
         r := random next.
         label := k name , ' ' , set first , ' seed ' , seed printString , ' step ' , step printString.
@@ -119,9 +124,8 @@ seeds do: [:seed |
                 new := pool at: (draw value: pool size).
                 index := index withReplaced: (model at: i) with: new.
                 model at: i put: new]].
-        (step \\ 8 = 0) ifTrue: [
-          [index validate: model] on: PBCorruptionError do: [:e | fails add: label , ': ' , e messageText. e return: nil]].
-        step \\ 20 = 0 ifTrue: [expect value: label , ' bag' value: (bag value: index) value: (QData bagOf: model)]].
+        [index validate: model] on: PBCorruptionError do: [:e | fails add: label , ': ' , e messageText. e return: nil].
+        expect value: label , ' bag' value: (bag value: index) value: (QData bagOf: model)].
       expect value: k name , ' ' , set first , ' count' value: index count value: model size]]].
 c that: 'random add, remove and replace keep validate: passing' is: fails asArray equals: #().
 

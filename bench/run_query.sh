@@ -44,7 +44,9 @@ echo "verified: $RUNS runs of each implementation report the same work (rows, qu
 echo "RUNS=$RUNS interleaved; load average before: $load_before, after: $(cut -d' ' -f1-3 /proc/loadavg)"
 echo "protost: $PROTOST; Python: $("$PY" --version 2>&1)"
 grep -h '^WORK ' "$OUT/py.1" | sed 's/ impl=py//'
-cat "$OUT"/py.[0-9]* "$OUT"/st.[0-9]* | grep '^TIME ' | awk '
+runs=()
+for ((r = 1; r <= RUNS; r++)); do runs+=("$OUT/py.$r" "$OUT/st.$r"); done
+cat "${runs[@]}" | grep '^TIME ' | awk '
     { for (i = 2; i <= NF; i++) { split($i, kv, "="); f[kv[1]] = kv[2] }
       key = f["id"] SUBSEP f["size"] SUBSEP f["plan"]; impl = f["impl"]
       n[key, impl]++; v[key, impl, n[key, impl]] = f["us"] + 0

@@ -37,7 +37,8 @@
   `element_identity`. A `PBVectorIndex` and an index of an unknown kind refuse every hook
   (`PBNotSupportedError`, design spec 3.3). `PBIndexSet` gains `withIndex:`, `without:`,
   `onAdd:`, `onRemove:`, `onReplace:with:` and `rebuiltStale:`. Collections do not call the hooks
-  yet (plan Task 4a).
+  yet (plan Task 4a). The trees `build:` and the hooks write are node for node `proto_db`'s on a
+  shared space (`tests/interop/index_build_identical.sh`).
 - **Benchmark M2** (`bench/run_query.sh`, `bench/query_workload.st`,
   `bench/py_query_workload.py`): the bulk build against the fold of single additions, in both
   implementations, with the work verified; figures in `docs/deviations.md#performance`.

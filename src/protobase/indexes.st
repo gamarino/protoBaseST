@@ -5,7 +5,9 @@ ProtoBase's indexes (format spec v2.0.0rc1, 'Indexes', 'Key-group indexes',
 and range indexes are written as proto_db writes them (indexed queries, plan
 Task 3: a port of base.py's Index and keyed.py's KeyGroupIndex): every hook
 answers a new, unsaved index version and never changes its receiver, and the
-trees it builds are node-identical to proto_db's for the same operations. The
+trees it builds are node-identical to proto_db's for the same operations
+(build and the hooks, both kinds, path, element and extractor key specs:
+tests/interop/index_build_identical.sh). The
 vector index is read only (design spec 3.3, ruling IQ5): each of its hooks is
 PBNotSupportedError naming it.
 
@@ -44,8 +46,9 @@ The hooks (base.py Index, keyed.py KeyGroupIndex), each answering a new index:
   build: aCollection an index over exactly the elements of aCollection (anything
                      answering do:), the receiver's content never kept; a
                      key-group index builds it in bulk (group, sort, balanced
-                     trees: keyed.py build), node-identical to the fold of
-                     withAdded: from empty
+                     trees, as keyed.py build builds them), holding the entries
+                     of the fold of withAdded: from empty key for key and member
+                     for member; only the tree shapes differ from the fold's
   explain            a PBFrozenDict: index, kind (proto_db's class name,
                      'EqualityIndex', plan call CR4), key; a key-group index adds
                      entries, keys, unorderable
