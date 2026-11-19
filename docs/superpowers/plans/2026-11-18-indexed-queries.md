@@ -889,6 +889,86 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
 
 ---
 
+## Phase 3b: atom weight (maintainer decision 2, 2026-11-19)
+
+The maintainer asked why a node costs so many cells and asked for improvements that keep
+immutability. The analysis (`.superpowers/sdd/2026-11-18-indexed-queries/atom-weight-analysis.md`,
+probes in `worktrees/protoBaseST-diag/diag-tmp/atom-weight/`) measured 92 cells per in-memory
+index node, 106 loaded, 359 allocated per build; about 70% incidental. Both tasks are pure
+protoBaseST refactors: no change to protoCore or protoST, on-disk bytes unchanged, every value
+still immutable, every runtime field still write-once.
+
+### Task 11: Atom weight stage 1 (construction cleanup; write-once fields by instance-variable CAS)
+
+**Files:**
+- Modify: `src/protobase/avl.st` (`_fieldsKey:`, `PBKeyNode` order-key cell),
+  `src/protobase/registry.st` (`_recordShape`, `stateOfSlots:`, `PBAtom` `_setOid:`, `oid`,
+  `pointer`, `_storage`, `isLoaded`, `_envelopeWithin:`, `_installState:`, `_pushInto:`),
+  `src/protobase/values.st` (`PBTuple` trusted constructor), `src/protobase/indexes.st`
+  (`PBIndex _setOid:`), the `values_immutable.st` allowlist.
+- Modify: `docs/superpowers/specs/2026-11-10-protobasest-prototype-design.md` section 4.1
+  (decision 3: "Both are `Atom` cells" becomes "each is written once, by a compare-and-swap from
+  nil on its instance variable (or an `Atom`)"); `docs/decisions.md` (the ruling);
+  `docs/deviations.md#performance` (stage 1 figures); CHANGELOG.
+- Create: `bench/atom_weight.st` (or the existing bench runner's equivalent) and a
+  `tests/unit/atom_weight.st` guard.
+
+**Interfaces:** no public selector changes. Private: `PBTuple class >> _trustedOn: anArray`
+(no copy; only for a fresh Array the caller never touches again); write-once publishers
+`_publishOid:`, `_publishSaved:`, `_publishMemo:`, `_publishOrderKey:` via
+`setInstVar:from:to:` from nil, answering the installed value (the loser of a race answers the
+winner's value, as the Atom version did).
+
+- [ ] **Step 1: measure the baseline** with the analysis probes, at this task's BASE: retained
+  cells per node (own key and value), cells allocated per node build, `PBTuple` of 2, `Atom`-held
+  atom shell. Run serially, quiet machine. Record the figures in the report.
+- [ ] **Step 2: write the failing guard.** `tests/unit/atom_weight.st` (`"EXPECT: ok"`): a node
+  built by `PBCountedKeyNode key:orderKey:value:left:right:` holds no `Atom` in any instance
+  variable (structural, not a cell count); `PBTuple _trustedOn:` answers a tuple equal to
+  `PBTuple withAll:` on the same elements; each write-once publisher, raced by two actors, installs
+  exactly one value and both callers answer it; a second publish of a different value does not
+  replace the first. Run: expected FAIL; record `fail-first:`.
+- [ ] **Step 3: A, construction cleanup.** One brace (or `,`) instead of `copyWith:` in
+  `_fieldsKey:`; the record shape in a class variable set once at module load; `PBTuple
+  _trustedOn:` at the internal call sites that hand over a fresh Array; no `asArray` of an
+  `OrderedCollection` on the node path.
+- [ ] **Step 4: B, write-once fields.** oid, saved, memo and order key become instance variables
+  published by CAS from nil; no `Atom on:` per atom; construction never assigns nil (an unset
+  variable already reads nil); the construction variables are written in one group. Each new
+  CAS publisher joins the allowlist next to `PBAtom >> _slots`, with the same justification.
+- [ ] **Step 5: run the covering tests**, sequentially: `atom_weight.st`, `values_immutable.st`,
+  `record_slots`, `record_slots_subclasses`, `avl_order_key_cache`, `atom_keys_oid`,
+  `keys_atom_keys`, `tx_atom_oid`, `bytes_pinned` and `save_race` (the `_newOid` overrides), `idx_*`, `qry_*` and the interop identity tests (`tests/interop/*identical*.sh`:
+  bytes and node identity with `proto_db` unchanged), the cluster persistence tests.
+  Expected: PASS.
+- [ ] **Step 6: measure again** with the same probes at the committed head, plus M2 (build and
+  fold, 2000 and 10^4) and Q1 at 10^4, serially on a quiet machine, provenance from a clean
+  committed tree. Expected: retained cells per node well under the baseline (the prototype
+  reached about 60 for stage 1); report every figure as measured, with wall time.
+- [ ] **Step 7:** spec and decisions text, deviations figures, CHANGELOG; commit
+  `Atom weight stage 1: construction cleanup, write-once fields by CAS`.
+
+### Task 12: Atom weight stage 2 (no envelope for shaped atoms; decode fast path)
+
+**Files:** `src/protobase/registry.st`, `framing.st`, `store.st` (the atom cache), `codec.st`;
+tests as Task 11 plus the codec/envelope, corruption/validation and cluster persistence tests.
+
+- [ ] **Step 1: failing tests.** An unsaved or loaded atom whose class has a record shape holds
+  its slots and no envelope or state dictionary (structural); `state` answers a `PBFrozenDict`
+  equal to the old one; a record whose names differ from the shape still loads through the
+  generic path; every corruption/validation error text is unchanged.
+- [ ] **Step 2: C.** For shaped classes the atom keeps `slots` (plus tag and oid); `state` is
+  `PBFrozenDict _keys:index:values:` over the slots on demand; a load decodes into the slots.
+  Classes without a shape and opaque atoms keep the envelope. The atom cache stores what the
+  atom keeps.
+- [ ] **Step 3: D.** When a record's names equal `shape persisted`, skip `associations` and the
+  per-attribute name check; decode the values into one Array.
+- [ ] **Step 4:** covering tests (as Task 11 Step 5 plus codec and corruption tests). PASS.
+- [ ] **Step 5:** measure as Task 11 Step 6, plus loaded-node cells and cells allocated per
+  record load. Record; commit `Atom weight stage 2: shaped atoms keep only their slots`.
+
+---
+
 ## Phase 4: final verification (spec T10)
 
 ### Task 10: Full suite, soaks, the full comparison, documentation complete
