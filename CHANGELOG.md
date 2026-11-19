@@ -38,7 +38,15 @@ accepted it, so a cluster of three survives the loss of any one member. See tuto
   permission at a time across the cluster), dynamic membership, and storage format 5, which is
   refused with `PBNotSupportedError`. Every difference from `proto_db` is in
   `docs/deviations.md`, and `docs/not-done.md` states the cluster's cuts and what is unproven
-  (the full timer audit and the 5000-seed soak run only in Task 30).
+  (the final verification: the long soak ran every simulator family at commit 02d9826 on protoCore
+  3.6.0 and protoST 0.12.0: sim_harness, sim_base_choice, sim_rejoin, sim_base_seeds_a,
+  sim_base_seeds_b and sim_grants at 5000 seeds each, sim_leases_terms_a and sim_leases_terms_b at
+  2000, sim_acceptance and sim_permits at 1000, sim_round_rules at 400 and sim_leases at 100 (five
+  families one after another, then the other seven at once; each run is deterministic per seed), and
+  every one passed; the full timer audit (81 parts, 3420 simulator runs) ran twice at the final
+  code: the first run had no violation but missed 36 floors by 1 to 7 commits, because 02d9826
+  changes every schedule (bisected), so the floors were re-measured from it (7cbac4a); the second
+  run passed whole at 7cbac4a in 2 h 22 min, serially).
 - **Costs:** on one machine, a cluster commits at about half the standalone rate for small commits
   on disjoint roots, and a third on a hot key (`bench/run_cluster.sh`; indicative figures in
   `docs/deviations.md`, Performance).
