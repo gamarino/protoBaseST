@@ -1649,15 +1649,30 @@ median of 3; peak RSS in MB:
 
 - M2's fold gains about a fifth and its peak RSS drops by a fifth to a quarter; the build gains
   under 10% (noise level).
-- **Q1 is slower and the cause is not found.** Two more alternating pairs of Q1 alone (before at
-  `f95b09f`, after at `515cd86`, load 2.4 to 3.8) gave index 17614 and 15935 before against
-  18568 and 19621 after, scan 11332900 and 11634473 against 12081126 and 12134155 (minimums):
-  index about +15%, scan +4% to +7%. The after side allocates fewer cells in every part of Q1
-  (counted: a scan of 2000 records 520,418 cells before, 488,852 after; reading one field of each
-  record 10.5 cells per record before, none after), and in one process the same queries run as fast or faster after (iteration, scan,
-  index lookup and planning timed in a loop). The units run at the heap budget (peak RSS about
-  5 GB either way), where when collections land depends on the whole run; this is the leading
-  suspect, unproven.
+- **Q1's index gap is page faults on fresh heap, not per-row work** (review fix round 1). Two
+  alternating pairs of Q1 alone (before `f95b09f`, after `515cd86`, load 2.4 to 3.8) had given
+  index 17614 and 15935 before against 18568 and 19621 after (minimums). A driver that times
+  each of the 20 queries and reads the heap trace (`PROTOCORE_HEAP_TRACE=1`) and the process's
+  minor faults (`/proc/self/stat`) around each one, at the bench's heap budget, `f95b09f` against
+  `a89cbae`, both clean, one process per run, 2026-11-19T21:06Z to 21:22Z, load 2.5 to 4.8:
+  - no collection lands in the index window on either side (after: no cycle at all in the
+    process; before: one, finished before the window). The after side's steady queries take
+    the same time (about 0.75 to 0.9 ms), but one to three of its 20 queries take about 2.7 ms,
+    each with 1,025 to 1,029 minor faults (one 4 MB chunk of fresh pages), against 64 to 73 faults
+    in the whole before window: the after side builds Q1 with fewer cells, reaches the timer
+    before its first collection and allocates into memory the kernel has not mapped yet, where
+    the before side reuses cells its first collection swept.
+  - The control: 2 x 10^7 short-lived Arrays made after the build and before the timer (both
+    sides then run 20 to 22 collections first) take the after side's window faults to 3 to 5, the
+    2.7 ms queries go, and the two sides are level: six pairs, window minimum 27.3 ms before and
+    27.6 ms after, median about 35 ms and 31 ms (the load rose to 4 during them; queries over
+    2 ms without faults appear on both sides).
+  - The scan is not slower: without the control 11.60 and 12.10 s before against 11.18 and
+    10.56 s after (one collection in each window, pauses under 0.1 ms); with it, 16.3 s against
+    12.9 s (one pair, load 4.8).
+  - So Q1's index figures measure where the heap stands when the timer starts, which the
+    smaller build moved; the queries themselves are not slower. The driver, its runner and the
+    raw outputs are in the task's working notes (`.superpowers/`, not in the repository).
 
 ## Known protoST limits
 
