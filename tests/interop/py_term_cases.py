@@ -30,15 +30,18 @@ the helper printed it: the test checks that QData still draws them) and 'cases',
              NearQuery, which has no wire form)
   describe   nil, or the msgpack bytes of expression.describe()
   index      nil unless the case compiles to one Term; then a map from 'EqualityIndex' and
-             'RangeIndex' (each built over the values with KeySpec.element(), named 'v') to a map:
+             'RangeIndex' (each built over the values with KeySpec.element(), named 'v'), and
+             'EqualityIndex on r' and 'RangeIndex on r' (KeySpec.path('r'), named 'r': the records
+             hold r, every other value is MISSING, so proto_db's oracle sees the MISSING group in
+             '?N', its exclusion from '!=' and the absent count of '?!N') to a map:
              'supports' (index.supports(term)) and, when it supports the term, 'estimate'
              ([rows, cost] of index.estimate(term)), 'rows' (the number of rows of
              index.plan(term).execute()), 'exact_rows' (plan.exact_rows()) and 'explain' (the msgpack
              bytes of plan.explain() without its 'estimate' entry, which 'estimate' holds)
 
-and, beside the cases, 'indexes': a map from the two kind names to a map 'explain' (the msgpack bytes
-of index.explain()) and, for 'RangeIndex', 'ordered': [[estimate, explain bytes without estimate]
-of ordered_plan(False), the same of ordered_plan(True)].
+and, beside the cases, 'indexes': a map from the four index names above to a map 'explain' (the
+msgpack bytes of index.explain()) and, for the two range indexes, 'ordered': [[estimate, explain
+bytes without estimate] of ordered_plan(False), the same of ordered_plan(True)].
 
 The cases: every operator with operands of several ranks (numbers of each type, strings, nil,
 booleans, bytes, dates, instants, tuples, an atom), the degenerate terms of the plan's Review
@@ -148,6 +151,11 @@ def cases(an_atom):
         ("in decimals", [None, "in", [Decimal("0E-3"), Decimal("1E+2"), Decimal("-0")]]),
         ("in uuid", [None, "in", [uuid.UUID("12345678-1234-5678-1234-567812345678")]]),
         ("== on r", ["r", "==", 2]),
+        ("!= on r", ["r", "!=", 2]),
+        ("< on r", ["r", "<", 3]),
+        ("between[] on r", ["r", "between[]", 2, 4]),
+        ("in on r", ["r", "in", [1, 3, None]]),
+        ("== nil on r", ["r", "==", None]),
         ("== on k", ["k", "==", 1]),
         ("< on k.x", ["k.x", "<", 1]),
         ("== on a dotted path through records", ["r.x", "==", 1]),
@@ -235,7 +243,9 @@ def main() -> None:
     values = [codec.decode_value(w, lambda ptr, tag: atoms[ptr.segment.bytes]) for w in dumped["values"]]
     an_atom = next(v for v in values if isinstance(v, DBObject))
     indexes = {"EqualityIndex": EqualityIndex("v", KeySpec.element()).build(values),
-               "RangeIndex": RangeIndex("v", KeySpec.element()).build(values)}
+               "RangeIndex": RangeIndex("v", KeySpec.element()).build(values),
+               "EqualityIndex on r": EqualityIndex("r", KeySpec.path("r")).build(values),
+               "RangeIndex on r": RangeIndex("r", KeySpec.path("r")).build(values)}
     rows = []
     for name, tokens in cases(an_atom):
         row = outcome(tokens, values, indexes)
@@ -245,8 +255,8 @@ def main() -> None:
             "values": [wire_bytes(v) for v in values], "cases": rows,
             "indexes": {kind: {"explain": msgpack.packb(index.explain(), use_bin_type=True)}
                         for kind, index in indexes.items()}}
-    data["indexes"]["RangeIndex"]["ordered"] = [explained(indexes["RangeIndex"].ordered_plan(d))
-                                                for d in (False, True)]
+    for kind in ("RangeIndex", "RangeIndex on r"):
+        data["indexes"][kind]["ordered"] = [explained(indexes[kind].ordered_plan(d)) for d in (False, True)]
     out.mkdir(parents=True, exist_ok=True)
     blob = msgpack.packb(data, use_bin_type=True)
     (out / "terms.msgpack").write_bytes(blob)

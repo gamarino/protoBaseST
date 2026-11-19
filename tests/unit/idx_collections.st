@@ -99,7 +99,7 @@ kinds at: 'PBCountedSet' put: {
 "The 200 mutations of one kind with one index set; adds what failed to failures."
 run := [:className :indexes :seed |
   | coll mutators empty |
-  random := QData on: seed.
+  random := QData spreadOn: seed.
   coll := (classes at: className) new.
   empty := coll stateAt: 'indexes'.
   mutators := kinds at: className.

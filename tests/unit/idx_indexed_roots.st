@@ -26,6 +26,7 @@
 Import from: 'random'.
 Import from: 'protobase'.
 Import from: '_check'.
+Import from: '_queries'.
 
 Object subclass: #RootWriter instanceVariableNames: 'attempts conflicts'.
 
@@ -58,7 +59,7 @@ RootWriter >> blind: n as: t shared: s in: aDb
  Snapshots of ('d', 'l') every tenth change. Answers the snapshots."
 RootWriter >> weights: n seed: aSeed in: aDb
   | rnd snaps |
-  rnd := Random seed: aSeed.
+  rnd := QData random: aSeed.
   snaps := OrderedCollection new.
   0 to: n - 1 do: [:i | | key |
     key := rnd nextInt: 40.

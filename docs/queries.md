@@ -425,7 +425,8 @@ above, never a measurement and never a promise of time. Ruling CR10 requires eac
 `proto_db`'s own planner output for the same data, generated from `proto_db` by a script; plan task
 7 checks the numbers, and the program checks that protoBaseST's planner computes the same. Costs are
 compared within 1e-9 because of R2. Built node by node (Task 6, before the planner), the plans below
-give these figures exactly, model estimate for model estimate, including the rejected candidates'.
+give these figures exactly, model estimate for model estimate, including the rejected candidates'
+(`tests/unit/qry_plans.st`, check 'the three plans of the guide give its model estimates exactly').
 
 ```smalltalk
 oslo := q where: (city eq: 'Oslo').

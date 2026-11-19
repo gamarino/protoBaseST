@@ -94,7 +94,7 @@ sets := [:seed | {
  and the stored multiset against the model (the oracle)."
 fails := OrderedCollection new.
 seeds do: [:seed |
-  random := Random seed: seed.
+  random := QData random: seed.
   draw := [:k | (random next * k) truncated + 1].
   (sets value: seed) do: [:set |
     kinds do: [:k |
@@ -132,7 +132,7 @@ c that: 'random add, remove and replace keep validate: passing' is: fails asArra
 "withReplaced:with: equals withRemoved: then withAdded: (check_hook_equivalences)."
 fails := OrderedCollection new.
 seeds do: [:seed |
-  random := Random seed: seed + 1000.
+  random := QData random: seed + 1000.
   (sets value: seed) do: [:set |
     kinds do: [:k |
       | elements index |
@@ -185,7 +185,7 @@ expect value: 'saved indexes' value: saved size value: seeds size * 6.
 saved do: [:each |
   | k set index elements loaded extra victim rest label |
   k := each at: 1. set := each at: 2. index := each at: 3.
-  random := Random seed: (each at: 4) + 2000.
+  random := QData random: (each at: 4) + 2000.
   label := k name , ' ' , set first , ' seed ' , (each at: 4) printString.
   elements := set last copyFrom: 1 to: 120.
   loaded := k unloadedAt: index pointer storage: storage.
@@ -208,7 +208,7 @@ c that: 'save and lazy load give equal explain' is: fails asArray equals: #().
  definition and holds nothing)."
 fails := OrderedCollection new.
 seeds do: [:seed |
-  random := Random seed: seed + 3000.
+  random := QData random: seed + 3000.
   (sets value: seed) do: [:set |
     kinds do: [:k |
       | elements index new victim before calls |

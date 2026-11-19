@@ -1,4 +1,4 @@
-"EXPECT: ok 14"
+"EXPECT: ok 15"
 "Indexed queries, plan Task 6: the plan operators (proto_db proto_db/query/plans.py at v2.0.0rc4,
  less ValuesScan, VectorSearch, GroupBy, Join and Unnest; spec 3.2). tests/unit/test_query_plans.py's
  four behaviours (the estimate, the abstract plan, the collection scan and its empty case), then
@@ -9,8 +9,10 @@
  two elements); Sort is stable and total (MISSING, nil, numbers, ... then the unorderable keys),
  descending reverses the keys and keeps ties in input order; Limit seeks its window by rank over an
  ordered scan; Count reads the count by rank; Distinct keeps first occurrences; Project answers a
- PBFrozenDict of the paths (an absent field is left out, so the field's key spec extracts PBMissing
- from the row) or a block's answer. explain has proto_db's keys in proto_db's order and is printable
+ PBFrozenDict of the paths, or of a PBFrozenDict mapping output names to paths (an absent field is
+ left out, so the field's key spec extracts PBMissing from the row), or a block's answer. The three
+ plans of docs/queries.md (section Reading a plan), built node by node, give the guide's model estimates
+ exactly (proto_db's figures, ruling CR10). explain has proto_db's keys in proto_db's order and is printable
  by PBNotation describe:; execute answers equal, distinct Arrays; do: is lazy. Mapped in
  tests/unit/queries_checklist.tsv."
 Import from: 'protobase'.
@@ -18,7 +20,8 @@ Import from: '_check'.
 Import from: '_queries'.
 
 | c people list byCity byAge scan city age bag ids keysOf est plans rows r1 a b u i k sorted
-  sortRows fails seen limit count dist proj missing decimal1 expected composite filter |
+  sortRows fails seen limit count dist proj missing decimal1 expected composite filter mapped
+  guide gCity gAge oslo range gFilter rejected fullScan r30 gSort gLimit |
 c := Check new.
 missing := PBMissing default.
 decimal1 := Decimal fromString: '1'.
@@ -150,15 +153,25 @@ rows := proj execute.
 expected := people collect: [:p | (p hasDefinedAttr: 'city')
   ifTrue: [PBFrozenDict withAssociations: { 'name' -> (p at: 'name'). 'city' -> (p at: 'city') }]
   ifFalse: [PBFrozenDict withAssociations: { 'name' -> (p at: 'name') }]].
+mapped := PBProject source: scan fields: (PBFrozenDict withAssociations: { 'who' -> 'name'. 'where' -> 'city' }).
 c that: 'Project of fields answers maps without the absent fields, and of a block its answers'
   is: { rows = expected.
+    (mapped execute detect: [:row | row includesKey: 'where']) keys asArray.
+    (mapped execute reject: [:row | row includesKey: 'where']) allSatisfy: [:row | row keys asArray = #('who')].
+    mapped explain at: 'fields'. (mapped execute at: 1) at: 'who'.
+    (PBProject source: scan fields: #('name' 'name')) explain at: 'fields'.
+    [PBProject source: scan fields: (PBFrozenDict withAssociations: { 'x' -> 3 }). nil] on: PBValidationError do: [:e | e return: #refused].
     (rows reject: [:row | row includesKey: 'city']) allSatisfy: [:row | ((PBKeySpec path: 'city') extract: row) == missing].
     (rows reject: [:row | row includesKey: 'city']) notEmpty.
     (PBProject source: scan fields: [:p | p at: 'id']) execute. est value: proj.
     proj explain at: 'fields'. (PBProject source: scan fields: [:p | 1] description: 'one') explain at: 'function'.
     [PBProject source: scan fields: #(). nil] on: PBValidationError do: [:e | e return: #refused].
     [PBProject source: scan fields: { 3 }. nil] on: PBValidationError do: [:e | e return: #refused] }
-  equals: { true. true. true. (0 to: 199) asArray. #(200.0 400.0).
+  equals: { true.
+    #('who' 'where'). true.
+    PBFrozenDict withAssociations: { 'who' -> 'name'. 'where' -> 'city' }. (people at: 1) at: 'name'.
+    PBFrozenDict withAssociations: { 'name' -> 'name' }. #refused.
+    true. true. (0 to: 199) asArray. #(200.0 400.0).
     PBFrozenDict withAssociations: { 'name' -> 'name'. 'city' -> 'city' }. 'one'. #refused. #refused }.
 
 "One plan holding every node: its explain is printable, and every node's explain has proto_db's keys
@@ -200,5 +213,28 @@ rows := limit execute.
 c that: 'do: is lazy: a Limit stops its source after its window'
   is: { rows size. seen. (PBFilter source: scan terms: { city value: '?!N' value: nil }) execute size > 3 }
   equals: { 3. 3. true }.
+
+"docs/queries.md, Reading a plan: 600 people, cities Lima, Oslo, Paris and Rome in turn, ages 18 to
+ 77 (ten each), by_city and by_age. The planner (Task 7) is not used: each plan, the chosen ones
+ and the rejected candidates, is built node by node, and its estimate is the guide's figure exactly."
+guide := (0 to: 599) asArray collect: [:j |
+  PBObject withAll: { 'city' -> (#('Lima' 'Oslo' 'Paris' 'Rome') at: j \\ 4 + 1). 'age' -> (18 + (j \\ 60)) }].
+guide := ((PBList new extend: guide) addIndex: (PBEqualityIndex name: 'by_city' path: 'city'))
+  addIndex: (PBRangeIndex name: 'by_age' path: 'age').
+gCity := guide getIndex: 'by_city'.
+gAge := guide getIndex: 'by_age'.
+oslo := gCity plan: (city value: '==' value: 'Oslo').
+range := gAge plan: (age value: '>' value: 70).
+gFilter := PBFilter source: range terms: { city value: '==' value: 'Oslo' }.
+rejected := PBFilter source: oslo terms: { age value: '>' value: 70 }.
+fullScan := PBFilter source: guide asQueryPlan terms: { city value: '==' value: 'Oslo'. age value: '>' value: 70 }.
+r30 := gAge plan: (age value: 'between[]' value: #(30 35)).
+gSort := PBSort source: r30 keys: { PBSortKey key: 'age' descending: false }.
+gLimit := PBLimit source: gSort limit: 5 offset: 0.
+c that: 'the three plans of the guide give its model estimates exactly'
+  is: { est value: oslo. est value: range. est value: gFilter. gFilter execute size. (est value: rejected) at: 2.
+    (est value: fullScan) at: 2. est value: gSort. est value: gLimit. gLimit explain at: 'by_rank'. gLimit execute size }
+  equals: { { 150.0. 152.58496250072116 }. { 70.0. 82.95419631038688 }. { 35.0. 152.95419631038686 }. 20. 302.5849625007212.
+    1200.0. { 60.0. 426.367632046898 }. { 5.0. 426.367632046898 }. true. 5 }.
 
 c report displayNl.

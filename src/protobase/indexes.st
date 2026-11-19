@@ -291,10 +291,13 @@ PBIndex >> orderedPlan: aKeySpec descending: aBoolean
   (self supportsOrder: aKeySpec) ifFalse: [^ self _cannotOrderBy: aKeySpec].
   ^ self _orderedPlan: aBoolean.
 
-"The refusal of an order this index does not offer: base.py ordered_plan's sentence."
+"The refusal of an order this index does not offer, for every kind: plans.py ordered_index_scan's
+ sentence, since orderedPlan:descending: is that entry point (it takes the key spec and checks it).
+ base.py ordered_plan's own sentence, 'does not provide ordered iteration', is never reached here:
+ ordered_plan(descending) has no key spec, and no index plan is asked for without one."
 PBIndex >> _cannotOrderBy: aKeySpec
-  ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: self name) , ' (' , self class kindName
-    , ') does not provide ordered iteration'.
+  ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: self name) , ' cannot iterate in the order of '
+    , ((aKeySpec isClassObject not and: [aKeySpec isKindOf: PBKeySpec]) ifTrue: [aKeySpec describe] ifFalse: [PBKeySpec _repr: aKeySpec]).
 
 PBIndex >> _orderedPlan: aBoolean
   ^ self _subclassResponsibility: '_orderedPlan:'.
@@ -848,10 +851,6 @@ PBRangeIndex class >> supportedOperators
 PBRangeIndex >> supportsOrder: aKeySpec
   ^ aKeySpec = self keySpecObject.
 
-"plans.py ordered_index_scan's refusal of another key."
-PBRangeIndex >> _cannotOrderBy: aKeySpec
-  ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: self name) , ' cannot iterate in the order of '
-    , ((aKeySpec isClassObject not and: [aKeySpec isKindOf: PBKeySpec]) ifTrue: [aKeySpec describe] ifFalse: [PBKeySpec _repr: aKeySpec]).
 
 "=== PBVectorIndex (read only: design spec 3.3, ruling IQ5) ================="
 

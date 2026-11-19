@@ -19,13 +19,10 @@ Import from: '_queries'.
 "One seeded case: its random draws and the checks of a plan."
 Object subclass: #RankCase instanceVariableNames: 'random fails'.
 
-"The first draw of Random seed: grows almost linearly with nearby seeds (about 0.0004 per step:
- seeds 2001 .. 2010 all draw about 0.01 first), so it is discarded; the later draws are spread."
+"QData random: discards the first draw, which neighbouring seeds share (seeds 2001 .. 2010 all
+ draw about 0.01 first)."
 RankCase class >> seed: anInteger fails: anOrderedCollection
-  | random |
-  random := Random seed: anInteger.
-  random next.
-  ^ self basicNew setRandom: random fails: anOrderedCollection.
+  ^ self basicNew setRandom: (QData random: anInteger) fails: anOrderedCollection.
 
 RankCase >> setRandom: aRandom fails: anOrderedCollection
   random := aRandom.

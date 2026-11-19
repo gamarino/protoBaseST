@@ -230,9 +230,11 @@ cases doWithIndex: [:case :i |
 "Value domain of the vector (extended at Task 6): QData values: and QData domainValues, the latter
  a naive datetime, a time, a timedelta, a UUID, an empty String and an empty ByteArray. No
  collection atom is among them (the generator rebuilds records only); collection atoms are covered
- by the unit checks above and in qry_expressions.st only. The counts below are of cases, which the
- Task 6 extension left as they were (199 cases: 176 with answers, 12 degenerate, 177 compiled)."
-expect value: 'cases with answers' value: (cases select: [:case | (case at: 'answers') notNil]) size value: 176.
+ by the unit checks above and in qry_expressions.st only. The counts below are of cases: 204 (176
+ with answers, 12 degenerate, 177 compiled until Task 6's review added five terms on the records'
+ path 'r', '!=', '<', 'between[]', 'in' and '== nil', for the path indexes of qry_index_plans.st:
+ 181 with answers, 182 compiled)."
+expect value: 'cases with answers' value: (cases select: [:case | (case at: 'answers') notNil]) size value: 181.
 c that: 'matches: on QData values equals proto_db''s answers for every operator' is: fails asArray equals: #().
 
 "degenerate terms as proto_db (Review Focus 4): the same result or the same error class"
@@ -279,7 +281,7 @@ cases doWithIndex: [:case :i |
         (MessagePack encode: (TermAtoms tree: expr describe)) = (case at: 'describe') ifFalse: [
           fails add: (case at: 'id') , ': describe ' , expr describe printString]]]].
 "A count of the vector (value-domain note above)."
-expect value: 'compiled cases' value: (dec select: [:each | each value notNil]) size value: 177.
+expect value: 'compiled cases' value: (dec select: [:each | each value notNil]) size value: 182.
 c that: 'compile: of every recorded list gives proto_db''s list and description' is: fails asArray equals: #().
 
 c report displayNl.

@@ -321,8 +321,20 @@ PBQueryPlan >> execute
   self do: [:each | out addLast: each].
   ^ out asArray.
 
-"The planner's estimate. Every node answers it."
+"The planner's estimate."
 PBQueryPlan >> estimate
+  ^ self _estimateIn: nil.
+
+"The estimate, computed once per node of one explain when aMemo is a Dictionary (plans.py _est
+ with _explain_memo): a node reads its sources' estimates through the memo, so an explain is
+ linear in the plan's size. With aMemo nil, computed directly."
+PBQueryPlan >> _estimateIn: aMemo
+  aMemo isNil ifTrue: [^ self _estimateWith: nil].
+  ^ aMemo at: self ifAbsent: [aMemo at: self put: (self _estimateWith: aMemo)].
+
+"The estimate of this node from its sources' estimates, each read by _estimateIn: aMemo. Every
+ node answers it."
+PBQueryPlan >> _estimateWith: aMemo
   ^ self subclassResponsibility.
 
 "The explain of this plan (plans.py explain): estimates are computed once per node and explain
@@ -335,7 +347,7 @@ PBQueryPlan >> _explainWith: aMemo
 
 "The estimate of aPlan, computed once per explain."
 PBQueryPlan >> _estimateOf: aPlan memo: aMemo
-  ^ aMemo at: aPlan ifAbsent: [aMemo at: aPlan put: aPlan estimate].
+  ^ aPlan _estimateIn: aMemo.
 
 "The common explain shape (plans.py _explain): { 'plan' -> aName. anArray of Associations (the
  node's fields). 'estimate'. 'children' }."
@@ -408,7 +420,7 @@ PBCollectionScan >> do: aBlock
   collection do: aBlock.
 
 "A scan produces and touches every element: rows = cost = count."
-PBCollectionScan >> estimate
+PBCollectionScan >> _estimateWith: aMemo
   ^ PBEstimate rows: collection count cost: collection count.
 
 "'collection' is proto_db's class name of the collection (type(c).__name__: the last segment of
@@ -469,7 +481,7 @@ PBIndexPlan >> do: aBlock
   part producer value: aBlock.
 
 "The explicit estimate, else the index's estimate of the term."
-PBIndexPlan >> estimate
+PBIndexPlan >> _estimateWith: aMemo
   ^ part estimate isNil ifTrue: [index estimate: term] ifFalse: [part estimate].
 
 "{ 'plan' -> kind. 'index' -> the index's explain. 'term' -> its describe or nil. details... }."
@@ -536,9 +548,9 @@ PBFilter class >> selectivityOf: anExpression
   ^ PBCost filterSelectivity.
 
 "rows = source rows * selectivity; cost = source cost + source rows."
-PBFilter >> estimate
+PBFilter >> _estimateWith: aMemo
   | src |
-  src := source estimate.
+  src := source _estimateIn: aMemo.
   ^ PBEstimate rows: src rows * (self class selectivityOf: predicate) cost: src cost + src rows.
 
 PBFilter >> _explainWith: aMemo
@@ -586,9 +598,9 @@ PBBlockFilter >> do: aBlock
   source do: [:each | (predicate evaluate: each) ifTrue: [aBlock value: each]].
 
 "Like a one-term Filter."
-PBBlockFilter >> estimate
+PBBlockFilter >> _estimateWith: aMemo
   | src |
-  src := source estimate.
+  src := source _estimateIn: aMemo.
   ^ PBEstimate rows: src rows * PBCost filterSelectivity cost: src cost + src rows.
 
 PBBlockFilter >> _explainWith: aMemo
@@ -596,9 +608,11 @@ PBBlockFilter >> _explainWith: aMemo
 
 "--- PBProject (plans.py Project) ---"
 
-"Each source row as a PBFrozenDict of anArray's paths (output name = the path; a PBMissing value
- leaves its name out: absence is not a value), or, for a block of one argument, the block's answer,
- described as 'block' in explain. PBValidationError otherwise."
+"Each source row as a PBFrozenDict of fields (a PBMissing value leaves its name out: absence is
+ not a value): anArray of paths (output name = the path; a repeated path is one field) or a
+ PBFrozenDict mapping output name to path, both Strings (plans.py Project's sequence and
+ mapping forms); or, for a block of one argument, the block's answer, described as 'block' in
+ explain. PBValidationError otherwise."
 PBProject class >> source: aPlan fields: anArrayOrBlock
   ^ self source: aPlan fields: anArrayOrBlock description: nil.
 
@@ -614,11 +628,29 @@ PBProject class >> source: aPlan fields: anArrayOrBlock description: aDescriptio
     ^ (self basicNew _setSource: aPlan) _setFields: nil block: anArrayOrBlock
       description: (aDescription isNil ifTrue: ['block'] ifFalse: [aDescription copy])].
   aDescription isNil ifFalse: [^ PBValidationError signal: 'PBProject descriptions label a block only'].
-  ((anArrayOrBlock isClassObject not and: [(anArrayOrBlock isKindOf: Array) or: [anArrayOrBlock isKindOf: OrderedCollection]])
-      and: [anArrayOrBlock notEmpty and: [anArrayOrBlock allSatisfy: [:each | PBExpression _isText: each]]]) ifFalse: [
-    ^ PBValidationError signal: 'PBProject needs at least one field, paths as Strings, or a block, not ' , (PBKeySpec _repr: anArrayOrBlock)].
-  paths := anArrayOrBlock asArray collect: [:each | each copy].
-  ^ (self basicNew _setSource: aPlan) _setFields: (paths collect: [:p | p -> (PBKeySpec forTermPath: p)]) block: nil description: nil.
+  paths := self _mappingOf: anArrayOrBlock.
+  ^ (self basicNew _setSource: aPlan) _setFields: (paths collect: [:each |
+      { each key. each value. PBKeySpec forTermPath: each value }]) block: nil description: nil.
+
+"The Associations output name -> path of a field list (each path its own name, first
+ occurrence kept) or of a PBFrozenDict mapping, in order; PBValidationError unless there is at
+ least one and every name and path is a String."
+PBProject class >> _mappingOf: aFields
+  | pairs seen |
+  (aFields isClassObject not and: [aFields isKindOf: PBFrozenDict])
+    ifTrue: [pairs := aFields associations asArray]
+    ifFalse: [
+      (aFields isClassObject not and: [(aFields isKindOf: Array) or: [aFields isKindOf: OrderedCollection]]) ifFalse: [
+        ^ PBValidationError signal: 'PBProject needs an Array of paths, a PBFrozenDict mapping or a block, not '
+          , (PBKeySpec _repr: aFields)].
+      seen := Set new.
+      pairs := OrderedCollection new.
+      aFields do: [:each |
+        (seen includes: each) ifFalse: [seen add: each. pairs addLast: each -> each]].
+      pairs := pairs asArray].
+  (pairs notEmpty and: [pairs allSatisfy: [:each | (PBExpression _isText: each key) and: [PBExpression _isText: each value]]]) ifFalse: [
+    ^ PBValidationError signal: 'PBProject needs at least one field, names and paths as Strings, not ' , (PBKeySpec _repr: aFields)].
+  ^ pairs collect: [:each | each key copy -> each value copy].
 
 PBProject >> _setFields: anArray block: aBlock description: aDescription
   "Runs once, on a fresh instance."
@@ -637,21 +669,21 @@ PBProject >> _project: anElement
   | out |
   out := OrderedCollection new.
   fields do: [:field | | v |
-    v := field value extract: anElement.
-    v == PBMissing default ifFalse: [out addLast: field key -> v]].
+    v := (field at: 3) extract: anElement.
+    v == PBMissing default ifFalse: [out addLast: (field at: 1) -> v]].
   ^ PBFrozenDict withAssociations: out asArray.
 
 "rows = source rows; cost = source cost + rows."
-PBProject >> estimate
+PBProject >> _estimateWith: aMemo
   | src |
-  src := source estimate.
+  src := source _estimateIn: aMemo.
   ^ PBEstimate rows: src rows cost: src cost + src rows.
 
 "'fields' (output name to path) or 'function' (the block's description)."
 PBProject >> _explainWith: aMemo
   ^ self _explain: 'Project'
     params: (block isNil
-      ifTrue: [{ 'fields' -> (PBFrozenDict withAssociations: (fields collect: [:f | f key -> f key])) }]
+      ifTrue: [{ 'fields' -> (PBFrozenDict withAssociations: (fields collect: [:f | (f at: 1) -> (f at: 2)])) }]
       ifFalse: [{ 'function' -> description }])
     children: { source } memo: aMemo.
 
@@ -708,9 +740,9 @@ PBSort >> _compare: a with: b
   ^ (a at: 3) < (b at: 3) ifTrue: [-1] ifFalse: [(a at: 3) = (b at: 3) ifTrue: [0] ifFalse: [1]].
 
 "rows = n; cost = source cost + n log2 n."
-PBSort >> estimate
+PBSort >> _estimateWith: aMemo
   | src n |
-  src := source estimate.
+  src := source _estimateIn: aMemo.
   n := src rows.
   ^ PBEstimate rows: n cost: src cost + (n > 1 ifTrue: [n * (PBCost log2: n)] ifFalse: [0]).
 
@@ -794,9 +826,9 @@ PBLimit >> exactRows
   ^ limit isNil ifTrue: [rows] ifFalse: [rows min: limit].
 
 "rows = min(limit, max(source rows - offset, 0)); cost = source cost (an upper bound)."
-PBLimit >> estimate
+PBLimit >> _estimateWith: aMemo
   | src rows |
-  src := source estimate.
+  src := source _estimateIn: aMemo.
   rows := src rows - offset max: 0.
   ^ PBEstimate rows: (limit isNil ifTrue: [rows] ifFalse: [limit min: rows]) cost: src cost.
 
@@ -823,8 +855,8 @@ PBCountPlan >> do: aBlock
   aBlock value: rows.
 
 "rows = 1; cost = source cost."
-PBCountPlan >> estimate
-  ^ PBEstimate rows: 1 cost: source estimate cost.
+PBCountPlan >> _estimateWith: aMemo
+  ^ PBEstimate rows: 1 cost: (source _estimateIn: aMemo) cost.
 
 "'by_rank' true when the count is read from the source's exact row count."
 PBCountPlan >> _explainWith: aMemo
@@ -848,9 +880,9 @@ PBDistinct >> do: aBlock
       aBlock value: each]].
 
 "rows = source rows (an upper bound); cost = source cost + source rows."
-PBDistinct >> estimate
+PBDistinct >> _estimateWith: aMemo
   | src |
-  src := source estimate.
+  src := source _estimateIn: aMemo.
   ^ PBEstimate rows: src rows cost: src cost + src rows.
 
 PBDistinct >> _explainWith: aMemo
@@ -902,9 +934,9 @@ PBUnion >> do: aBlock
         aBlock value: each]]].
 
 "rows = sum of source rows (an upper bound); cost = sum of costs + rows."
-PBUnion >> estimate
+PBUnion >> _estimateWith: aMemo
   | ests rows |
-  ests := sources collect: [:each | each estimate].
+  ests := sources collect: [:each | each _estimateIn: aMemo].
   rows := ests inject: 0 into: [:sum :e | sum + e rows].
   ^ PBEstimate rows: rows cost: (ests inject: 0 into: [:sum :e | sum + e cost]) + rows.
 
@@ -929,9 +961,9 @@ PBIntersect >> do: aBlock
     (counts allSatisfy: [:bag | n <= (bag at: k ifAbsent: [0])]) ifTrue: [aBlock value: each]].
 
 "rows = smallest source rows; cost = sum of (source cost + source rows)."
-PBIntersect >> estimate
+PBIntersect >> _estimateWith: aMemo
   | ests |
-  ests := sources collect: [:each | each estimate].
+  ests := sources collect: [:each | each _estimateIn: aMemo].
   ^ PBEstimate rows: ((ests collect: [:e | e rows]) inject: (ests at: 1) rows into: [:m :r | m min: r])
     cost: (ests inject: 0 into: [:sum :e | sum + (e cost + e rows)]).
 

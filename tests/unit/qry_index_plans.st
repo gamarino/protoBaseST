@@ -9,7 +9,8 @@
  an equal representative; ordered scans in the total order, descending its exact reverse; the D30
  estimates. Then the vector ../conformance/vectors-index-keys/terms.msgpack
  (tests/interop/py_term_cases.py, extended at Task 6): for every case that is one term, an
- equality and a range index on the element over QData termValues: 160 seed: 5 answer what
+ equality and a range index on the element, and one of each on the records' path 'r' (every other
+ value PBMissing there), over QData termValues: 160 seed: 5 answer what
  QData scan: finds and as many rows as proto_db's plan, supports: and exactRows as proto_db,
  estimate: within the tolerance of plan call IP8 (|a - b| <= 1e-12 * max(|a|, |b|)), and explain
  (less its estimate) byte for byte as proto_db's, but for a term whose operand is an atom (described
@@ -26,7 +27,7 @@ PlanRunner >> bagOf: aPlan
 
 | c rec people byCity eq range el mixed t run scan unsupported refused bagSize exact close fails blob listed
   data values atoms cases eqIndexes elIndexes tol plan futures tokensOf ordered noon elements
-  orders stored want got expr kind index explainOf part |
+  orders stored want got expr kind index explainOf part kinds pathPairs |
 c := Check new.
 rec := [:pairs | PBObject withAll: pairs].
 people := { rec value: { 'name' -> 'a'. 'city' -> 'Paris' }. rec value: { 'name' -> 'b'. 'city' -> 'Rome' }.
@@ -74,10 +75,13 @@ c that: 'an unsupported term, or order, is PBNotSupportedError'
     refused value: [range orderedPlan: (PBKeySpec path: 'other') descending: false].
     refused value: [range orderedPlan: (PBKeySpec path: 'age') descending: nil].
     refused value: [byCity supports: #('city' '==' 'x')].
-    [byCity plan: unsupported] on: PBNotSupportedError do: [:e | e return: e messageText] }
+    [byCity plan: unsupported] on: PBNotSupportedError do: [:e | e return: e messageText].
+    [byCity orderedPlan: (PBKeySpec path: 'city') descending: false] on: PBNotSupportedError do: [:e | e return: e messageText].
+    [range orderedPlan: (PBKeySpec path: 'other') descending: true] on: PBNotSupportedError do: [:e | e return: e messageText] }
   equals: { PBNotSupportedError. PBNotSupportedError. PBNotSupportedError. PBNotSupportedError. PBNotSupportedError.
     PBNotSupportedError. PBNotSupportedError. PBValidationError. PBValidationError.
-    'Index ''by_city'' (EqualityIndex on city) does not support ''<'' on ''city''' }.
+    'Index ''by_city'' (EqualityIndex on city) does not support ''<'' on ''city'''.
+    'Index ''by_city'' cannot iterate in the order of city'. 'Index ''by_age'' cannot iterate in the order of other' }.
 
 "=== test_answers_match_a_scan_with_value_semantics, test_missing_keys_are_recorded_and_never_match_ne ==="
 eq := byCity build: people.
@@ -202,9 +206,16 @@ atoms := TermAtoms on: values.
 (data at: 'values') doWithIndex: [:bytes :i |
   (PBKeys exactToken: (atoms decode: bytes)) = (PBKeys exactToken: (values at: i)) ifFalse: [
     Error signal: 'QData termValues: no longer draws the values of the vector (value ' , i printString , ')']].
+"The element indexes, and the indexes on the records' path 'r', under which every other value is
+ PBMissing: proto_db's oracle sees the MISSING group in '?N', its exclusion from '!=' and the
+ absent count of '?!N'."
 elIndexes := PBFrozenDict withAssociations: {
   'EqualityIndex' -> ((PBEqualityIndex name: 'v' keySpec: PBKeySpec element) build: values).
-  'RangeIndex' -> ((PBRangeIndex name: 'v' keySpec: PBKeySpec element) build: values) }.
+  'RangeIndex' -> ((PBRangeIndex name: 'v' keySpec: PBKeySpec element) build: values).
+  'EqualityIndex on r' -> ((PBEqualityIndex name: 'r' path: 'r') build: values).
+  'RangeIndex on r' -> ((PBRangeIndex name: 'r' path: 'r') build: values) }.
+kinds := elIndexes keys asArray.
+ordered := { 'RangeIndex' -> PBKeySpec element. 'RangeIndex on r' -> (PBKeySpec path: 'r') }.
 "near[] is refused when the term is made (spec 3.3), so its case is left out."
 cases := (data at: 'cases') select: [:case | (case at: 'index') notNil and: [((case at: 'id') includesSubstring: 'near[]') not]].
 tokensOf := [:case | PBExpression compile: (atoms decode: (case at: 'tokens'))].
@@ -213,22 +224,24 @@ explainOf := [:aPlan | MessagePack encode: (TermAtoms tree: (PBFrozenDict withAs
   (aPlan explain associations reject: [:each | each key = 'estimate'])))].
 
 fails := OrderedCollection new.
+pathPairs := 0.
 cases do: [:case |
   expr := tokensOf value: case.
-  #('EqualityIndex' 'RangeIndex') do: [:k | | theirs |
+  kinds do: [:k | | theirs |
     index := elIndexes at: k.
     theirs := (case at: 'index') at: k.
     ((index supports: expr) and: [theirs at: 'supports']) ifTrue: [
+      (k endsWith: ' on r') ifTrue: [pathPairs := pathPairs + 1].
       got := (index plan: expr) execute.
       ((QData bagOf: got) = (scan value: values value: expr) and: [got size = (theirs at: 'rows')]) ifFalse: [
         fails add: (case at: 'id') , ' on ' , k]]]].
 c that: 'plan: answers what a scan finds for every operator of the vector, as many rows as proto_db''s plan'
-  is: { cases size. fails asArray } equals: { 170. #() }.
+  is: { cases size. pathPairs. fails asArray } equals: { 175. 14. #() }.
 
 fails := OrderedCollection new.
 cases do: [:case |
   expr := tokensOf value: case.
-  #('EqualityIndex' 'RangeIndex') do: [:k | | theirs mine |
+  kinds do: [:k | | theirs mine |
     index := elIndexes at: k.
     theirs := (case at: 'index') at: k.
     (index supports: expr) = (theirs at: 'supports')
@@ -245,19 +258,20 @@ c that: 'estimate: equals proto_db''s within the tolerance of IP8, and supports:
 fails := OrderedCollection new.
 cases do: [:case |
   expr := tokensOf value: case.
-  #('EqualityIndex' 'RangeIndex') do: [:k | | theirs mine |
+  kinds do: [:k | | theirs mine |
     index := elIndexes at: k.
     theirs := (case at: 'index') at: k.
     ((theirs at: 'supports') and: [((case at: 'id') endsWith: ' atom') not]) ifTrue: [
       (explainOf value: (index plan: expr)) = (theirs at: 'explain') ifFalse: [fails add: (case at: 'id') , ' on ' , k]]]].
-#('EqualityIndex' 'RangeIndex') do: [:k |
+kinds do: [:k |
   (MessagePack encode: (TermAtoms tree: (elIndexes at: k) explain)) = (((data at: 'indexes') at: k) at: 'explain') ifFalse: [
     fails add: k , ' explain']].
-(((data at: 'indexes') at: 'RangeIndex') at: 'ordered') doWithIndex: [:theirs :j | | mine |
-  mine := (elIndexes at: 'RangeIndex') orderedPlan: PBKeySpec element descending: j = 2.
-  ((close value: mine estimate rows value: ((theirs at: 1) at: 1)) and: [close value: mine estimate cost value: ((theirs at: 1) at: 2)])
-    ifFalse: [fails add: 'ordered estimate ' , j printString].
-  (explainOf value: mine) = (theirs at: 2) ifFalse: [fails add: 'ordered explain ' , j printString]].
+ordered do: [:kindAndSpec |
+  (((data at: 'indexes') at: kindAndSpec key) at: 'ordered') doWithIndex: [:theirs :j | | mine |
+    mine := (elIndexes at: kindAndSpec key) orderedPlan: kindAndSpec value descending: j = 2.
+    ((close value: mine estimate rows value: ((theirs at: 1) at: 1)) and: [close value: mine estimate cost value: ((theirs at: 1) at: 2)])
+      ifFalse: [fails add: kindAndSpec key , ' ordered estimate ' , j printString].
+    (explainOf value: mine) = (theirs at: 2) ifFalse: [fails add: kindAndSpec key , ' ordered explain ' , j printString]]].
 "An IndexPlan: re-executable, its estimate the index's, its part validated (test_index_plan,
  test_index_plan_without_term_needs_an_estimate, test_index_plan_default_kind_and_validation)."
 plan := eq plan: (t value: 'city' value: '==' value: 'Paris').

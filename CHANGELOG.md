@@ -92,7 +92,8 @@
   order keys to the index plans. Tests: `tests/unit/qry_plans.st`,
   `tests/unit/qry_index_plans.st` (against the vector `terms.msgpack`, now holding
   `proto_db`'s supports, estimate, row count, exact rows and explain for each single-term case on
-  an equality and a range index, and both ordered scans), `tests/unit/qry_rank.st`, and the
+  an equality and a range index on the element and on the records' path `r`, where the other
+  values are MISSING, and their ordered scans), `tests/unit/qry_rank.st`, and the
   rank-window half of `tests/unit/idx_indexed_roots.st`. The vector's values gain naive
   datetimes, a time, timedeltas, a UUID, an empty String and an empty ByteArray
   (`QData termValues:`). The guide's Plan 2 filter cost is corrected to `proto_db`'s

@@ -37,7 +37,13 @@
   TermAtoms on: aValues       resolves the term vector's references to the atoms among aValues (by
                               oid) and writes them back the same way (decode:, bytesOf:);
                               TermAtoms tree: a description or explain as a MessagePack tree
-  QData seeds: aDefault       PBST_PROP_SEEDS as a positive Integer (plan call IP16), or aDefault"
+  QData seeds: aDefault       PBST_PROP_SEEDS as a positive Integer (plan call IP16), or aDefault
+  QData random: aSeed         a Random seeded by aSeed with its first draw discarded, for fixtures
+                              that draw per seed: the first draw of Random seed: grows almost
+                              linearly with nearby seeds (about 0.0004 per step), so neighbouring
+                              seeds would all make the same first choice; QData spreadOn: aSeed
+                              is QData on: over that Random (QData on: itself is unchanged: the
+                              vectors and the expected values of its callers depend on its draws)"
 Import from: 'random'.
 Import from: 'protobase'.
 
@@ -45,6 +51,17 @@ Object subclass: #QData instanceVariableNames: 'random records'.
 
 QData class >> on: aSeed
   ^ self basicNew setRandom: (Random seed: aSeed).
+
+"A Random seeded by aSeed, its first draw discarded (the header: neighbouring seeds share it)."
+QData class >> random: aSeed
+  | random |
+  random := Random seed: aSeed.
+  random next.
+  ^ random.
+
+"QData on: over QData random: aSeed."
+QData class >> spreadOn: aSeed
+  ^ self basicNew setRandom: (self random: aSeed).
 
 QData >> setRandom: aRandom
   random := aRandom.

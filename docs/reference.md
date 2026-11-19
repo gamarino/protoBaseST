@@ -1247,7 +1247,7 @@ argument is `PBValidationError`:
 | `PBFilter source: aPlan terms: anArray` | The rows for which the conjunction of the expressions holds (`PBExpression compile:`; the 0.1 list syntax works). One term over an index's ordered scan that the index answers windows by rank. |
 | `PBBlockFilter source: aPlan predicate: aPBBlockPredicate` | The rows the block accepts. |
 | `PBUnion withAll: plans`, `PBIntersect withAll: plans` | Two or more sources; each element identity with its largest, or smallest, multiplicity. Identity is `proto_db`'s element key: 1, 1.0 and `Decimal` 1 are three elements. |
-| `PBProject source: aPlan fields: paths`, `source:fields:description:` | Each row as a `PBFrozenDict` of the paths (an absent value leaves its field out), or a block's answer. |
+| `PBProject source: aPlan fields: paths`, `source:fields:description:` | Each row as a `PBFrozenDict` of the paths (an Array: each path its own output name) or of a `PBFrozenDict` mapping output name to path, an absent value leaving its field out; or a block's answer. |
 | `PBSort source: aPlan keys: { PBSortKey key: k descending: aBoolean }` | Stable and total (orderable keys by order key, unorderable keys after them). A key is a path, a `PBKeySpec` or a block of one argument (`key:descending:description:` names a block in `explain`; `'block'` otherwise). A sort by the index's own key over its plan windows by rank. |
 | `PBLimit source: aPlan limit: anIntegerOrNil offset: anInteger` | The window; by rank over a source that offers it. |
 | `PBCountPlan source: aPlan` | One row, the number of source rows (read by rank when the source knows it exactly). The class is not `PBCount`, the cluster coordinator's counter effect. |
