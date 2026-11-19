@@ -3,7 +3,7 @@
  (tests/contracts/index_contract.py at v2.0.0rc4; the plan half, plan == scan, joins in Task 7)
  for PBEqualityIndex and PBRangeIndex, on QData values: 300 (the element key spec, every value
  rank) and QData people: 300 (the path 'age', mixed numbers, absent and nil), for the seeds
- 1..PBST_PROP_SEEDS (default 8, proto_db's contract count; plan call IP16):
+ 1..PBST_PROP_SEEDS (default 8, proto_db's contract count; plan call IP16; from PBST_PROP_SEED_FROM when set):
    (b) random add, remove and replace sequences keep validate: passing, and the stored multiset
        (membersDo:) equals the model's (QData bagOf:)
    withReplaced:with: equals withRemoved: then withAdded:, node for node
@@ -71,7 +71,7 @@ IdxReader >> run
 
 | c seeds kinds sets fails expect dump fold bag random draw base storage saved |
 c := Check new.
-seeds := (1 to: (QData seeds: 8)) asArray.
+seeds := QData seedRange: 8.
 kinds := { PBEqualityIndex. PBRangeIndex }.
 fails := OrderedCollection new.
 expect := [:label :actual :expected |

@@ -1,7 +1,7 @@
 "EXPECT: ok"
 "Indexed queries, plan Task 7 (spec 7.2): a planned query answers what a scan answers (proto_db's
  tests/property/test_index_equals_scan.py at v2.0.0rc4, and test_planner.py's property), for the
- seeds 1..PBST_PROP_SEEDS (default 20, plan call IP16), each seed's draws from QData random: (the
+ seeds 1..PBST_PROP_SEEDS (default 20, plan call IP16; from PBST_PROP_SEED_FROM when set, QData seedRange:), each seed's draws from QData random: (the
  first draw discarded). For every seed and every collection kind protoBaseST writes (PBList, PBSet,
  PBCountedSet, PBDictionary, PBHashDictionary; PBRepeatedKeysDictionary has no mutators here, so
  the query vectors cover it, written by proto_db): a random collection (0 to 90 elements: records
@@ -266,7 +266,7 @@ PlanReader >> identitiesOf: aPlan
   ^ aPlan execute collect: [:e | PBMemberKeys identityOf: e].
 
 | seeds failures census kinds extractor dir storage saved readers plain c |
-seeds := QData seeds: 20.
+seeds := QData seedRange: 20.
 failures := OrderedCollection new.
 census := Dictionary new.
 kinds := #('List' 'Set' 'CountedSet' 'Dictionary' 'HashDictionary').
@@ -294,7 +294,7 @@ plain := [:label :coll :expr :keys :limit :offset | | plan got again oracle prob
        , ', limit ' , limit printString , ', offset ' , offset printString , ')'. nil]]
     on: Error do: [:e | failures add: label , ': ' , e class name , ': ' , e messageText printString , ' (' , expr printString , ')'. e return: nil]].
 
-1 to: seeds do: [:seed |
+seeds do: [:seed |
   kinds do: [:kind | | gen items coll queries |
     gen := PropGen seed: seed * 101 + (kinds indexOf: kind).
     items := (1 to: (gen pick: #(0 3 12 40 40 90))) asArray collect: [:i | gen element].
@@ -331,7 +331,7 @@ readers do: [:each | | futures answers |
     failures add: 'seed ' , (each at: 1) printString , ' ' , (each at: 2) , ': concurrent readers disagree']].
 
 ('census ' , (#('scan' 'index' 'union' 'ordered') collect: [:p | p , ' ' , (census at: p ifAbsent: [0]) printString]) printString
-  , ', ' , saved size printString , ' queries, ' , seeds printString , ' seeds') displayNl.
+  , ', ' , saved size printString , ' queries, seeds ' , seeds first printString , ' to ' , seeds last printString) displayNl.
 failures do: [:f | ('FAIL ' , f) displayNl].
 c := Check new.
 c that: 'the planned result equals the scan, as a multiset and sorted by the order keys, over every collection kind, reloaded and read by concurrent actors'

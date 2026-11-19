@@ -2015,7 +2015,7 @@ PBCoordinatorCore >> roundBuildConflict: anEvent in: s now: t
  the re-commit's ends the round with it. Otherwise an entry's error, of any class, fails it alone
  and the round builds the next entry; the re-commit's ends the round with its error
  (_recommitFailed:in:now:effects:). An entry's build runs application code, an extractor in a
- merge onto an indexed current, whose exception passes through unchanged and must fail only
+ merge onto an indexed current, whose exception passes through unwrapped and must fail only
  that commit (indexed queries ruling IQ1, the maintainer's decision of 2026-11-19; the
  standalone round's rule, proto_db _standalone_round, review M2). proto_db rc4's _permit_round
  fails the whole round on an entry's error that is not a ProtoDBError: a deviation

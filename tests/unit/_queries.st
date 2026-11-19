@@ -38,6 +38,9 @@
                               oid) and writes them back the same way (decode:, bytesOf:);
                               TermAtoms tree: a description or explain as a MessagePack tree
   QData seeds: aDefault       PBST_PROP_SEEDS as a positive Integer (plan call IP16), or aDefault
+  QData seedRange: aDefault   the seeds a soak runs: QData seeds: aDefault of them, from
+                              PBST_PROP_SEED_FROM (a positive Integer, default 1), so one soak can be
+                              split over processes that run in parallel (plan Task 10)
   QData random: aSeed         a Random seeded by aSeed with its first draw discarded, for fixtures
                               that draw per seed: the first draw of Random seed: grows almost
                               linearly with nearby seeds (about 0.0004 per step), so neighbouring
@@ -228,11 +231,20 @@ QData class >> contents: anIndex
   ^ out asArray.
 
 QData class >> seeds: aDefault
+  ^ self positiveEnv: 'PBST_PROP_SEEDS' default: aDefault.
+
+QData class >> seedRange: aDefault
+  | first |
+  first := self positiveEnv: 'PBST_PROP_SEED_FROM' default: 1.
+  ^ (first to: first + (self seeds: aDefault) - 1) asArray.
+
+"The environment variable aName as a positive Integer, or aDefault when it is unset or empty."
+QData class >> positiveEnv: aName default: aDefault
   | text |
-  text := Smalltalk getenv: 'PBST_PROP_SEEDS'.
+  text := Smalltalk getenv: aName.
   (text isNil or: [text isEmpty]) ifTrue: [^ aDefault].
   ((text allSatisfy: [:d | d isDigit]) and: [text asInteger > 0]) ifFalse: [
-    ^ Error signal: 'PBST_PROP_SEEDS must be a positive integer, not ' , text printString].
+    ^ Error signal: aName , ' must be a positive integer, not ' , text printString].
   ^ text asInteger.
 
 "Resolves the vector's references to the atoms of the values drawn here (by oid), and writes them

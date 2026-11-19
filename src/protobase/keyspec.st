@@ -28,7 +28,7 @@ element, because indexes store the keys it computed. With its name, the optional
 declared when it is registered is its identity across processes (proto_db R101): changing what
 it answers for some element needs a new name or a new version. During a merge it runs in the
 commit's build (the publisher, or the cluster round), and an exception it raises passes through
-extract: unchanged (ruling IQ1, plan call IP2: exactly as proto_db's KeySpec.extract, which does
+extract: unwrapped (ruling IQ1, plan call IP2: exactly as proto_db's KeySpec.extract, which does
 not wrap it): it fails only that commit, standalone, in a group commit and in a cluster round
 (in the cluster a deviation from proto_db rc4, docs/deviations.md).
 
@@ -231,7 +231,7 @@ PBKeySpec >> arg
   ^ arg.
 
 "The key of anElement, or PBMissing default when it has none (keyspec.py KeySpec.extract). An
- extractor block's exception passes through unchanged."
+ extractor block's exception passes through unwrapped."
 PBKeySpec >> extract: anElement
   | value |
   kind = 'element' ifTrue: [^ anElement].

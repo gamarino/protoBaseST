@@ -273,7 +273,7 @@ PBIndex >> plan: aTerm
   self _checkSupported: aTerm.
   ^ self _subclassResponsibility: 'plan:'.
 
-"Whether orderedPlan: aKeySpec descending: answers the elements in the order of aKeySpec
+"Whether orderedPlan: aKey descending: answers the elements in the order of aKeySpec
  (base.py supports_order: false by default)."
 PBIndex >> supportsOrder: aKeySpec
   ^ false.

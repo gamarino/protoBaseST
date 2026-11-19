@@ -524,7 +524,7 @@ PBTerm >> keySpecObject
   ^ keySpecObject.
 
 "Whether anElement satisfies the term: the scan oracle (terms.py Term.matches, D28; the module
- comment). An extractor's exception passes through unchanged."
+ comment). An extractor's exception passes through unwrapped."
 PBTerm >> matches: anElement
   | key k low high |
   key := keySpecObject extract: anElement.

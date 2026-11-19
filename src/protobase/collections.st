@@ -564,7 +564,7 @@ PBIndexedCollection >> markConsumed
  public mutators (ProtoBase ConcurrentOptimized.rebase_onto, base.py 594-631).
  The element ops first: the net ops of _netOps replayed through current's
  mutators, which maintain its indexes (an extractor runs there, inside the
- commit's build: its exception passes through unchanged, ruling IQ1). Then the
+ commit's build: its exception passes through unwrapped, ruling IQ1). Then the
  index-definition ops, per index name (_replayIndexOps:onto:). The order of the
  checks is protoBaseST's own: a class without a log (PBList) is refused first,
  where ProtoBase's List has no rebase_onto at all (an AttributeError); then a
