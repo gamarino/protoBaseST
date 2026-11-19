@@ -43,7 +43,15 @@ Import from: 'protobase/keys'.
 Import from: 'protobase/values'.
 Import from: 'protobase/codec'.
 
-Object subclass: #PBMemberKeys.
+Object subclass: #PBMemberKeys classVariableNames: 'TupleRank ZeroKey AtomTokenKey'.
+
+"The constant order keys of the member keys, made once when the module loads: the rank of a
+ tuple's key, the key of 0 (the tag of an orderable equality part) and the key of the atom token
+ (PBKeys atomToken)."
+PBMemberKeys class >> _initializeConstants
+  TupleRank isNil ifTrue: [TupleRank := (PBKeys orderKey: (PBTuple withAll: #())) rank].
+  ZeroKey isNil ifTrue: [ZeroKey := PBKeys orderKey: 0].
+  AtomTokenKey isNil ifTrue: [AtomTokenKey := PBKeys orderKey: PBKeys atomToken].
 
 "=== surrogates ==============================================================="
 
@@ -93,29 +101,43 @@ PBMemberKeys class >> _surrogateOf: v results: anArray
 "The member key of anElement, (equality part, exact token), a PBTuple (keyed.py _member_key):
  members equal to one another are adjacent in a members tree."
 PBMemberKeys class >> memberKeyOf: anElement
-  ^ PBTuple withAll: { self _equalityPart: anElement. PBKeys exactToken: anElement }.
+  ^ self _memberKeyOf: anElement orderKey: (self orderKeyOrNil: anElement) token: (PBKeys exactToken: anElement).
 
 "{ member key. its order key } of anElement: memberKeyOf: and PBKeys orderKey: of it, with the
- element's order key computed once. A tuple's order key is the rank-13 key of its items' keys
+ element's order key computed once. A tuple's order key is the tuple-rank key of its items' keys
  (PBKeys _orderKey:), so the order key of ((0, element), token) is built from the order keys of 0,
- the element and the token; an unorderable element takes the general path."
+ the element and the token; for an unorderable element ((1, surrogate), token) the surrogate is
+ orderable by construction and its key is computed whole."
 PBMemberKeys class >> memberKeyAndOrderKeyOf: anElement
   | okey token member |
   okey := self orderKeyOrNil: anElement.
-  okey isNil ifTrue: [
-    member := self memberKeyOf: anElement.
-    ^ { member. PBKeys orderKey: member }].
   token := PBKeys exactToken: anElement.
-  member := PBTuple withAll: { PBTuple withAll: { 0. anElement }. token }.
+  member := self _memberKeyOf: anElement orderKey: okey token: token.
+  okey isNil ifTrue: [^ { member. PBKeys orderKey: member }].
   ^ { member.
-    PBOrderKey rank: 13 payload: {
-      PBOrderKey rank: 13 payload: { PBKeys orderKey: 0. okey }.
-      PBKeys orderKey: token } }.
+    PBOrderKey rank: self _tupleRank payload: {
+      PBOrderKey rank: self _tupleRank payload: { ZeroKey. okey }.
+      self _orderKeyOfToken: token } }.
+
+"The member key (equality part, aToken) of anElement, whose order key is anOrderKeyOrNil (nil:
+ unorderable) and whose exact token is aToken: the one construction memberKeyOf: and
+ memberKeyAndOrderKeyOf: share."
+PBMemberKeys class >> _memberKeyOf: anElement orderKey: anOrderKeyOrNil token: aToken
+  ^ PBTuple withAll: { self _equalityPart: anElement orderKey: anOrderKeyOrNil. aToken }.
+
+"The order key of the exact token aToken: the atom token's is made once."
+PBMemberKeys class >> _orderKeyOfToken: aToken
+  aToken == PBKeys atomToken ifTrue: [^ AtomTokenKey].
+  ^ PBKeys orderKey: aToken.
 
 "(0, element) for an orderable element, (1, surrogate) for an unorderable one (keyed.py
  _equality_part)."
 PBMemberKeys class >> _equalityPart: anElement
-  (PBKeys isOrderable: anElement) ifTrue: [^ PBTuple withAll: { 0. anElement }].
+  ^ self _equalityPart: anElement orderKey: (self orderKeyOrNil: anElement).
+
+"As _equalityPart:, for a caller that has the element's order key (nil when it is unorderable)."
+PBMemberKeys class >> _equalityPart: anElement orderKey: anOrderKeyOrNil
+  anOrderKeyOrNil isNil ifFalse: [^ PBTuple withAll: { 0. anElement }].
   ^ PBTuple withAll: { 1. self surrogate: anElement }.
 
 "The order key below every member key whose equality part is aValue's: the one-item tuple
@@ -130,7 +152,7 @@ PBMemberKeys class >> highestOf: aValue
 
 "The rank of a tuple's order key (keyed.py _R_TUPLE, order_key(())[0])."
 PBMemberKeys class >> _tupleRank
-  ^ (PBKeys orderKey: (PBTuple withAll: #())) rank.
+  ^ TupleRank.
 
 "keyed.py _ABOVE_EVERY_RANK, order_key(MISSING)[0] + 1000 as a one-item key: its rank exceeds
  every order key's, so it compares above any of them. It is a bound, never the key of a value,
@@ -276,3 +298,5 @@ PBKeyGroups class >> sortedMembers: anArray total: anInteger
         { each at: 1. each at: 2. PBTuple withAll: { each at: 3. each at: 4 } }])
       nodeClass: PBCountedKeyNode.
     anInteger }.
+
+PBMemberKeys _initializeConstants.

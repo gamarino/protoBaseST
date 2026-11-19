@@ -52,7 +52,19 @@ avl.py over a root node, or nil for the empty tree:
                                               { root. replaced. old value }
   PBAvl keyAt: root orderKey: ok, keyPut: root key: k orderKey: ok value: v nodeClass: aClass,
   keyRemove: root orderKey: ok                the same, for a caller that has the order key ok
-                                              of k (trusted, as keyFromSortedOrderKeys:)
+                                              of k (trusted: see 'The trust contract' below)
+
+The trust contract of the order-key selectors (keyAt:orderKey:,
+keyPut:key:orderKey:value:nodeClass:, keyRemove:orderKey: and
+keyFromSortedOrderKeys:nodeClass:): the caller guarantees that each order key
+it passes is exactly PBKeys orderKey: of its key (= by compareWith:, which is
+what the walks compare). Nothing checks it on the write: a wrong key places
+the node where its own key does not, and every later lookup of that key
+misses it. PBAvl check: finds it: it recomputes each node's order key from
+its key and compares it with the cached one and with its neighbours' (a
+key-group index's validate: runs it on every tree). The callers in protoBaseST compute each
+order key with PBKeys orderKey: or PBMemberKeys memberKeyAndOrderKeyOf:,
+which tests/unit/idx_key_reuse.st checks against PBKeys orderKey:.
 
 Node classes: a keyed tree's nodes are of the class nodeClass: names for an
 empty tree (PBKeyNode, PBCountedKeyNode or an application subclass of
@@ -832,8 +844,9 @@ PBAvl class >> _posSplit: aNode at: anIndex
 PBAvl class >> keyAt: aRoot key: aKey
   ^ self keyAt: aRoot orderKey: (PBKeys orderKey: aKey).
 
-"As keyAt:key:, for a caller that has the order key of the key (PBKeys orderKey:), as
- keyFromSortedOrderKeys:nodeClass: trusts its caller's: the key is not given."
+"As keyAt:key:, for a caller that has anOrderKey, the order key of the key (PBKeys orderKey:);
+ the key itself is not given. anOrderKey is trusted (the trust contract, module comment): a
+ wrong one finds nothing or another node."
 PBAvl class >> keyAt: aRoot orderKey: anOrderKey
   self _root: aRoot kind: PBKeyNode.
   ^ _PBTree nodeWithKey: anOrderKey of: aRoot in: aRoot.
@@ -847,9 +860,10 @@ PBAvl class >> keyPut: aRoot key: aKey value: aValue nodeClass: aClass
   ^ self keyPut: aRoot key: aKey orderKey: (PBKeys orderKey: aKey) value: aValue nodeClass: aClass.
 
 "As keyPut:key:value:nodeClass:, for a caller that has anOrderKey, the order key of aKey
- (PBKeys orderKey: aKey), which is trusted, as keyFromSortedOrderKeys:nodeClass: trusts its
- caller's (ProtoBase passes _okey the same way). The tree is the one keyPut:key:value:nodeClass:
- makes, node for node."
+ (PBKeys orderKey: aKey; ProtoBase passes _okey the same way). anOrderKey is trusted, never
+ recomputed (the trust contract, module comment): a wrong one misfiles the node, which a new
+ node also caches as its order key. With the right one the tree is the one
+ keyPut:key:value:nodeClass: makes, node for node."
 PBAvl class >> keyPut: aRoot key: aKey orderKey: anOrderKey value: aValue nodeClass: aClass
   | okey make out root |
   self _root: aRoot kind: PBKeyNode.
@@ -881,7 +895,9 @@ PBAvl class >> _keyPut: aNode okey: anOrderKey key: aKey value: aValue make: aCl
 PBAvl class >> keyRemove: aRoot key: aKey
   ^ self keyRemove: aRoot orderKey: (PBKeys orderKey: aKey).
 
-"As keyRemove:key:, for a caller that has the order key of the key (trusted, as keyAt:orderKey:)."
+"As keyRemove:key:, for a caller that has anOrderKey, the order key of the key (PBKeys
+ orderKey:), trusted as keyAt:orderKey: trusts it (the trust contract, module comment): a wrong
+ one removes nothing or another node."
 PBAvl class >> keyRemove: aRoot orderKey: anOrderKey
   | out root |
   self _root: aRoot kind: PBKeyNode.

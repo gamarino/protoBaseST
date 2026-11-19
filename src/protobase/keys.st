@@ -230,7 +230,7 @@ PBOrderKey >> printOn: aStream
 
 PBOrderKey _initializeInfinities.
 
-Object subclass: #PBKeys.
+Object subclass: #PBKeys classVariableNames: 'AtomToken'.
 
 "The modulus of the numeric hash, the Mersenne prime 2^61 - 1."
 PBKeys class >> modulus
@@ -515,17 +515,20 @@ PBKeys class >> residue: aNumber
  An atom's token is the 7 bytes 81 a4 40 72 65 66 c0."
 PBKeys class >> exactToken: aValue
   "An atom's token is a constant: answered without encoding, after the one check canonical:
-   makes of a reference (PBCodec _canonicalLeaf:, the UTF-8 of its tag). PBMutableObject is
-   not an atom."
+   makes of a reference (PBCodec _checkReference:, the UTF-8 of its tag). PBMutableObject is
+   not an atom; a PBUnresolvedRef takes the general path."
   ((aValue isClassObject not and: [aValue isKindOf: PBAtom]) and: [aValue isPBReference == true]) ifTrue: [
-    ((aValue respondsTo: #tag) and: [aValue tag isString]) ifTrue: [PBCodec _checkUTF8: aValue tag].
+    PBCodec _checkReference: aValue.
     ^ self atomToken].
   ^ MessagePack encode: (PBCodec toWire: aValue atomRef: PBCodec tokenRef).
 
-"The exact token of every atom: the msgpack bytes of {'@ref': nil} (ByteArrays are immutable,
- so one is shared)."
+"The exact token of every atom: the msgpack bytes of {'@ref': nil}, one ByteArray made when the
+ module loads and shared (ByteArrays are immutable), so a caller may recognise it by identity."
 PBKeys class >> atomToken
-  ^ #[16r81 16rA4 16r40 16r72 16r65 16r66 16rC0].
+  ^ AtomToken.
+
+PBKeys class >> _initializeAtomToken
+  AtomToken isNil ifTrue: [AtomToken := #[16r81 16rA4 16r40 16r72 16r65 16r66 16rC0]].
 
 "=== map keys ================================================================="
 
@@ -933,3 +936,5 @@ PBMapKeyIndex >> _check: aDateTime against: aColumn
       i := PBKeys _firstIndexIn: locals atLeast: u - w.
       (i <= locals size and: [(locals at: i) <= (u + w)]) ifTrue: [
         ^ PBKeys _undecidable: (legacy at: i) and: aDateTime]].
+
+PBKeys _initializeAtomToken.

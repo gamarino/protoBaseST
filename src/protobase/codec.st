@@ -379,10 +379,15 @@ PBCodec class >> _canonicalLeaf: v
     ^ PBMutableObject name: (self _field: 'cellName' of: v base: PBMutableObject)].
   (v isKindOf: Dictionary) ifTrue: [
     ^ self _refuse: v because: 'its order is unspecified, and the order is part of the bytes; use PBFrozenDict'].
-  (self _isReference: v) ifTrue: [
-    ((v respondsTo: #tag) and: [v tag isString]) ifTrue: [self _checkUTF8: v tag].
-    ^ v].
+  (self _isReference: v) ifTrue: [^ self _checkReference: v].
   ^ self _refuse: v because: 'it is not a canonical value of format 4'.
+
+"The reference v (an atom, a PBUnresolvedRef) as canonical: keeps it: its tag, when it has a
+ String one, must be valid UTF-8 (_checkUTF8:). Shared by _canonicalLeaf: and the atom token of
+ PBKeys exactToken:, which answers without encoding."
+PBCodec class >> _checkReference: v
+  ((v respondsTo: #tag) and: [v tag isString]) ifTrue: [self _checkUTF8: v tag].
+  ^ v.
 
 PBCodec class >> _refuse: v because: aString
   ^ PBValidationError signal: 'PBCodec: a ' , v class name , ' cannot be stored ('
