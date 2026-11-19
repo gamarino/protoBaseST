@@ -776,8 +776,9 @@ The detail:
     and fails the whole round on any other error. *Why:* the maintainer's decision, for one rule in
     every mode: rc4's standalone and group-commit round already fails only the commit whose build
     raised (`_standalone_round`, `transactions.py:1149-1157`, review M2), and the same program
-    should not fail its neighbours' commits in a cluster only. Nothing is sent before a build
-    fails (every build comes before the round's replicate), so failing one entry is safe.
+    should not fail its neighbours' commits in a cluster only. It is safe: nothing of the round's own root is sent before its builds end; a re-commit, if any, has already committed
+    (every entry's build comes before the round's replicate), so failing one entry sends nothing of
+    it.
     Unchanged: a base read that failed with `PBUnexpectedError` after the permission expired is
     still a retryable conflict (R212), and the re-commit's error still ends the round. *Cost:* a
     commit whose round-mate's build failed with, say, a `ZeroDivide` commits here where `proto_db`

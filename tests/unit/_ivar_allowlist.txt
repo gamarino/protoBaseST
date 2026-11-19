@@ -108,7 +108,7 @@ PBPermitted>>_setPermission:
 PBBaseDecided>>_setDecision:
 PBBuilt>>_setEntry:root:micros:
 PBBuildConflict>>_setEntry:error:
-PBBuildFailed>>_setEntry:error:tierFailed:
+PBBuildFailed>>_setEntry:error:tierFailed:micros:
 PBReplicated>>_setOutcome:error:
 PBReplicateFailed>>_setError:
 PBRoundClosed>>_setLeft:

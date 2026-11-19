@@ -272,10 +272,11 @@ register it. It is never rebuilt or dropped silently.
 
 The merge of the previous sections replays intents through the current version's mutators, so
 during a merge the publisher runs the current version's extractors. That is application code inside
-the commit, which the publisher otherwise never runs. The maintainer's ruling IQ1 accepts it,
-exactly as `proto_db` does: **an exception raised by an extractor fails only the commit whose merge
-ran it, standalone, in a group commit and in a cluster round.** (In a cluster round this is the
-maintainer's choice and a deviation from `proto_db` rc4, which fails the whole round; see
+the commit, which the publisher otherwise never runs. The maintainer's ruling IQ1 accepts it: **an
+exception raised by an extractor fails only the commit whose merge ran it, standalone, in a group
+commit and in a cluster round.** Standalone and in a group commit that is exactly what `proto_db`
+does. (In a cluster round it is the maintainer's choice and a deviation from `proto_db` rc4, which
+fails the whole round; see
 [deviations.md](../deviations.md#cluster-mode).) protoBaseST adds no error class of its
 own and does not wrap it, because `proto_db`'s `KeySpec.extract` does not either
 (`keyspec.py`, `KeySpec.extract`). The caller receives a copy of the exception: the same class,

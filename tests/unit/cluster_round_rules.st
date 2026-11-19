@@ -1,4 +1,4 @@
-"EXPECT: ok 36"
+"EXPECT: ok 39"
 "The commit round (cluster/holder.st, PBCoordinatorCore round:in:now:) called directly, one guard
  per check (proto_db transactions.py _run_round, _permit_round, _keep, _take_kept,
  _await_retries, _drop_kept; coordinator.py replicate's _check_reserve and rejoin-ballot
@@ -353,6 +353,18 @@ c that: 'a build error of any class fails its commit alone; the round builds the
   is: { (settles value: st last) collect: [:q | { q first. q last messageText }]. reportOf value: st last. st first phase.
     (settles value: x last) collect: [:q | q first]. x first phase }
   equals: { #(#('a' 'bug')). #(). #build. #('a'). #build }.
+out := go value: core value: st first value: {
+  { PBBuilt entry: (e value: 'b' value: false) root: (rec value: T value: 2) micros: 1000. 3000 }. { PBReplicated outcome: #committed. 4000 } }.
+c that: 'after the failed build the round builds b on the same base, stamped { T. 2 }, and commits it; a is not settled again'
+  is: { (builds value: st last) collect: [:bd | { bd entry token. bd base == r1. bd stamp }].
+    (settles value: out last) collect: [:q | { q first. q last }] }
+  equals: { { { 'b'. true. { T. 2 } } }. #(#('b' true)) }.
+x := go value: core value: (rule value: core value: true) first value: {
+  { PBBuildFailed entry: (e value: 'a' value: false) error: (ZeroDivide new messageText: 'z'; yourself) tierFailed: false micros: 4500. 2000 } }.
+c that: 'a failed build''s time counts in the round''s longest build (CC11, CC18), as a built one''s; refused when not an Integer >= 0'
+  is: { x first longest. st first longest.
+    err value: [PBBuildFailed entry: nil error: (Error new messageText: 'v'; yourself) tierFailed: false micros: -1] }
+  equals: { 4500. 0. PBValidationError }.
 
 "(31) n1: with no held caller, the kept permission waits for as many commits as conflicts"
 st := go value: core value: fresh value: {
@@ -391,6 +403,12 @@ c that: 'a build failing with exactly PBUnexpectedError after the permission exp
   is: { st first conflicted collect: [:q | q first token]. (st first conflicted collect: [:q | q last cause == x]) asArray.
     (st first conflicted collect: [:q | q last class]) asArray. (settles value: st last) size }
   equals: { #('a'). { true }. { PBConflictError }. 0 }.
+x := ZeroDivide new messageText: 'ZeroDivide'; yourself.
+st := go value: HaltAfterBuild new value: (rule value: core value: false) first value: {
+  { PBBuildFailed entry: (e value: 'a' value: false) error: x tierFailed: false. 700000 } }.
+c that: 'a build failing with an error that is not a PBDBError after the permission expired settles alone with it, never a conflict'
+  is: { st first conflicted size. (settles value: st last) collect: [:q | { q first. q last == x }] }
+  equals: { 0. #(#('a' true)) }.
 
 "(35) Task 23: a replicate that failed with an error (PBReplicateFailed: the shell's flush, or a
  rejection of the coordinator's replicate). proto_db _permit_round's except branch: nothing was

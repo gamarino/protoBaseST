@@ -700,8 +700,10 @@ For tests, tools and readers of the format. An application does not need them.
   `PBRoundEnqueued entry:`, `PBPermitted permission:` (a `PBPermission` or an error value),
   `PBBaseDecided decision:` (a `PBBaseDecision` or an error value), `PBBuilt entry:root:micros:`
   (entry `nil` for the re-commit of a base that needs one; root `nil` for nothing to publish),
-  `PBBuildConflict entry:error:`, `PBBuildFailed entry:error:tierFailed:` (`isTierFailed`: whether
-  the commit's tier had failed, a Boolean the shell always passes), `PBReplicated outcome:`
+  `PBBuildConflict entry:error:`, `PBBuildFailed entry:error:tierFailed:micros:` (`isTierFailed`: whether
+  the commit's tier had failed, a Boolean the shell always passes; `micros`: how long the failed
+  build ran, counted in the round's longest build for CC11 and CC18; `entry:error:tierFailed:`
+  records 0), `PBReplicated outcome:`
   (`#committed`, `#none`, or the replication's `PBOutcomeUnknownError`; a bare `#unknown` is
   refused; `outcome`, `error`),
   `PBHoldExpired token:`, `PBDropKept caller:`. Effects: `PBAskPermit`, `PBAskBase permission:`,
@@ -717,8 +719,9 @@ For tests, tools and readers of the format. An application does not need them.
   (R121, `'sends_refused_reserve'` while the permission is valid; the text names the time left, `sendReserve`, the round's
   longest build, the belief and `leaseDuration`, CC18) and a term below the rejoin ballot (L14;
   `dispatchReplicateWanted:` checks it again at the send against the acceptor's ballot and then
-  sends nothing, `#none`). A build error that is a `PBDBError` fails its commit alone; any other
-  ends the round, nothing sent. Every build, the re-commit's too, comes before the round's
+  sends nothing, `#none`). A build error of any class fails its commit alone and the round builds
+  the next entry (a deviation from rc4, [deviations.md](deviations.md#cluster-mode)); the
+  re-commit's error ends the round. Every build, the re-commit's too, comes before the round's
   `PBReplicate`, so a failed build sent nothing: a failed re-commit ends the permission `#none`,
   never `#unknown` (R233). A build that failed with exactly `PBUnexpectedError` (never a
   subclass) once the permission is no longer valid, the tier not failed, is a retryable

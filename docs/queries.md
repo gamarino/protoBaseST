@@ -237,9 +237,10 @@ is never rebuilt or dropped silently (spec 5.4).
 the transaction's intents through the current version's mutators
 ([below](#merges-of-blind-writes)), so the current version's extractors run during the commit's
 build, in the publisher (standalone) or in the round's build (cluster). That is application code in
-the commit, which the publisher otherwise never runs. Ruling IQ1 accepts it, exactly as `proto_db`
-does: **an exception raised by an extractor fails only the commit whose merge ran it, standalone, in
-a group commit and in a cluster round, and it passes through unwrapped.** There is no protoBaseST error class for it and no wrapping, because
+the commit, which the publisher otherwise never runs. Ruling IQ1 accepts it: **an exception raised
+by an extractor fails only the commit whose merge ran it, standalone, in a group commit and in a
+cluster round, and it passes through unwrapped** (exactly as `proto_db` does standalone and in a
+group commit; in a cluster round a deviation, below). There is no protoBaseST error class for it and no wrapping, because
 `proto_db`'s `KeySpec.extract` does not wrap either (plan call IP2). The caller of that commit sees
 the block's exception (as a copy: same class, text and fields, not the same object); other
 commits, before and after it and in the same round, are not affected. In a cluster round this is a

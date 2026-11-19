@@ -263,7 +263,8 @@ PBClusterRound >> applyBuild: aBuild
     on: Error do: [:e |
       e return: ((e isKindOf: PBConflictError)
         ifTrue: [PBBuildConflict entry: aBuild entry error: e]
-        ifFalse: [PBBuildFailed entry: aBuild entry error: e tierFailed: self _tierFailed])].
+        ifFalse: [PBBuildFailed entry: aBuild entry error: e tierFailed: self _tierFailed
+          micros: Time microsecondClockValue - t0])].
   self _handle: event.
 
 PBClusterRound >> applyReplicate: aReplicate
