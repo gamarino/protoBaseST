@@ -1609,6 +1609,56 @@ one immutable ByteArray and marks a batch by concatenating slices: the old batch
 Array of 1024 oids by `at:put:`, about 276 of the ~303 cells of a draw. Bytes on disk, tree node
 identity with `proto_db` and every error text are unchanged.
 
+**Cells**, `bench/run_atom_weight.sh` as in stage 1, 2026-11-19, load average 2.4 to 3.1; before
+at `f95b09f`, after at `69e6888`, both clean (`515cd86`, a key path fix, does not touch these
+kinds). The loaded kinds read a stored tree of n nodes written by a process of their own:
+retained is per loaded node, allocated is per record load (the decode included; with the cache,
+a load the cache serves). Interquartile ranges 0.3 to 2.0 cells per object (empty runs 1.9 and
+1.7):
+
+| object | retained before | retained after | allocated before | allocated after |
+|---|---|---|---|---|
+| a `PBCountedKeyNode`, own key and value tuple | 51.2 | 33.7 | 200.1 | 134.0 |
+| the same node, key, order key and value shared | 30.7 | 13.4 | 111.2 | 49.5 |
+| the same, its oid drawn | 32.6 | 15.1 | 426.3 | 80.3 |
+| a node of a 10^5-node tree built by `PBAvl keyFromSorted:` | 60.2 | 41.6 | 173.3 | 110.0 |
+| a node loaded from storage, atom cache off | 69.6 | 48.2 | 2338.6 | 1382.8 |
+| a node loaded from storage, atom cache on (entry included) | 75.8 | 51.4 | 384.6 | 314.3 |
+| one oid drawn (`_PBOidPool next`) | 1.0 | 1.0 | 296.6 | 31.8 |
+
+A diagnostic split of a record load (200 records of such a tree, after the change): reading the
+record 302 cells, msgpack 587, the envelope decode 908 (1,620 before), the class's check and
+publication 106.
+
+**Wall time and memory**, as in stage 1 (`QUERY_M2_SIZES="2000 10000" QUERY_Q1_SIZES=10000
+RUNS=3 bench/run_query.sh M2 Q1`, heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`), before
+(`f95b09f`, a clean worktree of it) then after (`69e6888`). Runner provenance lines, unmodified:
+`2026-11-19T19:53Z; protoBaseST f95b09f; protoST 0.12.0` and
+`2026-11-19T19:56Z; protoBaseST 69e6888; protoST 0.12.0`. Load average 3.0 before and 2.3
+after the first run, 2.3 and 3.9 for the second. Every run verified. Microseconds, minimum /
+median of 3; peak RSS in MB:
+
+| unit | protoBaseST before | protoBaseST after | change (min) | peak RSS before / after | `proto_db` (after run) |
+|---|---|---|---|---|---|
+| M2, 2000, build | 1090222 / 1118948 | 1003718 / 1030832 | -8% | 665 / 611 | 50058 / 52619 |
+| M2, 2000, fold | 1909006 / 1963684 | 1526953 / 1599246 | -20% | 749 / 583 | 192044 / 205883 |
+| M2, 10^4, build | 6234040 / 6547333 | 5816012 / 5982705 | -7% | 3352 / 3038 | 273432 / 274016 |
+| M2, 10^4, fold | 12474643 / 12511415 | 10318996 / 11059922 | -17% | 4141 / 3034 | 1043149 / 1080007 |
+| Q1, 10^4, index | 15653 / 15656 | 18236 / 18316 | +17% | 5086 / 4952 | 2123 / 2195 |
+| Q1, 10^4, scan | 11535203 / 11586151 | 13090513 / 13539523 | +13% | 5086 / 5082 | 507110 / 530351 |
+
+- M2's fold gains about a fifth and its peak RSS drops by a fifth to a quarter; the build gains
+  under 10% (noise level).
+- **Q1 is slower and the cause is not found.** Two more alternating pairs of Q1 alone (before at
+  `f95b09f`, after at `515cd86`, load 2.4 to 3.8) gave index 17614 and 15935 before against
+  18568 and 19621 after, scan 11332900 and 11634473 against 12081126 and 12134155 (minimums):
+  index about +15%, scan +4% to +7%. The after side allocates fewer cells in every part of Q1
+  (counted: a scan of 2000 records 520,418 cells before, 488,852 after; reading one field of each
+  record 10.5 cells per record before, none after), and in one process the same queries run as fast or faster after (iteration, scan,
+  index lookup and planning timed in a loop). The units run at the heap budget (peak RSS about
+  5 GB either way), where when collections land depends on the whole run; this is the leading
+  suspect, unproven.
+
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded
