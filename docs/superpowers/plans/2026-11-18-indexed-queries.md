@@ -963,6 +963,10 @@ tests as Task 11 plus the codec/envelope, corruption/validation and cluster pers
   atom keeps.
 - [ ] **Step 3: D.** When a record's names equal `shape persisted`, skip `associations` and the
   per-attribute name check; decode the values into one Array.
+- [ ] **Step 3b: the oid draw.** Task 11 measured about 315 cells allocated per atom in
+  `_PBOidPool next` while the stored oid retains about 2. Root-cause it (systematic debugging,
+  allocation counts per step) and cut it, keeping oid uniqueness, the pool's refill semantics and
+  the first-drawn-wins race; `tx_atom_oid`, `bytes_pinned`, `save_race` and `atom_keys_oid` cover it.
 - [ ] **Step 4:** covering tests (as Task 11 Step 5 plus codec and corruption tests). PASS.
 - [ ] **Step 5:** measure as Task 11 Step 6, plus loaded-node cells and cells allocated per
   record load. Record; commit `Atom weight stage 2: shaped atoms keep only their slots`.
