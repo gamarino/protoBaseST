@@ -35,8 +35,9 @@ IndexKeysAtoms >> bytesOf: aValue
 
 | blob listed data limits shallow cases atoms values fails okeys bounded refused byKey |
 blob := 'vectors-index-keys/keys.msgpack' asFileReference binaryContents.
-listed := 'vectors-index-keys/manifest.sha256' asFileReference contents.
-(listed copyFrom: 1 to: 64) = blob sha256 hex asLowercase ifFalse: [
+listed := ('vectors-index-keys/manifest.sha256' asFileReference contents lines)
+  detect: [:line | line endsWith: '  keys.msgpack'] ifNone: [''].
+(listed copyFrom: 1 to: (64 min: listed size)) = blob sha256 hex asLowercase ifFalse: [
   Error signal: 'vectors-index-keys/keys.msgpack does not match manifest.sha256'].
 data := MessagePack decode: blob.
 fails := OrderedCollection new.

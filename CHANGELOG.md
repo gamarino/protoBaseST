@@ -63,6 +63,20 @@
   `proto_db` and in a three-member cluster; figures in `docs/deviations.md#performance`.
   Tests: `tests/unit/idx_merge.st`, `tests/unit/idx_indexed_roots.st`,
   `tests/interop/index_both_directions.sh`, two new rows in `tests/interop/concurrency.sh` (29).
+- **Terms and expressions** (plan Task 5, `src/protobase/terms.st`, ports of `proto_db`'s
+  `query/terms.py` and `query/expressions.py`): `PBTerm path:op:value:` and `path:op:` with
+  `proto_db`'s operator strings (`'near[]'` is `PBNotSupportedError`), canonical operands
+  validated as `proto_db` validates them, `matches:` (the scan oracle, D28 semantics),
+  `describe` (operands as `proto_db`'s `display_value`), `asList`, `keySpecObject`, equality by
+  order key; `PBExpression` with `evaluate:`, `describe`, `asList`, `termsDo:`, `&`, `|` and `not`
+  (expressions only, ruling CR5); `PBAnd withAll:` and `PBOr withAll:` (n-ary, flattened),
+  `PBNot of:` (`not not` is the original), `PBBlockPredicate block:description:`, and
+  `PBExpression class >> compile:` for the 0.1 prefix list syntax. Tests:
+  `tests/unit/qry_terms.st`, `tests/unit/qry_expressions.st`, and the vector
+  `tests/conformance/vectors-index-keys/terms.msgpack`, written by
+  `tests/interop/py_term_cases.py`: `proto_db`'s answers on the values of `QData values:` for
+  every operator, its outcome for the degenerate terms, and its list form and description of
+  each term.
 - **Benchmark M1**: commits per second of single-record transactions on a 600-record dictionary
   with 0, 1 and 3 indexes. `bench/run_query.sh` now runs each unit (a size and a plan) in a
   process of its own with an explicit heap budget (`PROTOCORE_HEAP_LIMIT_CELLS`) and reports each

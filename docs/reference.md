@@ -1055,10 +1055,9 @@ For tests, tools and readers of the format. An application does not need them.
 ## Indexed queries (in progress, 0.3.0)
 
 > **Planned for 0.3.0 and built task by task.** Implemented so far: "Key specs and extractors"
-> (`src/protobase/keyspec.st`), `PBMemberKeys` and `PBMisfiledError`, "Indexes" (Task 3), and the
-> collection messages of "Collections gain" except the merge (`addIndex:`, `removeIndex:`,
-> `validate`, maintenance in every mutator: Task 4a); every other message of this section is not
-> implemented yet. It is the API of
+> (`src/protobase/keyspec.st`), `PBMemberKeys` and `PBMisfiledError`, "Indexes" (Task 3), the
+> collection messages of "Collections gain" (Tasks 4a and 4b), and "Terms and expressions" (Task 5,
+> `src/protobase/terms.st`); every other message of this section is not implemented yet. It is the API of
 > the approved [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md)
 > (sections 5.2 and 5.5) and of its implementation plan's interfaces, written early so the
 > chapters can cite it. Until each task lands, the messages below are listed as pending in the
@@ -1173,16 +1172,21 @@ build: aCollection`; the set itself when none is stale), each answering a new se
 
 ### Terms and expressions
 
+`src/protobase/terms.st`, a port of `proto_db`'s `query/terms.py` and `query/expressions.py` (less
+the vector parts). Every condition is a frozen value: no message changes it.
+
 | Message | Meaning |
 |---|---|
-| `PBTerm path: aStringOrNil op: anOperator value: v`, `path: aStringOrNil op: anOperator` | A term; the second form for `'?N'`, `'?!N'`, `'?T'`, `'?!T'`. Operators are `proto_db`'s strings: `'=='` `'!='` `'<'` `'<='` `'>'` `'>='` `'in'` `'between[]'` `'between()'` `'between(]'` `'between[)'` `'?N'` `'?!N'` `'contains'` `'?T'` `'?!T'`. `'near[]'` is `PBNotSupportedError` (vector search is out of scope); an unknown operator or malformed operand `PBValidationError`. |
-| `path`, `op`, `value`, `keySpecObject` | The term's parts; `keySpecObject` is the `PBKeySpec` its path names (`PBKeySpec forTermPath: path`). |
-| `matches: anElement` | The scan oracle, `proto_db`'s D28 semantics ([queries.md](queries.md#key-specs-missing-and-nil)). |
-| `describe`, `asList` | `{ 'path'. 'op'. 'value' }` for `explain`; the 0.1 list form. |
-| `PBExpression`: `evaluate: anElement`, `describe`, `asList`, `termsDo: aBlock`, `&`, `\|`, `not` | Every condition (a term, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate`). `PBAnd` and `PBOr` are n-ary and flattened; `aCondition not not` is the condition itself. |
-| `PBAnd withAll: anArray`, `PBOr withAll: anArray`, `PBNot of: anExpression` | Explicit construction. |
-| `PBExpression class >> compile: anArray` | The 0.1 prefix list syntax: `{ 'city'. '=='. 'Oslo' }`; terms in sequence are joined by AND; `'&'`, `'\|'` binary, `'!'` unary. Malformed: `PBValidationError` naming the position. |
-| `PBBlockPredicate` | An opaque condition: a block and a description. Never answered by an index. |
+| `PBTerm path: aStringOrNil op: anOperator value: v`, `path: aStringOrNil op: anOperator` | A term; the second form for `'?N'`, `'?!N'`, `'?T'`, `'?!T'`. Operators are `proto_db`'s strings: `'=='` `'!='` `'<'` `'<='` `'>'` `'>='` `'in'` `'between[]'` `'between()'` `'between(]'` `'between[)'` `'?N'` `'?!N'` `'contains'` `'?T'` `'?!T'` (`PBTerm operators`, `unaryOperators`). `'near[]'` is `PBNotSupportedError` (vector search is out of scope). An operand is made canonical (`PBCodec canonical:`) and must be orderable and not `PBMissing`; `'in'` takes an `Array`, `OrderedCollection`, `PBFrozenList`, `PBTuple` or `Set` of operands (a `Set` is sorted by order key, a sequence keeps its order; never a String); a between operator a pair of one type rank. Anything else, an unknown operator or a malformed path included, is `PBValidationError`. |
+| `path`, `op`, `value`, `keySpecObject` | The term's parts: `value` is the canonical operand, a `PBTuple` of operands for `'in'` and of `(low, high)` for a between operator, `nil` for a unary one; `keySpecObject` is the `PBKeySpec` its path names (`PBKeySpec forTermPath: path`). A term has no `keySpec`. |
+| `matches: anElement` | The scan oracle, `proto_db`'s D28 semantics ([queries.md](queries.md#key-specs-missing-and-nil)): `'=='` and `'in'` by order key (1, 1.0 and `Decimal` 1 are equal, `true` is not 1, `nil` is a value); a `PBMissing` key matches only `'?N'`, so `'!='` is not the complement of `'=='`; range operators match keys of the operand's type rank only; unorderable keys match only `'?!N'`, `'!='`, `'contains'`, `'?T'`, `'?!T'`. `'contains'` is a substring of a String or `ByteArray`, an item of a list or tuple, a key of a map, an element of a collection atom by its own membership (`has:`; a `PBList` by element equality). `'?T'` / `'?!T'` test Python's truthiness of a present key. An extractor's exception passes through. |
+| `describe`, `asList` | `{ 'path'. 'op'. 'value' }` as a `PBFrozenDict` for `explain`, the value as `proto_db`'s display_value function renders it (`PBTerm displayValue:`: nil, Booleans, Integers, Strings and finite Floats kept; lists and tuples as Arrays; a map as `{ '@dict' -> pairs }`; anything else as Python's `repr` of it, such as `'Decimal(''1.50'')'`); the 0.1 list form (`{ path. op. value }`, `{ path. op. low. high }`, `{ path. 'in'. operands }`, `{ path. op }`). |
+| `=`, `hash` | By path, operator and the order key of the value, as `proto_db`'s `Term`: equal terms match the same elements. |
+| `PBExpression`: `evaluate: anElement`, `describe`, `asList`, `termsDo: aBlock`, `&`, `\|`, `not` | Every condition (a term, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate`). `evaluate:` is two-valued: `PBAnd` and `PBOr` short-circuit left to right, `PBNot` negates (so the negation of a comparison is true for an element without the key). `&`, `\|` and `not` take expressions only: anything else, a block included, is `PBValidationError` (ruling CR5). `termsDo:` visits every term depth first, left to right. `describe` is `{ 'and' -> { ... } }`, `{ 'or' -> { ... } }`, `{ 'not' -> ... }`. |
+| `PBAnd withAll: anArray`, `PBOr withAll: anArray`, `operands` | Explicit construction: n-ary, nested nodes of the same class flattened, order kept, at least two expressions (`PBValidationError` otherwise). |
+| `PBNot of: anExpression`, `operand` | The negation; `PBNot of:` a `PBNot` answers its operand, so `aCondition not not` is the condition itself. |
+| `PBExpression class >> compile: anArray` | The 0.1 prefix list syntax, from an `Array`, `OrderedCollection` or `PBFrozenList`: `{ 'city'. '=='. 'Oslo' }`; expressions in sequence are joined by AND; `'&'`, `'\|'` binary, `'!'` unary; nested lists and expressions already built are accepted; an expression compiles to itself. Malformed: `PBValidationError` naming the position, counted from 0 as in `proto_db`. Compiling the `asList` of an expression answers an equal expression. |
+| `PBBlockPredicate block: aBlock description: aString`, `block`, `description` | An opaque condition (`proto_db`'s `PythonPredicate`): a block of one argument, whose answer is read as truthiness, and a non-empty description; `describe` is `{ 'block' -> description }`; `asList` is `PBNotSupportedError`. Never answered by an index. |
 
 **`PBField`**, the builder (ruling IQ2):
 

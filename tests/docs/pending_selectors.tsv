@@ -6,12 +6,6 @@
 # Task 3: key-group indexes
 # Task 4a: collections maintain their indexes (4a and 4b share the spec's T4)
 # Task 5: terms and expressions
-asList	5
-compile:	5
-evaluate:	5
-not	5
-op	5
-termsDo:	5
 # Task 6: plan operators, explain, index access paths
 byRank	6
 cost	6

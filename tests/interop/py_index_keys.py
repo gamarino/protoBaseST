@@ -2,8 +2,8 @@
 
 Usage: python py_index_keys.py <out directory>
 
-Writes <out>/keys.msgpack and <out>/manifest.sha256 (the SHA-256 of keys.msgpack, in
-sha256sum's format). It refuses to run unless the imported proto_db is the commit
+Writes <out>/keys.msgpack and regenerates <out>/manifest.sha256 (the SHA-256 of every .msgpack
+file of the directory, sorted by name, in sha256sum's format). It refuses to run unless the imported proto_db is the commit
 tests/interop/setup_venv.sh pins (the venv's .commit file). Run it through the interop venv (tests/interop/env.sh sets PYTHONPATH);
 the vendored copy is tests/conformance/vectors-index-keys/, read by
 tests/conformance/index_keys.st, which requires protoBaseST's PBMemberKeys and PBKeys to give
@@ -241,7 +241,10 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     blob = msgpack.packb(data, use_bin_type=True)
     (out / "keys.msgpack").write_bytes(blob)
-    (out / "manifest.sha256").write_text(f"{hashlib.sha256(blob).hexdigest()}  keys.msgpack\n")
+    # One manifest per vector directory (pre-flight F8): every .msgpack file of it, sorted by name, so
+    # this generator and tests/interop/py_term_cases.py keep each other's lines.
+    (out / "manifest.sha256").write_text("".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n"
+                                                 for p in sorted(out.glob("*.msgpack"))))
     print(f"wrote {len(rows)} cases, {sum(1 for r in rows if r['row']['refusal'])} refusals, "
           f"{len(shallow)} with bounds, to {out}")
 

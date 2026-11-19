@@ -113,7 +113,10 @@ explicit.
   is read only, a merge onto one included (`PBNotSupportedError` naming it; see the table below).
   `extend:` of nothing still answers the receiver, as `proto_db`'s. *Cost:* a merge onto an
   indexed current runs the index work and the extractors in the commit's build, at protoBaseST's
-  index speed (bench M3 below).
+  index speed (bench M3 below). The term and expression language is provided (plan Task 5:
+  `PBTerm`, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate`, `PBExpression compile:`): a condition
+  is built, described and evaluated on one element, but no index answers it and no query runs it
+  yet.
 - **`PBRepeatedKeysDictionary` is read only.** Its writes and merges are a non-goal. A new empty
   one is mergeable and its rebase answers `current` unchanged, as `proto_db`'s.
 - **Immutability is by convention** (decision 3). No instance is frozen at run time: a method
@@ -919,7 +922,7 @@ The detail:
 > [18](tutorial/18-queries-and-plans.md), [19](tutorial/19-ordered-reads-and-pages.md)) and the
 > guide ([queries.md](queries.md)) can link here. The entry "Indexed collections are written and
 > merged; queries are not yet provided" above says what holds today. Each entry becomes a deviation when its task is merged;
-> the rows marked (Task 4a) are in force.
+> the rows marked (Task 4a) and (Task 5) are in force.
 
 | What | Difference from `proto_db` | Why | Cost |
 |---|---|---|---|
@@ -932,6 +935,11 @@ The detail:
 | Selection blocks | Not in the first release (ruling IQ2): a block condition is opaque and never uses an index. | Translating a block by running it on a recording object fails silently (`30 < (p at: 'age')`, inlined `ifTrue:` and `==`, methods of the element). | Index-using conditions are written with `PBField`. |
 | Plan choice on near ties (R2) | The descent term `log2 (G + 2)` is computed as `ln x / ln 2` (protoST has no `log2`; ruling IQ4: protoST is not changed), which can differ from C's `log2` in the last bit. Two candidates whose costs are within a relative 1e-12 may be ranked differently: the same answer by another plan. | No protoST change for plan parity (IQ4). | The query vectors report such a plan difference by name and do not fail on it; any other plan difference, and every result difference, fails. |
 | Vector and unknown index kinds (Task 4a) | A collection holding a `PBVectorIndex`, or an index of a kind protoBaseST does not know, stays read only: every change and every merge onto it is `PBNotSupportedError` naming it (IC2, ruling IQ5). | Vector search is out of scope; maintaining the other indexes but not that one would write a stale index. | Such a collection is changed from Python only. |
+| `near[]` terms (Task 5) | `PBTerm path:op:value:` with `'near[]'`, and the list syntax naming it, signal `PBNotSupportedError` when the term is made; `proto_db` builds the term (a `NearQuery`) and refuses it only when it is evaluated by a scan, answering it with a vector plan otherwise. | Vector search is out of scope (spec 3.3); a term no plan of this port can answer is refused where it is written, never later. | A query naming `near[]` fails at once, as every vector feature does. |
+| Atoms and IANA datetimes in `describe` (Task 5) | `describe` (so `explain`) renders an atom operand as `<type name oid=...>` and a datetime in an IANA zone by its `printString`; `proto_db`'s `display_value` prints Python's `repr`: a record's fields (`DBObject(r=1)`), a collection's count, the address of a stub, a zone datetime's wall clock. Every other value is rendered as Python renders it (`Decimal('1.50')`, `datetime.datetime(2026, 1, 1, 9, 0, tzinfo=datetime.timezone.utc)`, `b'\x00'`, `inf`), checked against `proto_db` by `tests/unit/qry_terms.st`. | Python's `repr` of a record walks its fields with Python's rules, and of a stub prints a memory address; a zone's wall clock needs a time-zone database (design 4.3). | The `explain` of a term whose operand is an atom or a zone datetime differs in that one value; results do not. |
+| `in` over a `Set` (Task 5) | A protoST `Set` keeps `true` and `1` as two operands; a Python `set` holds one of them, since `True == 1` there. Both sort their operands by order key. | The difference is the host's set, not the term: `PBTerm` keeps what it is given, as `proto_db`'s `Term` does. | `in: (Set withAll: { true. 1 })` also matches 1, where `{True, 1}` in Python matches only `True`; a sequence (an `Array`) is the same in both. |
+| Block predicates (Task 5) | `PBBlockPredicate` (`proto_db`'s `PythonPredicate`) describes itself as `{ 'block' -> description }`, where `proto_db` writes `{'python': description}`; it takes a block of one argument (`proto_db`: any callable). | Named after the language that runs it, as `BlockFilter` (call IC6). | A one-key difference in the description of a condition holding a block; the query vectors hold none. |
+| The 0.1 list syntax (Task 5) | `PBExpression compile:` takes an `Array`, an `OrderedCollection` or a `PBFrozenList` as a list (`proto_db`: a Python `list`); a `PBTuple` is refused, as a Python tuple is. | A list in protoST is any of the three, and a decoded MessagePack list is a `PBFrozenList`. | None. |
 | Pagers | In-process only: no portable token, no `resumePager:` (ruling IQ3). The pager's `explain` has no `'portable'` key, which `proto_db`'s `Pager.explain` has (`pager.py:221-224`); a pager here is never portable (ruling CR7). | The token's plan digest is over Python's `repr` of the plan, which protoST cannot reproduce byte for byte (spec 3.2; a portable digest is proposal IQ7, not sent). | A page sequence cannot be resumed by another process or language. |
 | Deferred | No query result cache, and so no `extractor_generation` (the registration generation that keys it); no `GroupBy`, `Agg`, `Join`, `Unnest` (`select_many`) or `ValuesScan`; no computed values, `startswith` / `endswith` or field-to-field comparisons; no collection `rebuilt` (misfiled format-3 repair) (ruling IQ3, spec 3.2). | Each is either not portable today or not an optimisation; a block condition covers computed values meanwhile. | Programs that need them wait, or use a block. |
 
@@ -959,6 +967,11 @@ Purity is a documented contract ([queries.md](queries.md#extractors-and-their-pu
   aBlock version: aStringOrNil", where `proto_db` says `register_extractor('x', fn)`. A path or
   extractor name holding a lone surrogate is refused with the codec's own text (`PBCodec`, "a String
   holding the lone surrogate U+... cannot be stored"), not with `check_text`'s sentence.
+- Terms and expressions (`PBTerm`, `PBExpression compile:`) keep `proto_db`'s sentences and positions
+  (counted from 0) with protoST's names: "PBAnd operands must be PBExpression instances ... use
+  PBExpression compile: for the list syntax", an `in` operand "needs a list, tuple or set of values
+  (an Array, an OrderedCollection, a PBFrozenList, a PBTuple or a Set)". The list of operators in
+  "Unknown operator" leaves out `'near[]'`, which is refused (above).
 
 ## Performance
 

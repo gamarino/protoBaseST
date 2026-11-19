@@ -11,6 +11,9 @@
                               nil, Booleans, ByteArrays, dates, instants in several offsets,
                               tuples, records, and the unorderable values (lists, maps, NaN, a
                               tuple holding a list)
+  QData pinOids: aValues       gives each record among aValues the oid of 15 zero bytes then its r,
+                              before anything draws one, so atoms (ordered by oid) order the same
+                              way in every run and in proto_db (tests/interop/py_term_cases.py)
   QData scan: aCollection where: aBlock
                               the oracle: the elements for which aBlock answers true, as a counted
                               bag, a Dictionary from PBMemberKeys identityOf: to the occurrences
@@ -114,6 +117,15 @@ QData >> instant
   offset := self pick: #(-3 0 1 5).
   ^ DateTime year: 2026 month: 1 day: 1 hour: hours + offset minute: 0 second: 0 microsecond: 0 fold: 0
     zone: (ZoneOffset microseconds: offset * 3600000000).
+
+QData class >> pinOids: aValues
+  aValues do: [:each |
+    (each isKindOf: PBObject) ifTrue: [
+      | oid |
+      oid := (ByteArray new: 15) , (ByteArray withAll: { each at: 'r' }).
+      ((each instVarNamed: 'oid') value: oid ifCurrent: nil) ifFalse: [
+        each oid = oid ifFalse: [^ Error signal: 'QData pinOids: an oid was drawn already']]]].
+  ^ aValues.
 
 QData class >> scan: aCollection where: aBlock
   | bag |

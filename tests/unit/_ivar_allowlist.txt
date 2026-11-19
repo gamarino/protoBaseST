@@ -140,3 +140,6 @@ PBKeySpec>>_setKind:arg:segments:
 PBKeySpec class>>_initializeRegistry
 PBKeys class>>_initializeAtomToken
 PBMemberKeys class>>_initializeConstants
+PBTerm>>_setPath:op:value:keySpecObject:valueKey:operandKeys:
+_PBNode>>_setOperands:
+PBBlockPredicate>>_setBlock:description:
