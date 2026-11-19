@@ -16,25 +16,36 @@ Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_queries'.
 
-"A writer: commits until the readers are done (aStop), aCount being only a safety cap, as
- proto_db's MAX_COMMITS: the writers outlive every reader, so commits land between the pages of
- every pager by construction, not by the relative speed of the actors."
+"A writer: commits until the readers are done (aStop), aCount being only a safety cap on the
+ commits of all the writers together (aProgress), as proto_db's MAX_COMMITS (CI-314: every row the
+ writers add lengthens each reader's next query, so unbounded writers on a slow machine grow the
+ readers' work faster than they finish it): the writers outlive every reader, so commits land between the pages of
+ every pager by construction, not by the relative speed of the actors. The three writers change
+ one PBList root, which never merges, so every concurrent commit but one conflicts and is
+ retried; a writer whose run: exhausts its retries (PBConflictError: the others kept winning)
+ starts the same change again, until it commits or the readers are done. Losing a race is the
+ scheduling's doing, not a defect the test looks for; with proto_db's retries alone a writer could
+ fail the test on a busy machine (seen in plan Task 10, with the base code too). Any other error is
+ the writer's answer."
 Object subclass: #PageWriter.
 
-"Commits aCount changes to the root 'items' of db, drawing them from QData random: aSeed; adds one
- to aProgress after each commit and to aDone at the end. Answers { commits. insertions. removals }
+"Commits changes to the root 'items' of db while all the writers together have committed fewer
+ than aCount times, drawing them from QData random: aSeed; adds one to aProgress after each commit
+ and to aDone at the end. Answers { commits. insertions. removals }
  (the root never falls to 50 elements, so every removal drawn is made), or the class and text of
  the first error."
 PageWriter >> write: db seed: aSeed commits: aCount progress: aProgress done: aDone stop: aStop
   | rnd n inserted removed |
   rnd := QData random: aSeed.
   n := 0. inserted := 0. removed := 0.
-  ^ [[n < aCount and: [aStop value not]] whileTrue: [ | choice slot gone |
+  ^ [[aProgress value < aCount and: [aStop value not]] whileTrue: [ | choice slot gone committed |
        n := n + 1.
        choice := rnd next.
        slot := (rnd next * 400) truncated.
        gone := rnd next.
-       db run: [:tx | | items |
+       committed := false.
+       [committed or: [aStop value]] whileFalse: [
+         [db run: [:tx | | items |
            items := tx getRootObject: 'items'.
            choice < 0.3 ifTrue: [items := items appendLast: (PBFrozenDict withAssociations: { 'id' -> (aSeed * 100000 + n). 'k' -> (0 - (aSeed * 1000) - n). 'v' -> (0 - n) })].
            (choice >= 0.3 and: [choice < 0.6]) ifTrue: [
@@ -43,11 +54,14 @@ PageWriter >> write: db seed: aSeed commits: aCount progress: aProgress done: aD
              items := items appendLast: (PBFrozenDict withAssociations: { 'id' -> (aSeed * 100000 + n). 'k' -> (100000 + (aSeed * 1000) + n). 'v' -> n })].
            (choice >= 0.8 and: [items count > 50]) ifTrue: [items := items removeAt: (gone * items count) truncated].
            tx setRootObject: 'items' value: items]
-         retries: 500 backoff: #(0 5).
-       choice < 0.8 ifTrue: [inserted := inserted + 1] ifFalse: [removed := removed + 1].
-       aProgress swap: [:x | x + 1]].
+           retries: 500 backoff: #(0 5).
+          committed := true]
+           on: PBConflictError do: [:e | e return: nil]].
+       committed ifTrue: [
+         choice < 0.8 ifTrue: [inserted := inserted + 1] ifFalse: [removed := removed + 1].
+         aProgress swap: [:x | x + 1]]].
      aDone swap: [:x | x + 1].
-     { n. inserted. removed }]
+     { inserted + removed. inserted. removed }]
     on: Error do: [:e | aDone swap: [:x | x + 1]. e class name , ': ' , e messageText].
 
 "A reader: pages through four snapshots of db."
