@@ -336,10 +336,14 @@ snapshot's.
 
 | Collection | Index work per mutator (as in `proto_db`'s mutators) |
 |---|---|
-| `PBList` | `appendLast:` / `insertAt:value:` add; `setAt:value:` replaces; `removeAt:` removes; `extend:` adds each; `sliceFrom:to:`, `head:`, `tail:` remove what they drop. |
+| `PBList` | `appendLast:` / `insertAt:value:` add; `setAt:value:` replaces; `removeAt:` removes; `extend:` adds each; `sliceFrom:to:`, `head:`, `tail:` answer a new collection whose indexes are the same definitions rebuilt (`empty build:`) over the slice (`lists.py:133-147`); a list without indexes keeps its index set. |
 | `PBDictionary`, `PBHashDictionary` | `setAt:value:` adds the value for a new key, replaces it for an existing key; `removeAt:` removes the value of a present key. |
 | `PBSet` | `add:` of an absent element adds; `remove:` of a present one removes; set algebra folds those. |
-| `PBCountedSet` | each occurrence added or removed is one index occurrence (the index stores a multiset). |
+| `PBCountedSet` | an add event when an element appears (count 0 to n > 0); a remove event of the stored element when it disappears (to 0); nothing while the count stays positive (`sets.py:352-373`). |
+
+*Corrected at Task 4a:* the original table did not match `proto_db` rc4 (it had slices remove
+what they drop and a `PBCountedSet` fire one event per occurrence); node identity
+(`tests/interop/index_ops_identical.sh`) confirms the Python reading.
 
 The port takes the exact hook order from each Python mutator (`lists.py`, `dictionaries.py`,
 `hash_dictionaries.py`, `sets.py`), because the order of `with_added` / `with_removed` calls
@@ -411,8 +415,11 @@ kind is read and refused for writes (3.3); a key-group index with format-3 token
 first change. An index built by `proto_db` with an extractor that this process has not registered
 is read, and a query whose plan never extracts a key (an index access path with no residual
 filter on the extractor's path) runs, because a lookup reads only the trees; a query whose plan
-does extract (a scan, or a residual filter on `@name`) signals, and so does any change to the
-collection or a `validate:`: `proto_db`'s error, `PBValidationError`
+does extract (a scan, or a residual filter on `@name`) signals, and so does any change that
+evaluates the extractor (an add, remove or replace event on that index, a rebuild) or a
+`validate:` (corrected at Task 4a: `proto_db` checks the registry only inside `KeySpec.extract`,
+`keyspec.py:232`, so a blind write, `removeIndex:` or an `addIndex:` of another index pass):
+`proto_db`'s error, `PBValidationError`
 naming the extractor and telling the program to register it (`keyspec.py:139-146`). It is never
 rebuilt or dropped silently.
 

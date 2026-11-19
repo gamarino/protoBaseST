@@ -666,8 +666,10 @@ PBTransaction >> _sameToken: aToken as: anotherToken
 "The value to store for a root written but neither read nor replaced
  (ProtoBase _merged): aValue rebased onto aCurrent when aValue is a collection
  with a complete log and aCurrent exists and is of the same class; aValue
- otherwise (last writer wins). A rebase onto an indexed current is
- PBNotSupportedError (design spec 7.4)."
+ otherwise (last writer wins). Until Task 4b logs the index operations (plan
+ call IP17), a rebase with an indexed receiver or current is PBNotSupportedError
+ (PBIndexedCollection >> _refuseIndexedMergeOnto:), and addIndex: / removeIndex:
+ answer an incomplete log, so such a version is never rebased here."
 PBTransaction >> _merged: aValue onto: aCurrent
   aCurrent == PBTxState missing ifTrue: [^ aValue].
   ((aValue isKindOf: PBIndexedCollection) and: [aValue isMergeable and: [aCurrent class == aValue class]])

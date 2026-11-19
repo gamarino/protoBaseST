@@ -142,8 +142,9 @@ spec states or a released API; Task 10 copies the table into `docs/decisions.md`
    Test: Task 5 (`qry_terms.st`, case `degenerate terms as proto_db`), with the expected outcomes
    taken from `proto_db` by `tests/interop/py_term_cases.py`.
 5. **A Python-written database whose extractor this process has not registered.** Reading and
-   index-only queries work; a scan, a residual filter on `@name`, any change and `validate`
-   signal `PBValidationError` naming the extractor; nothing is rebuilt or dropped. Tests: Task 4a
+   index-only queries work; a scan, a residual filter on `@name`, any change that evaluates the
+   extractor and `validate` signal `PBValidationError` naming the extractor (corrected at Task 4a:
+   as in `proto_db`, a blind write, `removeIndex:` or an `addIndex:` of another index pass); nothing is rebuilt or dropped. Tests: Task 4a
    (`idx_unregistered_extractor.st`, writes and validate), Task 7 (`qry_planner.st`, case
    `unregistered extractor: lookup runs, scan signals`).
 
@@ -486,10 +487,12 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
     format-3 stale index (built with `member_tokens` absent, as `read_records_indexes.st` does)
     is rebuilt on the first change and not before; a version read back in the same transaction
     agrees with its own indexes.
-  - `idx_unregistered_extractor.st` (`"EXPECT: ok 4"`, Review Focus 5): a collection with an
-    index on extractor `'gone'` (written by registering, saving, then unregistering): reading
-    and `indexNames` work; `setAt:value:`, `addIndex:` of another index and `validate` signal
-    `PBValidationError` containing `'gone'`; the stored index is unchanged.
+  - `idx_unregistered_extractor.st` (`"EXPECT: ok 6"`, Review Focus 5, corrected at Task 4a's
+    review): a collection with an index on extractor `'gone'` (written by registering, saving,
+    then unregistering): reading and `indexNames` work; `setAt:value:` of a new key and
+    `validate` signal `PBValidationError` containing `'gone'`; `removeAt:` of an absent key,
+    `removeIndex: 'by_gone'` and `addIndex:` of a path index succeed; the stored index is
+    unchanged.
   - `indexed_refusal.st`: now expects writes to succeed on key-group indexes and the refusal only
     with a `PBVectorIndex` or an opaque index atom; and a merge (`rebaseOnto:`, and a
     `PBCountedSet` transform) onto an indexed current still signals `PBNotSupportedError`

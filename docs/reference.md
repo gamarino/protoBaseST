@@ -238,8 +238,8 @@ new version. Values, keys and elements pass through `PBCodec canonical:` at once
 element that is not orderable (a NaN, a list, a map) is `PBValidationError`. Every write
 maintains the collection's indexes in the same step ([Collections gain](#indexes)); a collection
 holding a vector index or an index of an unknown kind is read only (`PBNotSupportedError` naming
-it), and one holding an index on an unregistered extractor refuses every change
-(`PBValidationError` naming the extractor).
+it). An index on an unregistered extractor fails any change that evaluates the extractor
+(`PBValidationError` naming it), as in `proto_db`.
 
 **Common** (`PBIndexedCollection`):
 
@@ -1105,9 +1105,11 @@ Using an extractor that is not registered is `PBValidationError`: "No key extrac
 under 'name'; call PBKeySpec registerExtractor: 'name' block: aBlock version: aStringOrNil in this
 process before using an index or term that names it".
 
-An index or term that names an unregistered extractor answers lookups from its stored trees; any
-change to its collection, a `validate`, or a scan that must extract signals `PBValidationError`
-naming the extractor. The block must be pure: the purity contract is in
+An index or term that names an unregistered extractor answers lookups from its stored trees; a
+change to its collection that evaluates the extractor (an add, remove or replace event, a
+rebuild), a `validate`, or a scan that must extract signals `PBValidationError` naming the
+extractor; a blind write, `removeIndex:` and an `addIndex:` of another index pass, as in
+`proto_db`. The block must be pure: the purity contract is in
 [queries.md](queries.md#extractors-and-their-purity-contract). During a merge it runs in the
 commit's build; an exception it raises fails only that commit and reaches the caller unchanged.
 

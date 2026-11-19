@@ -72,7 +72,7 @@ city := PBEqualityIndex name: 'by_city' path: 'city'.
 plain := PBDictionary new setAt: 'zed' value: 1.
 c that: 'rebaseOnto: an indexed current' signals: PBNotSupportedError containing: 'Task 4b'
   during: [plain rebaseOnto: people].
-c that: 'rebaseOnto: of an indexed receiver, and onto an indexed current after addIndex: and removeIndex:' is: {
+c that: 'rebaseOnto: of an indexed receiver onto a plain current, and of a receiver whose index was removed onto an indexed current' is: {
     [(PBDictionary new addIndex: city) rebaseOnto: PBDictionary new. nil] on: PBNotSupportedError do: [:e | e return: #refused].
     [((PBDictionary new addIndex: city) removeIndex: 'by_city') rebaseOnto: people. nil]
       on: PBNotSupportedError do: [:e | e return: #refused] }

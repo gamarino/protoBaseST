@@ -110,10 +110,10 @@ explicit.
   the index operations (plan call IP17), **a merge involving an indexed collection**:
   `rebaseOnto:` with an indexed receiver or `current` is `PBNotSupportedError` ("Task 4b"), and
   `addIndex:` / `removeIndex:` answer a version whose log is incomplete, so a commit replaces
-  instead of merging. `proto_db` merges blind writes onto indexed roots. Index *queries* are not
-  provided yet. `extend:` of nothing still answers the receiver, as `proto_db`'s. *Cost:* two
-  transactions that write one indexed root concurrently conflict where `proto_db` would merge
-  them; the loser retries.
+  instead of merging. Index *queries* are not provided yet. `extend:` of nothing still answers
+  the receiver, as `proto_db`'s. *Cost:* a root written without being read (a blind write) onto a
+  current that holds an index is `PBNotSupportedError`, concurrent or not, and is not retried;
+  read the root first. `proto_db` merges it. Task 4b removes this.
 - **`PBRepeatedKeysDictionary` is read only.** Its writes and merges are a non-goal. A new empty
   one is mergeable and its rebase answers `current` unchanged, as `proto_db`'s.
 - **Immutability is by convention** (decision 3). No instance is frozen at run time: a method
@@ -227,7 +227,9 @@ collections with writes, and `PBCountedSet` since Task 22.
 - **Format-3 collections** are read; a format-3 key-group index is rebuilt with format-4 tokens
   before the collection's first change (a read or a blind write keeps it), and `validate` reports
   a misfiled entry with `PBMisfiledError`, as `proto_db`'s. `rebuilt()` (the repair) is not
-  provided.
+  provided. A stale index that must order format-3 zone datetimes (IANA zones, which have no order
+  key here) makes the collection unwritable: its first change is `PBNotSupportedError` naming the
+  zone.
 - **`snapshot_ref` byte references, pagers and residency** are not provided.
 - **Format 5 is refused** (`proto_db` 2.0.0rc4, the runtime registry D62: the features `parents`,
   envelope key `p`, and `registry`, the types `ModuleList` and `Catalog`, aliases 22 and 23).
@@ -925,7 +927,6 @@ The detail:
 | Projection | `project:` and `collect:`; `PBQuery` has **no** `select:` (ruling IQ2). | Smalltalk's `select:` filters; `proto_db`'s `select` projects, and would read backwards. | A name to learn. |
 | Selection blocks | Not in the first release (ruling IQ2): a block condition is opaque and never uses an index. | Translating a block by running it on a recording object fails silently (`30 < (p at: 'age')`, inlined `ifTrue:` and `==`, methods of the element). | Index-using conditions are written with `PBField`. |
 | Plan choice on near ties (R2) | The descent term `log2 (G + 2)` is computed as `ln x / ln 2` (protoST has no `log2`; ruling IQ4: protoST is not changed), which can differ from C's `log2` in the last bit. Two candidates whose costs are within a relative 1e-12 may be ranked differently: the same answer by another plan. | No protoST change for plan parity (IQ4). | The query vectors report such a plan difference by name and do not fail on it; any other plan difference, and every result difference, fails. |
-| Unregistered extractor (Task 4a) | A collection holding an index on an extractor this process has not registered refuses **every** change with `PBValidationError` naming the extractor: blind writes, `addIndex:` of another index and `removeIndex:` included, as does `validate` (spec 5.4). `proto_db` fails only when the extractor is called: a blind write, `remove_index` or an `add_index` that never evaluates it pass. | One rule a program can rely on, checked before any work, rather than one that depends on which hooks a write happens to run. | A program must register the extractor before changing such a collection, even to drop the index; reads need no registration. |
 | Vector and unknown index kinds (Task 4a) | A collection holding a `PBVectorIndex`, or an index of a kind protoBaseST does not know, stays read only: every change and every merge onto it is `PBNotSupportedError` naming it (IC2, ruling IQ5). | Vector search is out of scope; maintaining the other indexes but not that one would write a stale index. | Such a collection is changed from Python only. |
 | Pagers | In-process only: no portable token, no `resumePager:` (ruling IQ3). The pager's `explain` has no `'portable'` key, which `proto_db`'s `Pager.explain` has (`pager.py:221-224`); a pager here is never portable (ruling CR7). | The token's plan digest is over Python's `repr` of the plan, which protoST cannot reproduce byte for byte (spec 3.2; a portable digest is proposal IQ7, not sent). | A page sequence cannot be resumed by another process or language. |
 | Deferred | No query result cache, and so no `extractor_generation` (the registration generation that keys it); no `GroupBy`, `Agg`, `Join`, `Unnest` (`select_many`) or `ValuesScan`; no computed values, `startswith` / `endswith` or field-to-field comparisons; no collection `rebuilt` (misfiled format-3 repair) (ruling IQ3, spec 3.2). | Each is either not portable today or not an optimisation; a block condition covers computed values meanwhile. | Programs that need them wait, or use a block. |

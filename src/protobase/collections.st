@@ -104,8 +104,10 @@ reads back included.
 What cannot be maintained keeps its collection read only (design spec 3.3 and
 5.4): an index that is a PBVectorIndex, or of a kind protoBaseST does not know
 (an opaque atom), makes every change PBNotSupportedError naming it; an index on
-an extractor this process has not registered makes every change
-PBValidationError naming the extractor. Nothing is rebuilt or dropped silently.
+an extractor this process has not registered fails any change that evaluates
+the extractor (PBValidationError naming it, from PBKeySpec extract:), as in
+proto_db; a blind write, removeIndex: or an addIndex: of another index pass.
+Nothing is rebuilt or dropped silently.
 
 Operation logs (ProtoBase ConcurrentOptimized, D33; design spec 7.2). A
 PBDictionary, a PBHashDictionary, a PBSet and a PBCountedSet are
@@ -637,21 +639,20 @@ PBIndexedCollection >> _elementsOf: aCollection for: aSelector
   aCollection do: [:each | out addLast: each].
   ^ out asArray.
 
-"Signals when the collection cannot be written (design spec 3.3 and 5.4): an
+"Signals when the collection cannot be written (design spec 3.3, ruling IQ5): an
  index that is a PBVectorIndex, or not a PBIndex at all (an opaque atom: an index
  kind protoBaseST does not know), is PBNotSupportedError naming it, since
- maintaining the other indexes and not that one would write a stale index; an
- index whose key spec names an extractor this process has not registered is
- PBValidationError naming the extractor, proto_db's text (keyspec.py _registered).
+ maintaining the other indexes and not that one would write a stale index.
  Nothing is rebuilt or dropped. Every change sends it first, addIndex: and
- removeIndex: included."
+ removeIndex: included. An extractor this process has not registered is not
+ checked here: as in proto_db (keyspec.py 232), only a change that evaluates the
+ extractor fails, PBValidationError naming it (PBKeySpec extract:)."
 PBIndexedCollection >> _checkWritable: aSelector
   | set |
   set := self indexes.
   (set isNil or: [set isEmpty]) ifTrue: [^ self].
   PBAvl keysAndValuesDo: [:name :index |
     ((index isClassObject not and: [index isKindOf: PBIndex]) and: [(index isKindOf: PBVectorIndex) not])
-      ifTrue: [index keySpecObject _checkRegistered]
       ifFalse: [
         ^ PBNotSupportedError signal: self class name , ' ' , aSelector , ': the index ' , (PBCodec repr: name)
           , ' is of the type '

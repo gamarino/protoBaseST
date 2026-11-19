@@ -48,8 +48,8 @@
   `addIndex:`, `removeIndex:` and `validate` (placement, `PBMisfiledError`, then every index
   against the elements) are new. The trees are node for node `proto_db`'s after the same
   operations (`tests/interop/index_ops_identical.sh`). Still refused: a collection holding a
-  vector index or an index of an unknown kind (`PBNotSupportedError`), any change to one holding an
-  index on an unregistered extractor (`PBValidationError`), and, until Task 4b, a merge involving
+  vector index or an index of an unknown kind (`PBNotSupportedError`), a change that evaluates an
+  unregistered extractor (`PBValidationError`, as in `proto_db`), and, until Task 4b, a merge involving
   an indexed collection (`addIndex:` and `removeIndex:` answer an incomplete log).
 - **Benchmark M1**: commits per second of single-record transactions on a 600-record dictionary
   with 0, 1 and 3 indexes. `bench/run_query.sh` now runs each unit (a size and a plan) in a
