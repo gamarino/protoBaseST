@@ -14,10 +14,14 @@ from proto_db import FileStorage, ObjectSpace
 from proto_db.collections import avl
 from proto_db.collections.dictionaries import Dictionary
 from proto_db.core.dbobject import DBObject
+from proto_db.collections.lists import List
 from proto_db.indexing import EqualityIndex, KeySpec, RangeIndex, register_extractor
+from proto_db.query.expressions import Expression
+from proto_db.query.planner import plan_query
+from proto_db.query.plans import Filter, Intersect
 
 P = (1 << 61) - 1
-ALL = ["M1", "M2", "M3"]
+ALL = ["M1", "M2", "M3", "P1", "P2", "P3"]
 SIZES = [int(n) for n in os.environ.get("QUERY_M2_SIZES", "100 1000 10000 100000").split()]
 COMMITS = int(os.environ.get("QUERY_M1_COMMITS", "200"))
 BLIND_COMMITS = int(os.environ.get("QUERY_M3_COMMITS", "120"))
@@ -131,6 +135,115 @@ def m2(n, plans):
         emit("M2", n, r[0], 1, plan, r[2], us)
 
 
+# The planner workloads P1, P2 and P3: bench/_query_bench.st PlannerBench states the data and
+# the work; each answers (rows, queries, plan, checksum, us, model, model_line).
+P1_UNITS = [("P1", c, k) for c in (1, 8, 32) for k in ("idx0", "idx2", "idx8")]
+P2_UNITS = [("P2", 2000, f"{point}-{forced}")
+            for point in ("r0001", "r0010", "r0100", "r0500", "r0900", "r0990", "r1000", "ne-few", "ne-many")
+            for forced in ("index", "scan")]
+P3_UNITS = [("P3", 2000, "intersect"), ("P3", 2000, "filter")]
+
+
+def shape(info):
+    out = [info["plan"]]
+    for child in info["children"]:
+        out.append(shape(child))
+    return "/".join(out)
+
+
+def fold(checksum, info):
+    nodes = indexes = 0
+
+    def walk(node):
+        nonlocal nodes, indexes
+        nodes += 1
+        if "index" in node:
+            indexes += int(node["index"]["index"][1:]) + 1
+        for child in node["children"]:
+            walk(child)
+    walk(info)
+    return (checksum * 31 + 64 * nodes + indexes) % P
+
+
+def p1(c, plan):
+    k = int(plan[3:])
+    coll = List()
+    for i in range(1000):
+        coll = coll.append_last(DBObject(id=i, **{f"f{f}": i * (2 * f + 3) * 7919 % 50 for f in range(8)}))
+    for m in range(k):
+        index = RangeIndex if m % 2 == 0 else EqualityIndex
+        coll = coll.add_index(index(f"i{m}", KeySpec.path(f"f{m}")))
+    conditions = []
+    for q in range(200):
+        tokens = []
+        for j in range(c):
+            tokens.append(f"f{j % 8}")
+            tokens += ["<", (7 * q + 13 * j) % 50] if j % 2 == 0 else ["==", (3 * q + j) % 50]
+        conditions.append(Expression.compile(tokens))
+    t0 = time.perf_counter_ns()
+    explains = [plan_query(coll, each).explain() for each in conditions]
+    us = (time.perf_counter_ns() - t0) // 1000
+    check = 0
+    for info in explains:
+        check = fold(check, info)
+    return 1000, 200, plan, check, us, shape(explains[-1]), None
+
+
+def planner_records(n):
+    coll = List()
+    for i in range(n):
+        coll = coll.append_last(DBObject(id=i, r=i, few=i % 4, many=i, x=i % 10, y=i % 7))
+    return coll
+
+
+def run(plan):
+    t0 = time.perf_counter_ns()
+    for _ in range(5):
+        rows = list(plan.execute())
+    us = (time.perf_counter_ns() - t0) // 1000
+    return len(rows), sum(e.id + 1 for e in rows) % P, us
+
+
+def p2(n, plan):
+    coll = (planner_records(n).add_index(RangeIndex("by_r", KeySpec.path("r")))
+            .add_index(EqualityIndex("by_few", KeySpec.path("few")))
+            .add_index(EqualityIndex("by_many", KeySpec.path("many"))))
+    forced = "index" if plan.endswith("-index") else "scan"
+    point = plan[:len(plan) - len(forced) - 1]
+    if point.startswith("r"):
+        term, index = Expression.compile(["r", "<", n * int(point[1:]) // 1000]), "by_r"
+    else:
+        index = "by_few" if point == "ne-few" else "by_many"
+        term = Expression.compile([index[3:], "!=", 0])
+    index_plan = coll.get_index(index).plan(term)
+    scan_plan = Filter(coll.as_query_plan(), term)
+    chosen = plan_query(coll, term)
+    rows, check, us = run(index_plan if forced == "index" else scan_plan)
+    return (rows, 5, plan, check, us, shape(chosen.explain()),
+            f"index_cost={round(index_plan.estimate().cost * 1000)} scan_cost={round(scan_plan.estimate().cost * 1000)}")
+
+
+def p3(n, plan):
+    coll = (planner_records(n).add_index(EqualityIndex("by_x", KeySpec.path("x")))
+            .add_index(RangeIndex("by_y", KeySpec.path("y"))))
+    hand = Intersect(coll.get_index("by_x").plan(Expression.compile(["x", "==", 3])),
+                     coll.get_index("by_y").plan(Expression.compile(["y", "==", 2])))
+    chosen = plan_query(coll, ["x", "==", 3, "y", "==", 2])
+    if plan not in ("intersect", "filter"):
+        raise SystemExit(f"P3: unknown plan {plan}")
+    rows, check, us = run(hand if plan == "intersect" else chosen)
+    return (rows, 5, plan, check, us, shape(chosen.explain()),
+            f"intersect_cost={round(hand.estimate().cost * 1000)} filter_cost={round(chosen.estimate().cost * 1000)}")
+
+
+def planner_unit(id_, n, plan):
+    rows, queries, plan, check, us, model, line = {"P1": p1, "P2": p2, "P3": p3}[id_](n, plan)
+    print(f"WORK id={id_} impl=py size={n} rows={rows} queries={queries} plan={plan} checksum={check} model={model}")
+    print(f"TIME id={id_} impl=py size={n} plan={plan} us={us}")
+    if line is not None:
+        print(f"MODEL id={id_} impl=py size={n} plan={plan} {line}")
+
+
 def main():
     units = []
     for arg in sys.argv[1:] or ALL:
@@ -140,8 +253,10 @@ def main():
         if len(parts) == 1:
             if parts[0] in ("M1", "M3"):
                 units += [(parts[0], 600, plan) for plan in ("idx0", "idx1", "idx3")]
-            else:
+            elif parts[0] == "M2":
                 units += [("M2", n, None) for n in SIZES]
+            else:
+                units += {"P1": P1_UNITS, "P2": P2_UNITS, "P3": P3_UNITS}[parts[0]]
         elif len(parts) == 3:
             units.append((parts[0], int(parts[1]), parts[2]))
         else:
@@ -151,6 +266,8 @@ def main():
             m1(n, plan)
         elif id_ == "M3":
             m1(n, plan, "M3", BLIND_COMMITS, True)
+        elif id_.startswith("P"):
+            planner_unit(id_, n, plan)
         else:
             m2(n, ["build", "fold"] if plan is None else [plan])
     print("query_workload ok")

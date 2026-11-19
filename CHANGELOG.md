@@ -98,6 +98,25 @@
   datetimes, a time, timedeltas, a UUID, an empty String and an empty ByteArray
   (`QData termValues:`). The guide's Plan 2 filter cost is corrected to `proto_db`'s
   152.95419631038686 (it read ...688, one unit in the last place).
+- **The planner** (plan Task 7, `src/protobase/planner.st`, a line for line port of `proto_db`'s
+  `query/planner.py` less its `near[]` rules): `PBPlanner plan:where:orderBy:limit:offset:`
+  answers the cheapest plan that answers what a scan answers, and `PBPlanner normalize:` the
+  normalised condition. Indexes in sorted name order (an index of an unknown kind and a
+  `PBVectorIndex` are never consulted), conjuncts deduplicated in order, candidates ranked by
+  cost, then no scan, then sorted index names; a `Union` only when every branch is index-only;
+  an ordered index scan against a `Sort`; `proto_db`'s argument errors as `PBValidationError`.
+  Tests: `tests/unit/qry_planner.st` (the 38 behaviours of `test_planner.py`, opaque and vector
+  indexes skipped, an unregistered extractor's lookup runs while its scan signals),
+  `tests/unit/qry_prop_equals_scan.st` (a planned query equals the scan over random collections
+  of every kind, index sets and conditions, reloaded and under concurrent readers; seeds from
+  `PBST_PROP_SEEDS`, default 20), `tests/unit/idx_contract_plans.st` (the plan half of the index
+  contract, and its teeth: 13 planted defects in `tests/unit/_qplants.st`, each rejected by the
+  check aimed at it), and `tests/conformance/queries.st` over the vendored vectors
+  `tests/conformance/vectors-queries/` (314 queries over nine roots of a `proto_db` space, written
+  by `tests/interop/py_query_vectors.py` through `tests/conformance/fetch_query_vectors.sh`:
+  every plan node for node and cost for cost `proto_db`'s, every result equal, 0 near ties). The
+  guide's worked-plan figures are checked against `proto_db`'s planner by
+  `tests/docs/guide_plans.sh` (`tests/interop/py_guide_plans.py`, ruling CR10).
 - **Benchmark M1**: commits per second of single-record transactions on a 600-record dictionary
   with 0, 1 and 3 indexes. `bench/run_query.sh` now runs each unit (a size and a plan) in a
   process of its own with an explicit heap budget (`PROTOCORE_HEAP_LIMIT_CELLS`) and reports each

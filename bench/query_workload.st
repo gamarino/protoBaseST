@@ -39,6 +39,15 @@
  the same rows, groups and checksum, or the run fails; the runner also requires the build and
  fold units of a size to report the same work.
 
+ P1, P2 and P3, the planner (plan Task 7; bench/_query_bench.st PlannerBench states the data):
+ P1 the planner's overhead (plan and explain only, 1, 8 and 32 conjuncts over 0, 2 and 8 indexes;
+ units P1:<conjuncts>:idx<k>), P2 the cost model against timings (a range term swept from 0.1
+ permille to every element, and != on an index of 4 and of n key groups; units P2:2000:<point>-index
+ and -scan, each plan forced), P3 the hand-built two-index intersection against the planner's
+ filter plan (P3:2000:intersect and :filter). Their WORK lines carry model=, the node names of
+ the plan PBPlanner chooses, compared with proto_db's like the rest; a MODEL line gives the model
+ costs of the plans compared (thousandths), informative only.
+
  M3, a blind write merged onto an indexed current (plan Task 4b): M1's dictionary and plans (idx0,
  idx1, idx3; bench/_query_bench.st), then QUERY_M3_COMMITS (default 120) transactions, timed
  together, each committing a new dictionary that holds M1's change j alone, without reading the
@@ -51,7 +60,7 @@ Import from: 'protobase'.
 Import from: '_query_bench'.
 
 | all units time p records report sizes m1 m2 emit commits blindCommits |
-all := #('M1' 'M2' 'M3').
+all := #('M1' 'M2' 'M3' 'P1' 'P2' 'P3').
 time := [:aBlock | | t0 | t0 := Time microsecondClockValue. aBlock value. Time microsecondClockValue - t0].
 p := (2 raisedTo: 61) - 1.
 sizes := (Smalltalk getenv: 'QUERY_M2_SIZES') ifNil: ['100 1000 10000 100000'].
@@ -67,7 +76,10 @@ units := OrderedCollection new.
   parts size = 1
     ifTrue: [
       (#('M1' 'M3') includes: parts first) ifTrue: [#('idx0' 'idx1' 'idx3') do: [:plan | units addLast: { parts first. 600. plan }]].
-      parts first = 'M2' ifTrue: [sizes do: [:n | units addLast: { 'M2'. n. nil }]]]
+      parts first = 'M2' ifTrue: [sizes do: [:n | units addLast: { 'M2'. n. nil }]].
+      parts first = 'P1' ifTrue: [units addAll: PlannerBench p1Units].
+      parts first = 'P2' ifTrue: [units addAll: PlannerBench p2Units].
+      parts first = 'P3' ifTrue: [units addAll: PlannerBench p3Units]]
     ifFalse: [
       parts size = 3 ifFalse: [Error signal: 'query_workload: a unit is <id>:<size>:<plan>, not ' , arg].
       units addLast: { parts first. (parts at: 2) asInteger. parts at: 3 }]].
@@ -143,5 +155,12 @@ units do: [:unit |
   (unit at: 1) = 'M1' ifTrue: [m1 valueWithArguments: { 'M1'. unit at: 2. unit at: 3. commits. false }].
   (unit at: 1) = 'M3' ifTrue: [m1 valueWithArguments: { 'M3'. unit at: 2. unit at: 3. blindCommits. true }].
   (unit at: 1) = 'M2' ifTrue: [
-    m2 value: (unit at: 2) value: ((unit at: 3) isNil ifTrue: [#('build' 'fold')] ifFalse: [{ unit at: 3 }])]].
+    m2 value: (unit at: 2) value: ((unit at: 3) isNil ifTrue: [#('build' 'fold')] ifFalse: [{ unit at: 3 }])].
+  ((unit at: 1) first = $P) ifTrue: [ | r |
+    r := PlannerBench perform: ((unit at: 1) asLowercase , ':plan:') asSymbol with: (unit at: 2) with: (unit at: 3).
+    ('WORK id=' , (unit at: 1) , ' impl=st size=' , (unit at: 2) printString , ' rows=' , (r at: 1) printString
+      , ' queries=' , (r at: 2) printString , ' plan=' , (r at: 3) , ' checksum=' , (r at: 4) printString
+      , ' model=' , (r at: 6)) displayNl.
+    ('TIME id=' , (unit at: 1) , ' impl=st size=' , (unit at: 2) printString , ' plan=' , (r at: 3) , ' us=' , (r at: 5) printString) displayNl.
+    (r at: 7) isNil ifFalse: [('MODEL id=' , (unit at: 1) , ' impl=st size=' , (unit at: 2) printString , ' plan=' , (r at: 3) , ' ' , (r at: 7)) displayNl]]].
 'query_workload ok' displayNl.

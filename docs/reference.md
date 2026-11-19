@@ -1058,7 +1058,8 @@ For tests, tools and readers of the format. An application does not need them.
 > (`src/protobase/keyspec.st`), `PBMemberKeys` and `PBMisfiledError`, "Indexes" (Task 3), the
 > collection messages of "Collections gain" (Tasks 4a and 4b), "Terms and expressions" (Task 5,
 > `src/protobase/terms.st`), and "Plans and explain" with the indexes' access paths and rank access
-> (Task 6, `src/protobase/plans.st`); every other message of this section is not implemented yet. It is the API of
+> (Task 6, `src/protobase/plans.st`), and `PBPlanner` (Task 7, `src/protobase/planner.st`); every
+> other message of this section is not implemented yet. It is the API of
 > the approved [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md)
 > (sections 5.2 and 5.5) and of its implementation plan's interfaces, written early so the
 > chapters can cite it. Until each task lands, the messages below are listed as pending in the
@@ -1222,7 +1223,11 @@ projection name would read backwards (ruling IQ2).
 answers a `PBQueryPlan`; `where:` also takes the 0.1 list syntax as an `Array`. Sort keys are
 `PBSortKey key: aPathOrFieldOrBlock descending: aBoolean` (plan call IP14). `PBPlanner normalize:`
 answers a condition with negations pushed inward and the one exact rewrite (`not isNone` is
-`notNone`). Malformed arguments are `PBValidationError`.
+`notNone`). Malformed arguments are `PBValidationError` (`proto_db`'s `planner.py:278-343`: the
+source, the condition, the sort keys, and a limit or offset that is not an Integer >= 0). The source
+is a `PBIndexedCollection` (its indexes are consulted in sorted name order, less an index of an
+unknown kind and a `PBVectorIndex`), its `asQueryPlan` (the same), or any other `PBQueryPlan` (no
+index; a `Filter` on top). Implemented (Task 7).
 
 ### Plans and explain
 

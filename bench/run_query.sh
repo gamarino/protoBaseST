@@ -2,12 +2,14 @@
 # Runs bench/query_workload.st (protoBaseST, on $PROTOST) and bench/py_query_workload.py (proto_db,
 # the interop venv) on the same workloads, verifies the work and prints the timings (spec 7.3).
 #
-# Usage: bench/run_query.sh [ids...]          (default: every workload: M1 M2 M3)
+# Usage: bench/run_query.sh [ids...]          (default: M1 M2 M3; the planner workloads P1 P2 P3 by name)
 #
 # A workload is split into units, <id>:<size>:<plan> (M1: 600:idx0, 600:idx1, 600:idx3; M2: <n>:build
 # and <n>:fold for each size of QUERY_M2_SIZES, default "100 1000 10000 100000"), and every unit runs
 # M3: 600:idx0, 600:idx1, 600:idx3 standalone, and 600:idx0-c3, 600:idx1-c3, 600:idx3-c3 in a
-# three-member cluster) and every unit runs
+# three-member cluster; P1: <conjuncts>:idx<k> for 1, 8 and 32 conjuncts and 0, 2 and 8 indexes; P2:
+# 2000:<point>-index and 2000:<point>-scan for each point; P3: 2000:intersect and 2000:filter; see
+# bench/_query_bench.st PlannerBench) and every unit runs
 # in a process of its own, so one size's live set never weighs on another's and the peak memory of
 # each process is its own. Each implementation prints, per unit, a WORK line (plan call IP10: id,
 # impl, size, rows, queries, plan, checksum) and a TIME line (us). The runs interleave: RUNS rounds
@@ -15,7 +17,9 @@
 # spreads over both. Every run must end with 'query_workload ok', and every run of either
 # implementation must report the same work (rows, queries, plan and checksum) as proto_db's first
 # run of the unit; the build and fold units of one M2 size must report the same rows, queries and
-# checksum; anything else is a failure (exit 1), and the runner prints 'verified' only when all
+# checksum, and so must the two forced plans of a P2 point and P3's two plans; P units also carry
+# model= (the plan the planner chooses) in their work, and their MODEL lines (the model costs, from
+# proto_db's and protoBaseST's first runs) are printed, never compared; anything else is a failure (exit 1), and the runner prints 'verified' only when all
 # agree. Timings are reported as the minimum and the median over the runs, never asserted, with
 # each implementation's peak resident set (the largest over its runs of the unit, /usr/bin/time).
 #
@@ -57,6 +61,10 @@ for id in "${@:-M1 M2 M3}"; do
             M1) units+=(M1:600:idx0 M1:600:idx1 M1:600:idx3) ;;
             M2) for n in $SIZES; do units+=("M2:$n:build" "M2:$n:fold"); done ;;
             M3) units+=(M3:600:idx0 M3:600:idx1 M3:600:idx3 M3:600:idx0-c3 M3:600:idx1-c3 M3:600:idx3-c3) ;;
+            P1) for c in 1 8 32; do for k in idx0 idx2 idx8; do units+=("P1:$c:$k"); done; done ;;
+            P2) for p in r0001 r0010 r0100 r0500 r0900 r0990 r1000 ne-few ne-many; do
+                    units+=("P2:2000:$p-index" "P2:2000:$p-scan"); done ;;
+            P3) units+=(P3:2000:intersect P3:2000:filter) ;;
             *) fail "unknown workload $one" ;;
         esac
     done
@@ -131,6 +139,13 @@ for n in $SIZES; do
     [[ -f "$b" && -f "$f" ]] || continue
     [[ "$(sed 's/ plan=[a-z]*//' "$b")" == "$(sed 's/ plan=[a-z]*//' "$f")" ]] || fail "M2 $n: build and fold report different work"
 done
+# P2 and P3: the two forced plans of a point (and P3's two plans) must answer the same rows and checksum.
+for unit in "${units[@]}"; do
+    case "$unit" in P2:*-index) other="${unit%-index}-scan" ;; P3:*:intersect) other="${unit%intersect}filter" ;; *) continue ;; esac
+    a="$OUT/${unit//:/_}/py.1.work"; b="$OUT/${other//:/_}/py.1.work"
+    [[ -f "$a" && -f "$b" ]] || continue
+    [[ "$(sed 's/ plan=[a-z0-9-]*//' "$a")" == "$(sed 's/ plan=[a-z0-9-]*//' "$b")" ]] || fail "$unit and $other report different work"
+done
 echo "verified: $RUNS runs of each implementation report the same work (rows, queries, plan, checksum)"
 echo "RUNS=$RUNS interleaved, one process per unit; load average before: $load_before, after: $(cut -d' ' -f1-3 /proc/loadavg)"
 echo "protost: $PROTOST (PROTOCORE_HEAP_LIMIT_CELLS=$PROTOCORE_HEAP_LIMIT_CELLS; cluster members $CLUSTER_HEAP); Python: $("$PY" --version 2>&1)"
@@ -139,6 +154,7 @@ commit="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo '?')"
 echo "$(date -u +%Y-%m-%dT%H:%MZ); protoBaseST $commit; $("$PROTOST" --version 2>&1 | head -n 1)"
 echo "Machine: $(lscpu | sed -n 's/^\(Model name\|Nombre del modelo\): *//p' | head -n 1), $(nproc) CPUs, Linux $(uname -r)"
 for unit in "${units[@]}"; do [[ "$unit" == *-c3 ]] || cat "$OUT/${unit//:/_}/py.1.work"; done
+for unit in "${units[@]}"; do [[ "$unit" == P[23]:* ]] && grep -h '^MODEL ' "$OUT/${unit//:/_}/py.1" "$OUT/${unit//:/_}/st.1"; done
 for unit in "${units[@]}"; do
     [[ "$unit" == *-c3 ]] || continue
     echo "$unit retries per run (block runs beyond one per commit): $(for ((r = 1; r <= RUNS; r++)); do sed -n 's/^RETRIES .*retries=//p' "$OUT/${unit//:/_}/st.$r"; done | tr '\n' ' ')"

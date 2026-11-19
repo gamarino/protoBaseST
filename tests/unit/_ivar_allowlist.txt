@@ -156,3 +156,5 @@ PBProject>>_setFields:block:description:
 PBSort>>_setKeys:
 PBLimit>>_setLimit:offset:
 _PBSetPlan>>_setSources:
+_PBCandidate>>_setPlan:names:scans:cost:
+PBPlanner>>_setBase:indexes:

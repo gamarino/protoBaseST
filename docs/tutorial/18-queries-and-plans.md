@@ -4,12 +4,13 @@
 Program, pending: [examples/queries/pending/18_queries_and_plans.st.pending](../../examples/queries/pending/18_queries_and_plans.st.pending).
 Previous: [17. Indexes](17-indexes.md). Next: [19. Ordered reads and pages](19-ordered-reads-and-pages.md).
 
-> **Draft: the API in this chapter is not implemented.** It is planned for protoBaseST 0.3.0 by
-> the approved [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md).
-> Every block below comes from a program written against the spec's API that **has never run**.
-> The planner's behaviour described here is `proto_db`'s, read from its code and cited; the port
-> is planned to be line for line (spec 5.6). Figures marked `[measured in T<n>: ...]` do not
-> exist yet.
+> **Draft: the query API in this chapter (`PBQuery`, `PBField`) is not implemented yet.** It is
+> planned for protoBaseST 0.3.0 by the approved
+> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md). Every block
+> below comes from a program written against the spec's API that **has never run**. The planner
+> beneath it is implemented (`PBPlanner`, plan Task 7), a line for line port of `proto_db`'s
+> (spec 5.6), and its plans are `proto_db`'s node for node on the conformance vectors. Figures
+> marked `[measured in T<n>: ...]` do not exist yet.
 
 Chapter 17 made indexes part of the collection. This chapter asks questions of it: how to write a
 query, how to read the plan that answers it, and why the planner sometimes ignores an index that
@@ -121,15 +122,16 @@ lesson check: 'the same rows: an index never changes an answer'
 ## Why not use both indexes?
 
 The obvious plan for two indexed conditions is to ask both indexes and intersect the two answers.
-`proto_db`'s planner never builds it, and protoBaseST's will not either. Under the cost model an
+`proto_db`'s planner never builds it, and protoBaseST's does not either. Under the cost model an
 intersection of a and b costs `cost(a) + rows(a) + cost(b) + rows(b)`, and a filter over the
 better input costs `cost(a) + rows(a)`: the intersection can never be cheaper
 (`proto_db/query/planner.py`, module docstring, "Access paths and cost"). So enumerating
 intersections would only add untested code.
 
 That is the model's claim. Whether it holds in time, at protoST's speed, is a measurement:
-[measured in T7: bench P3, the two-index intersection built by hand against the planner's
-filter plan, on this data shape at several sizes and selectivities, RUNS=5 interleaved].
+measured in T7 (bench P3, 2000 records, 5 runs): the hand-built intersection took 3.8x the
+filter plan's time in `proto_db` and 11.6x in protoBaseST (model: 2.4x), so the claim holds at both
+speeds ([deviations.md](../deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
 
 ## Why the planner sometimes scans
 
@@ -148,10 +150,12 @@ every cost in this chapter). In this model the switch comes almost at once: with
 two cities the lookup costs 3 and the scan 4. That is the model's crossover in collection size, and
 it is too small to be worth measuring (ruling CR2). What matters to a program is whether the
 timings agree with the model where it switches for a reason other than size, the selectivity of the
-condition: [measured in T7: bench P2, for a range term swept from very selective to unselective and
-for `ne:` on indexes with few and with nearly n key groups, the point where the cost model switches
-between the index plan and a scan with a filter, and whether the measured times of the two plans,
-both forced, cross at that point].
+condition: measured in T7 (bench P2, 2000 records, both plans forced): the model switches to the scan only
+between 99 % and 100 % of a unique range key, and for `ne:` on an index of n groups, and the
+timings do not cross there: at both switch points the index plan is still the faster, by 4 % and 30
+% in protoBaseST and 31 % and 24 % in `proto_db`; below the switch the index wins in proportion to
+the rows. The model is slightly pessimistic about the index, never wrong about the answer
+([deviations.md](../deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
 
 ## `not (age = 30)` is not `age ne: 30`
 

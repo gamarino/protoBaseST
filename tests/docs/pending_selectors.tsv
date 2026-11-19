@@ -7,8 +7,6 @@
 # Task 4a: collections maintain their indexes (4a and 4b share the spec's T4)
 # Task 5: terms and expressions
 # Task 7: the planner
-normalize:	7
-plan:where:orderBy:limit:offset:	7
 # Task 8: PBQuery and PBField
 between:and:	8
 betweenLeftOpen:and:	8

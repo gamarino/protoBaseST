@@ -55,9 +55,9 @@ test_index_base.py::test_element_identity	ported	tests/unit/idx_keygroups.st	mix
 test_index_key_neutrality.py::test_an_element_index_has_the_same_bytes_however_the_value_was_built	ported	tests/unit/idx_keygroups.st	the stored bytes do not depend on how a value was built
 test_index_key_neutrality.py::test_a_field_index_has_the_same_bytes_however_the_value_was_built	ported	tests/unit/idx_keygroups.st	the stored bytes do not depend on how a value was built
 test_index_key_neutrality.py::test_an_extractor_index_has_the_same_bytes_however_the_key_was_built	ported	tests/unit/idx_keygroups.st	the stored bytes do not depend on how a value was built
-test_index_contract.py::test_index_contract	deferred	7	Contract over every index kind: structure half in Task 3, whole contract with plans in Task 7.
+test_index_contract.py::test_index_contract	ported	tests/unit/idx_contract_plans.st	the whole contract holds for PBEqualityIndex and PBRangeIndex, on records and values, every seed
 test_index_contract.py::test_scan_index_is_registered	n/a	Python-only API	Registers the Python test-support ScanIndex kinds; protoBaseST writes no user index kinds (spec 3.3), and idx_contract.st runs the contract directly.
-test_index_contract.py::test_contract_rejects_broken_index	deferred	7	Contract over every index kind: structure half in Task 3, whole contract with plans in Task 7.
+test_index_contract.py::test_contract_rejects_broken_index	ported	tests/unit/idx_contract_plans.st	every planted defect is rejected by the check aimed at it
 test_keyspec.py::test_path_reads_record_attributes_and_absent_is_missing	ported	tests/unit/idx_keyspec.st	path steps read records, maps and other atoms
 test_keyspec.py::test_dotted_path_through_records_and_mappings	ported	tests/unit/idx_keyspec.st	path steps read records, maps and other atoms
 test_keyspec.py::test_private_and_reserved_names_are_never_read	ported	tests/unit/idx_keyspec.st	private and reserved names are never read
@@ -121,44 +121,44 @@ test_expressions.py::test_truthiness_operators	ported	tests/unit/qry_expressions
 test_expressions.py::test_module_reexports_term	n/a	Python-only API	Checks which Python module re-exports Term, which has no protoST counterpart.
 test_expressions.py::test_term_equality_and_hash_follow_values_equal	ported	tests/unit/qry_expressions.st	terms are expressions, equal by value semantics
 test_expressions.py::test_contains_on_dicts_and_collection_atoms	ported	tests/unit/qry_expressions.st	contains and truthiness
-test_planner.py::test_no_where_is_the_scan_itself	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_collection_scan_plan_source_uses_the_collection_indexes	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_other_plan_sources_get_a_filter_on_top	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_where_accepts_the_list_syntax	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_invalid_arguments_raise	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_picks_the_cheapest_index_and_keeps_the_rest_as_residual	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_cheaper_index_wins_over_a_dearer_one_on_the_same_term	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_estimate_ties_break_by_index_name	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_ne_term_alone_prefers_the_index_complement_over_scan_plus_filter	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_and_keeps_every_unindexed_conjunct_in_order	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_duplicate_conjuncts_are_planned_once	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_no_index_means_scan_plus_filter_of_the_whole_predicate	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_or_fully_indexed_uses_union	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_or_with_an_unindexed_branch_falls_back_to_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_or_with_a_negated_branch_falls_back_to_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_unselective_union_loses_to_the_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_or_conjunct_inside_and_is_an_access_path	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_union_keeps_list_duplicates_exactly	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_normalize_de_morgan_and_presence_only	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_not_presence_uses_the_index_and_not_comparison_stays_residual	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_not_over_and_becomes_a_scan_filtered_by_the_disjunction	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_not_over_or_of_presence_terms_is_indexed	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_mixed_type_values_by_element	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_mixed_type_values_and_missing_by_path	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_order_by_uses_a_range_index_when_present	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_order_by_single_path_string_and_filter_on_ordered_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_order_by_without_ordering_index_sorts	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_order_by_two_keys_sorts_even_with_an_index_on_the_first	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_selective_where_then_sort_beats_ordered_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_range_and_order_on_the_same_key_picks_by_cost	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_limit_and_offset_apply_after_ordering	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_no_where_is_the_scan_itself	ported	tests/unit/qry_planner.st	no condition is the scan itself; a scan source and the list syntax use the indexes; another plan gets a Filter
+test_planner.py::test_collection_scan_plan_source_uses_the_collection_indexes	ported	tests/unit/qry_planner.st	no condition is the scan itself; a scan source and the list syntax use the indexes; another plan gets a Filter
+test_planner.py::test_other_plan_sources_get_a_filter_on_top	ported	tests/unit/qry_planner.st	no condition is the scan itself; a scan source and the list syntax use the indexes; another plan gets a Filter
+test_planner.py::test_where_accepts_the_list_syntax	ported	tests/unit/qry_planner.st	no condition is the scan itself; a scan source and the list syntax use the indexes; another plan gets a Filter
+test_planner.py::test_invalid_arguments_raise	ported	tests/unit/qry_planner.st	malformed arguments are PBValidationError (test_invalid_arguments_raise)
+test_planner.py::test_picks_the_cheapest_index_and_keeps_the_rest_as_residual	ported	tests/unit/qry_planner.st	the cheapest index answers and the rest stays residual; a dearer index loses; ties go to the smaller name; != uses the complement; on equal cost an index plan beats the scan
+test_planner.py::test_cheaper_index_wins_over_a_dearer_one_on_the_same_term	ported	tests/unit/qry_planner.st	the cheapest index answers and the rest stays residual; a dearer index loses; ties go to the smaller name; != uses the complement; on equal cost an index plan beats the scan
+test_planner.py::test_estimate_ties_break_by_index_name	ported	tests/unit/qry_planner.st	the cheapest index answers and the rest stays residual; a dearer index loses; ties go to the smaller name; != uses the complement; on equal cost an index plan beats the scan
+test_planner.py::test_ne_term_alone_prefers_the_index_complement_over_scan_plus_filter	ported	tests/unit/qry_planner.st	the cheapest index answers and the rest stays residual; a dearer index loses; ties go to the smaller name; != uses the complement; on equal cost an index plan beats the scan
+test_planner.py::test_and_keeps_every_unindexed_conjunct_in_order	ported	tests/unit/qry_planner.st	every unindexed conjunct is kept in order; duplicate conjuncts are planned once; no index is a scan and a filter
+test_planner.py::test_duplicate_conjuncts_are_planned_once	ported	tests/unit/qry_planner.st	every unindexed conjunct is kept in order; duplicate conjuncts are planned once; no index is a scan and a filter
+test_planner.py::test_no_index_means_scan_plus_filter_of_the_whole_predicate	ported	tests/unit/qry_planner.st	every unindexed conjunct is kept in order; duplicate conjuncts are planned once; no index is a scan and a filter
+test_planner.py::test_or_fully_indexed_uses_union	ported	tests/unit/qry_planner.st	a disjunction is a Union only when every branch has an index plan and it is cheaper; an Or conjunct is an access path
+test_planner.py::test_or_with_an_unindexed_branch_falls_back_to_scan	ported	tests/unit/qry_planner.st	a disjunction is a Union only when every branch has an index plan and it is cheaper; an Or conjunct is an access path
+test_planner.py::test_or_with_a_negated_branch_falls_back_to_scan	ported	tests/unit/qry_planner.st	a disjunction is a Union only when every branch has an index plan and it is cheaper; an Or conjunct is an access path
+test_planner.py::test_unselective_union_loses_to_the_scan	ported	tests/unit/qry_planner.st	a disjunction is a Union only when every branch has an index plan and it is cheaper; an Or conjunct is an access path
+test_planner.py::test_or_conjunct_inside_and_is_an_access_path	ported	tests/unit/qry_planner.st	a disjunction is a Union only when every branch has an index plan and it is cheaper; an Or conjunct is an access path
+test_planner.py::test_union_keeps_list_duplicates_exactly	ported	tests/unit/qry_planner.st	a Union keeps List duplicates exactly
+test_planner.py::test_normalize_de_morgan_and_presence_only	ported	tests/unit/qry_planner.st	normalize: pushes negations by De Morgan and rewrites only not ?N and not ?!N
+test_planner.py::test_not_presence_uses_the_index_and_not_comparison_stays_residual	ported	tests/unit/qry_planner.st	not presence uses the index, a negated comparison stays residual, not over and scans, not over or of presence terms is indexed
+test_planner.py::test_not_over_and_becomes_a_scan_filtered_by_the_disjunction	ported	tests/unit/qry_planner.st	not presence uses the index, a negated comparison stays residual, not over and scans, not over or of presence terms is indexed
+test_planner.py::test_not_over_or_of_presence_terms_is_indexed	ported	tests/unit/qry_planner.st	not presence uses the index, a negated comparison stays residual, not over and scans, not over or of presence terms is indexed
+test_planner.py::test_mixed_type_values_by_element	ported	tests/unit/qry_planner.st	equal-but-distinct values stay apart, by element and by path, PBMissing and nil included
+test_planner.py::test_mixed_type_values_and_missing_by_path	ported	tests/unit/qry_planner.st	equal-but-distinct values stay apart, by element and by path, PBMissing and nil included
+test_planner.py::test_order_by_uses_a_range_index_when_present	ported	tests/unit/qry_planner.st	a range index orders both ways, under the whole condition as a filter; without one, or for two keys, a Sort
+test_planner.py::test_order_by_single_path_string_and_filter_on_ordered_scan	ported	tests/unit/qry_planner.st	a range index orders both ways, under the whole condition as a filter; without one, or for two keys, a Sort
+test_planner.py::test_order_by_without_ordering_index_sorts	ported	tests/unit/qry_planner.st	a range index orders both ways, under the whole condition as a filter; without one, or for two keys, a Sort
+test_planner.py::test_order_by_two_keys_sorts_even_with_an_index_on_the_first	ported	tests/unit/qry_planner.st	a range index orders both ways, under the whole condition as a filter; without one, or for two keys, a Sort
+test_planner.py::test_selective_where_then_sort_beats_ordered_scan	ported	tests/unit/qry_planner.st	a selective condition then a Sort beats an ordered scan; on one key, the cost decides
+test_planner.py::test_range_and_order_on_the_same_key_picks_by_cost	ported	tests/unit/qry_planner.st	a selective condition then a Sort beats an ordered scan; on one key, the cost decides
+test_planner.py::test_limit_and_offset_apply_after_ordering	ported	tests/unit/qry_planner.st	limit and offset apply after the order
 test_planner.py::test_near_without_index_raises	n/a	excluded: vector	The kNN planner rules are excluded by spec 3.3, never ported.
 test_planner.py::test_near_with_index_uses_vector_search_never_a_filter	n/a	excluded: vector	The kNN planner rules are excluded by spec 3.3, never ported.
 test_planner.py::test_near_in_a_disjunction_forces_a_union_with_a_filtered_scan_branch	n/a	excluded: vector	The kNN planner rules are excluded by spec 3.3, never ported.
 test_planner.py::test_near_where_with_order_by_never_filters_on_the_ordered_scan	n/a	excluded: vector	The kNN planner rules are excluded by spec 3.3, never ported.
-test_planner.py::test_explain_is_exactly_the_executed_node_tree	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_planning_is_per_version	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
-test_planner.py::test_property_planned_result_equals_the_scan	deferred	7	Planner behaviour, access paths and ranking, ported with Task 7.
+test_planner.py::test_explain_is_exactly_the_executed_node_tree	ported	tests/unit/qry_planner.st	explain is exactly the node tree the plan runs, and is deterministic
+test_planner.py::test_planning_is_per_version	ported	tests/unit/qry_planner.st	planning is per version: a plan keeps answering for its version
+test_planner.py::test_property_planned_result_equals_the_scan	ported	tests/unit/qry_prop_equals_scan.st	the planned result equals the scan, as a multiset and sorted by the order keys, over every collection kind, reloaded and read by concurrent actors
 test_query_plans.py::test_estimate_is_frozen_and_validated	ported	tests/unit/qry_plans.st	PBEstimate is frozen and validated
 test_query_plans.py::test_query_plan_is_abstract	ported	tests/unit/qry_plans.st	PBQueryPlan is abstract
 test_query_plans.py::test_collection_scan_plan	ported	tests/unit/qry_plans.st	a collection scan executes, estimates and explains as proto_db, empty or not
@@ -287,8 +287,8 @@ test_query_cache.py::test_key_bytes_count_in_the_bound	n/a	deferred: cache	The q
 test_query_cache.py::test_a_shared_result_cannot_be_changed	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
 test_query_cache.py::test_a_disabled_cache_counts_no_misses_and_no_refusals	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
 test_query_cache.py::test_every_key_holds_the_decimal_context_and_exceptions_are_never_cached	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
-test_index_equals_scan.py::test_planned_query_equals_scan	deferred	7	Property that a planned query equals the scan, ported with Task 7.
-test_index_equals_scan.py::test_every_access_path_was_exercised	deferred	7	Property that a planned query equals the scan, ported with Task 7.
+test_index_equals_scan.py::test_planned_query_equals_scan	ported	tests/unit/qry_prop_equals_scan.st	the planned result equals the scan, as a multiset and sorted by the order keys, over every collection kind, reloaded and read by concurrent actors
+test_index_equals_scan.py::test_every_access_path_was_exercised	ported	tests/unit/qry_prop_equals_scan.st	every access path was exercised: scan, index, union and ordered scan
 test_index_rank.py::test_built_index_windows_equal_execution	ported	tests/unit/qry_rank.st	windows equal the slices of execute on built indexes, for every operator and ordered scan
 test_index_rank.py::test_incremental_writes_keep_weights_exact	ported	tests/unit/qry_rank.st	additions, removals and replacements keep the weights exact and the windows equal execution
 test_index_rank.py::test_window_bounds_are_validated	ported	tests/unit/qry_rank.st	window bounds are validated

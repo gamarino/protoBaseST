@@ -933,7 +933,7 @@ The detail:
 | `isExtractorRegistered:` | A protoBaseST addition: `proto_db` has no such function (its programs call `extractor_version` and catch the error). | Asking needs no exception handler. | None: one more message. |
 | Projection | `project:` and `collect:`; `PBQuery` has **no** `select:` (ruling IQ2). | Smalltalk's `select:` filters; `proto_db`'s `select` projects, and would read backwards. | A name to learn. |
 | Selection blocks | Not in the first release (ruling IQ2): a block condition is opaque and never uses an index. | Translating a block by running it on a recording object fails silently (`30 < (p at: 'age')`, inlined `ifTrue:` and `==`, methods of the element). | Index-using conditions are written with `PBField`. |
-| Plan choice on near ties (R2) | The descent term `log2 (G + 2)` is computed as `ln x / ln 2` (protoST has no `log2`; ruling IQ4: protoST is not changed), which can differ from C's `log2` in the last bit. Two candidates whose costs are within a relative 1e-12 may be ranked differently: the same answer by another plan. | No protoST change for plan parity (IQ4). | The query vectors report such a plan difference by name and do not fail on it; any other plan difference, and every result difference, fails. |
+| Plan choice on near ties (R2) | The descent term `log2 (G + 2)` and a sort's `n log2 n` are computed by `PBCost class >> log2:` (`src/protobase/plans.st`, the one place a logarithm is computed, plan call IP7) as `ln x / ln 2` (protoST has no `log2`; ruling IQ4: protoST is not changed), which can differ from C's `log2` in the last bit. Two candidates whose costs are within a relative 1e-12 may be ranked differently: the same answer by another plan. | No protoST change for plan parity (IQ4). | The query vectors (`tests/conformance/queries.st`) report such a plan difference by name and do not fail on it; it counts as a near tie only when the choice differs (the node and index names) and the root costs agree within plan call IP8; any other plan difference, and every result difference, fails. Measured at Task 7: 0 near ties in the 314 recorded queries, every plan node for node and cost for cost `proto_db`'s. |
 | Vector and unknown index kinds (Task 4a) | A collection holding a `PBVectorIndex`, or an index of a kind protoBaseST does not know, stays read only: every change and every merge onto it is `PBNotSupportedError` naming it (IC2, ruling IQ5). | Vector search is out of scope; maintaining the other indexes but not that one would write a stale index. | Such a collection is changed from Python only. |
 | `near[]` terms (Task 5) | `PBTerm path:op:value:` with `'near[]'`, and the list syntax naming it, signal `PBNotSupportedError` when the term is made; `proto_db` builds the term (a `NearQuery`) and refuses it only when it is evaluated by a scan, answering it with a vector plan otherwise. | Vector search is out of scope (spec 3.3); a term no plan of this port can answer is refused where it is written, never later. | A query naming `near[]` fails at once, as every vector feature does. |
 | Atoms and instant-form IANA datetimes in `describe` (Task 5) | `describe` (so `explain`) renders an atom as `<type name oid=...>` and an instant-form datetime in an IANA zone by its `printString`; `proto_db`'s `display_value` prints Python's `repr`: a record's fields (`DBObject(r=1)`), a collection's count, a stub's storage pointer (`<type stub at ...>`), a zone datetime's wall clock. Every other value is rendered as Python renders it, checked by `tests/unit/qry_terms.st`: against `proto_db` for the values of its vector (numbers, `Decimal('1.50')`, `inf`, strings, `b'\x00'`, dates, naive and fixed-offset datetimes, times, timedeltas, UUIDs, tuples), and against CPython's text for the rest (`Decimal('Infinity')`, `Decimal('NaN')` and the other specials, named offsets, `fold=1`, a time or a format-3 datetime in an IANA zone, `zoneinfo.ZoneInfo(key='Europe/Rome')`, `MutableObject('cell')`, maps as `{'@dict': ...}`). | Python's `repr` of a record walks its fields with Python's rules; an instant-form datetime holds only its UTC instant, and its wall clock in the zone needs a time-zone database (design 4.3). A time and a format-3 datetime keep their wall clock, so they are rendered. | The `explain` of a term whose operand is an atom, or of a key that is an instant-form zone datetime, differs in that one value; results do not. |
@@ -1112,15 +1112,12 @@ What the figures say, and what they do not:
 
 ### Queries and indexes
 
-Planned for 0.3.0 (spec section 7.3, `bench/run_query.sh`). M1, M2 and M3 are measured so far (below);
+Planned for 0.3.0 (spec section 7.3, `bench/run_query.sh`). M1, M2, M3 and P1-P3 are measured so far (below);
 the drafts cite these markers for the rest, each filled by the task named:
 
 - [measured in T8: Q1-Q4, point equality, `in` and ranges, compound conditions, ordering, indexed
   against a forced scan, in both implementations]
 - [measured in T9: Q5, page k by rank against materialised, and `count` by rank]
-- [measured in T7: P1 planner overhead; P2 where the cost model switches between an index plan and
-  a scan with a filter as selectivity varies, and whether the timings cross there; P3 the
-  hand-built intersection against the filter plan]
 - [measured in T10: the full comparison with `proto_db`, with date, machine, load, both commits and
   both binaries]
 
@@ -1219,6 +1216,90 @@ Commits per second from the minimum of five runs (medians: standalone within 5 %
   workload needs.
 - Not measured: `proto_db`'s cluster on this workload, a longer lease, more writers per member,
   sizes other than 600.
+
+#### P1, P2, P3: the planner's overhead, the cost model against timings, the intersection
+
+`RUNS=5 bench/run_query.sh P1 P2 P3`. **Indicative only.** Measured 2026-11-19 (about 12:09-12:28 UTC) on
+the machine of M1 to M3 (AMD Ryzen 5 5500U, 6 cores, 12 threads, Linux 7.0.0, DEV12), load average
+2.6 before and 3.0 after (other desktop sessions open, not controlled); protoBaseST at `1ebabee`
+with the Task 7 working tree (committed as the Task 7 commit; the only source edit during the run
+renamed the planner's internal candidate accessor, no change of behaviour), the `pinned-360` build
+(protoST 0.12.0 on protoCore 3.6.0); `proto_db` v2.0.0rc4 (`8e6127f`) on CPython 3.14.0. One
+process per unit, five rounds interleaved, protost heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`.
+The data and work are `bench/_query_bench.st` (`PlannerBench`) and `bench/py_query_workload.py`.
+Every run self-reports its rows, queries, checksum and `model=`, the node names of the plan the
+planner chooses; all ten runs of every unit agreed with `proto_db`'s first, so on every unit the
+two planners chose the same plan; the two forced plans of a P2 point, and P3's two plans, answered
+the same rows and checksum. Times are the minimum of five (medians within 10 % of it, but P1 32
+conjuncts over 2 indexes in protoBaseST, 20 %, and `proto_db`'s scan at `r < 2000`, 18 %).
+
+**P1, planner overhead**: `plan` and `explain` of 200 conditions, no execution, on a `PBList` of
+1000 records with 0, 2 or 8 indexes (alternately range and equality on eight fields).
+
+| Conjuncts | Indexes | `proto_db` ms per query | protoBaseST ms per query | ratio |
+|---|---|---|---|---|
+| 1 | 0 | 0.04 | 0.76 | 19.9x |
+| 1 | 2 | 0.07 | 1.86 | 25.1x |
+| 1 | 8 | 0.10 | 2.41 | 25.0x |
+| 8 | 0 | 0.11 | 2.54 | 23.9x |
+| 8 | 2 | 0.27 | 4.92 | 18.2x |
+| 8 | 8 | 0.67 | 11.2 | 16.8x |
+| 32 | 0 | 0.31 | 9.07 | 29.0x |
+| 32 | 2 | 1.38 | 17.9 | 13.0x |
+| 32 | 8 | 4.64 | 45.5 | 9.8x |
+
+The cost grows with conjuncts times indexes, as `planner.py`'s design says (one candidate per
+supported conjunct, each estimated): 32 conjuncts over 8 indexes cost protoBaseST 45 ms a query,
+`proto_db` 4.6 ms. The ratio falls as the work becomes estimating (index descents) rather than
+building expressions and explains.
+
+**P2, the cost model against timings**: 2000 records; a `PBRangeIndex` on a unique key `r`,
+`PBEqualityIndex`es on `few` (4 key groups) and `many` (2000 groups). Each point runs the index's
+own plan and a `Filter` over the scan, both forced, five executions timed together. Model costs are
+`proto_db`'s and protoBaseST's alike (they agree to the unit).
+
+| Term | rows | model: index / scan cost | planner chooses | `proto_db` ms index / scan | protoBaseST ms index / scan |
+|---|---|---|---|---|---|
+| `r < 2` | 2 | 15.0 / 4000 | IndexRange | 0.07 / 27.9 | 1.5 / 678 |
+| `r < 20` | 20 | 51.0 / 4000 | IndexRange | 0.23 / 27.1 | 9.8 / 684 |
+| `r < 200` | 200 | 411 / 4000 | IndexRange | 1.8 / 27.4 | 66 / 675 |
+| `r < 1000` | 1000 | 2011 / 4000 | IndexRange | 8.7 / 28.0 | 333 / 701 |
+| `r < 1800` | 1800 | 3611 / 4000 | IndexRange | 16.0 / 27.8 | 605 / 727 |
+| `r < 1980` | 1980 | 3971 / 4000 | IndexRange | 17.4 / 27.8 | 670 / 697 |
+| `r < 2000` | 2000 | 4011 / 4000 | scan + Filter | 19.2 / 28.0 | 676 / 707 |
+| `few != 0` (4 groups) | 1500 | 2005 / 4000 | IndexComplement | 3.5 / 26.9 | 112 / 627 |
+| `many != 0` (2000 groups) | 1999 | 4001 / 4000 | scan + Filter | 20.7 / 27.2 | 443 / 632 |
+
+- **The model switches** to the scan between 99 % and 100 % selectivity on the unique range
+  index, and for `!=` when the index has n groups (CR1: the complement wins below n − 1 groups).
+- **The timings do not cross there.** At both points where the model picks the scan the forced
+  index plan is still faster: by 4 % (range, protoBaseST) and 31 % (`proto_db`) at 100 %, by 30 %
+  (protoBaseST) and 24 % (`proto_db`) for `!=` on n groups. In protoBaseST the two plans converge
+  near the switch (0.96x at 99 % and at 100 %); in `proto_db` the index range stays about 30 %
+  cheaper than the scan and filter even when it reads everything. So the model's switch is late
+  rather than wrong in protoBaseST and slightly pessimistic about the index in both: where it
+  chooses the scan it gives up 4 % to 31 %. Below the switch, the index wins by a factor that
+  follows the rows (about 450x at 2 rows in protoBaseST, 1.04x at 1980). Why a full index pass beats a scan with
+  a filter that the model prices 0.3 % cheaper was not measured; the model charges a scanned
+  element 2 units (read, test) and an index row 1 plus its group's share.
+- Not measured: other sizes (ruling CR2: the model's switch does not move with size for a unique
+  key), and equality indexes with many rows per group.
+
+**P3, intersect**: 2000 records, `x == 3` on a `PBEqualityIndex` (200 rows) and `y == 2` on a
+`PBRangeIndex` (286 rows); 29 rows answer. The hand-built `PBIntersect` of both index plans costs
+978.8 in the model, the planner's plan (`Filter <- IndexLookup` of `x`) 403.6.
+
+| Plan | `proto_db` ms (5 runs) | protoBaseST ms (5 runs) |
+|---|---|---|
+| `Intersect (IndexLookup x, IndexRange y)` | 11.9 | 865 |
+| `Filter <- IndexLookup` (planner) | 3.1 | 74 |
+
+The model's claim holds at both speeds: the intersection is 3.8x slower in `proto_db` and 11.6x in
+protoBaseST (model: 2.4x). Where protoBaseST's intersection spends the extra time was not
+profiled.
+
+**Peak RSS** (0.7 to 5 GB for protoBaseST against about 30 MB) is the heap budget being used, not
+the live set (see M1).
 
 #### M2: the bulk build against the fold of single additions
 
