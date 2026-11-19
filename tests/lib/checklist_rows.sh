@@ -13,7 +13,7 @@
 #   checklist_prepare                 skip (77) / fail on a missing checkout or tag, needs python3
 #   checklist_list <repo path>...     the test functions of those files at the tag, as file::function
 #                                     (sets CHECKLIST_LISTING, CHECKLIST_NFILES)
-#   checklist_run <table> <plan> <min> <max> <strict 0|1> <n/a reasons, '|' separated>
+#   checklist_run <table> <plan> <min> <max> <strict 0|1> <n/a reasons, '|' separated> <sh check command>
 #                                     the task ids are min..max (numbers need no plan heading unless
 #                                     strict; lettered ids always need one)
 # and reads REPO (the repository root) and PB (the protoBase checkout).
@@ -42,16 +42,17 @@ checklist_list() {
 }
 
 checklist_run() {
-    local table="$1" plan="$2" tmin="$3" tmax="$4" strict="$5" na="$6" lettered
+    local table="$1" plan="$2" tmin="$3" tmax="$4" strict="$5" na="$6" shcheck="$7" lettered
     lettered="$(sed -n -E 's/^### Task ([0-9]+[a-z]?):.*/\1/p' "$plan" 2>/dev/null | tr '\n' ' ')"
     python3 -I - "$REPO" "$table" "$CHECKLIST_LISTING" "$CHECKLIST_NFILES" "${CHECKLIST_FINAL:-0}" \
-        "$lettered" "$tmin" "$tmax" "$strict" "$na" <<'PY'
+        "$lettered" "$tmin" "$tmax" "$strict" "$na" "$shcheck" <<'PY'
 import os, re, sys
 repo, table, listing, nfiles = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 final = sys.argv[5] == "1"
 planned = set(sys.argv[6].split())       # the tasks the plan has a '### Task <id>:' heading for
 tmin, tmax, strict = int(sys.argv[7]), int(sys.argv[8]), sys.argv[9] == "1"
-NA = tuple(sys.argv[10].split("|"))      # the n/a reasons of the caller
+NA = tuple(sys.argv[10].split("|"))
+shcheck = sys.argv[11]                   # the command whose argument names a check of a .sh test
 
 
 def labels_of(text):
@@ -86,8 +87,10 @@ def labels_of(text):
 
 def sh_labels_of(text):
     """The check labels of a .sh test: the single-quoted text of each line that is exactly
-    `cluster_check '<label>'` (indentation allowed; no quote inside the label)."""
-    return {m.group(1) for m in re.finditer(r"^[ \t]*cluster_check '([^'\n]+)'[ \t]*$", text, re.M)}
+    `<shcheck> '<label>'` (indentation allowed; no quote inside the label), <shcheck> being
+    the command the caller names."""
+    pattern = r"^[ \t]*" + re.escape(shcheck) + r" '([^'\n]+)'[ \t]*$"
+    return {m.group(1) for m in re.finditer(pattern, text, re.M)}
 
 functions = [l.strip() for l in listing.splitlines() if l.strip()]
 errors = []

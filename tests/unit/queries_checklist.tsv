@@ -1,29 +1,29 @@
 # proto_db index and query tests (tag v2.0.0rc4) and where each is ported; see queries_checklist.sh for the row rules.
 # columns: proto_db file::function, status, task or reason class, reason (or check label for ported rows)
 test_equality_index.py::test_definition_type_name_and_str_key	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_equality_index.py::test_supported_operators	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
-test_equality_index.py::test_answers_match_a_scan_with_value_semantics	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
-test_equality_index.py::test_missing_keys_are_recorded_and_never_match_ne	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_equality_index.py::test_supported_operators	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
+test_equality_index.py::test_answers_match_a_scan_with_value_semantics	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
+test_equality_index.py::test_missing_keys_are_recorded_and_never_match_ne	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
 test_equality_index.py::test_duplicates_are_counted	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
 test_equality_index.py::test_removing_an_absent_element_raises	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
 test_equality_index.py::test_unorderable_keys_and_elements	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_equality_index.py::test_estimates	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_equality_index.py::test_estimates	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
 test_equality_index.py::test_explain_reports_the_structure	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
 test_equality_index.py::test_validate_detects_stale_and_miscounted_entries	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
 test_equality_index.py::test_build_equals_fold_and_ignores_the_receiver	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
 test_equality_index.py::test_persistence_roundtrip_keeps_answers	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
 test_equality_index.py::test_readers_unaffected_by_concurrent_writers	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
 test_range_index.py::test_definition_and_type_name	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_range_index.py::test_supported_operators_and_ordering	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
-test_range_index.py::test_range_operators_stay_within_the_operand_rank	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
-test_range_index.py::test_between_variants_inclusivity	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
-test_range_index.py::test_presence_equality_and_unorderable_keys	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
-test_range_index.py::test_ordered_iteration_follows_the_total_order	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
-test_range_index.py::test_range_estimates_use_subtree_counts	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_range_index.py::test_supported_operators_and_ordering	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
+test_range_index.py::test_range_operators_stay_within_the_operand_rank	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
+test_range_index.py::test_between_variants_inclusivity	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
+test_range_index.py::test_presence_equality_and_unorderable_keys	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
+test_range_index.py::test_ordered_iteration_follows_the_total_order	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
+test_range_index.py::test_range_estimates_use_subtree_counts	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
 test_range_index.py::test_validate_detects_corruption	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
 test_range_index.py::test_build_equals_fold	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
 test_range_index.py::test_readers_unaffected_by_concurrent_writers	deferred	3	Structure of the key-group index (hooks, counts, build, validate, explain), ported with Task 3.
-test_range_index.py::test_plans_return_the_stored_values_not_an_equal_representative	deferred	6	Answers terms through supports, estimate and plan, so it is ported with the Task 6 plan operators.
+test_range_index.py::test_plans_return_the_stored_values_not_an_equal_representative	deferred	6	Depends on supports: and plan: (and estimate), which land in Task 6, so it is ported there.
 test_index_base.py::test_index_requires_every_abstract_hook	deferred	3	Index base hooks and definition rules, ported with Task 3.
 test_index_base.py::test_definition_is_validated	deferred	3	Index base hooks and definition rules, ported with Task 3.
 test_index_base.py::test_index_is_immutable	deferred	3	Index base hooks and definition rules, ported with Task 3.
@@ -36,21 +36,21 @@ test_index_base.py::test_build_starts_from_empty_and_folds_with_added	deferred	3
 test_index_base.py::test_build_accepts_any_iterable	deferred	3	Index base hooks and definition rules, ported with Task 3.
 test_index_base.py::test_empty_keeps_the_whole_definition	deferred	3	Index base hooks and definition rules, ported with Task 3.
 test_index_base.py::test_explain_default	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_supports_checks_the_key_path	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
-test_index_base.py::test_plan_on_unsupported_term_raises_not_supported	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
-test_index_base.py::test_estimate_on_unsupported_term_raises_not_supported	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
-test_index_base.py::test_ordered_iteration_is_unsupported_by_default	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
-test_index_base.py::test_ordered_scan_index	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_supports_checks_the_key_path	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
+test_index_base.py::test_plan_on_unsupported_term_raises_not_supported	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
+test_index_base.py::test_estimate_on_unsupported_term_raises_not_supported	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
+test_index_base.py::test_ordered_iteration_is_unsupported_by_default	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
+test_index_base.py::test_ordered_scan_index	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_validate_detects_an_inconsistent_index	deferred	3	Index base hooks and definition rules, ported with Task 3.
 test_index_base.py::test_validate_covers_missing_keys_and_stale_keys	deferred	3	Index base hooks and definition rules, ported with Task 3.
-test_index_base.py::test_validate_only_checks_supported_terms	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_validate_only_checks_supported_terms	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_validate_skips_unorderable_keys	deferred	3	Index base hooks and definition rules, ported with Task 3.
 test_index_base.py::test_key_spec_survives_persistence	deferred	3	Index base hooks and definition rules, ported with Task 3.
 test_index_base.py::test_index_attached_to_a_collection_persists	deferred	4a	Attaches an index to a collection and persists it, so it needs addIndex: from Task 4a.
-test_index_base.py::test_index_plan	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
-test_index_base.py::test_index_plan_without_term_needs_an_estimate	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
-test_index_base.py::test_index_plan_default_kind_and_validation	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
-test_index_base.py::test_index_plan_concurrent_execution	deferred	6	Concerns supports, estimate, plan or IndexPlan, which arrive with the Task 6 plan operators.
+test_index_base.py::test_index_plan	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
+test_index_base.py::test_index_plan_without_term_needs_an_estimate	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
+test_index_base.py::test_index_plan_default_kind_and_validation	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
+test_index_base.py::test_index_plan_concurrent_execution	deferred	6	Depends on supports: and plan: (and estimate, IndexPlan), which land in Task 6, so it is ported there.
 test_index_base.py::test_element_identity	deferred	3	Index base hooks and definition rules, ported with Task 3.
 test_index_key_neutrality.py::test_an_element_index_has_the_same_bytes_however_the_value_was_built	deferred	3	Index bytes do not depend on how the value was built, a Task 3 structure check.
 test_index_key_neutrality.py::test_a_field_index_has_the_same_bytes_however_the_value_was_built	deferred	3	Index bytes do not depend on how the value was built, a Task 3 structure check.
@@ -300,4 +300,4 @@ test_query_cache_soundness.py::test_plan_families_with_equal_keys_give_equal_res
 test_index_weights_concurrency.py::test_weights_are_exact_after_concurrent_merges_and_retries	deferred	4b	Index weights after concurrent merges onto indexed currents, ported with Task 4b.
 test_indexed_roots.py::test_appends_to_an_indexed_list	deferred	4b	Appends and blind writes on indexed roots merge concurrently, ported with Task 4b.
 test_indexed_roots.py::test_blind_set_at_on_an_indexed_dictionary	deferred	4b	Appends and blind writes on indexed roots merge concurrently, ported with Task 4b.
-test_pager_stability.py::test_pagers_and_cached_queries_stay_on_their_snapshot_under_writers	deferred	9	Pagers stay on their snapshot under concurrent writers, ported with Task 9.
+test_pager_stability.py::test_pagers_and_cached_queries_stay_on_their_snapshot_under_writers	deferred	9	Pagers stay on their snapshot under writers; the cached-query half is deferred with the query cache and is dropped and noted when Task 9 ports it.

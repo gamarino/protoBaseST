@@ -41,4 +41,4 @@ files="$(git -C "$PB" ls-tree --name-only "$TAG" tests/unit/ | grep -E '^tests/u
 checklist_list $files
 
 checklist_run "$HERE/cluster_checklist.tsv" "$REPO/docs/superpowers/plans/2026-11-13-cluster-mode.md" 19 28 0 \
-    "tiered|DEPTH = 1|Python-only API"
+    "tiered|DEPTH = 1|Python-only API" cluster_check

@@ -14,7 +14,8 @@
 # must be one the plan has a '### Task <id>:' heading for. With CHECKLIST_FINAL=1 (the final gate,
 # plan Task 10) every deferred row is an error too. The checkout is only read; without one at the
 # default path, and none named, the check is skipped (exit 77); a named one that is missing or lacks
-# the tag is a failure (as in cluster_checklist.sh).
+# the tag is a failure (as in cluster_checklist.sh). A .sh test names its check labels in lines
+# `queries_check '<label>'`.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -34,4 +35,4 @@ checklist_list \
     tests/concurrency/test_pager_stability.py
 
 checklist_run "$HERE/queries_checklist.tsv" "$REPO/docs/superpowers/plans/2026-11-18-indexed-queries.md" 1 10 1 \
-    "excluded: vector|deferred: cache|deferred: tokens|deferred: spec 3.2|Python-only API"
+    "excluded: vector|deferred: cache|deferred: tokens|deferred: spec 3.2|Python-only API" queries_check
