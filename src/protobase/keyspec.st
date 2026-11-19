@@ -249,9 +249,9 @@ PBKeySpec >> _step: aValue name: aName
   ((aValue isKindOf: PBFrozenDict) or: [aValue isKindOf: Dictionary]) ifTrue: [
     ^ aValue at: aName ifAbsent: [PBMissing default]].
   (aValue isKindOf: PBAtom) ifTrue: [
+    "A name no record may carry is missing; otherwise the field the state holds, read through
+     the memo (a PBObject's hasDefinedAttr: and at: answer the same, checking the name again)."
     (PBAtomEnvelope _nameProblem: aName) isNil ifFalse: [^ PBMissing default].
-    (aValue isKindOf: PBObject) ifTrue: [
-      ^ (aValue hasDefinedAttr: aName) ifTrue: [aValue at: aName] ifFalse: [PBMissing default]].
     ^ aValue _stateAt: aName ifAbsent: [PBMissing default]].
   ^ PBMissing default.
 

@@ -1,4 +1,4 @@
-"EXPECT: ok 60"
+"EXPECT: ok 68"
 "Atom weight, stage 2 (plan Task 12). An atom whose class has a record shape (its persistedFields,
  when its slots are its state: _PBRecordShape keepsState:) and whose state holds exactly those
  fields, in that order, keeps its slots, its oid and the shared shape, never an envelope or a
@@ -23,6 +23,25 @@ BadNameNode class >> persistedFields
   ^ #('key' 'value' 'left' 'right' 'height' 'count' '_hidden').
 BadNameNode class >> slotFields
   ^ BadNameNode persistedFields.
+
+"A shaped node and a record that count the reads of their whole state (StateReads, a test-local OrderedCollection):
+ a key path step reads one field through the memo and builds no state (plan Task 12, fix round 1)."
+PBCountedKeyNode subclass: #StateCountingNode classVariableNames: 'StateReads'.
+StateCountingNode class >> reads
+  ^ StateReads size.
+StateCountingNode class >> resetReads
+  StateReads := OrderedCollection new.
+StateCountingNode >> state
+  StateReads isNil ifFalse: [StateReads add: 1].
+  ^ super state.
+PBObject subclass: #StateCountingRecord classVariableNames: 'StateReads'.
+StateCountingRecord class >> reads
+  ^ StateReads size.
+StateCountingRecord class >> resetReads
+  StateReads := OrderedCollection new.
+StateCountingRecord >> state
+  StateReads isNil ifFalse: [StateReads add: 1].
+  ^ super state.
 
 "Draws n oids, on an actor."
 Object subclass: #Drawer.
@@ -163,6 +182,20 @@ base deleteAll.
   "A key path reads a shaped atom's field as its state does, and misses what it does not hold."
   c that: 'a key path reads a shaped atom''s field' is: ((PBKeySpec path: 'key') extract: node) equals: (node state at: 'key').
   c that: 'and misses an absent one' isTrue: ((PBKeySpec path: 'nothing') extract: node) == PBMissing default.
+  "... without building the state, for a shaped node and for a record (whose step reads the name
+   rule once)."
+  rec := StateCountingNode key: 7 orderKey: (PBKeys orderKey: 7) value: v left: nil right: nil.
+  StateCountingNode resetReads.
+  c that: 'a key path step on a shaped node reads its field' is: ((PBKeySpec path: 'key') extract: rec) equals: 7.
+  c that: 'and builds no state' is: StateCountingNode reads equals: 0.
+  rec := StateCountingRecord withAll: { 'a' -> 1. 'n' -> nil }.
+  StateCountingRecord resetReads.
+  c that: 'a key path step on a record reads its field' is: ((PBKeySpec path: 'a') extract: rec) equals: 1.
+  c that: 'a field holding nil reads nil' isTrue: ((PBKeySpec path: 'n') extract: rec) isNil.
+  c that: 'an absent field is missing' isTrue: ((PBKeySpec path: 'b') extract: rec) == PBMissing default.
+  c that: 'a name starting with _ is missing' isTrue: ((PBKeySpec path: '_a') extract: rec) == PBMissing default.
+  c that: 'a reserved name is missing' isTrue: ((PBKeySpec path: 'oid') extract: rec) == PBMissing default.
+  c that: 'and the record builds no state' is: StateCountingRecord reads equals: 0.
 
   "--- the oid pool ---"
   raw := ByteArray withAll: ((1 to: 32) asArray collect: [:i | 255]).
