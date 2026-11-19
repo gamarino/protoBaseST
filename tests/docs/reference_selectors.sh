@@ -28,6 +28,11 @@
 # above: a span `name: n keySpec: k` is accepted because `name:` and `keySpec:` are each a part of
 # some defined or pending selector, without proving that `name:keySpec:` itself is either; only a
 # span written as one selector (`name:keySpec:`) is checked whole.
+# Citation (what keeps a pending line from being stale): a span cites a pending selector when it
+# is that selector, when its keyword parts joined in order are that selector (`orderBy: aKey
+# descending: aBoolean` cites orderBy:descending:, even when `descending:` is also a part of a
+# defined selector), or when it is a lone keyword part of no defined selector that belongs to that
+# pending selector. A lone part that some defined selector has never cites a pending one.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -127,12 +132,13 @@ for doc in docs:
         if re.fullmatch(r"[\w./-]+\.(?:py|rst|st|md|sh)(?::\d+(?:-\d+)?)?", span):
             continue   # a file citation (keyed.py:596-622), not a selector
         bare = re.sub(r"'[^']*'|\"[^\"]*\"|<[^>]*>", "", span)   # string literals are not selectors
+        # A message pattern cites the pending selector its keyword parts join into
+        # (`orderBy: aKey descending: aBoolean` cites orderBy:descending:), whether or not its
+        # parts are also parts of defined selectors.
+        joined = "".join(re.findall(r"[A-Za-z_]\w*:", bare))
+        if joined in pending:
+            used.add(joined)
         for tok in re.findall(r"(?:[A-Za-z_]\w*:)+", bare):
-            # A lone keyword part cites the pending selectors it is a part of, even when the part
-            # is also a part of a defined selector (`descending:` once keyDo:over:fromWeight:descending:
-            # exists): otherwise defining one selector would make another's line look uncited.
-            if tok.count(":") == 1 and tok in pending_parts:
-                used.update(pending_parts[tok])
             if tok in defined or tok in allow_here:
                 continue
             if all(p in parts or p in allow_here for p in re.findall(r"[A-Za-z_]\w*:", tok)) and tok.count(":") == 1:

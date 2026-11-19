@@ -984,6 +984,8 @@ PBAvl class >> keyCountBelow: aRoot orderKey: anOrderKey inclusive: aBoolean
  ProtoBase's _build_balanced (plan call IP13): see _keyBuild:class:low:high:."
 PBAvl class >> keyFromSorted: anArray nodeClass: aClass
   | items prev |
+  "The node class is checked even for an empty Array: stricter than ProtoBase,
+   which never calls node_class then."
   self _keyedClass: aClass for: 'keyFromSorted:nodeClass:'.
   items := Array new: anArray size.
   prev := nil.
@@ -1003,6 +1005,8 @@ PBAvl class >> keyFromSorted: anArray nodeClass: aClass
  key_from_sorted_okeys)."
 PBAvl class >> keyFromSortedOrderKeys: anArray nodeClass: aClass
   | prev |
+  "The node class is checked even for an empty Array: stricter than ProtoBase,
+   which never calls node_class then."
   self _keyedClass: aClass for: 'keyFromSortedOrderKeys:nodeClass:'.
   prev := nil.
   anArray do: [:triple |
