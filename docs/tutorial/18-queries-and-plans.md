@@ -129,9 +129,9 @@ intersections would only add untested code.
 That is the model's claim. Whether it holds in time, at protoST's speed, is a measurement:
 measured (bench P3, one size and one selectivity: 2000 records, 29 rows, 5 runs): the hand-built
 intersection took 3.7x the filter plan's time in `proto_db`, so the claim holds there. In
-protoBaseST it took 13.2x at T7, but 0.91x after Task 8's fix round 1 made identity keys cheap, so
-at protoST's speed the claim does not hold on that data; the planner still chooses the filter, as
-`proto_db`'s does ([deviations.md](../deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
+protoBaseST it took 13.2x at T7; after Task 8's fix round 1 made identity keys cheap, the two plans
+are within noise of each other (65.5 / 67.7 against 71.9 / 74.5 ms, minimum / median), so that run
+is inconclusive at protoST's speed; the planner still chooses the filter, as `proto_db`'s does ([deviations.md](../deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
 
 ## Why the planner sometimes scans
 

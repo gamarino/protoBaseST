@@ -23,7 +23,7 @@ Contents:
 [Conformance vectors](#conformance-vectors) |
 [Cluster wire messages](#cluster-wire-messages) |
 [Cluster mode](#cluster-mode) |
-[Indexed queries (planned)](#indexed-queries-planned) |
+[Indexed queries (in progress)](#indexed-queries-in-progress) |
 [Errors and messages](#errors-and-messages) |
 [Performance](#performance) |
 [Known protoST limits](#known-protost-limits)
@@ -1196,10 +1196,17 @@ What it shows.
   0.8 ms per query from 10^2 to 10^4 records, and `proto_db` about 0.1 ms. The scan grows with the
   collection: 5.9 ms to 554 ms per query in protoBaseST, 0.3 to 27 ms in `proto_db`. At 10^4 records
   protoBaseST's index answers about 650 times faster than its scan.
-- **protoBaseST is 5 to 35 times slower than `proto_db`** on every unit. Most of it is the speed of
-  a protoST walk over immutable records: about 7x to 12x on lookups, unions and ordered streams, and
-  about 20x on scans. The `in:` scans are faster relative to `proto_db` (5x and 11x), because
-  `proto_db` tests `in` slowly on a scan.
+- **protoBaseST is 5 to 35 times slower than `proto_db`** on every unit (minimum against minimum),
+  by kind:
+  - point lookups and ordered streams: 8x to 12x (Q1 index, Q2 `in:` 1 value, Q3 AND, Q4 `all`
+    and selective);
+  - the Union of two lookups: 7x;
+  - index plans that answer many rows: 14x to 24x (Q2 `in:` 10 and 100 values, ranges of 1 % to
+    50 %), and 31x for the unselective Q4 (a sort of 500 rows);
+  - the 0.1 % range: 10x;
+  - scans, forced or chosen: 17x to 25x, and 35x for Q4's sort over the whole scan;
+  - the `in:` scans of 10 and 100 values: 11x and 5x, because `proto_db` tests a long `in` slowly
+    on a scan.
 - **The Union is now cheap.** The first run of Task 8 measured the Union of two lookups at 107x
   `proto_db`'s time, slower than its own scan. The cause was the identity key of `PBUnion`,
   `PBIntersect` and `PBDistinct`: a constant cost of about 430 µs per row, from a member tuple built
@@ -1396,18 +1403,19 @@ are compared by the runner: `proto_db`'s and protoBaseST's are equal (in thousan
 
 | Plan | `proto_db` ms (5 runs) | protoBaseST ms (5 runs), Task 7 | protoBaseST ms (5 runs), Task 8 fix round 1 |
 |---|---|---|---|
-| `Intersect (IndexLookup x, IndexRange y)` | 12.2 (re-run: 11.1) | 1139 | 65.5 |
-| `Filter <- IndexLookup` (planner) | 3.1 (re-run: 3.0) | 86 | 71.9 |
+| `Intersect (IndexLookup x, IndexRange y)` | 12.2 (re-run: 11.1 / 12.0) | 1139 | 65.5 / 67.7 |
+| `Filter <- IndexLookup` (planner) | 3.1 (re-run: 3.0 / 3.1) | 86 | 71.9 / 74.5 |
 
 At Task 7 the model's claim held at both speeds on this data. The intersection was 3.9x slower
 than the filter in `proto_db` and 13.2x in protoBaseST (model: 2.4x).
 
 Task 8's fix round 1 made the intersection's identity keys cheap, and P3 was re-run in the Q1-Q4
-run above (provenance `90bad75`, all runs verified). In `proto_db` the intersection is still 3.7x
-slower. **In protoBaseST it is now 9 % faster than the filter plan** (65.5 against 71.9 ms). The
-filter evaluates `y == 2` on each of the 200 rows of the lookup, and a term evaluation in protoST
-now costs more per row than an identity key. So the model's claim does not hold at protoST's speed
-on this data.
+run above (provenance `90bad75`, all runs verified; the re-run cells are minimum / median of five,
+ms). In `proto_db` the intersection is still 3.7x slower than the filter plan. **In protoBaseST
+the two plans are now within noise of each other** (65.5 / 67.7 against 71.9 / 74.5 ms, a 9 %
+difference, under the about 15 % this section counts as noise): the run is inconclusive on the
+model's claim at protoST's speed. The filter evaluates `y == 2` on each of the 200 rows of the
+lookup, and a term evaluation in protoST costs about as much per row as an identity key now does.
 
 The planner still chooses the filter plan, as `proto_db`'s does: plans are ported, not retuned
 (spec 5.6). Other sizes and selectivities were not measured.

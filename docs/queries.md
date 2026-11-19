@@ -20,7 +20,7 @@ and pages). The reference lists every class and message:
 
 The normative texts are `proto_db`'s own: `docs/source/indexing-framework.rst` and
 `docs/source/query-planner.rst` in the protoBase repository. Where protoBaseST differs on purpose,
-the difference is listed in [deviations.md](deviations.md#indexed-queries-planned).
+the difference is listed in [deviations.md](deviations.md#indexed-queries-in-progress).
 
 Contents:
 [Why a full scan fails at scale](#why-a-full-scan-fails-at-scale) |
@@ -440,9 +440,9 @@ less than `Filter(a, b)` at `cost(a) + rows(a)`, so `proto_db` does not enumerat
 (`planner.py`, module docstring, "Access paths and cost"; `query-planner.rst`). That is a claim of
 the model; measured (bench P3, one size and one selectivity: 2000 records, 29 rows, 5 runs): the
 hand-built intersection took 3.7x the filter plan's time in `proto_db`, so the claim holds there; in
-protoBaseST it took 13.2x at T7, but 0.91x once Task 8's fix round 1 made identity keys cheap (a
-term evaluation now costs more per row than a key), so at protoST's speed on that data the claim
-does not hold, and the planner still chooses the filter, as `proto_db`'s does ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
+protoBaseST it took 13.2x at T7, and after Task 8's fix round 1 made identity keys cheap the two
+plans are within noise of each other (65.5 / 67.7 against 71.9 / 74.5 ms, minimum / median), so the
+run is inconclusive at protoST's speed; the planner still chooses the filter, as `proto_db`'s does ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
 
 **The crossover where scanning wins.** For a tiny collection the scan and its filter (two units per
 element) are cheaper than any descent. With one element, a matching lookup costs 1 + log2 3 ≈ 2.58
@@ -815,7 +815,7 @@ same rows, checksum and plan. None exists yet.
 | Merges onto an indexed current, standalone and in a cluster | M3 | Measured in T4b: standalone protoBaseST 34.2, 11.9 and 5.1 commits/s with 0, 1 and 3 indexes, `proto_db` 141, 110 and 81; a three-member protoBaseST cluster 17.4, 6.8 and 1.1, its three-index build (189 ms) refused for the send reserve 135 to 210 times per 120 commits ([deviations.md](deviations.md#m3-a-blind-write-merged-onto-an-indexed-current-standalone-and-in-a-cluster)) |
 | `plan` and `explain` alone, 1 to 32 conjuncts, 0 to 8 indexes | P1 | Measured in T7: 0.71 to 47 ms a query in protoBaseST, 0.04 to 4.5 ms in `proto_db` ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
 | Where the cost model switches between index and scan, and whether the timings cross there | P2 | Measured in T7: the model switches to the scan at 99-100 % of a unique key and for `!=` on n groups, early: in `proto_db` the forced index plan is still 31 % and 19 % faster there; in protoBaseST the `!=` complement 30 %, the range plans within noise ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
-| The two-index intersection against the filter plan | P3 | Measured at one size and selectivity: the intersection takes 3.7x the filter plan's time in `proto_db`; in protoBaseST 13.2x at T7, and 0.91x after Task 8's fix round 1 (the model's 2.4x does not hold there); model 2.4x ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
+| The two-index intersection against the filter plan | P3 | Measured at one size and selectivity: the intersection takes 3.7x the filter plan's time in `proto_db`; in protoBaseST 13.2x at T7, and within noise of it after Task 8's fix round 1 (0.91x, inconclusive); model 2.4x ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
 | protoBaseST against `proto_db` on every workload above | all | [measured in T10: the full `bench/run_query.sh` comparison, recorded in deviations.md#performance with date, machine, load, commits and binaries] |
 
 ## Sources

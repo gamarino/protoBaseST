@@ -18,7 +18,7 @@ milliseconds. `Integer` arguments that must be positions or counts and are not a
 `PBValidationError`. "Answers a new version" means a new atom with its own oid.
 
 Contents:
-[Mapping](#mapping-from-protobase) |
+[Mapping](#mapping-from-proto_db) |
 [Space and databases](#space-and-databases) |
 [Transactions](#transactions) |
 [Mutable objects](#mutable-objects) |
