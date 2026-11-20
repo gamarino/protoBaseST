@@ -9,7 +9,7 @@
   execution of a `VectorHnsw` plan); maintenance, `validate:`, `explain` and planning work.
   **VQ2** the fsum primitive (VP) is specified now and built in protoST only if V8 shows the
   interpreted kernel dominates search time. **VQ3** vectors ship in protoBaseST **0.4.0**, after
-  0.3.0 (queries) is released. **Stack:** the phase first moves protoBaseST to protoST 0.14.0 on
+  0.3.0 (queries) is released. **Stack:** the phase first moves protoBaseST to protoST 0.14.1 on
   protoCore 3.6.1 (task V-pin). **Execution:** the tasks run to the end without approval stops:
   spec, implementation, tests, documentation, tutorial chapter 20, examples, merge, publication.
 - **Reference:** `proto_db` at `v2.0.0rc4` (`8e6127f`), read only through
@@ -22,10 +22,12 @@
   repository path.
 - **protoBaseST:** branch `feat/queries` at `2c5cb34` (HEAD moves while Task 10 commits; every
   `src/`, `docs/` and `tests/` line cited here is at `2c5cb34`, and V0 re-greps them before editing).
-  **protoST:** citations are at **0.14.0** lines, read from branch `feat/fraction-bytes-prims` at
-  `af640f1` ("protoST 0.14.0") in the `protost-numprims` worktree, because the `v0.14.0` tag did not
-  exist when this was written (the latest tag was `v0.13.0`; `main` was at `b7e206a`, 0.12.0).
-  V-pin re-checks each citation against the tag. **protoCore:** 3.6.1, no change.
+  **protoST:** citations are at the **v0.14.1** tag (`15157d7`, the pinned stack's protoST); they were
+  first read from branch `feat/fraction-bytes-prims` at `af640f1` ("protoST 0.14.0", the `v0.14.0` tag
+  `8dd0535` has the identical tree), before the tags existed. V-pin re-checked them: no file or line
+  cited in this addendum differs between `af640f1` and `v0.14.1` (v0.14.1 only adds the capped-wait fix
+  S43 and the empty-conversions test S44, in `STRuntime`, `future_prims.cpp` and their tests).
+  **protoCore:** 3.6.1, no change.
 - **Verified while revising (2026-11-19, DEV12, CPython 3.14.0, glibc 2.43):** CPython's
   `x ** 2` against `x * x` and against glibc `pow` (C1); protoST 0.14.0's (a build of the same branch at
   `e90bcc1`, the parent of `af640f1`, whose `--version` still printed 0.13.0) `Float raisedTo: 2`,
@@ -71,7 +73,7 @@ Contents: [0. Summary](#0-summary) | [1. Scope](#1-scope) |
   correctly rounded `asFloat` and `String >> asNumber`; the k-means square is protoST's
   `raisedTo:`, which calls the same libm `pow` (2.2). Speed probably needs a primitive; one is
   specified in 2.2.4 and gated on a measurement (ruling VQ2).
-- **Stack:** protoST 0.14.0 on protoCore 3.6.1 (task V-pin, gated on the `v0.14.0` tag).
+- **Stack:** protoST 0.14.1 on protoCore 3.6.1 (task V-pin, gated on the `v0.14.1` tag).
 - **Tasks:** V-pin, then V0 to V10, after Task 10 and the 0.3.0 release, plus one conditional
   protoST task (VP). V10 releases protoBaseST 0.4.0.
 
@@ -217,7 +219,7 @@ corrupt, `vector.py:372-374`).
   - **Checked by an exact oracle.** `vec_math.st` checks, for seeded and adversarial Decimals,
     that the answer `f` is the nearest Float: with the exact value `d asExactFraction` and the
     neighbours of `f`, `|d - f| <= |d - neighbour|`, ties to the even significand, compared
-    exactly with protoST 0.14.0's exact Fraction comparison (`fraction_prims.cpp`), besides the
+    exactly with protoST 0.14.1's exact Fraction comparison (`fraction_prims.cpp`), besides the
     CPython vectors (5.2): subnormal half-way Decimals, `2^-1074` halves, the largest finite
     Float's half-way neighbour, zero with extreme exponents, `-0`.
   - protoST's `Fraction >> asFloat` is never used: it divides two rounded Floats
@@ -244,7 +246,7 @@ corrupt, `vector.py:372-374`).
   (`math_prims.cpp:167-171`), a trap for the k-means port.
 - **`trainingOrderOf: aVector`**: the big-endian IEEE bytes of the components
   (`vector_backends.py:555-558`), written with `WriteStream >> nextPutFloat64:bigEndian:`
-  (`protoST lib/kernel/stream.st:131`) and read back as one unsigned Integer with protoST 0.14.0's
+  (`protoST lib/kernel/stream.st:131`) and read back as one unsigned Integer with protoST 0.14.1's
   `ByteArray >> unsignedIntegerFrom:to:bigEndian:` (`lib/kernel/bytes.st:179`). Every vector of one
   index has `dim` components, so the byte strings have equal length and Integer order is exactly
   Python's `bytes` order; one primitive and one Integer comparison replace a byte loop per
@@ -285,7 +287,7 @@ Constraints: the translation unit is compiled with `-ffp-contract=off` (a fused 
 break the error-free transformations Shewchuk's algorithm relies on, and would change the rounded
 products); results are checked against the same CPython vectors as the Smalltalk kernel, which stays
 in protoBaseST as the test oracle and the fallback when the primitive is absent (a feature probe at
-module load, not a version check, so the protoST floor stays 0.14.0). Expected gain: unknown until
+module load, not a version check, so the protoST floor stays 0.14.1). Expected gain: unknown until
 VB0 and V8 report.
 
 **What the primitive cannot serve.** `fsumOfSquaredDifferences` multiplies, so it serves the l2
@@ -864,8 +866,8 @@ task, `PROTOST` and `PROTOBASE_REPO` set explicitly). **No approval stops** (sec
 ends with its own tests and a commit; reviews requested by the plan's process are fixed in the
 owning task; V10 merges and publishes.
 
-**Gates.** V-pin starts only when protoST's `v0.14.0` tag exists (`git -C <protoST> rev-parse
---verify v0.14.0`); V10 starts only when protoBaseST's `v0.3.0` GitHub release exists.
+**Gates.** V-pin starts only when protoST's `v0.14.1` tag exists (`git -C <protoST> rev-parse
+--verify v0.14.1`); V10 starts only when protoBaseST's `v0.3.0` GitHub release exists.
 
 **Order.** V-pin first; then V0; V1 and V2 in either order; V3 after V1; V4 after V3; V5 after V4
 (collections become writable only once every backend is maintained); V6 after V2 and V5; V7 after
@@ -877,13 +879,13 @@ earlier tasks were sized in, with a wide error bar: V-pin 1.5, V0 1.5, V1 3.5, V
 only compare the tasks with each other; they are not a calendar and say nothing about how long an
 agent-driven run takes. Nothing in the phase is dated or gated by them.
 
-### Task V-pin: Move the stack to protoST 0.14.0 on protoCore 3.6.1
+### Task V-pin: Move the stack to protoST 0.14.1 on protoCore 3.6.1
 
 **Files:**
-- Modify: `README.md` (Requirements table: protoCore v3.6.1, protoIO v0.7.0, protoST v0.14.0; the
+- Modify: `README.md` (Requirements table: protoCore v3.6.1, protoIO v0.7.0, protoST v0.14.1; the
   build line and the "tests need protoST" line, 93-104 and 250 at `2c5cb34`), `docs/tutorial/erp.md`
   (34), `docs/not-done.md` (the floor notes, 108-109), `docs/decisions.md` (a ruling row: protoST
-  0.14.0 is the floor, and why), `CHANGELOG.md` (a `## 0.4.0 (unreleased)` section opening with the
+  0.14.1 is the floor, and why), `CHANGELOG.md` (a `## 0.4.0 (unreleased)` section opening with the
   requirements), `src/protobase/keys.st` (`_unsignedBigEndian:`, 324-333),
   `docs/deviations.md` (new dated runs of the headline benchmarks), this addendum's protoST
   citations (re-based to the tag).
@@ -894,13 +896,13 @@ agent-driven run takes. Nothing in the phase is dated or gated by them.
   documents above and the protoST binary the tests and benches are given (`PROTOST`).
 
 **Interfaces:**
-- Consumes: protoST `v0.14.0` (`ByteArray >> unsignedIntegerFrom:to:bigEndian:`,
+- Consumes: protoST `v0.14.1` (`ByteArray >> unsignedIntegerFrom:to:bigEndian:`,
   `lib/kernel/bytes.st:179`; the exact `Fraction` comparison primitives, `fraction_prims.cpp`),
   protoCore `v3.6.1`.
-- Produces: the stack every later V task runs on; the `pinned-361` release build (protoST 0.14.0 on
+- Produces: the stack every later V task runs on; the `pinned-361` release build (protoST 0.14.1 on
   protoCore 3.6.1) for benchmarks, as `pinned-360` was for 0.12.0 on 3.6.0.
 
-- [ ] **Step 1:** build protoST `v0.14.0` against protoCore `v3.6.1` and protoIO 0.7.0 as the
+- [ ] **Step 1:** build protoST `v0.14.1` against protoCore `v3.6.1` and protoIO 0.7.0 as the
   `pinned-361` release build; `ldd` shows it links that protoCore, never `/usr`'s.
 - [ ] **Step 2: baseline.** Run the full default suite with the venv present on `pinned-361`, before
   any code change. Expected: PASS, the same skips as on `pinned-360`. A failure that protoST or
@@ -909,21 +911,21 @@ agent-driven run takes. Nothing in the phase is dated or gated by them.
 - [ ] **Step 3: commit the pin move alone.** The documents of **Files** except `keys.st` and its
   test (README Requirements, `erp.md`, `not-done.md`, `decisions.md`, the CHANGELOG 0.4.0
   requirements); re-base every protoST citation of this addendum (and of the spec section it
-  becomes) from `af640f1` to the tag (`git diff af640f1 v0.14.0` on the cited files). No code
+  becomes) from `af640f1` to the tag (`git diff af640f1 v0.14.1` on the cited files). No code
   changes in this commit; the baseline of Step 2 is its evidence. Commit `Vectors V-pin: protoST
-  0.14.0 on protoCore 3.6.1 (pins, documents, full-suite baseline)`.
+  0.14.1 on protoCore 3.6.1 (pins, documents, full-suite baseline)`.
 - [ ] **Step 4: the primitive adoption, its own commit, fail-first.** Write `keys_unsigned.st`:
   `PBKeys _unsignedBigEndian:` on 0, 8, 16 and 33 bytes (all-zero,
   all-`16rFF`, a 16-byte oid, a mixed pattern) against the Integer the bytes spell, and a fifth
   case that calls `unsignedIntegerFrom:to:bigEndian:` directly on the same arrays, so the test
-  fails without the 0.14.0 primitive (`"EXPECT: ok 5"`; no `respondsTo:` fallback, the floor is
-  0.14.0). Run it with the 0.12.0 binary first:
+  fails without the 0.14.1 primitive (`"EXPECT: ok 5"`; no `respondsTo:` fallback, the floor is
+  0.14.1). Run it with the 0.12.0 binary first:
   Expected FAIL (`doesNotUnderstand: #unsignedIntegerFrom:to:bigEndian:`), recorded in the commit
   body. Then rewrite `_unsignedBigEndian:` (`keys.st:324-333`) as one
   `unsignedIntegerFrom: 1 to: aByteArray size bigEndian: true` for every size (the 16-byte
   two-word special case and the byte loop both go) and run it with `pinned-361`: PASS, and so do
   `tests/conformance/order.st`, `index_keys.st` and `tests/interop/avl_ops_identical.sh`. Commit
-  `Keys: an unsigned big-endian Integer from bytes in one protoST 0.14.0 primitive`. The exact
+  `Keys: an unsigned big-endian Integer from bytes in one protoST 0.14.1 primitive`. The exact
   Fraction comparison needs no code change: order keys of floats compare `Fraction` payloads
   (`keys.st:285`, `336-361`), which now take the primitive.
 - [ ] **Step 5: headline benchmarks, serially, on a quiet machine, after both commits:**
@@ -931,7 +933,7 @@ agent-driven run takes. Nothing in the phase is dated or gated by them.
   `pinned-361`. Expected: every line `verified`. Record them in `docs/deviations.md#performance` as
   new dated runs beside the 0.12.0 ones (date, machine, load, both commits, both binaries); nothing
   is asserted about time, and no earlier figure is rewritten. Commit `Vectors V-pin: headline
-  benchmarks re-measured on protoST 0.14.0`.
+  benchmarks re-measured on protoST 0.14.1`.
 
 ### Task V0: Documentation drafts, rulings and the checklist for vectors
 
@@ -1204,7 +1206,7 @@ flags (`-ffp-contract=off` for that unit), protoST tests with CPython-generated 
 protoBaseST then gains the feature probe in `PBVectorMath` (scores only: k-means keeps the
 Smalltalk `raisedTo: 2` loop, 2.2.4), re-runs `tests/conformance/vector_math.st` with and without
 the primitive, and re-measures VB0-VB2 on the release that carries it. The protoST floor stays
-0.14.0 (the probe falls back). protoCore is not touched.
+0.14.1 (the probe falls back). protoCore is not touched.
 
 ### Task V9: Final: chapter 20 runnable, documentation complete, audits
 
@@ -1230,7 +1232,7 @@ the primitive, and re-measures VB0-VB2 on the release that carries it. The proto
 Gate: protoBaseST's `v0.3.0` GitHub release exists.
 
 **Files:**
-- Modify: `CHANGELOG.md` (`## 0.4.0 — <date>`: requirements protoST 0.14.0 and protoCore 3.6.1,
+- Modify: `CHANGELOG.md` (`## 0.4.0 — <date>`: requirements protoST 0.14.1 and protoCore 3.6.1,
   vector indexes and search, the deviations DV1-DV9 by name, the measured comparison by link);
   `README.md` (a "Vector search (0.4.0)" line beside "Cluster mode (0.2.0)", the chapter 20 and
   guide rows marked **(0.4.0)** as 0.3.0's are; Requirements were moved by V-pin); `docs/not-done.md`
@@ -1244,7 +1246,7 @@ Gate: protoBaseST's `v0.3.0` GitHub release exists.
 - [ ] **Step 3:** open a pull request from `feat/vectors` to `main` and merge it with a merge
   commit, as 0.2.0 was (PR #1); tag the merge `v0.4.0`; push the tag.
 - [ ] **Step 4:** create the GitHub release `protoBaseST 0.4.0 — vector search` with the CHANGELOG
-  section as its notes, the stack pins (protoCore v3.6.1, protoIO v0.7.0, protoST v0.14.0, and the
+  section as its notes, the stack pins (protoCore v3.6.1, protoIO v0.7.0, protoST v0.14.1, and the
   protoST release of VP if it ran) and the `proto_db` reference (`v2.0.0rc4`, `8e6127f`).
 - [ ] **Step 5:** record the release in `progress.md` and report.
 
@@ -1258,7 +1260,7 @@ Settled on 2026-11-19. V0 records them in `docs/decisions.md`, section 5.
 |---|---|---|---|
 | VQ1 | **hnsw search.** Refuse it, answer it with an exact search under the `VectorHnsw` node, or write an HNSW graph in Smalltalk? | **Refuse.** `PBNotSupportedError` at the first execution of a `VectorHnsw` plan, as `proto_db` refuses it without `hnswlib` (`tests/unit/test_vector_index.py:520-531`); maintenance, `validate:`, `explain` and planning work. | "Refuse, never diverge" holds, and hnsw-indexed collections are writable from protoST. An exact answer under an hnsw node would show `proto_db`'s hnsw estimate for a full scan; a Smalltalk graph would be new, unreproducible against hnswlib, and slow to build per process. DV1. |
 | VQ2 | **A protoST primitive for fsum** (2.2.4). | **Specified now; built in protoST only if V8 shows the interpreted kernel dominates search time** (the rule of V8, Step 3). | Correctness never depends on it; the Smalltalk kernel stays as the oracle and the fallback. It cannot serve k-means, whose square is `** 2` (libm `pow`), not a product (2.2.4). |
-| VQ3 | **Release vehicle.** | **0.4.0, after 0.3.0 (queries) is released.** | 0.3.0 ships after Task 10 with IQ5 as approved, on protoST 0.12.0. The vectors phase moves the stack to protoST 0.14.0 (V-pin) and ends with the 0.4.0 release (V10). |
+| VQ3 | **Release vehicle.** | **0.4.0, after 0.3.0 (queries) is released.** | 0.3.0 ships after Task 10 with IQ5 as approved, on protoST 0.12.0. The vectors phase moves the stack to protoST 0.14.1 (V-pin) and ends with the 0.4.0 release (V10). |
 | (execution) | Approval stops. | **None.** The phase runs to the end: spec, implementation, tests, documentation, tutorial chapter 20, examples, merge, publication. | Decisions the tasks take (the VQ2 outcome, declined review findings) are recorded with their evidence in `docs/decisions.md` instead of waiting for approval. |
 
 ---
@@ -1274,7 +1276,7 @@ Settled on 2026-11-19. V0 records them in `docs/decisions.md`, section 5.
 | RV5 | **IVF interop with numpy-trained `proto_db` indexes** (DV3): protoBaseST reads and maintains them, but a protoBaseST retrain replaces numpy centroids with pure-path ones. | Valid by the format; stated in DV3 and chapter 20; `vector_both_directions.sh` validates both ways. |
 | RV6 | **Python's `random.sample` or MT19937 seeding changes between CPython versions.** | The vectors record the CPython version that generated them; `vec_random.st` fails loudly on a change. |
 | RV7 | **Host libm.** The k-means square is libm `pow`, which is not correctly rounded (2.5); another libm can round half-way squares differently, for `proto_db` and the port alike, or set `ERANGE` on a subnormal square, which CPython turns into `OverflowError` (a distance of `inf`) while protoST keeps the subnormal. | Identity is claimed and tested on one host; every generator records `platform.libc_ver()`; the half-way vectors of `vector_math.st` fail on a host whose `pow` differs, which names the cause instead of reporting a wrong centroid. |
-| RV8 | **protoST 0.14.0 is not tagged when the phase is due**, or regresses protoBaseST. | V-pin is gated on the tag and runs the full suite before any change; a protoST regression is reported upstream, never worked around. |
+| RV8 | **protoST 0.14.1 is not tagged when the phase is due**, or regresses protoBaseST. | V-pin is gated on the tag and runs the full suite before any change; a protoST regression is reported upstream, never worked around. |
 
 ---
 

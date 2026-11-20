@@ -103,17 +103,18 @@ spends most of its time on index work (65 % with one index, 85 % with three)
 
 | Component | Version | Source |
 |---|---|---|
-| protoCore | v3.6.0 | https://github.com/numaes/protoCore |
+| protoCore | v3.6.1 | https://github.com/numaes/protoCore |
 | protoIO | v0.7.0 | https://github.com/gamarino/protoIO |
-| protoST | v0.12.0 | https://github.com/gamarino/protoST |
+| protoST | v0.14.1 | https://github.com/gamarino/protoST |
 
-These are the minimum versions. The 0.3.0 suite, both soaks and the benchmarks ran on exactly
-these versions; the 0.2.0 suite also passed on protoCore 3.6.1 with protoST 0.13.0.
+These are the minimum versions. The 0.4.0 suite and benchmarks run on exactly these versions (the
+0.3.0 release was tested on protoCore 3.6.0 with protoST 0.12.0).
 
-Build protoST 0.12.0 against protoCore 3.6.0 and protoIO 0.7.0 (see its own README); it provides
-`lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S40 and
+Build protoST 0.14.1 against protoCore 3.6.1 and protoIO 0.7.0 (see its own README); it provides
+`lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S44,
 `BinaryFile >> linkCount` and `FileReference >> realPath` (the hard-link refusal and the lock
-naming of the cluster logs), which this code relies on. The Python interop tests and the ERP demo also need a checkout of the
+naming of the cluster logs), the exact `Fraction` comparison and
+the ByteArray primitive that reads an unsigned Integer of any width from bytes (both from protoST 0.14.0), which this code relies on. The Python interop tests and the ERP demo also need a checkout of the
 [protoBase repository](https://github.com/gamarino/ProtoDB), at the tag `v2.0.0rc4` (`v2.0.0rc2`
 before the cluster branch), and Python 3.12 or newer (3.11 before it; tested with 3.14):
 
@@ -260,7 +261,7 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 
 ## Running the tests
 
-The tests need protoST 0.12.0 or newer (see Requirements). Point `PROTOST` at the binary:
+The tests need protoST 0.14.1 or newer (see Requirements). Point `PROTOST` at the binary:
 
 ```sh
 export PROTOST=../protoST/build_release/protost      # default: protost from PATH

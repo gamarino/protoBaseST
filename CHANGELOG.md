@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+### Requirements
+
+- **protoST 0.14.1** (was 0.12.0), **protoCore 3.6.1** (was 3.6.0) and **protoIO 0.7.0**
+  (unchanged). protoST 0.14.0 adds the exact `Fraction` comparison and
+  `ByteArray >> unsignedIntegerFrom:to:bigEndian:`; 0.14.1 fixes S43 (a ThreadSanitizer
+  capped-wait polling flake) and S44 (empty conversions). The README Requirements table, the
+  tutorial and the examples state the new floor; the default suite passes unchanged on it.
+
 ## 0.3.0 (2026-11-20)
 
 ### Indexed queries
