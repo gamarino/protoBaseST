@@ -19,8 +19,12 @@
  (sampleRange:count:seed:), kmeans (kmeans:nlist:iterations:seed:, proto_db's pure-Python path)
  and list_for (the best-scoring centroid under the assignment metric, cosine for cosine and l2
  otherwise, lowest number on ties: IvfFlatBackend.list_for, which PBVectorIvfFlat listFor:vector:
- ports; here it pins that the scores pick proto_db's list). It prints the generator's CPython, libc and numpy lines, the number
- of cases per group, then 'vector math vectors ok'."
+ ports; here it pins that the scores pick proto_db's list). Every group runs twice (task VP-adopt,
+ Addendum V 2.2.4): with protoST 0.15.0's Float fsum primitives, when the feature probe found them,
+ and with the Smalltalk kernel forced (PBVectorMath _forceSmalltalkKernel:, a test-only switch);
+ both runs must agree with CPython. On an older protoST both runs take the Smalltalk kernel. It
+ prints the generator's CPython, libc and numpy lines, then per run its kernel and the number of
+ cases per group, then 'vector math vectors ok'."
 Import from: 'protobase'.
 
 | dir manifest blob data meta fails counts hex num key res expect check floats group |
@@ -70,12 +74,19 @@ expect := [:t | | tag |
   tag = 'f' ifTrue: ['f ' , (t at: 2) hex asLowercase] ifFalse: [
   tag = 'v' ifTrue: ['v ' , (' ' join: ((t at: 2) collect: [:b | b hex asLowercase]))] ifFalse: [
   'e ' , (t at: 3)]]]].
-check := [:aGroup :anIndex :got :wanted |
-  got = wanted ifFalse: [fails add: aGroup , ' #' , anIndex printString , ': expected ' , wanted printString , ', got ' , got printString]].
+check := nil.
 group := [:name :aBlock | | cases |
   cases := data at: name.
   cases doWithIndex: [:case :i | aBlock value: case value: i].
   counts add: name , ' ' , cases size printString].
+{ false. true } do: [:forced | | kernel |
+PBVectorMath _forceSmalltalkKernel: forced.
+kernel := PBVectorMath usesFsumPrimitive
+  ifTrue: ['the fsum primitives']
+  ifFalse: [forced ifTrue: ['the Smalltalk kernel (forced)'] ifFalse: ['the Smalltalk kernel (no primitive in this protoST)']].
+counts := OrderedCollection new.
+check := [:aGroup :anIndex :got :wanted |
+  got = wanted ifFalse: [fails add: kernel , ': ' , aGroup , ' #' , anIndex printString , ': expected ' , wanted printString , ', got ' , got printString]].
 
 group value: 'float_of' value: [:case :i | | x wanted |
   x := num value: (case at: 1).
@@ -144,8 +155,9 @@ group value: 'list_for' value: [:case :i | | metric v best bestScore |
     s := PBVectorMath score: metric query: v vector: (floats value: centroid).
     (bestScore isNil or: [s > bestScore]) ifTrue: [best := j - 1. bestScore := s]].
   check value: 'list_for' value: i value: best value: (case at: 4)].
+('kernel: ' , kernel , '; cases: ' , (', ' join: counts)) displayNl].
+PBVectorMath _forceSmalltalkKernel: false.
 
 fails do: [:each | ('FAIL ' , each) displayNl].
-('cases: ' , (', ' join: counts)) displayNl.
 fails isEmpty ifFalse: [Error signal: fails size printString , ' vector math cases differ from proto_db'].
 'vector math vectors ok' displayNl.

@@ -27,6 +27,11 @@ on them. PBNearQuery is the public value of a near[] term (terms.st).
     kmeans: vectors nlist: n iterations: i seed: s
                                     _kmeans, its pure-Python path (an Array of n centroids, each an
                                     Array of Floats)
+    hasFsumPrimitive                the feature probe: whether this protoST has Float fsum:,
+                                    fsumOfProducts:with: and fsumOfSquaredDifferences:with:
+                                    (protoST 0.15.0 on), read once when the module loads
+    usesFsumPrimitive               whether the kernel calls them: the probe, unless a test forced
+                                    the Smalltalk kernel (_forceSmalltalkKernel:, tests only)
 
   PBPythonRandom (class side only)
     sampleRange: n count: k seed: s     random.Random(s).sample(range(n), k), an Array of Integers
@@ -67,13 +72,32 @@ spellings, each where proto_db has it: the scores and the norms multiply (x * x)
 distance is Python's (a - b) ** 2, which is libm pow (vector_backends.py:548) and not always the
 correctly rounded square; squared, which is x * x in protoST, is never used.
 
+The fsum primitives (Addendum V, 2.2.4; task VP-adopt). protoST 0.15.0's Float fsum:,
+fsumOfProducts:with: and fsumOfSquaredDifferences:with: are CPython's math_fsum in C++, checked
+against CPython's vectors in protoST and against this module's in tests/conformance/vector_math.st.
+A feature probe, not a version check, decides when the module loads (Float respondsTo: #fsum:), so
+the protoST floor stays 0.14.1, where the Smalltalk kernel runs alone. The primitives serve fsum:,
+sumNonNegative: and the scores (the products and the squared differences, each rounded as the
+Smalltalk kernel rounds them, and cosine's norms), normalized: and canonicalVector:dim:'s norm;
+k-means keeps its Smalltalk loop of raisedTo: 2 terms (libm pow, which no primitive computes) and
+sums them with sumNonNegative:. The Smalltalk kernel stays as the oracle and the fallback, and
+answers wherever the primitive cannot: an Integer term (the primitive takes Floats only; the
+Smalltalk kernel's answer is kept), and sequences of unequal sizes in a score (zip). The
+primitive's own errors (Error, 'fsum: intermediate overflow' and 'fsum: -inf + inf') are matched by
+their text around the primitive call only and become the kernel's: PBValidationError with
+CPython's text, or infinity in sumNonNegative:; any other error passes. A NaN made inside a term
+(inf * 0, inf - inf) has a platform-defined sign on either path; no case reaches it from canonical
+vectors, and no test pins its bytes.
+
 Errors. Where CPython raises an error of its own (fsum's OverflowError and ValueError, float()'s
 ValueError on a signalling NaN), the port signals PBValidationError with CPython's text (deviation
 DV7: only the class differs).
 
 State. The generator's state (624 words and an index) is an Array local to one call of
 sampleRange:count:seed: or bits:count:seed:, passed to the private methods that draw from it; it is
-never kept in a class or instance variable."
+never kept in a class or instance variable. The kernel's two class variables are set once when the
+module loads: FsumPrimitive, the probe's Boolean, and SmalltalkForced, an Atom whose value only the
+tests change (_forceSmalltalkKernel:)."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/keys'.
@@ -82,8 +106,8 @@ Import from: 'protobase/codec'.
 Import from: 'protobase/keyspec'.
 Import from: 'decimal'.
 
-Object subclass: #PBVectorMath.
-PBVectorMath comment: 'The vector math kernel of the vector indexes (class side only): CPython''s float(), math.fsum and proto_db v2.0.0rc4''s scores, ranking and pure-Python k-means, bit for bit. Not public API.'.
+Object subclass: #PBVectorMath classVariableNames: 'FsumPrimitive SmalltalkForced'.
+PBVectorMath comment: 'The vector math kernel of the vector indexes (class side only): CPython''s float(), math.fsum and proto_db v2.0.0rc4''s scores, ranking and pure-Python k-means, bit for bit; protoST 0.15.0''s Float fsum primitives where the feature probe finds them, the Smalltalk kernel as their oracle and fallback. Not public API.'.
 
 Object subclass: #PBNearQuery instanceVariableNames: 'vector k threshold metric'.
 PBNearQuery comment: 'proto_db''s NearQuery: the frozen value of a near[] term, a query vector of finite Floats with k nearest members and/or a threshold, and a metric or nil.'.
@@ -168,8 +192,88 @@ PBVectorMath class >> canonicalVector: aKey dim: anInteger
     f := self floatOf: x.
     (f isNil or: [(self _isFinite: f) not]) ifTrue: [^ nil].
     out at: i put: f].
-  (self _isFinite: (self sumNonNegative: (out collect: [:x | x * x]))) ifFalse: [^ nil].
+  (self _isFinite: (self _fsumOfProducts: out with: out size: anInteger overflow: [Float infinity])) ifFalse: [^ nil].
   ^ PBTuple _trustedOn: out.
+
+"=== PBVectorMath: the fsum primitives (feature probe) ======================"
+
+"The feature probe, made once when the module loads (Addendum V, 2.2.4): whether this protoST
+ answers Float fsum: (protoST 0.15.0 adds it with fsumOfProducts:with: and
+ fsumOfSquaredDifferences:with:), and the Atom of the test-only switch, false."
+PBVectorMath class >> _initializeKernel
+  FsumPrimitive isNil ifTrue: [FsumPrimitive := Float respondsTo: #fsum:].
+  SmalltalkForced isNil ifTrue: [SmalltalkForced := Atom on: false].
+
+"Whether this protoST has the Float fsum primitives (the probe's answer)."
+PBVectorMath class >> hasFsumPrimitive
+  ^ FsumPrimitive.
+
+"Whether the kernel calls the fsum primitives: the probe found them and no test forced the
+ Smalltalk kernel."
+PBVectorMath class >> usesFsumPrimitive
+  ^ FsumPrimitive and: [SmalltalkForced value not].
+
+"For the tests only: aBoolean true makes the kernel compute with its Smalltalk code even where
+ the primitives exist, false restores the probe's choice; both paths can so be checked in one
+ process (tests/unit/vec_math.st, tests/conformance/vector_math.st). Never called by protoBaseST."
+PBVectorMath class >> _forceSmalltalkKernel: aBoolean
+  [ | current |
+    current := SmalltalkForced value.
+    SmalltalkForced value: aBoolean == true ifCurrent: current ] whileFalse.
+
+"The Float aPrimitiveBlock answers (a call of one fsum primitive), with the primitive's own errors
+ made the kernel's: an intermediate overflow is the value of anOverflowBlock, '-inf + inf' is
+ PBValidationError with CPython's text, and a term that is not a Float (an Integer, which the
+ Smalltalk kernel sums as it always has) answers aSmalltalkBlock's value. Only those errors, raised
+ by the primitive itself, are caught, by their text; any other error passes."
+PBVectorMath class >> _primitive: aPrimitiveBlock overflow: anOverflowBlock otherwise: aSmalltalkBlock
+  | outcome |
+  outcome := aPrimitiveBlock on: Error do: [:e | | kind |
+    kind := self _fsumFailure: e messageText.
+    kind isNil ifTrue: [e pass].
+    e return: kind].
+  outcome == #overflow ifTrue: [^ anOverflowBlock value].
+  outcome == #infinities ifTrue: [^ PBValidationError signal: '-inf + inf in fsum'].
+  outcome == #notFloat ifTrue: [^ aSmalltalkBlock value].
+  ^ outcome.
+
+"Which of the fsum primitives' errors aText is (protoST src/primitives/fsum_prims.cpp): #overflow,
+ #infinities, #notFloat (an element that is not a Float), or nil for any other text."
+PBVectorMath class >> _fsumFailure: aText
+  (aText isString and: [aText beginsWith: 'fsum']) ifFalse: [^ nil].
+  aText = 'fsum: intermediate overflow' ifTrue: [^ #overflow].
+  aText = 'fsum: -inf + inf' ifTrue: [^ #infinities].
+  (aText endsWith: ' is not a Float') ifTrue: [^ #notFloat].
+  ^ nil.
+
+"fsum of aSequence (anOverflowBlock's value on an intermediate overflow): the primitive Float
+ fsum: when the kernel uses it, the Smalltalk kernel otherwise."
+PBVectorMath class >> _fsum: aSequence overflow: anOverflowBlock
+  self usesFsumPrimitive ifFalse: [^ self _smalltalkFsum: aSequence overflow: anOverflowBlock].
+  ^ self _primitive: [Float fsum: aSequence] overflow: anOverflowBlock
+    otherwise: [self _smalltalkFsum: aSequence overflow: anOverflowBlock].
+
+"fsum of (a at: i) * (b at: i) for i from 1 to anInteger (Python's zip of the two): one IEEE
+ product each, then fsum. The primitive fsumOfProducts:with: when both sequences hold exactly
+ anInteger items, the products made here otherwise."
+PBVectorMath class >> _fsumOfProducts: a with: b size: anInteger overflow: anOverflowBlock
+  | products |
+  products := [(1 to: anInteger) asArray collect: [:i | (a at: i) * (b at: i)]].
+  (self usesFsumPrimitive and: [a size = anInteger and: [b size = anInteger]]) ifFalse: [
+    ^ self _fsum: products value overflow: anOverflowBlock].
+  ^ self _primitive: [Float fsumOfProducts: a with: b] overflow: anOverflowBlock
+    otherwise: [self _smalltalkFsum: products value overflow: anOverflowBlock].
+
+"_sum_nonnegative of d * d, d = (a at: i) - (b at: i), for i from 1 to anInteger: the difference
+ rounded, then the product, then fsum, an overflow being infinity. The primitive
+ fsumOfSquaredDifferences:with: when both sequences hold exactly anInteger items."
+PBVectorMath class >> _sumSquaredDifferences: a with: b size: anInteger
+  | squares |
+  squares := [(1 to: anInteger) asArray collect: [:i | | d | d := (a at: i) - (b at: i). d * d]].
+  (self usesFsumPrimitive and: [a size = anInteger and: [b size = anInteger]]) ifFalse: [
+    ^ self sumNonNegative: squares value].
+  ^ self _primitive: [Float fsumOfSquaredDifferences: a with: b] overflow: [Float infinity]
+    otherwise: [self _smalltalkFsum: squares value overflow: [Float infinity]].
 
 "=== PBVectorMath: fsum ====================================================="
 
@@ -181,15 +285,20 @@ PBVectorMath class >> canonicalVector: aKey dim: anInteger
  PBValidationError '-inf + inf in fsum' (CPython's ValueError); a non-finite partial from finite
  terms signals PBValidationError 'intermediate overflow in fsum' (CPython's OverflowError). DV7."
 PBVectorMath class >> fsum: aSequence
-  ^ self _fsum: aSequence overflow: [PBValidationError signal: 'intermediate overflow in fsum'].
+  ^ self _fsum: aSequence overflow: [self _overflow].
+
+"CPython's OverflowError of math.fsum, as PBValidationError (DV7)."
+PBVectorMath class >> _overflow
+  ^ PBValidationError signal: 'intermediate overflow in fsum'.
 
 "_sum_nonnegative (vector_backends.py:92-97): fsum of non-negative terms; an intermediate overflow
  is infinity, its true value."
 PBVectorMath class >> sumNonNegative: aSequence
   ^ self _fsum: aSequence overflow: [Float infinity].
 
-"math_fsum, answering the value of anOverflowBlock where CPython raises OverflowError."
-PBVectorMath class >> _fsum: aSequence overflow: anOverflowBlock
+"math_fsum in Smalltalk, answering the value of anOverflowBlock where CPython raises OverflowError:
+ the kernel's reference implementation, the fsum primitives' oracle and fallback."
+PBVectorMath class >> _smalltalkFsum: aSequence overflow: anOverflowBlock
   | p n count x y t hi yr lo xsave specialSum infSum done |
   count := aSequence size.
   p := Array new: count + 1.
@@ -258,14 +367,13 @@ PBVectorMath class >> _fsum: aSequence overflow: anOverflowBlock
 PBVectorMath class >> score: aMetric query: q vector: v
   | n nq nv |
   n := q size min: v size.
-  aMetric = 'ip' ifTrue: [^ self fsum: ((1 to: n) asArray collect: [:i | (q at: i) * (v at: i)])].
-  aMetric = 'l2' ifTrue: [
-    ^ (self sumNonNegative: ((1 to: n) asArray collect: [:i | | d | d := (q at: i) - (v at: i). d * d])) sqrt negated].
+  aMetric = 'ip' ifTrue: [^ self _fsumOfProducts: q with: v size: n overflow: [self _overflow]].
+  aMetric = 'l2' ifTrue: [^ (self _sumSquaredDifferences: q with: v size: n) sqrt negated].
   aMetric = 'cosine' ifTrue: [
-    nq := (self fsum: (q asArray collect: [:a | a * a])) sqrt.
-    nv := (self fsum: (v asArray collect: [:b | b * b])) sqrt.
+    nq := (self _fsumOfProducts: q with: q size: q size overflow: [self _overflow]) sqrt.
+    nv := (self _fsumOfProducts: v with: v size: v size overflow: [self _overflow]) sqrt.
     (nq = 0.0 or: [nv = 0.0]) ifTrue: [^ 0.0].
-    ^ (self fsum: ((1 to: n) asArray collect: [:i | (q at: i) * (v at: i)])) / nq / nv].
+    ^ (self _fsumOfProducts: q with: v size: n overflow: [self _overflow]) / nq / nv].
   ^ PBValidationError signal: 'Unknown metric ' , (PBCodec repr: aMetric)
     , '; expected one of [''cosine'', ''l2'', ''ip'']'.
 
@@ -304,10 +412,11 @@ PBVectorMath class >> _sliceEnd: anInteger size: aSize
 "_normalized (vector_backends.py:561-563): aVector divided by its norm (the sqrt of fsum of
  x * x), or aVector itself when the norm is 0.0; an Array of Floats."
 PBVectorMath class >> normalized: aVector
-  | n |
-  n := (self fsum: (aVector asArray collect: [:x | x * x])) sqrt.
-  n = 0.0 ifTrue: [^ aVector asArray].
-  ^ aVector asArray collect: [:x | x / n].
+  | n items |
+  items := aVector asArray.
+  n := (self _fsumOfProducts: items with: items size: items size overflow: [self _overflow]) sqrt.
+  n = 0.0 ifTrue: [^ items].
+  ^ items collect: [:x | x / n].
 
 "_training_order (vector_backends.py:555-558): struct.pack('>Nd', *v), the components' big-endian
  IEEE 754 bytes (so -0.0 and 0.0 differ), read back as one unsigned Integer: every vector of one
@@ -929,3 +1038,5 @@ PBVectorHnsw class >> check: aDictionary
     'ef_construction' -> (self _positiveInt: 'ef_construction' value: (aDictionary at: 'ef_construction' ifAbsent: [200])).
     'ef_search' -> (self _positiveInt: 'ef_search' value: (aDictionary at: 'ef_search' ifAbsent: [64])).
     'seed' -> seed }.
+
+PBVectorMath _initializeKernel.

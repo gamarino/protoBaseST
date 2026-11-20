@@ -108,7 +108,10 @@ spends most of its time on index work (65 % with one index, 85 % with three)
 | protoST | v0.14.1 | https://github.com/gamarino/protoST |
 
 These are the minimum versions. The 0.4.0 suite and benchmarks run on exactly these versions (the
-0.3.0 release was tested on protoCore 3.6.0 with protoST 0.12.0).
+0.3.0 release was tested on protoCore 3.6.0 with protoST 0.12.0). protoST 0.15.0 is recommended
+for vector search: its `Float` fsum primitives make the vector scores faster, and protoBaseST uses
+them when it finds them (a feature probe); on 0.14.1 it computes the same answers, to the bit, in
+Smalltalk.
 
 Build protoST 0.14.1 against protoCore 3.6.1 and protoIO 0.7.0 (see its own README); it provides
 `lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S44,

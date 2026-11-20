@@ -1,4 +1,4 @@
-"EXPECT: ok 12"
+"EXPECT: ok 14"
 "Vectors phase V1 (Addendum V, 2.2 and 5.1): PBVectorMath, the vector math kernel, against
  CPython and proto_db v2.0.0rc4 (proto_db/indexing/vector_backends.py). Every expected Float is
  written as its IEEE 754 binary64 bytes (big-endian hex) and every result is compared by its bytes,
@@ -19,12 +19,17 @@
  negative k; the three squares (x * x in scores and norms,
  raisedTo: 2 in k-means, on a half-way case, with a k-means witness whose centroids change if the
  square multiplies); trainingOrderOf: against byte order; and the IEEE self-test of 2.2.3 (error-free
- transformations, signed zeros, subnormals, half-way products, sqrt, the libm pow square)."
+ transformations, signed zeros, subnormals, half-way products, sqrt, the libm pow square). Then the
+ fsum primitives of protoST 0.15.0 (Addendum V, 2.2.4; task VP-adopt): the feature probe selects
+ them from protoST 0.15.0 on, and only there (Smalltalk version), and the test-only switch forces
+ the Smalltalk kernel; on both paths the kernel answers alike and the primitives' errors become
+ the kernel's (PBValidationError with CPython's text, infinity in sumNonNegative:), an Integer term
+ keeps the Smalltalk kernel's answer, and sequences of unequal sizes pair as Python's zip."
 Import from: 'protobase'.
 Import from: '_check'.
 
 | c f hex hexes outcome tuple list pow2 bitsOf floatOfBits unitsOf nearest seed next decimals
-  oracleFails half five entries ranked q x witness vs sorted hi lo yr |
+  oracleFails half five entries ranked q x witness vs sorted hi lo yr version released paths |
 c := Check new.
 "A Float from its big-endian hex bytes, and the hex bytes of a Float (nil answers 'nil')."
 f := [:h | (Check bytes: h) float64At: 1 bigEndian: true].
@@ -314,5 +319,49 @@ c that: 'IEEE self-test: TwoSum keeps its low part, signed zeros, subnormals, ha
   equals: #('4341c37937e08000' '3ff0000000000000' '8000000000000000' '0000000000000000' '8000000000000000'
             '0000000000000002' '0000000000000001' '0000000000000000' '434e3f9396099984' '434e3f9396099985'
             '3ff6a09e667f3bcd' '4010000000000000' '5fefffffffffffff' '3fd5555555555555').
+
+"--- 13. The fsum primitives: the feature probe and the test-only switch ---"
+version := ((Smalltalk version subStrings: ' ') last subStrings: '.') collect: [:each | each asNumber].
+released := ((version at: 1) * 1000000) + ((version at: 2) * 1000) + (version at: 3) >= 15000.
+paths := OrderedCollection new.
+paths add: { PBVectorMath hasFsumPrimitive. PBVectorMath usesFsumPrimitive }.
+PBVectorMath _forceSmalltalkKernel: true.
+paths add: { PBVectorMath hasFsumPrimitive. PBVectorMath usesFsumPrimitive }.
+PBVectorMath _forceSmalltalkKernel: false.
+paths add: { PBVectorMath hasFsumPrimitive. PBVectorMath usesFsumPrimitive }.
+c that: 'the probe selects the fsum primitives from protoST 0.15.0 on; the switch forces the Smalltalk kernel'
+  is: { (Float respondsTo: #fsum:) = released. paths asArray }
+  equals: { true. { { released. released }. { released. false }. { released. released } } }.
+
+"--- 14. The same answers and errors on both paths ---"
+"Each case's outcome (a Float as its hex, or the error's class and text) with the primitives (when
+ the binary has them) and with the Smalltalk kernel forced: both must be the expected one."
+paths := { false. true } collect: [:forced |
+  PBVectorMath _forceSmalltalkKernel: forced.
+  [ { [PBVectorMath fsum: #(1.0e16 1.0 1.0e-16)].
+      [PBVectorMath fsum: (tuple value: #(1.0e308 1.0e308 -1.0e308))].
+      [PBVectorMath fsum: {Float infinity. Float infinity negated}].
+      [PBVectorMath fsum: {1.0. Float infinity. 2.0}].
+      [PBVectorMath fsum: #()].
+      [PBVectorMath sumNonNegative: #(1.0e308 1.0e308)].
+      [PBVectorMath sumNonNegative: (list value: #(0.5 0.25))].
+      [PBVectorMath fsum: #(1 2 0.5)].
+      [PBVectorMath score: 'ip' query: #(1.0e308 1.0e308) vector: #(1.0 1.0)].
+      [PBVectorMath score: 'ip' query: (tuple value: #(1.0 2.0 3.0)) vector: (tuple value: #(4.0 5.0))].
+      [PBVectorMath score: 'l2' query: #(1.0e308 0.0) vector: #(-1.0e308 0.0)].
+      [PBVectorMath score: 'l2' query: (tuple value: #(0.1 0.2 0.3)) vector: #(0.3 0.2)].
+      [PBVectorMath score: 'cosine' query: (tuple value: #(1.0e200 1.0e200)) vector: (tuple value: #(1.0e200 -1.0e199))].
+      [PBVectorMath score: 'cosine' query: #(1.0 2.0) vector: #(1 2)].
+      [PBVectorMath score: 'cosine' query: #(0.0 0.0) vector: #(1.0 2.0)].
+      [PBVectorMath normalized: (tuple value: #(3.0 4.0))].
+      [PBVectorMath canonicalVector: (tuple value: #(1.0e200 1.0e200)) dim: 2] }
+    collect: [:block | outcome value: [ | r | r := block value. r isFloat ifTrue: [r] ifFalse: [r isNil ifTrue: ['nil'] ifFalse: [hexes value: r]]]] ]
+    ensure: [PBVectorMath _forceSmalltalkKernel: false]].
+c that: 'the primitives'' errors become the kernel''s, and both paths answer alike'
+  is: { paths first = paths last. paths last }
+  equals: { true. { '4341c37937e08001'. 'refused: intermediate overflow in fsum'. 'refused: -inf + inf in fsum'. '7ff0000000000000'.
+    '0000000000000000'. '7ff0000000000000'. '3fe8000000000000'. '400c000000000000'. 'refused: intermediate overflow in fsum'.
+    '402c000000000000'. 'fff0000000000000'. 'bfc9999999999999'. 'refused: -inf + inf in fsum'. '3ff0000000000000'. '0000000000000000'.
+    #('3fe3333333333333' '3fe999999999999a'). 'nil' } }.
 
 c report displayNl.

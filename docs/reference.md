@@ -1421,7 +1421,12 @@ infinities of opposite signs of Python's math.fsum, Python's float of a signalli
 sample larger than its population), they
 signal `PBValidationError` with CPython's text (DV7). Every result is pinned bit for bit by
 `tests/unit/vec_math.st`, `tests/unit/vec_random.st` and the `proto_db` vectors of
-`tests/conformance/vector_math.st`.
+`tests/conformance/vector_math.st`. On protoST 0.15.0 the sums run in its `Float` fsum primitives
+(Float fsum:, fsumOfProducts:with: and fsumOfSquaredDifferences:with:, protoST's): `hasFsumPrimitive` is
+the feature probe's answer, read once when the module loads, and `usesFsumPrimitive` whether the
+kernel calls them; `_forceSmalltalkKernel:` exists for the tests only, which run every vendored
+case on both paths. The Smalltalk kernel is the oracle and the fallback (protoST 0.14.1, an
+Integer term, sequences of unequal sizes); k-means keeps its Smalltalk `raisedTo: 2` loop.
 
 ## The module and its files
 

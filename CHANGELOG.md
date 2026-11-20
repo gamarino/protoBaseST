@@ -9,6 +9,10 @@
   `ByteArray >> unsignedIntegerFrom:to:bigEndian:`; 0.14.1 fixes S43 (a ThreadSanitizer
   capped-wait polling flake) and S44 (empty conversions). The README Requirements table, the
   tutorial and the examples state the new floor; the default suite passes unchanged on it.
+- **protoST 0.15.0 recommended** (the floor stays 0.14.1): its `Float fsum:`,
+  `fsumOfProducts:with:` and `fsumOfSquaredDifferences:with:` primitives speed up the vector
+  scores; protoBaseST finds them by a feature probe and runs its Smalltalk kernel without them,
+  with the same answers to the bit.
 
 ### Vectors
 
@@ -59,6 +63,23 @@
   `bench/py_vector_workload.py`, `bench/py_vector_data.py`): the kernel alone, fsum against a naive
   sum and the three scores, at dim 8, 32 and 128 over 10^4 vectors, self-verified against
   `proto_db`'s checksums; the figures are in `docs/deviations.md` (Performance, "Vectors").
+- **IVF-Flat lists, training and retraining** (task V4): `PBVectorIvfFlat` `listFor:vector:`
+  (the best-scoring centroid, lowest number on ties; -1 untrained), `needsTraining:` (Python's
+  int-against-float comparison), `train:vectors:` (vectors sorted by their bytes, the pure-Python
+  k-means with libm `pow` squares; deviation DV3) and `probeOrder:query:`; an `ivf_flat` index is
+  maintained, built, retrained, validated and explained node for node as `proto_db` does without
+  numpy. Pinned by `tests/unit/vec_ivf.st`, `tests/interop/vector_index_identical.sh` (101 indexes,
+  every training of five growth histories, one shrunk to nothing and regrown, and 73 refusal
+  texts) and the `ivf` root of `tests/conformance/database_contents.st`.
+- **The fsum primitives of protoST 0.15.0** (task VP-adopt; internal): `PBVectorMath` probes
+  `Float respondsTo: #fsum:` once when the module loads and, where the primitives exist, computes
+  fsum, `sumNonNegative:`, the three scores, `normalized:` and the squared norm of
+  `canonicalVector:dim:` with them; k-means keeps its Smalltalk loop of `raisedTo: 2` terms. The
+  Smalltalk kernel stays as the oracle and the fallback (an Integer term, sequences of unequal
+  sizes, a protoST without the primitives), and the primitives' errors become the kernel's
+  (`PBValidationError` with CPython's text, infinity in `sumNonNegative:`). Pinned on both paths,
+  in one process, by `tests/conformance/vector_math.st` (every case run with the primitives and
+  with the Smalltalk kernel forced, a test-only switch) and `tests/unit/vec_math.st`.
 
 ## 0.3.0 (2026-11-20)
 

@@ -28,6 +28,7 @@ PBMapKeyIndex>>_setIds:zoned:
 PBIdentityKey>>_setObject:
 _PBValueFrame>>_setKind:source:items:depth:
 PBMissing class>>_initializeDefault
+PBVectorMath class>>_initializeKernel
 PBMutableObject>>_setCellName:
 PBAtomPointer>>_setSegmentBytes:offset:
 PBUnresolvedRef>>_setPointer:tag:
