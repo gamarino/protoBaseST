@@ -517,15 +517,17 @@ _PBOneSourcePlan >> source
 "The source rows for which the conjunction of anArray's expressions holds: PBExpression compile:
  anArray, so anArray holds expressions or is the 0.1 list syntax; a lone expression is accepted as
  itself. A near[] term has no per-element semantics: an expression holding one is
- PBValidationError (plans.py:458-462; a PBVectorSearch answers it)."
+ PBValidationError (plans.py:458-462; a PBVectorSearch answers it). Checked in proto_db's order:
+ the expression is compiled, then checked for near[], then the source."
 PBFilter class >> source: aPlan terms: anArray
   | expr near |
-  PBQueryPlan _check: aPlan owner: 'PBFilter'.
+  "proto_db's order: compile, refuse near[], then check the source."
   expr := PBExpression compile: anArray.
   near := nil.
   expr termsDo: [:each | (near isNil and: [each op = PBTerm nearOperator]) ifTrue: [near := each]].
   near isNil ifFalse: [
     ^ PBValidationError signal: 'A Filter cannot evaluate ''near[]'' terms (' , near printString , '); use a VectorSearch plan'].
+  PBQueryPlan _check: aPlan owner: 'PBFilter'.
   ^ (self basicNew _setSource: aPlan) _setPredicate: expr.
 
 PBFilter >> _setPredicate: anExpression

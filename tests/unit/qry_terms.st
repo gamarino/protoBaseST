@@ -240,9 +240,9 @@ cases doWithIndex: [:case :i |
  by the unit checks above and in qry_expressions.st only. The counts below are of cases: 204 (176
  with answers, 12 degenerate, 177 compiled until Task 6's review added five terms on the records'
  path 'r', '!=', '<', 'between[]', 'in' and '== nil', for the path indexes of qry_index_plans.st:
- 181 with answers, 182 compiled). The vectors phase (V2) holds 41 near[] cases, the Task 5 one
- among them, renamed (244 cases): 11 compile and are refused by evaluate: (no answers), 27 are
- degenerate (39 in all), 5 record Python's own errors (DV7); 193 compile."
+ 181 with answers, 182 compiled). The vectors phase (V2) holds 42 near[] cases, the Task 5 one
+ among them, renamed (245 cases): 11 compile and are refused by evaluate: (no answers), 28 are
+ degenerate (40 in all), 5 record Python's own errors (DV7); 193 compile."
 expect value: 'cases with answers' value: (cases select: [:case | (case at: 'answers') notNil]) size value: 181.
 c that: 'matches: on QData values equals proto_db''s answers for every operator' is: fails asArray equals: #().
 
@@ -260,7 +260,7 @@ cases doWithIndex: [:case :i |
     got = (errorClass value: (case at: 'match_error')) ifFalse: [
       fails add: id , ': evaluate: signals ' , got printString , ', proto_db ' , (case at: 'match_error')]]].
 "A count of the vector (value-domain note above)."
-expect value: 'degenerate cases' value: (cases select: [:case | (case at: 'id') includesSubstring: '(degenerate)']) size value: 39.
+expect value: 'degenerate cases' value: (cases select: [:case | (case at: 'id') includesSubstring: '(degenerate)']) size value: 40.
 s := t value: nil value: 'in' value: { 1. 1.0. decimal1. true. 's1'. nil. 1 }.
 expect value: 'in keeps duplicates and mixed types' value: s value size value: 7.
 s := t value: nil value: 'in' value: (-500 to: 499) asArray.

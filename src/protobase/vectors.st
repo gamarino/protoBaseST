@@ -38,9 +38,9 @@ on them. PBNearQuery is the public value of a near[] term (terms.st).
                                     Floats (floatOf:); k an Integer >= 1 or nil; t a finite number
                                     (a Float) or nil, not both nil; m 'cosine', 'l2', 'ip' or nil
                                     (the index's metric). Also vector:k:, vector:threshold:,
-                                    vector:k:threshold:, and _from: (a PBNearQuery, or a mapping of
-                                    its fields, terms.py _near_query). Equal and hashed by value,
-                                    0.0 = -0.0; describe is terms.py's display_value of it
+                                    vector:k:threshold: (a mapping of its fields is converted by
+                                    PBTerm, terms.st, as terms.py _near_query). Equal and hashed by
+                                    value, 0.0 = -0.0; describe is terms.py's display_value of it
 
 Floats. protoST's Float + - * / are one IEEE double operation each, sqrt is std::sqrt and
 Float raisedTo: an Integer is libm pow (Addendum V, 2.2.3); no build flag contracts or
@@ -532,31 +532,6 @@ PBNearQuery class >> vector: aSequence k: anInteger threshold: aNumber
 "The metrics a query may name (terms.py NEAR_METRICS)."
 PBNearQuery class >> _metrics
   ^ #('cosine' 'l2' 'ip').
-
-"The PBNearQuery anObject names: itself, or a Dictionary or PBFrozenDict holding 'vector' and only
- 'vector', 'k', 'threshold' and 'metric' (String keys), converted (terms.py _near_query,
- terms.py:128-137); PBValidationError otherwise."
-PBNearQuery class >> _from: anObject
-  | keys unknown at |
-  (anObject isClassObject not and: [anObject isKindOf: PBNearQuery]) ifTrue: [^ anObject].
-  (anObject isClassObject not and: [(anObject isKindOf: Dictionary) or: [anObject isKindOf: PBFrozenDict]]) ifFalse: [
-    ^ PBValidationError signal: 'near[] needs a NearQuery (or a mapping of its fields), not ' , (PBKeySpec _repr: anObject)].
-  keys := OrderedCollection new.
-  anObject keysAndValuesDo: [:k :v | keys add: k].
-  unknown := keys reject: [:k | (self _isText: k) and: [#('vector' 'k' 'threshold' 'metric') includes: k]].
-  (unknown isEmpty and: [keys anySatisfy: [:k | (self _isText: k) and: [k = 'vector']]]) ifFalse: [
-    ^ PBValidationError signal: 'A near[] mapping needs ''vector'' and only vector/k/threshold/metric, got '
-      , (self _sortedTexts: keys)].
-  at := [:name | | found | found := nil. anObject keysAndValuesDo: [:k :v | k = name ifTrue: [found := v]]. found].
-  ^ self vector: (at value: 'vector') k: (at value: 'k') threshold: (at value: 'threshold') metric: (at value: 'metric').
-
-"Python's sorted(map(str, keys)) as its repr prints it: the keys' texts (a String as itself, any
- other key as its printString), sorted by code point, each quoted."
-PBNearQuery class >> _sortedTexts: aCollection
-  | texts |
-  texts := (aCollection collect: [:k | (self _isText: k) ifTrue: [k] ifFalse: [k printString]]) asArray.
-  texts := texts asSortedCollection: [:a :b | a <= b].
-  ^ '[' , (', ' join: (texts asArray collect: [:each | PBCodec repr: each])) , ']'.
 
 "terms.py _finite_number: aValue as a Float when it is an Integer, a Float or a Decimal (not a
  Boolean) that is finite; PBValidationError '<what> must be a finite number, not <repr>'

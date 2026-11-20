@@ -217,6 +217,12 @@ expect value: 'a near[] term' value: (msg value: [PBFilter source: scan terms: {
 { { 'v'. 'near[]'. #(1). 0.5 }. { a1. { '!'. 'v'. 'near[]'. #(1). 0.5 } }. { '|'. a1. { 'v'. 'near[]'. #(1). 0.5 } } } do: [:tokens |
   expect value: 'a near[] inside ' , tokens printString value: (refused value: [PBFilter source: scan terms: tokens]) value: PBValidationError].
 expect value: 'a String' value: (refused value: [PBFilter source: scan terms: 'city == ''Oslo''']) value: PBValidationError.
+"proto_db's order (plans.py Filter.__init__): the expression is compiled, then checked for near[],
+ then the source, so with both wrong the expression's refusal is the one reported."
+expect value: 'a malformed list before a bad source' value: ((msg value: [PBFilter source: #(1 2) terms: #('a' '=~' 1)])
+  beginsWith: 'PBValidationError: Unknown operator ''=~'' at position 1;') value: true.
+expect value: 'a near[] term before a bad source' value: ((msg value: [PBFilter source: #(1 2) terms: { t value: 'v' value: 'near[]' value: (PBNearQuery vector: #(1.0) k: 1) }])
+  beginsWith: 'PBValidationError: A Filter cannot evaluate ''near[]'' terms') value: true.
 expect value: 'a source that is not a plan' value: ((msg value: [PBFilter source: #(1 2) terms: { t value: nil value: '==' value: 1 }]) includesSubstring: 'QueryPlan')
   value: true.
 c that: 'PBFilter takes prefix lists and refuses near[]' is: fails asArray equals: #().
@@ -263,17 +269,22 @@ cases do: [:case | | id expr |
       fails add: id , ': asList ' , expr asList printString].
     (MessagePack encode: (TermAtoms tree: expr describe)) = (case at: 'describe') ifFalse: [
       fails add: id , ': describe ' , expr describe printString]]].
+"Where proto_db's text quotes only the mapping's keys, rendered by Python's str, it is the same text."
+(cases select: [:case | (case at: 'id') includesSubstring: 'keys of other types']) do: [:case |
+  expect value: (case at: 'id') value: (msg value: [PBExpression compile: (atoms decode: (case at: 'tokens'))])
+    value: 'PBValidationError: ' , (case at: 'error_text')].
 "The DV7 cases carry CPython's text."
 (cases select: [:case | (case at: 'id') includesSubstring: '(DV7'])
   do: [:case | | text |
     text := msg value: [PBExpression compile: (atoms decode: (case at: 'tokens'))].
     ((text = 'PBValidationError: int too large to convert to float' or: [text = 'PBValidationError: cannot convert signaling NaN to float'])
       or: [text beginsWith: 'PBValidationError: near[] metric must be one of']) ifFalse: [fails add: (case at: 'id') , ': ' , text]].
-"Counts of the vector: 41 near[] cases, 11 compiled (2 of them listed in the 0.1 form), 5 of
+"Counts of the vector: 42 near[] cases, 11 compiled (2 of them listed in the 0.1 form), 5 of
  Python's own errors."
 expect value: 'counts' value: { cases size. (cases select: [:case | (case at: 'error') isNil]) size.
     (cases select: [:case | (case at: 'to_list') notNil]) size.
-    (cases select: [:case | (case at: 'id') includesSubstring: '(DV7']) size } value: #(41 11 2 5).
+    (cases select: [:case | (case at: 'id') includesSubstring: '(DV7']) size.
+    (cases select: [:case | (case at: 'id') includesSubstring: 'keys of other types']) size } value: #(42 11 2 5 1).
 c that: 'the near[] cases of the term vector are proto_db''s' is: fails asArray equals: #().
 
 c report displayNl.

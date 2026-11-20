@@ -16,7 +16,7 @@ proto_db's operator strings:
   '?N' '?!N' '?T' '?!T'          no operand (PBTerm path:op:)
   'contains'                     one orderable operand
   'near[]'                       a PBNearQuery (vectors.st), or a Dictionary or PBFrozenDict of its
-                                 fields (converted, PBNearQuery _from:)
+                                 fields (converted, PBTerm _nearQuery:)
 
 An operand is made canonical (PBCodec canonical:) and must be orderable and not PBMissing; anything
 else is PBValidationError (terms.py:152-213). A near[] term is answered by vector plans, never by
@@ -250,7 +250,7 @@ PBTerm class >> path: aStringOrNil op: anOperator value: aValue
   (PBExpression _isText: anOperator) ifFalse: [^ self _unknownOperator: anOperator].
   (self operators includes: anOperator) ifFalse: [^ self _unknownOperator: anOperator].
   anOperator = self nearOperator ifTrue: [
-    canonical := PBNearQuery _from: aValue.
+    canonical := self _nearQuery: aValue.
     ^ self _path: aStringOrNil op: anOperator value: canonical spec: spec valueKey: canonical operandKeys: #()].
   ((self scalarOperators includes: anOperator) or: [anOperator = 'contains']) ifTrue: [
     canonical := self _operand: aValue op: anOperator.
@@ -285,6 +285,67 @@ PBTerm class >> path: aStringOrNil op: anOperator value: aValue
   aValue isNil ifFalse: [
     ^ PBValidationError signal: 'Operator ' , (PBKeySpec _repr: anOperator) , ' takes no value, got ' , (PBKeySpec _repr: aValue)].
   ^ self _path: aStringOrNil op: anOperator value: nil spec: spec valueKey: (PBKeys orderKey: nil) operandKeys: #().
+
+"The PBNearQuery anObject names (terms.py _near_query, terms.py:128-137): itself, or a Dictionary
+ or PBFrozenDict holding 'vector' and only 'vector', 'k', 'threshold' and 'metric' (String keys),
+ converted; PBValidationError otherwise. The text of an unknown key lists the keys as Python's
+ sorted(map(str, keys)) prints them (_pythonStr:)."
+PBTerm class >> _nearQuery: anObject
+  | keys texts at |
+  (anObject isClassObject not and: [anObject isKindOf: PBNearQuery]) ifTrue: [^ anObject].
+  (anObject isClassObject not and: [(anObject isKindOf: Dictionary) or: [anObject isKindOf: PBFrozenDict]]) ifFalse: [
+    ^ PBValidationError signal: 'near[] needs a NearQuery (or a mapping of its fields), not ' , (PBKeySpec _repr: anObject)].
+  keys := OrderedCollection new.
+  anObject keysAndValuesDo: [:k :v | keys add: k].
+  ((keys allSatisfy: [:k | (PBExpression _isText: k) and: [#('vector' 'k' 'threshold' 'metric') includes: k]])
+      and: [keys anySatisfy: [:k | (PBExpression _isText: k) and: [k = 'vector']]]) ifFalse: [
+    texts := (keys collect: [:k | self _pythonStr: k]) asArray asSortedCollection: [:a :b | a <= b].
+    ^ PBValidationError signal: 'A near[] mapping needs ''vector'' and only vector/k/threshold/metric, got ['
+      , (', ' join: (texts asArray collect: [:each | PBCodec repr: each])) , ']'].
+  at := [:name | | found | found := nil. anObject keysAndValuesDo: [:k :v | k = name ifTrue: [found := v]]. found].
+  ^ PBNearQuery vector: (at value: 'vector') k: (at value: 'k') threshold: (at value: 'threshold') metric: (at value: 'metric').
+
+"Python's str(aValue): a String is itself, a Decimal its scientific string (Decimal.__str__);
+ every other value its repr (_pyRepr:)."
+PBTerm class >> _pythonStr: aValue
+  (PBExpression _isText: aValue) ifTrue: [^ aValue].
+  (aValue isClassObject not and: [aValue isKindOf: Decimal]) ifTrue: [^ aValue printString].
+  ^ self _pyRepr: aValue.
+
+"Python's repr(aValue) for the values a decoded mapping key may be: None, True, False, a str
+ quoted as Python quotes it, an int, a float (_floatRepr:), bytes, a tuple (its items' reprs,
+ '(x,)' for one item) and a list; any other value as _pythonRepr: renders it."
+PBTerm class >> _pyRepr: aValue
+  | items |
+  aValue isNil ifTrue: [^ 'None'].
+  aValue == true ifTrue: [^ 'True'].
+  aValue == false ifTrue: [^ 'False'].
+  aValue isClassObject ifTrue: [^ self _pythonRepr: aValue].
+  (PBExpression _isText: aValue) ifTrue: [^ PBCodec repr: aValue].
+  aValue isInteger ifTrue: [^ aValue printString].
+  aValue isFloat ifTrue: [^ self _floatRepr: aValue].
+  (aValue isKindOf: ByteArray) ifTrue: [^ self _bytesRepr: aValue].
+  (aValue isKindOf: PBTuple) ifTrue: [
+    items := aValue asArray collect: [:each | self _pyRepr: each].
+    ^ '(' , (', ' join: items) , (items size = 1 ifTrue: [',)'] ifFalse: [')'])].
+  ((aValue isKindOf: PBFrozenList) or: [(aValue isKindOf: Array) or: [aValue isKindOf: OrderedCollection]]) ifTrue: [
+    ^ '[' , (', ' join: (aValue asArray collect: [:each | self _pyRepr: each])) , ']'].
+  ^ self _pythonRepr: aValue.
+
+"Python's repr of aFloat: the shortest round-trip digits, as protoST prints them, with Python's
+ exponent form (1e+16, 1e-05, 1.5e+300: no '.0' before the exponent, a sign and at least two
+ digits); nan, inf and -inf."
+PBTerm class >> _floatRepr: aFloat
+  | text e mantissa exponent |
+  (aFloat isNaN or: [aFloat isInfinite]) ifTrue: [^ self _pythonRepr: aFloat].
+  text := aFloat printString.
+  e := text indexOf: $e.
+  e = 0 ifTrue: [^ text].
+  mantissa := text copyFrom: 1 to: e - 1.
+  exponent := (text copyFrom: e + 1 to: text size) asNumber.
+  (mantissa endsWith: '.0') ifTrue: [mantissa := mantissa copyFrom: 1 to: mantissa size - 2].
+  ^ mantissa , 'e' , (exponent < 0 ifTrue: ['-'] ifFalse: ['+'])
+    , (exponent abs < 10 ifTrue: ['0'] ifFalse: ['']) , exponent abs printString.
 
 "The term (aStringOrNil, anOperator) of a unary operator ('?N', '?!N', '?T', '?!T')."
 PBTerm class >> path: aStringOrNil op: anOperator

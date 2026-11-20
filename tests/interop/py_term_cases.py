@@ -21,6 +21,7 @@ the helper printed it: the test checks that QData still draws them) and 'cases',
   id         a name for the case
   tokens     the wire form (codec.encode_value) of the 0.1 prefix list given to
              Expression.compile, each atom written {'@ref': [oid, 0, type tag]}
+  error_text nil, or str() of the error Expression.compile raised (its message)
   error      nil, or the class name of the error Expression.compile raised
              ('ProtoValidationError', 'ProtoNotSupportedError'; for the cases whose id names DV7,
              Python's own 'OverflowError', 'ValueError' or 'TypeError', which protoBaseST refuses
@@ -219,6 +220,9 @@ def cases(an_atom):
         ("near[] metric 3 (degenerate)", ["v", "near[]", {"vector": [1.0], "k": 1, "metric": 3}]),
         ("near[] a mapping with an unknown key (degenerate)", ["v", "near[]", {"vector": [1.0], "k": 1, "x": 2}]),
         ("near[] a mapping without vector (degenerate)", ["v", "near[]", {"k": 1}]),
+        ("near[] a mapping with keys of other types (degenerate)",
+         ["v", "near[]", {"vector": [1.0], "k": 1, 2: "a", None: 1, 2.5: 0, True: 3, (1, "t"): 4, b"\x01": 5,
+                          Decimal("1.50"): 6, 1e16: 7, 1e-5: 8}]),
         ("near[] the 0.1 form without a threshold (degenerate)", ["v", "near[]", [1, 0]]),
         ("near[] the 0.1 form with a nil threshold (degenerate)", ["v", "near[]", [1, 0], None]),
         ("near[] the 0.1 form with a scalar vector (degenerate)", ["v", "near[]", 5, 0.3]),
@@ -267,12 +271,13 @@ def index_row(index, term) -> dict:
 
 
 def outcome(case_id, tokens, values, indexes):
-    row = {"tokens": wire_bytes(tokens), "error": None, "answers": None, "match_error": None,
+    row = {"tokens": wire_bytes(tokens), "error": None, "error_text": None, "answers": None, "match_error": None,
            "to_list": None, "describe": None, "index": None}
     try:
         expr = Expression.compile(tokens)
     except (ProtoValidationError, ProtoNotSupportedError) as e:
         row["error"] = type(e).__name__
+        row["error_text"] = str(e)
         return row
     except (OverflowError, ValueError, TypeError) as e:
         # Python's own errors, raised by math.isfinite and the metric's set membership in
@@ -280,6 +285,7 @@ def outcome(case_id, tokens, values, indexes):
         if "(DV7" not in case_id:
             raise
         row["error"] = type(e).__name__
+        row["error_text"] = str(e)
         return row
     try:
         row["to_list"] = wire_bytes(expr.to_list())

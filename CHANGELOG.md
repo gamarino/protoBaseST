@@ -32,7 +32,7 @@
   when built; `PBExpression compile:` and `asList` read and write both list forms, `describe` renders
   the query as `proto_db` does; `matches:` (so `evaluate:`) is `PBNotSupportedError`, a `PBFilter`
   holding a `near[]` term is `PBValidationError`, and `PBPlanner normalize:` refuses a negated one.
-  No plan answers `near[]` yet (V6, V7). Pinned by `tests/unit/vec_terms.st` and 41 `near[]` cases
+  No plan answers `near[]` yet (V6, V7). Pinned by `tests/unit/vec_terms.st` and 42 `near[]` cases
   added to the term vector (`tests/interop/py_term_cases.py`,
   `tests/conformance/vectors-index-keys/terms.msgpack`).
 - **Benchmark VB0** (`bench/run_query.sh VB0`, `bench/vector_workload.st`,
