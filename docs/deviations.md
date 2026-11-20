@@ -1904,6 +1904,114 @@ median of 3; peak RSS in MB:
   - The driver, its runner and the raw outputs are in the task's working notes (`.superpowers/`,
     not in the repository).
 
+#### Headline benchmarks re-measured on protoST 0.14.1 (V-pin, 2026-11-20)
+
+The stack moved to protoST 0.14.1 on protoCore 3.6.1 (task V-pin of the vectors plan). The three
+headline benchmarks were re-run, serially, on a quiet machine, as new runs beside the protoST 0.12.0
+ones above; **no earlier figure is rewritten and nothing is asserted about time**. Every query run
+ended `verified: 5 runs of each implementation report the same work (rows, queries, plan,
+checksum)`, and every AVL and transaction run self-reported and passed its check. Indicative only: one
+machine, one session, five rounds each.
+
+- **Provenance.** The runner's line, unmodified: `2026-11-20T11:14Z; protoBaseST 119584a; protoST 0.14.1`.
+  Commits: `7fbd139` (the pin move) and `119584a` (the primitive adoption), a clean tree for every
+  run. The binaries: protoST 0.14.1 (`v0.14.1`, `15157d7`) on protoCore 3.6.1 (`v3.6.1`,
+  `00a90df3`) and protoIO 0.7.0, the `pinned-361` release builds (`ldd` shows the pinned
+  `libprotoCore.so.5`, never `/usr`'s); `proto_db` v2.0.0rc4 on CPython 3.14.6. The earlier
+  figures above are `pinned-360` (protoST 0.12.0 on protoCore 3.6.0) at older protoBaseST commits.
+- **Machine and load.** AMD Ryzen 5 5500U, 12 CPUs, Linux 7.0.0-43 (DEV12). Load average before
+  and after: AVL 2.38 before (the runner prints no after figure); query run 2.38 before and 2.08 after (a short build by another
+  session had just ended: the one-minute load was 2.5 when the AVL run started, the five-minute
+  average 7.4); transactions 1.84 before and 2.10 after. The query run took 54 minutes
+  (10:20Z to 11:14Z).
+- **Commands.** `RUNS=5 bench/run_avl.sh pinned361=<protost>`, `RUNS=5 bench/run_tx.sh
+  pinned361=<protost>`, `RUNS=5 bench/run_query.sh M1 M2 M3 P1 P2 P3`, with `PROTOST` and
+  `PROTOBASE_REPO` set.
+
+**AVL operations** (microseconds per operation, minimum / median):
+
+| operation | ops | ProtoBase | pinned361 | ratio pinned361 |
+|---|---|---|---|---|
+| posAppend | 1000 | 17.0 / 17.2 | 147.2 / 150.5 | 9x |
+| keyPut-new | 1000 | 26.1 / 26.4 | 181.5 / 189.0 | 7x |
+| posAt | 2000 | 0.8 / 0.8 | 15.3 / 15.4 | 20x |
+| keyAt | 2000 | 1.8 / 1.9 | 27.7 / 28.1 | 15x |
+| keyPut-replace | 500 | 19.2 / 19.3 | 172.3 / 172.9 | 9x |
+| check-pos | 3 | 678.5 / 686.6 | 18167.7 / 18561.3 | 27x |
+| check-key | 3 | 1025.0 / 1038.7 | 31033.7 / 31948.3 | 30x |
+
+**Commits per second** (`TX_SCALE=1`, minimum / median wall time; segments on ZFS, `fsync`):
+
+| profile | transactions | ProtoBase commits/s | ProtoBase retries | pinned361 commits/s | pinned361 retries | ratio pinned361 |
+|---|---|---|---|---|---|---|
+| tiny | 100 | 163.9 / 155.3 | 0-0 | 54.1 / 53.6 | 0-0 | 0.330x |
+| small-record | 100 | 159.1 / 156.5 | 0-0 | 51.1 / 50.2 | 0-0 | 0.321x |
+| batch-100 | 10 | 75.7 / 74.2 | 0-0 | 8.9 / 8.7 | 0-0 | 0.118x |
+| conc-disjoint-1 | 120 | 160.1 / 157.4 | 0-0 | 47.1 / 47.1 | 0-0 | 0.294x |
+| conc-disjoint-2 | 120 | 152.9 / 151.3 | 0-0 | 49.6 / 49.0 | 0-0 | 0.325x |
+| conc-disjoint-4 | 120 | 256.8 / 246.9 | 0-0 | 52.7 / 51.6 | 0-0 | 0.205x |
+| conc-merge-1 | 120 | 155.4 / 152.2 | 0-0 | 38.3 / 37.2 | 0-0 | 0.246x |
+| conc-merge-2 | 120 | 144.8 / 143.7 | 0-0 | 45.7 / 41.8 | 0-0 | 0.315x |
+| conc-merge-4 | 120 | 238.2 / 232.8 | 0-0 | 46.1 / 45.3 | 0-0 | 0.193x |
+| conc-hot-1 | 120 | 168.3 / 163.4 | 0-0 | 56.1 / 55.4 | 0-0 | 0.334x |
+| conc-hot-2 | 120 | 156.0 / 152.2 | 9-38 | 53.1 / 50.4 | 14-56 | 0.340x |
+| conc-hot-4 | 120 | 135.8 / 133.9 | 57-117 | 44.9 / 43.5 | 41-144 | 0.330x |
+
+**M1, M2, M3 (commits with indexes, bulk build against fold, the cluster) and P1, P2, P3 (the
+planner)**, microseconds, minimum / median; protoBaseST peak RSS in MB:
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st |
+|---|---|---|---|---|---|---|
+| M1 | 600 | idx0 | 1287521 / 1343151 | 4759445 / 4821141 | 3.7x | 27 / 1085 |
+| M1 | 600 | idx1 | 1533237 / 1563797 | 13755653 / 13890551 | 9.0x | 34 / 4128 |
+| M1 | 600 | idx3 | 2060544 / 2120526 | 32500847 / 33015599 | 15.8x | 46 / 5140 |
+| M2 | 100 | build | 1882 / 1900 | 36571 / 38469 | 19.4x | 23 / 97 |
+| M2 | 100 | fold | 5022 / 5065 | 44404 / 45836 | 8.8x | 24 / 97 |
+| M2 | 1000 | build | 19122 / 20021 | 434696 / 454779 | 22.7x | 25 / 264 |
+| M2 | 1000 | fold | 66717 / 67293 | 628485 / 650177 | 9.4x | 24 / 240 |
+| M2 | 10000 | build | 204316 / 212870 | 5024412 / 5198421 | 24.6x | 38 / 2326 |
+| M2 | 10000 | fold | 838089 / 858723 | 8746668 / 8985768 | 10.4x | 35 / 2186 |
+| M2 | 100000 | build | 2709895 / 2783515 | 53778817 / 54455202 | 19.8x | 172 / 5299 |
+| M2 | 100000 | fold | 12838432 / 12946482 | 110909792 / 114651304 | 8.6x | 142 / 5270 |
+| M3 | 600 | idx0 | 800313 / 813732 | 3074622 / 3103652 | 3.8x | 27 / 837 |
+| M3 | 600 | idx1 | 936415 / 938474 | 8448352 / 8662500 | 9.0x | 31 / 2988 |
+| M3 | 600 | idx3 | 1210178 / 1234176 | 20858878 / 21063507 | 17.2x | 40 / 5140 |
+| M3 | 600 | idx0-c3 | - | 5903094 / 6014560 | - | - / 1165 (largest member) |
+| M3 | 600 | idx1-c3 | - | 14380158 / 14797360 | - | - / 1889 (largest member) |
+| M3 | 600 | idx3-c3 | - | 44074416 / 54417679 | - | - / 2088 (largest member) |
+| P1 | 1 | idx0 | 5417 / 5482 | 139080 / 141630 | 25.7x | 24 / 401 |
+| P1 | 1 | idx2 | 11966 / 12177 | 321127 / 331124 | 26.8x | 26 / 773 |
+| P1 | 1 | idx8 | 14110 / 14200 | 405612 / 428468 | 28.7x | 30 / 1821 |
+| P1 | 8 | idx0 | 15780 / 15862 | 485019 / 489978 | 30.7x | 25 / 593 |
+| P1 | 8 | idx2 | 37029 / 39161 | 855204 / 885951 | 23.1x | 27 / 1025 |
+| P1 | 8 | idx8 | 95436 / 98021 | 1766945 / 1822154 | 18.5x | 31 / 2246 |
+| P1 | 32 | idx0 | 43683 / 45439 | 1762051 / 1782438 | 40.3x | 27 / 1254 |
+| P1 | 32 | idx2 | 188884 / 191905 | 3126482 / 3153748 | 16.6x | 29 / 1954 |
+| P1 | 32 | idx8 | 600098 / 615330 | 7322972 / 7444189 | 12.2x | 34 / 3996 |
+| P2 | 2000 | r0001-index | 59 / 60 | 741 / 780 | 12.6x | 31 / 1465 |
+| P2 | 2000 | r0001-scan | 20738 / 21605 | 495952 / 507682 | 23.9x | 31 / 1580 |
+| P2 | 2000 | r0010-index | 186 / 195 | 3530 / 3800 | 19.0x | 31 / 1464 |
+| P2 | 2000 | r0010-scan | 21222 / 21514 | 506282 / 509462 | 23.9x | 31 / 1577 |
+| P2 | 2000 | r0100-index | 1401 / 1416 | 41026 / 44082 | 29.3x | 31 / 1476 |
+| P2 | 2000 | r0100-scan | 20418 / 21779 | 484237 / 495626 | 23.7x | 31 / 1577 |
+| P2 | 2000 | r0500-index | 6894 / 7029 | 207523 / 211418 | 30.1x | 31 / 1517 |
+| P2 | 2000 | r0500-scan | 20393 / 21371 | 507889 / 530196 | 24.9x | 31 / 1584 |
+| P2 | 2000 | r0900-index | 12441 / 12631 | 364170 / 370748 | 29.3x | 31 / 1561 |
+| P2 | 2000 | r0900-scan | 20652 / 21105 | 515007 / 531713 | 24.9x | 31 / 1589 |
+| P2 | 2000 | r0990-index | 13967 / 14663 | 405322 / 420817 | 29.0x | 31 / 1569 |
+| P2 | 2000 | r0990-scan | 20682 / 21308 | 530426 / 534371 | 25.6x | 31 / 1589 |
+| P2 | 2000 | r1000-index | 13753 / 13814 | 406428 / 422988 | 29.6x | 31 / 1569 |
+| P2 | 2000 | r1000-scan | 21132 / 21582 | 527112 / 540162 | 24.9x | 31 / 1589 |
+| P2 | 2000 | ne-few-index | 2950 / 3047 | 91996 / 95407 | 31.2x | 31 / 1493 |
+| P2 | 2000 | ne-few-scan | 20315 / 20780 | 450156 / 460804 | 22.2x | 31 / 1565 |
+| P2 | 2000 | ne-many-index | 15475 / 16171 | 357701 / 358948 | 23.1x | 31 / 1569 |
+| P2 | 2000 | ne-many-scan | 20897 / 21042 | 449763 / 458561 | 21.5x | 31 / 1569 |
+| P3 | 2000 | intersect | 7815 / 7839 | 56360 / 57203 | 7.2x | 27 / 1324 |
+| P3 | 2000 | filter | 2234 / 2309 | 52184 / 55121 | 23.4x | 27 / 1316 |
+
+M3 cluster retries per run (block runs beyond one per commit): idx0-c3 27, 1, 0, 0, 0; idx1-c3 31,
+26, 29, 28, 25; idx3-c3 172, 153, 174, 115, 171.
+
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded
