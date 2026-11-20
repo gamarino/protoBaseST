@@ -2012,6 +2012,59 @@ planner)**, microseconds, minimum / median; protoBaseST peak RSS in MB:
 M3 cluster retries per run (block runs beyond one per commit): idx0-c3 27, 1, 0, 0, 0; idx1-c3 31,
 26, 29, 28, 25; idx3-c3 172, 153, 174, 115, 171.
 
+### Vectors
+
+**VB0, the vector math kernel** (vectors phase task V1; an input to ruling VQ2). `RUNS=5
+bench/run_query.sh VB0`, measured 2026-11-20 12:29-12:41 UTC on an AMD Ryzen 5 5500U (12 CPUs, Linux
+7.0.0-43-generic), load average 1.35 before and 2.39 after; protoBaseST `a36dc7f`, protoST 0.14.1
+(`worktrees/pinned-361/protoST/build_release/protost`, protoCore 3.6.1), `proto_db` `v2.0.0rc4` on
+CPython 3.14.6 and glibc 2.43 in its reference mode (numpy and hnswlib blocked, every score its
+pure-Python `exact_score`; the default mode, with numpy, was skipped: `tests/interop/.venv-numpy` does
+not exist yet). Data: `proto_db`'s clustered benchmark set (`benchmarks/workloads/vector.py:18-26`,
+seed 51, 16 centres), 10^4 vectors and one query, read by both sides from one MessagePack file
+(`bench/py_vector_data.py`). Each unit times one operation over the 10^4 vectors (`bench/vector_workload.st`
+states them): `products` the dim products of each vector, `naive` a plain left-to-right sum of
+precomputed products, `fsum` CPython's `math.fsum` of the same products, and the three scores. The
+runner printed `verified`: every run of both sides reported the same CRC-32 of the results' bytes,
+so every product, sum and score is `proto_db`'s to the bit. Times in microseconds, minimum and median
+of 5 interleaved runs; nothing is asserted about time.
+
+| dim | op | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st |
+|---|---|---|---|---|---|
+| 8 | products | 8298 / 8788 | 169151 / 173085 | 20.4x | 31 / 413 |
+| 8 | naive | 2006 / 2028 | 90532 / 94478 | 45.1x | 27 / 334 |
+| 8 | fsum | 2139 / 2259 | 443275 / 468377 | 207.2x | 27 / 474 |
+| 8 | ip | 8434 / 8826 | 653086 / 664258 | 77.4x | 27 / 554 |
+| 8 | l2 | 10306 / 10893 | 716641 / 731393 | 69.5x | 27 / 578 |
+| 8 | cosine | 20571 / 20644 | 1716774 / 1786196 | 83.5x | 27 / 1063 |
+| 32 | products | 32169 / 32620 | 444381 / 467272 | 13.8x | 64 / 1135 |
+| 32 | naive | 5862 / 5977 | 278608 / 287513 | 47.5x | 47 / 868 |
+| 32 | fsum | 7539 / 7910 | 2445678 / 2505955 | 324.4x | 47 / 1856 |
+| 32 | ip | 23599 / 24997 | 2916613 / 3032046 | 123.6x | 47 / 2036 |
+| 32 | l2 | 27712 / 29318 | 3132586 / 3248288 | 113.0x | 47 / 2144 |
+| 32 | cosine | 55337 / 58146 | 8916927 / 9178626 | 161.1x | 47 / 4943 |
+| 128 | products | 107690 / 108909 | 1584645 / 1618040 | 14.7x | 197 / 4155 |
+| 128 | naive | 21180 / 22011 | 1010019 / 1033946 | 47.7x | 128 / 3092 |
+| 128 | fsum | 28192 / 29459 | 10128024 / 10540129 | 359.3x | 128 / 4964 |
+| 128 | ip | 83195 / 87900 | 11630306 / 12140643 | 139.8x | 128 / 4966 |
+| 128 | l2 | 103367 / 106770 | 13340647 / 13612491 | 129.1x | 128 / 4966 |
+| 128 | cosine | 210111 / 214950 | 33496258 / 34064568 | 159.4x | 128 / 4964 |
+
+What the table says, and what it does not:
+
+- **The sum dominates a score.** An `ip` score is the products plus one fsum; the fsum alone takes
+  68% (dim 8), 84% (32) and 87% (128) of the `ip` time in protoBaseST, against 25%, 32% and 34% in
+  `proto_db`, whose `math.fsum` is C. The correctly rounded sum costs 4.9, 8.8 and 10.0 times a naive
+  interpreted sum: the ratio grows with the dimension (more partials per sum).
+- **A score per vector** costs about 65 us (dim 8), 290 us (32) and 1.2 ms (128) for `ip` and `l2`,
+  2.5 to 3 times that for cosine (two norms and a dot product, three fsums); 70 to 160 times
+  `proto_db`'s pure-Python scores. An exact search over 10^4 vectors of dim 32 would spend about 3 s in
+  the kernel alone; V8 measures searches, and ruling VQ2 decides on those figures whether the protoST
+  fsum primitive (Addendum V, 2.2.4) is built.
+- **Peak resident set** is not determinant: protoCore keeps memory until it needs it, up to the heap
+  budget (`PROTOCORE_HEAP_LIMIT_CELLS`, 80,000,000 cells here), which the dim-128 units reach; it is
+  reported, not compared.
+
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded

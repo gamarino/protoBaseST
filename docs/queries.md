@@ -899,7 +899,7 @@ norm is 0. Every sum is `math.fsum`: the exact sum, rounded once, whatever the o
 protoBaseST ports CPython's `math.fsum` line for line, special values and overflow included, on IEEE
 doubles, whose `+`, `-`, `*` and `/` are one rounding each in protoST. Nothing else is needed for
 correctness: no protoST primitive, no change to protoCore. The cost of the port is measured:
-[measured in V1: bench VB0, the interpreted fsum against a naive sum and each score, per dimension]. A protoST primitive for these sums is specified, and is built only if the measurement
+on 10^4 vectors (bench VB0, 2026-11-20, minimum of 5 runs), protoBaseST's fsum costs 4.9, 8.8 and 10.0 times a naive sum at dim 8, 32 and 128, and takes 68%, 84% and 87% of an inner-product score's time (in `proto_db` the C `math.fsum` takes 25% to 34%); a score is 70 to 160 times `proto_db`'s pure-Python one ([Performance, Vectors](deviations.md#vectors)). A protoST primitive for these sums is specified, and is built only if the measurement
 of V8 shows the interpreted kernel dominates search time (ruling VQ2).
 
 Ranking is nearest first, ties by the member key's order (`vector_backends.py:147-163`). For records

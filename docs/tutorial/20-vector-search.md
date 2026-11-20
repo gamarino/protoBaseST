@@ -194,7 +194,7 @@ sum rounded once, whatever the order of the terms (`vector_backends.py:12-13`, `
 `docs/source/format-spec.rst:1432-1437`). protoBaseST ports CPython's `math.fsum` line for line
 (Shewchuk's algorithm) on IEEE doubles, so both implementations compute the same score for the
 same vectors, bit for bit, and rank and file them alike. The cost of the correctly rounded sum
-against the plain loop: [measured in V1: bench VB0, fsum against a naive sum and the score per metric, dim 8, 32 and 128, 10^4 vectors].
+against the plain loop: on 10^4 vectors of dim 8, 32 and 128, the interpreted fsum costs 4.9, 8.8 and 10.0 times the plain loop, and most of a score (68% to 87% of an inner-product score) is the sum, not the products (bench VB0, [Performance, Vectors](../deviations.md#vectors)). Correctness is what is paid for; whether a protoST primitive for the sum is worth building is decided on the search measurements (ruling VQ2).
 
 ## Why `x ** 2` is not `x * x`
 
