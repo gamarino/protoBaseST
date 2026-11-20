@@ -4,7 +4,7 @@
 Program: [examples/tutorial/19_ordered_reads_and_pages.st](../../examples/tutorial/19_ordered_reads_and_pages.st).
 Previous: [18. Queries and the planner](18-queries-and-plans.md). Back to the [index](README.md).
 
-> **In progress for protoBaseST 0.3.0** (the approved
+> **protoBaseST 0.3.0** (the
 > [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md), sections 5.5
 > and 5.7). Every block below comes from the chapter's program, which runs as a test and checks
 > what it shows. Rank access and pagers are `proto_db`'s (`proto_db/indexing/keyed.py`, "Rank
@@ -104,21 +104,21 @@ What page k costs, for a page of size s over n rows:
 | A pager over a plan without rank | the whole plan once, then O(s) per page | one run of the plan, then O(n) |
 
 How much the seek saves is a measurement. Bench Q5 reads every page of 50 of an ordered query over
-2000 and 10^4 records, three ways, five runs interleaved with `proto_db`'s (the minimum; the full
-table is in [deviations.md](../deviations.md#q5-pages-by-rank-materialised-and-by-skipping-counts-by-rank)):
+2000 and 10^4 records, three ways, five runs interleaved with `proto_db`'s (the minimum, in the
+final comparison; the full table is in [deviations.md](../deviations.md#the-final-comparison-plan-task-10)):
 
 | Every page of 50, ordered by an indexed key | 2000 records (40 pages) | 10^4 records (200 pages) |
 |---|---|---|
-| A pager by rank (`IndexOrderedScan`) | 85 ms, 2.1 ms per page | 385 ms, 1.9 ms per page |
-| A pager over a `Sort` without rank: materialised once, then sliced | 189 ms | 911 ms |
-| Skipping to each page | 1554 ms, 39 ms per page on average | 39003 ms, 195 ms per page on average |
-| `proto_db`, the same three | 5.5, 5.6 and 56 ms | 26, 32 and 1468 ms |
+| A pager by rank (`IndexOrderedScan`) | 76 ms, 1.9 ms per page | 321 ms, 1.6 ms per page |
+| A pager over a `Sort` without rank: materialised once, then sliced | 145 ms | 867 ms |
+| Skipping to each page | 1402 ms, 35 ms per page on average | 29488 ms, 147 ms per page on average |
+| `proto_db`, the same three | 5.2, 5.2 and 53 ms | 24, 31 and 1417 ms |
 
 A page by rank costs the same at both sizes; a skipped page costs more the further it is, so the
-user who reads to the end pays 18 times the pager's price at 2000 records and 101 times at 10^4,
-and the gap keeps growing with the collection (`proto_db`: 10 and 57 times). Materialising once is
-not free, it pays the sort, but it pays it once: about twice the pager by rank. protoBaseST is 15
-to 34 times slower than `proto_db` in absolute terms, the gap of the whole port (chapter 18); the
+user who reads to the end pays 18 times the pager's price at 2000 records and 92 times at 10^4,
+and the gap keeps growing with the collection (`proto_db`: 10 and 58 times). Materialising once is
+not free, it pays the sort, but it pays it once: 1.9 and 2.7 times the pager by rank. protoBaseST is 13
+to 28 times slower than `proto_db` in absolute terms, the gap of the whole port (chapter 18); the
 shape of the costs is the same in both.
 
 ## Stable pages: one snapshot
@@ -173,8 +173,8 @@ lesson check: 'count of a range, by rank'
 `count` uses the same weights: when the plan knows its exact number of rows without producing them
 (an index plan does, from the weights of the groups it covers), the count is read, not computed by
 walking the rows. A `Count` node in a plan shows `'by_rank'`: true when it does so. In bench Q5 a
-count by rank took 1.7 ms at 2000 records and 2.2 ms at 10^4, against 143 and 654 ms for counting
-a filtered scan of the same records (`proto_db`: 0.10 ms against 6.2 and 31 ms).
+count by rank took 1.6 ms at 2000 records and 2.2 ms at 10^4, against 104 and 439 ms for counting
+a filtered scan of the same records (`proto_db`: 0.10 ms against 5.8 and 29 ms).
 
 ## What to take away
 

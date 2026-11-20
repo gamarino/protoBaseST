@@ -4,7 +4,7 @@
 Program: [examples/tutorial/17_indexes.st](../../examples/tutorial/17_indexes.st).
 Previous: [16. Operating a cluster](16-operating-a-cluster.md). Next: [18. Queries and the planner](18-queries-and-plans.md).
 
-> **In progress for protoBaseST 0.3.0** (the approved
+> **protoBaseST 0.3.0** (the
 > [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md)). Every block
 > below comes from the chapter's program, which runs as a test and checks what it shows.
 
@@ -28,10 +28,10 @@ lesson check: 'a walk finds the people in Oslo' is: (walk value: (db newTransact
 It is correct, and it is the right answer for 600 elements read once. Its cost is the size of the
 collection, whatever the answer: finding one person among a million reads a million records.
 In protoBaseST a stored record that is not in memory is also a lazy load and a decode, so the
-cost per element is not small. Measured in T8 on records in memory (bench Q1, RUNS=5 interleaved,
-the minimum, [deviations.md](../deviations.md#q1-q4-queries-indexed-against-a-forced-scan)): one
-lookup by a walk took 5.9 ms at 10^2 elements, 63 ms at 10^3 and 554 ms at 10^4; by an equality
-index, about 0.8 ms at every one of those sizes. A stored collection adds a load and a
+cost per element is not small. Measured in the final comparison on records in memory (bench Q1,
+RUNS=5 interleaved, the minimum, [deviations.md](../deviations.md#the-final-comparison-plan-task-10)): one
+lookup by a walk took 3.9 ms at 10^2 elements, 41 ms at 10^3 and 483 ms at 10^4; by an equality
+index, 0.66 to 0.85 ms at every one of those sizes. A stored collection adds a load and a
 decode per record the walk reads.
 
 ## The next obvious solution: keep the lookup yourself
@@ -158,10 +158,10 @@ merge needs no index-specific rule at all.
 
 Two consequences, both explained in [the guide](../queries.md#index-maintenance-under-immutability-and-the-commit):
 the merge now runs index work during the commit, so it lengthens the commit
-(bench M3: standalone, a merged blind write costs what a read-modify-write costs, 34, 12 and 5
+(bench M3: standalone, a merged blind write costs what a read-modify-write costs, 39, 14 and 6
 commits per second with 0, 1 and 3 indexes on a 600-record dictionary; in a three-member cluster
-17, 6.8 and 1.1, since the build runs under the write permission;
-[deviations.md](../deviations.md#m3-a-blind-write-merged-onto-an-indexed-current-standalone-and-in-a-cluster)); and if two transactions add an index of the
+19.5, 8.0 and 2.8, since the build runs under the write permission;
+[deviations.md](../deviations.md#the-final-comparison-plan-task-10)); and if two transactions add an index of the
 same name concurrently, the second commit is `PBConflictError`.
 
 ## What an index costs on every write
@@ -173,12 +173,17 @@ matters here more than in Python:
 
 | Indexes on the collection | Commits per second, one element per commit, 600-element `PBDictionary` (protoBaseST / `proto_db`) |
 |---|---|
-| 0 | 38 / 150 |
-| 1 (a `PBEqualityIndex`) | 11.9 / 115 |
-| 3 (an equality, a range and an extractor index) | 5.2 / 83 |
+| 0 | 42 / 147 |
+| 1 (a `PBEqualityIndex`) | 14.5 / 114 |
+| 3 (an equality, a range and an extractor index) | 6.3 / 79 |
 
-Measured on one busy machine, five runs each (bench M1, [deviations.md](../deviations.md#m1-commits-per-second-with-0-1-and-3-indexes)):
-indicative only. Each index costs about 55 ms per commit here, 2 ms in `proto_db`.
+Measured on one quiet machine, five runs each, the minimum (bench M1, the final comparison,
+[deviations.md](../deviations.md#the-final-comparison-plan-task-10)). Each index costs about 45 ms per commit here, 2 ms in `proto_db`.
+
+So the question the design left open (risk R1 of the specification: may indexed writes be slow
+enough to dominate commits?) has a measured answer: **here they do.** Index work is 65 % of a
+commit's time with one index and 85 % with three; in `proto_db` it is 22 % and 46 %. No speed
+claim is made; the cost is the tree work, paid by every write to an indexed collection.
 
 The rule that follows is `proto_db`'s: **index what you query**, and nothing else.
 

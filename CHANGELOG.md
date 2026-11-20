@@ -2,7 +2,7 @@
 
 ## 0.3.0 (unreleased)
 
-### Indexed queries (in progress)
+### Indexed queries
 
 - **AVL functions for indexes and rank access** (`PBAvl`, class side, ports of `proto_db`'s
   `avl.py`): order-key ranges (`keyDo:over:fromOrderKey:inclusive:toOrderKey:inclusive:`), the
@@ -187,6 +187,17 @@
   [deviations.md](docs/deviations.md#atom-weight-stage-2-shaped-atoms-keep-only-their-slots).
   No public selector, byte on disk, error text or tree node changes. Tests:
   `tests/unit/atom_weight_stage2.st`.
+- **Saves build each state once** (plan Task 10): the save walk builds an atom's state once and
+  hands it to the record and to the atom cache (a save built a shaped atom's state three times);
+  the atom cache makes one stub per reference (it stubbed each twice); the attribute name rule
+  compares the reserved names one by one (a literal `Array`'s `includes:` was most of its cost, on
+  every key path step). Same records, answers and errors; tests in
+  `tests/unit/atom_weight_stage2.st`.
+- **An empty `in` sorts** (plan Task 10, found by the 5000-seed property soak): an `in` with no
+  operand, ordered by the key of a weighted index, and an `in` over an empty `Set` failed with
+  protoST's "sort: needs an Array or an OrderedCollection" (its `asSortedCollection:` refuses an
+  empty collection). Both now sort with `sorted:`; tests in `tests/unit/qry_rank.st` and
+  `tests/unit/qry_terms.st`.
 
 ## 0.2.0 (2026-11-19)
 

@@ -117,11 +117,11 @@ other `proto_db` release.
 Python's `proto_db` can do things this prototype cannot, on the same directory: maintain and query
 indexes, write `RepeatedKeysDictionary`, run a cluster. A directory that uses them is still read by
 protoST, which refuses only the changes it cannot make exactly. Index maintenance and queries come
-with 0.3.0 (in progress); the next section shows the interplay.
+with 0.3.0; the next section shows the interplay.
 
 ## Indexes, from both sides
 
-> **In progress for protoBaseST 0.3.0** (the
+> **protoBaseST 0.3.0** (the
 > [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md), chapter 17).
 > The code comes from [11_indexed_interop.sh](../../examples/tutorial/11_indexed_interop.sh),
 > which runs [11_indexed_python_side.py](../../examples/tutorial/11_indexed_python_side.py)

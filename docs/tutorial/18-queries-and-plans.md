@@ -4,7 +4,7 @@
 Program: [examples/tutorial/18_queries_and_plans.st](../../examples/tutorial/18_queries_and_plans.st).
 Previous: [17. Indexes](17-indexes.md). Next: [19. Ordered reads and pages](19-ordered-reads-and-pages.md).
 
-> **In progress for protoBaseST 0.3.0** (the approved
+> **protoBaseST 0.3.0** (the
 > [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md)). Every block
 > below comes from the chapter's program, which runs as a test and checks what it shows. The
 > planner beneath the query API is a line for line port of `proto_db`'s (spec 5.6), and its plans
@@ -129,9 +129,9 @@ intersections would only add untested code.
 That is the model's claim. Whether it holds in time, at protoST's speed, is a measurement:
 measured (bench P3, one size and one selectivity: 2000 records, 29 rows, 5 runs): the hand-built
 intersection took 3.7x the filter plan's time in `proto_db`, so the claim holds there. In
-protoBaseST it took 13.2x at T7; after Task 8's fix round 1 made identity keys cheap, the two plans
-are within noise of each other (65.5 / 67.7 against 71.9 / 74.5 ms, minimum / median), so that run
-is inconclusive at protoST's speed; the planner still chooses the filter, as `proto_db`'s does ([deviations.md](../deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
+protoBaseST it took 13.2x at T7; since Task 8's fix round 1 made identity keys cheap it takes
+1.10x (59.4 against 54.2 ms, the minimum, in the final comparison), within noise, so the run is
+inconclusive at protoST's speed; the planner still chooses the filter, as `proto_db`'s does ([deviations.md](../deviations.md#the-final-comparison-plan-task-10)).
 
 ## Why the planner sometimes scans
 
@@ -150,13 +150,14 @@ every cost in this chapter). In this model the switch comes almost at once: with
 two cities the lookup costs 3 and the scan 4. That is the model's crossover in collection size, and
 it is too small to be worth measuring (ruling CR2). What matters to a program is whether the
 timings agree with the model where it switches for a reason other than size, the selectivity of the
-condition: measured in T7 (bench P2, 2000 records, both plans forced): the model switches to the scan only
-between 99 % and 100 % of a unique range key, and for `ne:` on an index of n groups. It switches
-early: in `proto_db` the forced index plan is still faster at both points (by 31 % and 19 %), and
-in protoBaseST the `ne:` complement is 30 % faster than the scan it rejects, while on the range
-key the two plans converge, within the run's noise. Below the switch the index wins in proportion
-to the rows. The model is slightly pessimistic about the index, never wrong about the answer
-([deviations.md](../deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
+condition: measured in the final comparison (bench P2, 2000 records, both plans forced): the model switches to the scan only
+between 99 % and 100 % of a unique range key, and for `ne:` on an index of n groups. In `proto_db`
+it switches early: the forced index plan is still faster at both points (by 37 % and 21 %). In
+protoBaseST the `ne:` complement is 22 % faster than the scan it rejects, early too, while on the
+range key the two plans cross between 90 % and 99 %, so there the model switches late by under
+10 %, within the run's noise. Below the switch the index wins in proportion to the rows. The
+model is slightly off about the index near the switch, never wrong about the answer
+([deviations.md](../deviations.md#the-final-comparison-plan-task-10)).
 
 ## `not (age = 30)` is not `age ne: 30`
 
@@ -191,10 +192,10 @@ lesson check: 'an unindexed branch: one scan for the whole OR'
 A disjunction gets a `Union` of index plans only when every branch has one. If one branch needs a
 scan, a union that includes that scan always costs more than the scan alone, filtered by the whole
 `|`. A union keeps each element with its largest multiplicity over its branches, so it answers
-the same multiset as a scan. Measured in T8 (bench Q3, 2000 records, 20 queries, the minimum;
-[deviations.md](../deviations.md#q1-q4-queries-indexed-against-a-forced-scan)): the Union of two
-lookups of about 500 rows took 19 ms per query against 235 ms for the scan; `proto_db` 2.7 against
-12.6 ms.
+the same multiset as a scan. Measured in the final comparison (bench Q3, 2000 records, 20
+queries, the minimum; [deviations.md](../deviations.md#the-final-comparison-plan-task-10)): the Union of two
+lookups of about 500 rows took 18 ms per query against 166 ms for the scan; `proto_db` 2.6 against
+11.5 ms.
 
 ## Blocks: what no index can answer
 

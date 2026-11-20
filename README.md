@@ -40,6 +40,19 @@ disjoint roots, and a third as many on one hot key ([docs/deviations.md](docs/de
 [chapter 13](docs/tutorial/13-cluster-concepts.md); what it does not do is in
 [docs/not-done.md](docs/not-done.md).
 
+**Indexed queries (0.3.0, unreleased).** Equality and range indexes that are part of a collection
+version, maintained by every mutator and by merges; the query front end (`PBQuery`, `PBField`),
+`proto_db`'s cost-based planner with the same plans and model costs, ordered reads, pages and
+counts by rank, all from `proto_db` `v2.0.0rc4`, on the same disk format. Vector indexes are
+excluded. Checked: `proto_db`'s query and plan vectors, its index contract over 200 seeds, a
+planned-equals-scan property over 5000 seeds and every collection kind, and its tests, each ported
+or justified (`tests/unit/queries_checklist.tsv`). The atom weight work that came with it (plan
+Tasks 11 and 12) cut the cells a stored index node keeps by about a third (stage 2 alone). Measured on one
+quiet machine against `proto_db`: 3.5 to 35 times slower on every unit, and an indexed commit
+spends most of its time on index work (65 % with one index, 85 % with three)
+([docs/deviations.md](docs/deviations.md#the-final-comparison-plan-task-10)). Start with
+[chapter 17](docs/tutorial/17-indexes.md) and [docs/queries.md](docs/queries.md).
+
 ## What it shows
 
 - **Objects persist as objects reachable from named roots**, the part of GemStone's model this
@@ -147,7 +160,7 @@ program that checks its own results and is run by the tests.
 |---|---|
 | [The tutorial, chapters 1-12](docs/tutorial/README.md) | A single process: first commit, values and versions, records, collections and queries, transactions and conflicts, blind writes, mutables and history, bytes, actors, crash recovery, Python interop, refusals. |
 | [Cluster mode, chapters 13-16](docs/tutorial/13-cluster-concepts.md) | Several processes sharing one database: [the ideas](docs/tutorial/13-cluster-concepts.md), [a three-node cluster](docs/tutorial/14-a-three-node-cluster.md), [failures and recovery](docs/tutorial/15-failures-and-recovery.md), [operating a cluster](docs/tutorial/16-operating-a-cluster.md). |
-| [Queries, chapters 17-19](docs/tutorial/17-indexes.md) **(0.3.0, in progress)** | [Indexes](docs/tutorial/17-indexes.md) and [queries and the planner](docs/tutorial/18-queries-and-plans.md) and [ordered reads and pages](docs/tutorial/19-ordered-reads-and-pages.md) run. |
+| [Queries, chapters 17-19](docs/tutorial/17-indexes.md) **(0.3.0)** | [Indexes](docs/tutorial/17-indexes.md) and [queries and the planner](docs/tutorial/18-queries-and-plans.md) and [ordered reads and pages](docs/tutorial/19-ordered-reads-and-pages.md) run. |
 | [A small ERP](docs/tutorial/erp.md) | A guided build of a real application, with the reasoning at each step. |
 | [Coming from GemStone/S](docs/tutorial/gemstone.md), [Coming from Soil](docs/tutorial/soil.md) | Orientation for readers who know those systems. |
 
@@ -173,7 +186,7 @@ SmallInteger milliseconds, not float seconds.
 | `FrozenList`, `FrozenDict`, `MISSING`, a Python tuple | `PBFrozenList`, `PBFrozenDict`, `PBMissing`, `PBTuple` |
 | `OpaqueAtom` | `PBOpaqueAtom` |
 | `KeySpec`, `Term`, `And`, `Or`, `Not`, `PythonPredicate` | `PBKeySpec`, `PBTerm`, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate` |
-| `F`, `Field`; `Queryable` | `PBField`; `PBQuery` (0.3.0, in progress) |
+| `F`, `Field`; `Queryable` | `PBField`; `PBQuery` |
 | `PythonFilter` (an `explain` node) | `BlockFilter` (`PBBlockFilter`) |
 | `ProtoValidationError`, `ProtoCorruptionError`, `ProtoNotSupportedError`, `ProtoConflictError`, `ProtoTimeoutError`, `ProtoOutcomeUnknownError`, `ProtoUserError`, `ProtoClosedError` | `PBValidationError`, `PBCorruptionError`, `PBNotSupportedError`, `PBConflictError`, `PBTimeoutError`, `PBOutcomeUnknownError`, `PBUserError`, `PBClosedError` |
 
@@ -232,12 +245,12 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 | | |
 |---|---|
 | [docs/tutorial/erp.md](docs/tutorial/erp.md) | A guided build of a small ERP, with the reasoning at each step. Every snippet is run by the tests. |
-| [docs/tutorial/](docs/tutorial/README.md) | The chaptered tutorial: chapters 1-12 on a single process, chapters 13-16 on cluster mode, each quoting a program of `examples/tutorial/` or `examples/cluster/`; and two orientation chapters, coming from GemStone/S and coming from Soil, with their sources. |
+| [docs/tutorial/](docs/tutorial/README.md) | The chaptered tutorial: chapters 1-12 on a single process, chapters 13-16 on cluster mode, chapters 17-19 on indexed queries, each quoting a program of `examples/tutorial/` or `examples/cluster/`; and two orientation chapters, coming from GemStone/S and coming from Soil, with their sources. |
 | [examples/cluster/](examples/cluster/README.md) | The cluster chapters' programs, run by the tests; `pending/` is for those that need API still being built (none today). |
 | [examples/tutorial/](examples/tutorial/README.md) | Small programs, one concept each, each checking its own results; run by the tests. |
-| [docs/reference.md](docs/reference.md) | Every public class and message; the indexed-query API, pagers included, in a section marked in progress. |
-| [docs/queries.md](docs/queries.md) | **0.3.0, in progress:** indexed queries and the query planner, the conceptual guide, including how to read `explain`. |
-| [examples/queries/](examples/queries/README.md) | **0.3.0, in progress:** the programs of the guide, run as tests; `pending/` is empty. |
+| [docs/reference.md](docs/reference.md) | Every public class and message, the indexed-query API and pagers included. |
+| [docs/queries.md](docs/queries.md) | **0.3.0:** indexed queries and the query planner, the conceptual guide, including how to read `explain`. |
+| [examples/queries/](examples/queries/README.md) | **0.3.0:** the programs of the guide, run as tests; `pending/` is empty. |
 | [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from `proto_db`. |
 | [docs/not-done.md](docs/not-done.md) | What is not done, and what is not proven. |
 | [docs/decisions.md](docs/decisions.md) | The choices, with what each costs if it is wrong. |

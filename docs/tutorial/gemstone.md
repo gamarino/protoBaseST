@@ -48,7 +48,7 @@ Smalltalk code can share its database with another language?
 | Read and write locks, never waited for automatically [G2] | No object locks. One OS lock (`flock` on `space.lock`) is held only while a version is published | No pessimistic mode. |
 | Code (classes and methods) is stored in the repository and executed by the Gem [G1] | **No code is stored.** The file holds a type name and attributes; behaviour comes from the class each program registers | A deliberate difference: the same record is read by a protoST class and by a Python class. It also means there is no server-side execution and no shared code base in the database. |
 | Class versions and class history; instances migrate explicitly (`migrateTo:`, `migrateInstancesTo:`, `migrateFrom:instVarMap:`); unmigrated instances keep the old class's methods [G4] | No class versions and no migration. Records are maps of attribute names; an attribute added later is absent in old records; `typeAliases` keeps records of a renamed type readable | GemStone's model is far richer. protoBaseST's answer is that old versions are immutable history and should stay as written; a "migration" is a new version written by a program. |
-| Equality and identity indexes on `UnorderedCollection` subclasses, `GsQuery`, selection blocks, automatic index maintenance [G3] | Maintained equality and range indexes, a query front end (`PBQuery`, `PBField`) and a cost-based planner (0.3.0, in progress, [chapters 17-18](17-indexes.md)); pagers to come ([chapter 19](19-ordered-reads-and-pages.md)) | **GemStone is still ahead here.** protoBaseST's conditions are built with `PBField`, not selection blocks (a block is opaque and never uses an index; ruling IQ2), and there are no identity indexes. |
+| Equality and identity indexes on `UnorderedCollection` subclasses, `GsQuery`, selection blocks, automatic index maintenance [G3] | Maintained equality and range indexes, a query front end (`PBQuery`, `PBField`) and a cost-based planner, and pagers by rank in one process (0.3.0, [chapters 17-19](17-indexes.md)) | **GemStone is still ahead here.** protoBaseST's conditions are built with `PBField`, not selection blocks (a block is opaque and never uses an index; ruling IQ2), and there are no identity indexes. |
 | Clustering: `cluster`, `clusterDepthFirst`, cluster buckets packing objects into disk pages [G5] | No clustering control. Records are appended to segments in commit order | Not addressed. |
 | Shared page cache holding the object table and pages, shared by the Stone and the Gems on a host [G5] | A per-storage atom cache of decoded records, in the process (bounded in entries and bytes) | No shared cache across processes. |
 | Transaction log with point-in-time roll-forward recovery [G1] | No log. A version is published by an atomic rename of `space.root`; a crash leaves only unreachable debris (chapter 10) | Different technique. protoBaseST has no backup or roll-forward tool. |
@@ -62,7 +62,8 @@ Smalltalk code can share its database with another language?
 
 - Transparent persistence of a mutable graph: modify, commit, done.
 - Object-level conflict detection.
-- Indexes, `GsQuery`, selection blocks.
+- Identity indexes, and selection blocks that use an index (`GsQuery`); protoBaseST has
+  equality and range indexes and `PBQuery` (chapters 17-19), where a block never uses an index.
 - Code in the database, executed next to the data; class history and migration tools.
 - A server, a shared page cache, administration tools, backups, and a product history that
   goes back to 1986 [G7].

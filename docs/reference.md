@@ -27,7 +27,7 @@ Contents:
 [Values](#values) |
 [Errors](#errors) |
 [Lower layers](#lower-layers) |
-[Indexed queries (in progress)](#indexed-queries-in-progress-030) |
+[Indexed queries (0.3.0)](#indexed-queries-030) |
 [The module and its files](#the-module-and-its-files)
 
 ## Mapping from `proto_db`
@@ -285,7 +285,7 @@ out; an absent element answers a new version with the same content), `countOf:`,
 **PBRepeatedKeysDictionary**: `getAt:`, `has:`, `keys`, `values`, `items`, `keysAndValuesDo:`,
 `totalCount`. Read only; its writes are a non-goal.
 
-**Indexes** are decoded, kept, maintained and queried (0.3.0, in progress: [Indexed queries](#indexed-queries-in-progress-030)): `PBEqualityIndex`, `PBRangeIndex`
+**Indexes** are decoded, kept, maintained and queried (0.3.0: [Indexed queries](#indexed-queries-030)): `PBEqualityIndex`, `PBRangeIndex`
 (`PBKeyGroupIndex`), `PBVectorIndex` (`dim`, `metric`, `backend`, `params`, `centroids`,
 `trainedSize`, `storeEntries`). On all: `name`, `keySpec`, `hasMemberTokens` (false for an index
 written by format 3), `totalCount`. `PBIndexSet` (`names`, `get:`, `size`, `isEmpty`) holds a
@@ -1055,19 +1055,17 @@ For tests, tools and readers of the format. An application does not need them.
   (the deadline in monotonic microseconds), `future`, `transaction`,
   `databaseName`, `isCreateDatabase`, `willRetry`, `deadline`, `writtenAtoms`.
 
-## Indexed queries (in progress, 0.3.0)
+## Indexed queries (0.3.0)
 
-> **0.3.0, built task by task.** Implemented so far: "Key specs and extractors"
-> (`src/protobase/keyspec.st`), `PBMemberKeys` and `PBMisfiledError`, "Indexes" (Task 3), the
-> collection messages of "Collections gain" (Tasks 4a and 4b), "Terms and expressions" (Task 5,
-> `src/protobase/terms.st`), and "Plans and explain" with the indexes' access paths and rank access
-> (Task 6, `src/protobase/plans.st`), `PBPlanner` (Task 7, `src/protobase/planner.st`), and
-> `PBField` and `PBQuery` (Task 8, `src/protobase/query.st`), and `pagerSize:` and "Pagers"
-> (Task 9, `src/protobase/pager.st`): every message of this section is implemented. It is the API
-> of the approved [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md)
-> (sections 5.2 and 5.5) and of its implementation plan's interfaces, written early so the
-> chapters could cite it; the final task of the plan (Task 10) completes the documentation pass
-> and removes the "in progress" marks. The concepts are in
+> **0.3.0.** Every message of this section is implemented: "Key specs and extractors"
+> (`src/protobase/keyspec.st`), `PBMemberKeys` and `PBMisfiledError` (`keygroups.st`,
+> `errors.st`), "Indexes" (`indexes.st`), the collection messages of "Collections gain"
+> (`collections.st`), "Terms and expressions" (`terms.st`), "Plans and explain" with the indexes'
+> access paths and rank access (`plans.st`), `PBPlanner` (`planner.st`), `PBField` and `PBQuery`
+> (`query.st`), and `pagerSize:` and "Pagers" (`pager.st`). It is the API of the
+> [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md) (sections 5.2
+> and 5.5); `tests/docs/reference_selectors.sh` checks that every selector it names exists. The
+> concepts are in
 > [queries.md](queries.md); the tutorial is chapters [17](tutorial/17-indexes.md),
 > [18](tutorial/18-queries-and-plans.md) and [19](tutorial/19-ordered-reads-and-pages.md).
 
@@ -1096,7 +1094,7 @@ For tests, tools and readers of the format. An application does not need them.
 | `PBKeySpec forTermPath: aStringOrNil` | The key spec a term path names: `nil` is the element, `'@name'` an extractor, anything else a path. |
 | `PBKeySpec fromData: aTuple`, `asData` | From and to the persisted tuple `('path' 'a.b')`, `('element' nil)`, `('extractor' name)`: `asData` answers a `PBTuple`; `fromData:` takes a `PBTuple`, a `PBFrozenList` or an `Array` of two items, and malformed data is `PBCorruptionError`. |
 | `kind`, `arg`, `termPath`, `describe` | `kind` is `'path'`, `'element'` or `'extractor'`; `termPath` is the path, `nil` or `'@name'`; `describe` is the path, `'<element>'` or `'@name'`, as `explain` shows it. |
-| `extract: anElement` | The key, or `PBMissing default` when a path step finds no attribute or map key, or steps through any other value; an explicit `nil` stays `nil`. Steps read a `PBObject`'s own attributes, another atom's persisted fields and a map's keys; names starting with `_` and reserved names are never read from an atom. An extractor's answer passes through `PBCodec canonical:`; an exception its block raises passes through unchanged. |
+| `extract: anElement` | The key, or `PBMissing default` when a path step finds no attribute or map key, or steps through any other value; an explicit `nil` stays `nil`. Steps read a `PBObject`'s own attributes, another atom's persisted fields and a map's keys; names starting with `_` and reserved names are never read from an atom. An extractor's answer passes through `PBCodec canonical:`; an exception its block raises passes through unwrapped. |
 | `=`, `hash` | By value: kind and argument. |
 
 **The extractor registry** (process-wide; one `Atom` of an immutable dictionary, changed by

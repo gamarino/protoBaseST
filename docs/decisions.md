@@ -9,8 +9,10 @@ Three kinds, in this order, for the single-process prototype and then for cluste
 3. [Execution rulings](#3-execution-rulings), made while the tasks ran, numbered R1 to R29 where
    they were numbered.
 4. [Cluster mode](#4-cluster-mode): the maintainer's answers Q1 to Q8, the planner's calls CC1 to
-   CC25, and the rulings taken while the cluster tasks ran; then
-   [the proposals to `proto_db`](#proposals-to-proto_db).
+   CC25, and the rulings taken while the cluster tasks ran.
+5. [Indexed queries](#5-indexed-queries) (0.3.0): the spec's calls IC1 to IC10, the maintainer's
+   rulings IQ1 to IQ8, the controller rulings CR1 to CR10, the planner's calls IP1 to IP17, and the
+   rulings taken while the tasks ran; then [the proposals to `proto_db`](#proposals-to-proto_db).
 
 The first two kinds are quoted as decided; where a later ruling superseded one, it says so in the
 entry. The rule that governs them all is the maintainer's: **when in doubt, `proto_db` is the
@@ -237,9 +239,6 @@ As built:
 | 29 | The cluster benchmark runs each member as a process of its own on loopback, beside a standalone run of the same workload; the root-independent split is measured by a benchmark-only subclass of the round (`BenchRound`), not by a new product statistic; no `proto_db` figure is shown, since `proto_db`'s cluster was not run on the same shape. | Compare like with like; a measurement task changes no product code. | A `proto_db` comparison needs its own driver. |
 | 29 | The timer table of the reference is generated from `PBClusterConfig timerTable` and guarded (`tests/docs/timer_table_sync.sh`). | A copied table goes stale. | None. |
 | 30 | The timer audit's row `persist` stays outside the simulator audit: its only reader is the persister, a shell actor the simulator does not run; the declaration names that source and class, and the index fails on any other reader. `AcceptFamilies powerLoss:` keeps its between-terms schedule and gains `powerLossInTerm:` (crashes inside a term, then one more commit). The audit's floors are re-measured; the drops are named (R149/R149a, and Task 22b's base read by the build). | The persister is `proto_db`'s `PlainTier.persist`, beside the coordinator; `proto_db`'s power-loss tests keep their load running after the revive. | The persister's timers are tested only where it runs (`cluster_persister.st`, `tests/cluster`). |
-| Queries 4b | **(maintainer, 2026-11-19)** An entry's build error of any class fails only that commit in a cluster round too (`PBCoordinatorCore >> roundBuildFailed:in:now:`), a documented deviation from rc4's `_permit_round`, which fails the whole round on an error that is not a `ProtoDBError`. | One rule in every mode: standalone and in a group commit rc4 already fails only the commit whose build raised (`_standalone_round`, review M2); an extractor's exception must not fail its round-mates in a cluster only. Failing one entry is safe: nothing of the round's own root is sent before its builds end; a re-commit, if any, has already committed. An unsent proposal asks `proto_db` to adopt the rule. | A program that relied on a round-mate's build error failing its own cluster commit; none found. Reverting is one branch of the core (`roundBuildFailed:in:now:`), case 30 of `tests/unit/cluster_round_rules.st` and the subcase of case 34, case 27 of `tests/unit/sim_round_rules.st`, case (c) of `tests/unit/idx_merge_extractor.st`, and the docs (deviations.md cluster mode, decisions.md, reference.md, queries.md, tutorial 17, CHANGELOG, the spec 9.2 note, the source comments of round.st, publisher.st, keyspec.st, transactions.st). |
-| Queries 11 | **(maintainer, 2026-11-19, the second decision of that evening: "¿por qué tantas celdas? … sin romper la inmutabilidad")** An atom's runtime-only fields (oid, the saved place, the load memo, a keyed node's order key, an index's parsed key spec) are instance variables written once, by a compare-and-swap from nil on the variable (`setInstVar:from:to:`, the `_slots` precedent), not `Atom` cells; a constructor writes the fields it knows in one write group and never writes nil. Spec 4.1 (decision 3) is amended from "Both are `Atom` cells" to "each is written once, by a compare-and-swap from nil on its instance variable (or an `Atom`)". | An `Atom` per field cost about 25 of a node's cells and four extra allocations per node; the write-once rule needs only the compare-and-swap, and a race keeps today's semantics (the loser answers the winner's value; `tests/unit/atom_weight.st`). Values stay immutable. | A field that is re-written cannot use the pattern and stays an `Atom` (the process-wide tables, the transaction bookkeeping, the round runner's cells). The collection's `consumed` mark (false, then true once) stays an `Atom` for now: one per collection version, not per node, and `consumed` answers the cell itself. Reverting is the publishers in `registry.st`, `avl.st` and `indexes.st` and their allowlist entries. |
-| Queries 12 | **(plan Task 12, stage 2 of Queries 11)** A shaped atom (its class's record shape has slots equal to its persisted fields, and its record holds exactly those fields in that order) keeps its slots and its oid; its memo is the class's shape, and `state` is a `PBFrozenDict` over the slots made on demand. Any other atom keeps the envelope (tag, oid, state, slots). The atom cache keeps what the atom keeps (oid and values, or the envelope). The decoder takes a fast path when a record's names equal its shape's persisted fields, and for lists and tuples of scalars; the oid pool keeps the rest of its batch as one ByteArray. | The envelope and the state dictionary were most of a loaded node's cells, and a record load built associations, a per-name check and a dictionary before reading its slots out of it. Equality, hash and `state` answers are unchanged for every atom kind (`tests/unit/atom_weight_stage2.st`). | `state` of a shaped atom is a new dictionary per call (equal, not identical); a caller that reads many fields should read `state` once. A shaped atom keeps no tag (the class gives it; a cache-rebuilt shaped envelope has tag nil, unused). The attribute name rule moved to `_PBRecordShape nameProblem:` (framing delegates). Reverting is `registry.st`, `framing.st`, `store.st`, `avl.st`, `codec.st` and the allowlist entries. |
 
 ### Known, not adopted: `proto_db` D62 (the runtime registry, format 5)
 
@@ -254,6 +253,105 @@ C3 with oid identity, catalog replacement), about the size of the cluster plan i
 maintainer, the full registry gets its own plan after the cluster branch merges
 (`2026-11-15-rc4-delta.md`, section 3b). *Cost:* protoBaseST cannot open a space whose `proto_db`
 writers use the registry.
+
+## 5. Indexed queries
+
+The design is `docs/superpowers/specs/2026-11-18-indexed-queries-design.md` (approved
+2026-11-18), the plan `docs/superpowers/plans/2026-11-18-indexed-queries.md` (Tasks 0 to 12, with
+Tasks 11 and 12, the atom weight, added by the maintainer's second decision of 2026-11-19). The
+reference is `proto_db` `v2.0.0rc4`: its `indexing`, `query` and `collections` packages and its
+`indexing-framework.rst` and `query-planner.rst`. Vector indexes and vector search were excluded
+from this feature (spec 3.3); the maintainer has since asked for them as a separate scope
+extension, not part of 0.3.0.
+
+### The spec's calls, IC1 to IC10
+
+| # | Call | Why | Cost if wrong |
+|---|---|---|---|
+| IC1 | Port `proto_db`'s structure (mutator-time maintenance, the same trees, the same cost model) rather than design a protoST-native index. | The format is shared; any other structure would be refused by `proto_db` or diverge. | None found: the index trees are node-identical to `proto_db`'s (`tests/interop/index_build_identical.sh`). |
+| IC2 | Vector and unknown index kinds keep their collection read only. | Vectors are excluded; maintaining only some indexes writes stale ones. | A collection with a vector index stays unchangeable from protoST. |
+| IC3 | Operators are `proto_db`'s strings inside `PBTerm`; the builder gives Smalltalk selectors on top. | One list syntax and one `explain` for both languages and for the vectors. | None. |
+| IC4 | No `=` override on `PBField`; `eq:` / `ne:` instead. | `=` must stay an equality for collections and tests. | A little less like Python's `F.city == "Oslo"`. |
+| IC5 | `PBQuery` immutable, like every value of the library. | `proto_db`'s `Queryable` is; the house rule is the same. | The cascade trap (chapter 18 teaches it first). |
+| IC6 | `BlockFilter` as the node name for an opaque predicate. | The node runs a protoST block; naming it `PythonFilter` would mislead. | A one-name difference in `explain`; no query vector holds one. |
+| IC7 | Stale format-3 key-group indexes are rebuilt on first change, as `proto_db` does. | Refusing would keep such collections read only for no format reason. | A first change to a large stale collection pays a full build. |
+| IC8 | Query vectors are generated by a protoBaseST script from `proto_db`, vendored with a manifest, and self-checked against a scan. | `proto_db` ships none. | They must be regenerated when the reference moves (`tests/conformance/fetch_query_vectors.sh`). |
+| IC9 | Pager tokens, the query cache, `GroupBy`/`Join`/`Unnest`, computed values: deferred (spec 3.2). | Each is either not portable today (tokens) or not optimisation (the rest). | Programs that need them wait ([not-done.md](not-done.md#the-cuts)). |
+| IC10 | A version bump to 0.3.0 for the release that carries this feature, after 0.2.0 (cluster). | It changes what protoBaseST writes (indexed collections) and adds API. | Naming only. |
+
+### The maintainer's rulings, IQ1 to IQ8 (2026-11-18)
+
+| # | Question | Ruling | As executed |
+|---|---|---|---|
+| IQ1 | Application code in the commit build: an extractor runs during a merge in the publisher and in the cluster round. | **Exactly as `proto_db`.** The extractor's own exception passes through unwrapped and fails only that commit; purity is a documented contract; no new error class. | Standalone and in a group commit, as ruled. In a cluster round rc4 fails the whole round; the maintainer then chose per-commit failure there too (row "4b, decision 1" below), a documented deviation and an unsent proposal. |
+| IQ2 | The shape of the query API. | `eq:` / `ne:` with the binary comparisons, `&` / `|` / `not`, `project:` / `collect:`, no `select:` on `PBQuery`, no selection blocks in the first release. | As ruled; the `proto_db` rc4 conveniences were ported too (Task 8, below). |
+| IQ3 | Scope cut: pager tokens, the query cache, `GroupBy` / `Join` / `Unnest`, computed values, `ValuesScan`. | **Deferred.** | Listed in [not-done.md](not-done.md#the-cuts). |
+| IQ4 | A `log2` primitive in protoST for exact plan parity. | **No protoST change; a documented deviation.** | `PBCost class >> log2:` is the one logarithm (IP7); the 314 query vectors found no near tie ([deviations.md](deviations.md#indexed-queries)). |
+| IQ5 | Vector and unknown index kinds keep their collection read only. | **Approved.** | As ruled (`PBNotSupportedError` naming the index). |
+| IQ6 | Propose query and index-shape vectors to `proto_db`. | **Stays a proposal; nothing is sent.** | Below, under the proposals. |
+| IQ7 | Propose a portable plan digest to `proto_db`. | **Stays a proposal; nothing is sent.** | Below, under the proposals; pager tokens stay deferred. |
+| IQ8 | Release vehicle. | **0.3.0, after 0.2.0.** | `CHANGELOG.md`, `## 0.3.0 (unreleased)`. |
+
+### The controller rulings, CR1 to CR10 (2026-11-18)
+
+Gaps the documentation drafts found, ruled before the code (spec 9.2).
+
+| # | Ruling |
+|---|---|
+| CR1 | The `!=` claim of spec 1.3 was wrong. Under D30 the index complement costs n + G + 1 against 2n for scan plus filter, so it wins whenever the index has fewer than n − 1 key groups. |
+| CR2 | P2 measures whether real timings cross where the cost model says; the model's crossover for a tiny collection is only one or two elements. |
+| CR3 | `name:keySpec:` is the primitive index constructor; `name:path:` is a convenience for a single-path key spec. |
+| CR4 | An index's `explain` `kind` uses `proto_db`'s names (`'EqualityIndex'`, `'RangeIndex'`), as plan nodes keep `proto_db`'s names. |
+| CR5 | Chained `where:` calls combine with AND. `&`, `|` and `not` take expressions only; a block enters only through `where:` and becomes a `BlockFilter`. |
+| CR6 | `where:` with an argument that is neither a `PBExpression` nor a one-argument block signals `PBValidationError` with the text `where: expects a PBExpression or a one-argument block, got a <class name>`. |
+| CR7 | The half-open selectors are `betweenLeftOpen:and:` and `betweenRightOpen:and:`; pages are zero-based; the pager's `explain` is `pager` → `page_size`, `by_rank` and `plan`, with no `portable`; `PBExpression class >> compile:` belongs to the term task. |
+| CR8 | Group commit with a failing extractor: only that transaction's commit fails and the others commit (`tests/unit/idx_merge_extractor.st`). |
+| CR9 | The final task rewrites every "planned for 0.3.0" note in `not-done.md` and `deviations.md` as a present-tense statement of what is. Done in Task 10. |
+| CR10 | The guide's worked-plan estimates are model output, labelled "model estimate", generated from `proto_db`'s own planner by a script (`tests/docs/guide_plans.sh`), never computed by hand. |
+
+### The planner's calls, IP1 to IP17
+
+The plan's calls, reviewed in the final task. Where execution changed one, the last column says
+how.
+
+| # | Call | As executed |
+|---|---|---|
+| IP1 | Task numbers are the spec's T0-T10, so a marker `[measured in T<n>: …]` names the task that fills it; T4 is split into 4a and 4b; the chapter programs leave `examples/queries/pending/` in Task 8 (Task 9 for chapter 19). | As called; no marker is left (`MARKERS_FINAL=1 tests/docs/measured_markers.sh`). |
+| IP2 | **(maintainer)** An exception raised by an extractor block passes through `extract:` unwrapped and fails only the commit whose merge ran it. | As called standalone and in a group commit; extended to the cluster round by the maintainer's decision of 2026-11-19 (row "4b, decision 1"). |
+| IP3 | **(maintainer)** `PBIndex >> keySpec` keeps answering the persisted `(kind, arg)` tuple; `keySpecObject` answers a `PBKeySpec`; a malformed tuple is `PBValidationError` naming the index, when asked. | As called; every selector that answers a `PBKeySpec` is named `keySpecObject`, on `PBTerm` too (Task 0 ruling). |
+| IP4 | Tests live flat in `tests/unit/` (`idx_*.st`, `qry_*.st`, helpers `_queries.st` and `_qplants.st`), generators and replays in `tests/interop/`. | As called. |
+| IP5 | `tests/docs/pending_selectors.tsv` lists selectors the drafts cite before they exist; empty at release (`PENDING_FINAL=1`). | Empty at Task 10. |
+| IP6 | `tests/docs/measured_markers.sh` lists every `[measured in T<n>: …]`; none left at release (`MARKERS_FINAL=1`). | None left at Task 10. |
+| IP7 | `log2(groups + 2)` is computed in one method, `PBCost class >> log2:`. | As called. |
+| IP8 | Near tie: `|a - b| <= 1e-12 * (a abs max: b abs)` for the two chosen plans' root costs; results compared in every case. | As called; 0 near ties in 314 vectors. |
+| IP9 | Plans: `do:` is the lazy protocol; `execute` answers a new `Array` each time; no stream class. | As called; `windowFrom:to:` answers an `Array` too. |
+| IP10 | The bench line `WORK id=… impl=… size=… rows=… queries=… plan=… checksum=…`, with one checksum formula in both languages. | As called (`bench/run_query.sh`). |
+| IP11 | Query vectors are vendored as MessagePack, written only by `tests/conformance/fetch_query_vectors.sh`. | As called. |
+| IP12 | Task 0 merges `feat/queries-docs` with `--no-ff`; review findings are fixed on `feat/queries`. | As called. |
+| IP13 | The keyed bulk build ports `_build_balanced` exactly. | As called; node identity checked against `proto_db`. |
+| IP14 | Sort keys are `PBSortKey key:descending:`; `PBQuery >> orderBy:` builds them. | As called. |
+| IP15 | Term-facing index methods and rank segments are built in Task 6, with the plan classes. | As called. The count node is `PBCountPlan`, not `PBCount` (that name is the cluster's counter effect; Task 6 ruling). |
+| IP16 | The seed count of the property and contract tests is read from `PBST_PROP_SEEDS`. | As called; `idx_contract.st` defaults to 8 seeds, `proto_db`'s contract count, and validates every step, `proto_db`'s cadence (Task 3 fix round). |
+| IP17 | Between Tasks 4a and 4b the merge onto an indexed current stays refused, and index operations answer an incomplete log. | Interim only: Task 4b removed both when it logged `@index_add` and `@index_remove`. |
+
+### Rulings taken during execution
+
+| Task | What was decided | Why | Cost if wrong |
+|---|---|---|---|
+| 0 | `CollectionScan`'s `collection` field reports `proto_db`'s class name (`Dictionary`, `List`, `Set`, …). | Cross-language `explain` equality. | A Smalltalk reader sees Python's names; the reference says so. |
+| 3 | The extractor registry's `Atom` cell is a construction-time entry of the immutability allowlist. | The registry is the one mutable table the design allows (one `Atom` of an immutable dictionary). | None found. |
+| 3 (diagnosis) | The index cost is not algorithmic: same algorithm as `proto_db`, constant work per element at a high per-operation cost in protoST; the order key is computed once per element, the oid read as two 64-bit words. | Measured by a separate diagnosis before Task 4a. | None: the atom weight became Tasks 11 and 12. |
+| 4a | No eager check of unregistered extractors: as in `proto_db`, a blind write, `removeIndex:` or an `addIndex:` of another index passes; anything that evaluates the extractor refuses, naming it. | `proto_db` refuses only where it extracts. | None: it is `proto_db`'s rule. |
+| 4b, decision 1 | **(maintainer, 2026-11-19)** An entry's build error of any class fails only that commit in a cluster round too (`PBCoordinatorCore >> roundBuildFailed:in:now:`), a documented deviation from rc4's `_permit_round`, which fails the whole round on an error that is not a `ProtoDBError`. | One rule in every mode: standalone and in a group commit rc4 already fails only the commit whose build raised (`_standalone_round`, review M2); an extractor's exception must not fail its round-mates in a cluster only. Failing one entry is safe: nothing of the round's own root is sent before its builds end; a re-commit, if any, has already committed. An unsent proposal asks `proto_db` to adopt the rule. | A program that relied on a round-mate's build error failing its own cluster commit; none found. Reverting is one branch of the core (`roundBuildFailed:in:now:`), case 30 of `tests/unit/cluster_round_rules.st` and the subcase of case 34, case 27 of `tests/unit/sim_round_rules.st`, case (c) of `tests/unit/idx_merge_extractor.st`, and the docs (deviations.md cluster mode, decisions.md, reference.md, queries.md, tutorial 17, CHANGELOG, the spec 9.2 note, the source comments of round.st, publisher.st, keyspec.st, transactions.st). |
+| 7 | Benchmarks never overlap a build, a probe, a soak or another bench; figures come from a committed, clean tree. | A run at load 5.5-8.9 on a dirty tree was re-measured. | None. |
+| 8 | Union, Intersect and Distinct key a row by its atom's oid (identity keys), not by an order key with uncached hashes. | Root cause of a Union slower than its own scan (about 430 µs per row). | None: the answers are unchanged. |
+| 8 | `proto_db` rc4's query conveniences are ported, not listed as deviations. | No technical debt. | None. |
+| 8 | Q1 at 10^5 is a recorded deviation (one process took 336 s and 5.4 GB, over the heap budget). | The machine's budget, not a defect. | The size is not compared. |
+| 11, decision 2 | **(maintainer, 2026-11-19, the second decision of that evening: "¿por qué tantas celdas? … sin romper la inmutabilidad")** An atom's runtime-only fields (oid, the saved place, the load memo, a keyed node's order key, an index's parsed key spec) are instance variables written once, by a compare-and-swap from nil on the variable (`setInstVar:from:to:`, the `_slots` precedent), not `Atom` cells; a constructor writes the fields it knows in one write group and never writes nil. Spec 4.1 (decision 3) is amended from "Both are `Atom` cells" to "each is written once, by a compare-and-swap from nil on its instance variable (or an `Atom`)". | An `Atom` per field cost about 25 of a node's cells and four extra allocations per node; the write-once rule needs only the compare-and-swap, and a race keeps today's semantics (the loser answers the winner's value; `tests/unit/atom_weight.st`). Values stay immutable. | A field that is re-written cannot use the pattern and stays an `Atom` (the process-wide tables, the transaction bookkeeping, the round runner's cells). The collection's `consumed` mark (false, then true once) stays an `Atom` for now: one per collection version, not per node, and `consumed` answers the cell itself. Reverting is the publishers in `registry.st`, `avl.st` and `indexes.st` and their allowlist entries. |
+| 12 | **(plan Task 12, stage 2 of Queries 11)** A shaped atom (its class's record shape has slots equal to its persisted fields, and its record holds exactly those fields in that order) keeps its slots and its oid; its memo is the class's shape, and `state` is a `PBFrozenDict` over the slots made on demand. Any other atom keeps the envelope (tag, oid, state, slots). The atom cache keeps what the atom keeps (oid and values, or the envelope). The decoder takes a fast path when a record's names equal its shape's persisted fields, and for lists and tuples of scalars; the oid pool keeps the rest of its batch as one ByteArray. | The envelope and the state dictionary were most of a loaded node's cells, and a record load built associations, a per-name check and a dictionary before reading its slots out of it. Equality, hash and `state` answers are unchanged for every atom kind (`tests/unit/atom_weight_stage2.st`). | `state` of a shaped atom is a new dictionary per call (equal, not identical); a caller that reads many fields should read `state` once. A shaped atom keeps no tag (the class gives it; a cache-rebuilt shaped envelope has tag nil, unused). The attribute name rule moved to `_PBRecordShape nameProblem:` (framing delegates). Reverting is `registry.st`, `framing.st`, `store.st`, `avl.st`, `codec.st` and the allowlist entries. |
+| 12 | The query bench keeps its protocol: no heap-settling churn before the timed window, for either implementation. | The comparison with `proto_db` must measure the same work; the Q1 index figures carry the fresh-page caveat instead. | One noisier figure. |
+| 10 | A save builds each atom's state once (the walk keeps it for the record and the atom cache), the atom cache stubs each reference once, and the attribute name rule compares the reserved names one by one. | Measured before the final comparison: a save built a shaped atom's state three times and stubbed each reference twice; a literal `Array`'s `includes:` cost most of the name rule (4.6 µs, now 2.0 µs per call). | None: same answers and errors (`tests/unit/atom_weight_stage2.st`). |
+| 10 (soaks) | The soaks run as disjoint seed ranges in parallel processes (`PBST_PROP_SEED_FROM`, `QData seedRange:`), each with a two-hour timeout; Q1 at 10^5 stays out of the default sizes. | One process for 5000 property seeds would take about 13 hours, and idx_contract's 200 seeds about 2.3 hours; a range is the same seeds the single process runs. Q1 at 10^5 became feasible (one run, 6 minutes for all four processes), but five interleaved runs would add about half an hour to every Q1. | A range split could hide an interaction between seeds of one process: they share only the save directory (and, in the property test, its reader actors), so a range writes fewer collections per directory than one process would; a reader who needs 10^5 sets `QUERY_Q1_SIZES`. |
 
 ## Proposals to `proto_db`
 
@@ -293,6 +391,22 @@ Still open (checked against `v2.0.0rc4`):
   maintainer's decision of 2026-11-19 (`PBCoordinatorCore >> roundBuildFailed:in:now:`;
   `tests/unit/idx_merge_extractor.st` case (c), `tests/unit/cluster_round_rules.st` case 30;
   [deviations.md](deviations.md#cluster-mode)).
+- **IQ6 (indexed queries): query and index-shape vectors.** *Not sent* (maintainer, 2026-11-18).
+  *Proposal:* `proto_db` should ship, beside its format vectors, a set of query vectors (a
+  database of indexed collections, the queries, each plan's `explain` and estimates, and the
+  rows) and index-shape vectors (the node trees an index build and each mutator write), so that
+  another implementation can check its planner and its index maintenance against the reference
+  without running Python. *Why:* `proto_db` ships none; protoBaseST generates its own from
+  `proto_db` (`tests/conformance/fetch_query_vectors.sh`, 314 cases, and
+  `tests/interop/index_build_identical.sh`), and every port would have to do the same.
+  *Precedent:* protoBaseST's vectors, generated from rc4 by those scripts.
+- **IQ7 (indexed queries): a portable plan digest.** *Not sent* (maintainer, 2026-11-18).
+  *Proposal:* the pager token's plan digest should be computed over a canonical encoding of the
+  plan key (for example canonical MessagePack), not over Python's `repr()` of a nested tuple
+  (`cache.py:264-303` at rc4). *Why:* Python's `repr` of floats, strings, `Decimal` and nested
+  tuples is not a format anyone specified, so a token from one language cannot be checked by
+  another; protoBaseST defers pager tokens and `resumePager:` for that reason
+  ([not-done.md](not-done.md#the-cuts)). *Precedent:* none yet; tokens wait for it.
 - **CC6: bind the node id in the acceptor log (lesson L27), for Phase D.** *Proposal:* record the
   node id in the acceptor log (a new entry kind, or a header field at the next log format), and
   refuse to open a log whose id is not the node's. *Why:* over shared storage the file name

@@ -2,25 +2,24 @@
 
 <!-- example: examples/queries/reading_plans.st -->
 
-> **In progress for protoBaseST 0.3.0.** This guide explains the design of the approved
-> [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md). Indexes, their
-> maintenance in every write and merge, the expression language, the planner and the query front
-> end (`PBQuery`, `PBField`) and pagers (`PBPager`) are implemented. Everything below
-> about `proto_db` is read from its code and documentation at `v2.0.0rc4` and cited by file. Every
-> code block comes from a program of [examples/queries/](../examples/queries/README.md) that runs
-> as a test and checks what it shows; the section that quotes one names it. Figures marked
-> `[measured in T<n>: ...]` do not exist yet: each names the task of spec section 11 whose
-> benchmark (spec 7.3) will measure it.
+> **protoBaseST 0.3.0.** This guide explains the design of the
+> [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md): indexes, their
+> maintenance in every write and merge, the expression language, the planner, the query front
+> end (`PBQuery`, `PBField`) and pagers (`PBPager`). Everything below about `proto_db` is read
+> from its code and documentation at `v2.0.0rc4` and cited by file. Every code block comes from a
+> program of [examples/queries/](../examples/queries/README.md) that runs as a test and checks
+> what it shows; the section that quotes one names it. Every figure is quoted from
+> [deviations.md](deviations.md#queries-and-indexes), with the date of its run.
 
 This is the conceptual guide. The tutorial teaches the same ground by example, in
 [chapter 17](tutorial/17-indexes.md) (indexes), [chapter 18](tutorial/18-queries-and-plans.md)
 (queries and the planner) and [chapter 19](tutorial/19-ordered-reads-and-pages.md) (ordered reads
 and pages). The reference lists every class and message:
-[reference.md, Indexed queries](reference.md#indexed-queries-in-progress-030).
+[reference.md, Indexed queries](reference.md#indexed-queries-030).
 
 The normative texts are `proto_db`'s own: `docs/source/indexing-framework.rst` and
 `docs/source/query-planner.rst` in the protoBase repository. Where protoBaseST differs on purpose,
-the difference is listed in [deviations.md](deviations.md#indexed-queries-in-progress).
+the difference is listed in [deviations.md](deviations.md#indexed-queries).
 
 Contents:
 [Why a full scan fails at scale](#why-a-full-scan-fails-at-scale) |
@@ -48,11 +47,12 @@ load and a decode, so the constant is not small.
 
 An index changes what a question costs from "what is stored" to "what is returned": a lookup costs
 a descent of a tree, about log2 of the number of distinct keys, plus the rows it answers.
-Measured in T8 on records in memory (bench Q1, RUNS=5 interleaved, the minimum;
-[deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)): a point lookup by an equality index took about 0.8 ms in protoBaseST at
-10^2, 10^3 and 10^4 elements (`proto_db` about 0.1 ms), while a forced scan of the same collection
-without indexes took 5.9 ms, 63 ms and 554 ms (`proto_db` 0.3, 2.8 and 27 ms). 10^5 elements is
-not in the default run: protoST's indexed build of it took 336 s and 5.4 GB in one process.
+Measured in the final comparison on records in memory (bench Q1, RUNS=5 interleaved, the minimum;
+[deviations.md](deviations.md#the-final-comparison-plan-task-10)): a point lookup by an equality index took 0.66, 0.79 and 0.85 ms in protoBaseST at
+10^2, 10^3 and 10^4 elements (`proto_db` 0.09 to 0.10 ms), while a forced scan of the same collection
+without indexes took 3.9 ms, 41 ms and 483 ms (`proto_db` 0.30, 2.6 and 26 ms). 10^5 elements is
+not in the default run (five interleaved runs would add about half an hour); one run at 10^5 gave
+2.0 ms per lookup and 5.3 s per scan (`proto_db` 0.10 ms and 0.27 s).
 
 The hand-made alternative of chapter 4, a second root kept by the program, fails differently: it
 is only as good as every writer's memory, in both languages, and nothing checks that it agrees with
@@ -130,7 +130,11 @@ A `PBVectorIndex` and any index kind protoBaseST does not know are read and kept
 a collection holding one keeps refusing every change with `PBNotSupportedError` naming it, because
 maintaining its other indexes and not that one would write a stale index (spec 3.3, ruling IQ5).
 Vector search (`near[]`) is out of scope; a term with that operator is `PBNotSupportedError` when
-built.
+built. That includes a custom index kind written by another `proto_db` program
+(`indexing-framework.rst`, "Writing a custom index"): protoBaseST reads it as an opaque atom, keeps
+it, and its collection refuses changes. `proto_db`'s index contract is ported as tests of the two
+built-in kinds (`tests/unit/idx_contract.st`, `tests/unit/idx_contract_plans.st`), not as an
+extension point for new kinds.
 
 ## Key specs, MISSING and nil
 
@@ -440,22 +444,23 @@ less than `Filter(a, b)` at `cost(a) + rows(a)`, so `proto_db` does not enumerat
 (`planner.py`, module docstring, "Access paths and cost"; `query-planner.rst`). That is a claim of
 the model; measured (bench P3, one size and one selectivity: 2000 records, 29 rows, 5 runs): the
 hand-built intersection took 3.7x the filter plan's time in `proto_db`, so the claim holds there; in
-protoBaseST it took 13.2x at T7, and after Task 8's fix round 1 made identity keys cheap the two
-plans are within noise of each other (65.5 / 67.7 against 71.9 / 74.5 ms, minimum / median), so the
-run is inconclusive at protoST's speed; the planner still chooses the filter, as `proto_db`'s does ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
+protoBaseST it took 13.2x at T7, and since Task 8's fix round 1 made identity keys cheap it takes
+1.10x (59.4 against 54.2 ms, the minimum, in the final comparison), within noise, so the run is
+inconclusive at protoST's speed; the planner still chooses the filter, as `proto_db`'s does ([deviations.md](deviations.md#the-final-comparison-plan-task-10)).
 
 **The crossover where scanning wins.** For a tiny collection the scan and its filter (two units per
 element) are cheaper than any descent. With one element, a matching lookup costs 1 + log2 3 ≈ 2.58
 against the scan's 2 (model estimates), and the planner scans; with two elements in two groups the
 lookup costs 3 and the scan 4, and it looks up. In the model, then, the switch in collection size
-comes at once, so size is not what bench P2 sweeps (ruling CR2). Whether the timings cross where the
-model says is a measurement: measured in T7 (bench P2, 2000 records, both plans forced): the model switches to the scan only
-between 99 % and 100 % of a unique range key, and for `ne:` on an index of n groups. It switches
-early: in `proto_db` the forced index plan is still faster at both points (by 31 % and 19 %), and
-in protoBaseST the `ne:` complement is 30 % faster than the scan it rejects, while on the range
-key the two plans converge, within the run's noise. Below the switch the index wins in proportion
-to the rows. The model is slightly pessimistic about the index, never wrong about the answer
-([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
+comes at once, so size is not what bench P2 sweeps (ruling CR2: "P2 measures whether real timings cross where the cost model says; the model's crossover for a tiny collection is only one or two elements."). Whether the timings cross where the
+model says is a measurement: measured in the final comparison (bench P2, 2000 records, both plans forced): the model switches to the scan only
+between 99 % and 100 % of a unique range key, and for `ne:` on an index of n groups. In `proto_db`
+it switches early: the forced index plan is still faster at both points (by 37 % and 21 %). In
+protoBaseST the `ne:` complement is 22 % faster than the scan it rejects, early too, while on the
+range key the two plans cross between 90 % and 99 %, so there the model switches late by under
+10 %, within the run's noise. Below the switch the index wins in proportion to the rows. The
+model is slightly off about the index near the switch, never wrong about the answer
+([deviations.md](deviations.md#the-final-comparison-plan-task-10)).
 
 **`!=` and the complement.** An `IndexComplement` is charged a full pass over the index (total + G
 + 1), yet it is still cheaper than a scan with a filter (2n) whenever the index has fewer than
@@ -478,9 +483,9 @@ always be equal.
 **No fallback.** Nothing in the query path catches an error to answer something else. A malformed
 query is `PBValidationError`; an unsupported one `PBNotSupportedError`.
 
-Measured in T7 (bench P1): `plan` and `explain` alone take 0.04 to 4.5 ms a query in `proto_db`
-and 0.71 to 47 ms in protoBaseST, from one conjunct without an index to 32 conjuncts over 8 indexes;
-the cost grows with conjuncts times indexes ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)).
+Measured in the final comparison (bench P1): `plan` and `explain` alone take 0.04 to 4.1 ms a query in `proto_db`
+and 0.68 to 38 ms in protoBaseST, from one conjunct without an index to 32 conjuncts over 8 indexes;
+the cost grows with conjuncts times indexes ([deviations.md](deviations.md#the-final-comparison-plan-task-10)).
 
 ## Reading a plan
 
@@ -696,18 +701,21 @@ lesson check: 'and sliced: its pages are the query''s rows'
 ```
 
 A pager lives in one process: `proto_db`'s portable pager tokens are deferred (spec 3.2), because
-the token's plan digest is computed over Python's `repr` of the plan.
+the token's plan digest is computed over Python's `repr` of the plan. So is `proto_db`'s query result
+cache (`query-planner.rst`, "Results, caching and pages"): every query is planned and run, and a
+pager materialises a plan without rank access once per pager, not once per space
+([not-done.md](not-done.md#the-cuts)).
 
-Measured in T9 (bench Q5, every page of 50 of 2000 and 10^4 records ordered by an indexed key, the
-minimum; [deviations.md](deviations.md#q5-pages-by-rank-materialised-and-by-skipping-counts-by-rank)): a
-pager by rank served a page in about 2 ms at both sizes, a pager over a sort without rank in 4.7 and 4.6 ms
-(the sort once, then slices), and skipping to each page took 39 and 195 ms per page on average, so
-reading every page by skipping cost 18x and 101x the pager's time; a count by rank took 1.7 and
-2.2 ms against 143 and 654 ms for counting a filtered scan. `proto_db`: 0.13, 0.15, 1.4 and 7.3 ms
-per page, 0.10 against 6.2 and 31 ms per count. Measured in T8 (bench Q4, 2000 elements, 20 queries of `take: 5`, the minimum;
-[deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)): the ordered index scan answered in 1.0 ms per query against 172 ms for a
-`Sort` over a scan; with a condition the planner sorts over a lookup, 2.6 ms per query for ten
-rows and 57 ms for 500. `proto_db`: 0.12, 4.9, 0.23 and 1.8 ms.
+Measured in the final comparison (bench Q5, every page of 50 of 2000 and 10^4 records ordered by an indexed key, the
+minimum; [deviations.md](deviations.md#the-final-comparison-plan-task-10)): a
+pager by rank served a page in 1.9 and 1.6 ms, a pager over a sort without rank in 3.6 and 4.3 ms
+(the sort once, then slices), and skipping to each page took 35 and 147 ms per page on average, so
+reading every page by skipping cost 18x and 92x the pager's time; a count by rank took 1.6 and
+2.2 ms against 104 and 439 ms for counting a filtered scan. `proto_db`: 0.13 and 0.12 ms per page by
+rank, 0.13 and 0.15 materialised, 1.3 and 7.1 by skipping; 0.10 against 5.8 and 29 ms per count.
+Bench Q4 (2000 elements, 20 queries of `take: 5`, the minimum): the ordered index scan answered in 0.81 ms per query against 130 ms for a
+`Sort` over a scan; with a condition the planner sorts over a lookup, 2.1 ms per query for ten
+rows and 45 ms for 500. `proto_db`: 0.10, 4.2, 0.21 and 1.5 ms.
 
 ## Index maintenance under immutability and the commit
 
@@ -732,8 +740,8 @@ nothing (adding a present set member) does no index work.
 **Stale indexes.** An index written by format 3 (`hasMemberTokens` false) is rebuilt from the
 elements before the collection's first change (`proto_db` D58, call IC7). A first change to a large
 stale collection pays a full build: in bench M2, on an `EqualityIndex` over 10^4 records, the bulk
-build took 10.0 s against 30.6 s for the fold of single additions (`proto_db`: 0.26 s against
-1.0 s; [deviations.md](deviations.md#m2-the-bulk-build-against-the-fold-of-single-additions)).
+build took 5.6 s against 9.9 s for the fold of single additions (`proto_db`: 0.27 s against
+1.05 s; [deviations.md](deviations.md#the-final-comparison-plan-task-10)).
 
 **Unsaved atoms.** A new index version is an unsaved atom like a new collection version; its trees
 are new dependents of the collection, saved by the writer's existing dependents-first walk.
@@ -784,12 +792,12 @@ Three consequences follow, each explicit:
 
 - **The merge runs index work in the commit's build**, so an indexed root lengthens the commit.
   Bench M3 (120 blind writes merged onto a 600-record dictionary): standalone, protoBaseST
-  commits 34.2, 11.9 and 5.1 times per second with 0, 1 and 3 indexes (`proto_db` 141, 110 and
-  81), what a read-modify-write costs (M1); in a three-member cluster 17.4, 6.8 and 1.1, because
-  the build (34, 91 and 189 ms) runs under the write permission and, with three indexes, leaves
-  too little of it for the send, so rounds are refused and retried
-  ([deviations.md](deviations.md#m3-a-blind-write-merged-onto-an-indexed-current-standalone-and-in-a-cluster);
-  indicative only).
+  commits 38.8, 14.1 and 6.0 times per second with 0, 1 and 3 indexes (`proto_db` 140, 111 and
+  81), what a read-modify-write costs (M1); in a three-member cluster 19.5, 8.0 and 2.8, because
+  the build runs under the write permission and, with three indexes, leaves too little of it for
+  the send, so rounds are refused and retried (119 to 151 retries per 120 commits)
+  ([deviations.md](deviations.md#the-final-comparison-plan-task-10); the build times per commit are measured at Task 4b,
+  [deviations.md](deviations.md#m3-a-blind-write-merged-onto-an-indexed-current-standalone-and-in-a-cluster)).
 - **Extractors run in the commit's build** ([above](#extractors-and-their-purity-contract)): an
   exception fails only that commit, standalone, in a group commit and in a cluster round.
 - **What is still refused.** A merge onto a collection holding a vector index or an index of an
@@ -799,9 +807,10 @@ The cost on every write, merged or not, is a new version of two trees per index 
 and the members of one group), on top of the collection's own. protoBaseST's tree operations are
 12 to 31 times slower than `proto_db`'s ([deviations.md](deviations.md#avl-operations)), so index
 what you query. Bench M1 (200 single-element transactions on a 600-record dictionary): with 0, 1
-and 3 indexes protoBaseST commits 38, 11.9 and 5.2 times per second, `proto_db` 150, 115 and 83;
-each index adds about 55 ms per commit here and 2 ms in `proto_db`
-([deviations.md](deviations.md#m1-commits-per-second-with-0-1-and-3-indexes); indicative only).
+and 3 indexes protoBaseST commits 42, 14.5 and 6.3 times per second, `proto_db` 147, 114 and 79;
+each index adds about 45 ms per commit here and 2 ms in `proto_db`, so index work is 65 % of a
+one-index commit and 85 % of a three-index one here, against 22 % and 46 % in `proto_db`
+([deviations.md](deviations.md#the-final-comparison-plan-task-10)).
 
 ## Cluster mode
 
@@ -827,22 +836,25 @@ Indexes change nothing in cluster mode's protocol (spec 5.8):
 
 Every figure of this feature is owed by a benchmark of spec 7.3, run on both implementations with
 the same seed, data and queries (the list syntax), and refused by its runner unless both report the
-same rows, checksum and plan. None exists yet.
+same rows, checksum and plan. Every figure below is from the final comparison of plan Task 10
+(2026-11-20, one quiet machine, one clean commit, five interleaved runs, the minimum;
+[deviations.md](deviations.md#the-final-comparison-plan-task-10)), which supersedes the earlier runs of
+each task.
 
 | What | Bench | Task |
 |---|---|---|
-| A point lookup against collection size, indexed and scanned | Q1 | Measured in T8, sizes 10^2 to 10^4, in memory: about 0.8 ms per lookup at every size against a scan of 5.9 to 554 ms; `proto_db` 0.1 ms against 0.3 to 27 ms ([deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)) |
-| `'in'` of 1, 10, 100 values; ranges of 0.1 % to 50 % selectivity | Q2 | Measured in T8: the index wins at every point, 1.2 to 49 ms per query against 125 to 401 ms for the scan; 10x to 24x `proto_db`'s time ([deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)) |
-| AND, OR of two indexed branches and of an indexed and an unindexed one, NOT | Q3 | Measured in T8: AND 2.4 ms per query against a 161 ms scan; the Union of two lookups 19 ms against a 235 ms scan (`proto_db` 2.7 against 12.6 ms), after fix round 1 removed a per-row identity-key cost that had made it slower than the scan; the other two plan a scan ([deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)) |
-| Ordered scan against sort, with `take:` | Q4 | Measured in T8: an ordered index scan 1.0 ms per query against 172 ms for a sort over a scan ([deviations.md](deviations.md#q1-q4-queries-indexed-against-a-forced-scan)) |
-| Page k by rank against materialised; `count` by rank | Q5 | Measured in T9, every page of 50 at 2000 and 10^4 records: by rank about 2 ms per page at both sizes, materialised once 4.7 and 4.6 ms, by skipping 39 and 195 ms; a count by rank 1.7 and 2.2 ms against 143 and 654 ms for a counted scan; `proto_db` 0.13, 0.15, 1.4 and 7.3 ms, and 0.10 against 6.2 and 31 ms ([deviations.md](deviations.md#q5-pages-by-rank-materialised-and-by-skipping-counts-by-rank)) |
-| Commits per second with 0, 1 and 3 indexes | M1 | Measured in T4a: protoBaseST 38, 11.9 and 5.2 commits/s, `proto_db` 150, 115 and 83; about 55 ms per index per commit against 2 ms ([deviations.md](deviations.md#m1-commits-per-second-with-0-1-and-3-indexes)) |
-| Bulk `addIndex:` against the fold of single additions | M2 | Measured in T3: build 3.1x faster than the fold at 10^4, protoBaseST 16.7x (10^2) to 38.3x (10^4) slower than `proto_db` ([deviations.md](deviations.md#m2-the-bulk-build-against-the-fold-of-single-additions)) |
-| Merges onto an indexed current, standalone and in a cluster | M3 | Measured in T4b: standalone protoBaseST 34.2, 11.9 and 5.1 commits/s with 0, 1 and 3 indexes, `proto_db` 141, 110 and 81; a three-member protoBaseST cluster 17.4, 6.8 and 1.1, its three-index build (189 ms) refused for the send reserve 135 to 210 times per 120 commits ([deviations.md](deviations.md#m3-a-blind-write-merged-onto-an-indexed-current-standalone-and-in-a-cluster)) |
-| `plan` and `explain` alone, 1 to 32 conjuncts, 0 to 8 indexes | P1 | Measured in T7: 0.71 to 47 ms a query in protoBaseST, 0.04 to 4.5 ms in `proto_db` ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
-| Where the cost model switches between index and scan, and whether the timings cross there | P2 | Measured in T7: the model switches to the scan at 99-100 % of a unique key and for `!=` on n groups, early: in `proto_db` the forced index plan is still 31 % and 19 % faster there; in protoBaseST the `!=` complement 30 %, the range plans within noise ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
-| The two-index intersection against the filter plan | P3 | Measured at one size and selectivity: the intersection takes 3.7x the filter plan's time in `proto_db`; in protoBaseST 13.2x at T7, and within noise of it after Task 8's fix round 1 (0.91x, inconclusive); model 2.4x ([deviations.md](deviations.md#p1-p2-p3-the-planners-overhead-the-cost-model-against-timings-the-intersection)) |
-| protoBaseST against `proto_db` on every workload above | all | [measured in T10: the full `bench/run_query.sh` comparison, recorded in deviations.md#performance with date, machine, load, commits and binaries] |
+| A point lookup against collection size, indexed and scanned | Q1 | 0.66 to 0.85 ms per lookup from 10^2 to 10^4 against a scan of 3.9 to 483 ms; `proto_db` 0.09 to 0.10 ms against 0.30 to 26 ms; one run at 10^5: 2.0 ms against 5.3 s |
+| `'in'` of 1, 10, 100 values; ranges of 0.1 % to 50 % selectivity | Q2 | The index wins at every point, 1.1 to 42 ms per query against 88 to 340 ms for the scan; 9x to 23x `proto_db`'s time |
+| AND, OR of two indexed branches and of an indexed and an unindexed one, NOT | Q3 | AND 2.0 ms per query against a 118 ms scan; the Union of two lookups 18 ms against a 166 ms scan (`proto_db` 2.6 against 11.5 ms); the other two plan a scan |
+| Ordered scan against sort, with `take:` | Q4 | An ordered index scan 0.81 ms per query against 130 ms for a sort over a scan (`proto_db` 0.10 against 4.2 ms) |
+| Page k by rank against materialised; `count` by rank | Q5 | Every page of 50 at 2000 and 10^4 records: by rank 1.9 and 1.6 ms per page, materialised once 3.6 and 4.3 ms, by skipping 35 and 147 ms; a count by rank 1.6 and 2.2 ms against 104 and 439 ms for a counted scan; `proto_db` 0.13, 0.13 and 1.3 ms at 2000, 0.12, 0.15 and 7.1 ms at 10^4, and 0.10 against 5.8 and 29 ms |
+| Commits per second with 0, 1 and 3 indexes | M1 | protoBaseST 42, 14.5 and 6.3 commits/s, `proto_db` 147, 114 and 79; about 45 ms per index per commit against 2 ms |
+| Bulk `addIndex:` against the fold of single additions | M2 | The build 1.2x (10^2) to 2.0x (10^5) faster than the fold in protoBaseST, 2.6x to 4.1x in `proto_db`; protoBaseST 16x to 21x slower than `proto_db` on the build, 7x to 9x on the fold |
+| Merges onto an indexed current, standalone and in a cluster | M3 | Standalone protoBaseST 38.8, 14.1 and 6.0 commits/s with 0, 1 and 3 indexes, `proto_db` 140, 111 and 81; a three-member protoBaseST cluster 19.5, 8.0 and 2.8, its three-index rounds refused and retried 119 to 151 times per 120 commits |
+| `plan` and `explain` alone, 1 to 32 conjuncts, 0 to 8 indexes | P1 | 0.68 to 38 ms a query in protoBaseST, 0.04 to 4.1 ms in `proto_db` |
+| Where the cost model switches between index and scan, and whether the timings cross there | P2 | The model switches to the scan at 99-100 % of a unique key and for `!=` on n groups. In `proto_db` early: the forced index plan is still 37 % and 21 % faster there. In protoBaseST the `!=` complement is 22 % faster (early), the range plans cross between 90 % and 99 % (late by under 10 %, noise) |
+| The two-index intersection against the filter plan | P3 | At one size and selectivity: the intersection takes 3.7x the filter plan's time in `proto_db`, 1.10x in protoBaseST (13.2x at T7, before Task 8's fix round 1; now within noise, inconclusive); model 2.4x |
+| protoBaseST against `proto_db` on every workload above | all | protoBaseST is 3.5x to 35x slower, minimum against minimum, on every unit; no speed claim is made. Date, machine, load per workload, both commits and both binaries in [deviations.md](deviations.md#the-final-comparison-plan-task-10) |
 
 ## Sources
 

@@ -62,12 +62,13 @@ chapters 14 to 16 runs. What a cluster costs, measured on one machine, is in cha
 | 15 | [Failures and recovery](15-failures-and-recovery.md) | `15_losing_members.st`, `15_wiped_disk.st`, `15_majority_loss.st` |
 | 16 | [Operating a cluster](16-operating-a-cluster.md) | `16_configuration.st` |
 
-### Indexed queries (in progress for 0.3.0)
+### Indexed queries (0.3.0)
 
-> **In progress.** These chapters were written before the code, from the approved
-> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md). The programs
-> of chapters 17, 18 and 19 run as tests. A figure not measured yet is a `[measured in T<n>: ...]`
-> marker. The concepts are in [queries.md](../queries.md).
+> These chapters were written before the code, from the approved
+> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md), and made
+> runnable task by task. The programs of chapters 17, 18 and 19 run as tests, and every figure is
+> quoted from [deviations.md](../deviations.md#queries-and-indexes). The concepts are in
+> [queries.md](../queries.md).
 
 | # | Chapter | Program |
 |---|---|---|
@@ -106,10 +107,10 @@ Both are explained in chapter 2, and both surprise Smalltalk programmers:
 - [erp.md](erp.md): the guided build of a small ERP in one script, with the reasoning
   behind each design choice. These chapters split the same ground into small programs and add
   bytes, actors, crashes and the refusals; read either first.
-- [reference.md](../reference.md): every public class and message (and, marked planned, the
-  indexed-query API).
+- [reference.md](../reference.md): every public class and message, the indexed-query API
+  included.
 - [queries.md](../queries.md): indexed queries and the query planner, the conceptual guide
-  (in progress for 0.3.0).
+  (0.3.0).
 - [deviations.md](../deviations.md): every difference from `proto_db`, every refusal, and the
   performance figures.
 - [decisions.md](../decisions.md): the choices, with what each costs if it is wrong.
