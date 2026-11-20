@@ -2075,6 +2075,61 @@ What the table says, and what it does not:
   budget (`PROTOCORE_HEAP_LIMIT_CELLS`, 80,000,000 cells here), which the dim-128 units reach; it is
   reported, not compared.
 
+**VB0 on protoST 0.15.0, with the fsum primitives** (task VP-adopt; the run above is kept as the
+0.14.1 baseline). `RUNS=5 bench/run_query.sh VB0`, measured 2026-11-20 14:42-14:47 UTC on the same
+machine, load average 2.95 / 3.34 / 3.36 (1, 5 and 15 minutes) before and 2.64 / 3.17 / 3.30 after;
+protoBaseST `2f6ab44` (committed tree), protoST 0.15.0
+(`worktrees/pinned-0150/protoST/build_release/protost`, protoCore 3.6.1 per `ldd`, protoIO 0.7.0),
+`PBVectorMath usesFsumPrimitive` true; `proto_db` and the data as above. The runner printed
+`verified`: every result is `proto_db`'s to the bit, as with the Smalltalk kernel.
+
+| dim | op | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | 0.14.1 / 0.15.0 (min) | peak RSS MB py / st |
+|---|---|---|---|---|---|---|
+| 8 | products | 8740 / 9304 | 188261 / 191055 | 21.5x | 0.9x | 31 / 414 |
+| 8 | naive | 2168 / 2252 | 97419 / 98238 | 44.9x | 0.9x | 27 / 335 |
+| 8 | fsum | 2369 / 2388 | 49839 / 50811 | 21.0x | 8.9x | 27 / 291 |
+| 8 | ip | 9359 / 9930 | 171323 / 176481 | 18.3x | 3.8x | 27 / 335 |
+| 8 | l2 | 11546 / 11712 | 163151 / 167690 | 14.1x | 4.4x | 27 / 331 |
+| 8 | cosine | 21178 / 23966 | 354295 / 387420 | 16.7x | 4.8x | 27 / 431 |
+| 32 | products | 33268 / 34371 | 483211 / 509456 | 14.5x | 0.9x | 64 / 1136 |
+| 32 | naive | 6451 / 6593 | 288522 / 306205 | 44.7x | 1.0x | 47 / 869 |
+| 32 | fsum | 8553 / 8958 | 66501 / 69425 | 7.8x | 36.8x | 47 / 673 |
+| 32 | ip | 27924 / 28833 | 205215 / 212894 | 7.3x | 14.2x | 47 / 717 |
+| 32 | l2 | 34016 / 34498 | 192865 / 203766 | 5.7x | 16.2x | 47 / 713 |
+| 32 | cosine | 63935 / 69025 | 396953 / 410627 | 6.2x | 22.5x | 47 / 813 |
+| 128 | products | 113340 / 116277 | 1717960 / 1768144 | 15.2x | 0.9x | 197 / 4156 |
+| 128 | naive | 23999 / 24983 | 1090660 / 1136748 | 45.4x | 0.9x | 128 / 3093 |
+| 128 | fsum | 31106 / 33546 | 134054 / 137761 | 4.3x | 75.6x | 128 / 2297 |
+| 128 | ip | 100361 / 102443 | 298788 / 310040 | 3.0x | 38.9x | 128 / 2345 |
+| 128 | l2 | 113650 / 118571 | 297544 / 301457 | 2.6x | 44.8x | 128 / 2337 |
+| 128 | cosine | 235901 / 236327 | 597312 / 601554 | 2.5x | 56.1x | 128 / 2441 |
+
+What changed, and what did not:
+
+- **The sum no longer dominates a score.** The primitive fsum of precomputed products costs 0.51,
+  0.23 and 0.12 times the naive interpreted sum at dim 8, 32 and 128 (it was 4.9, 8.8 and 10.0
+  times). An `ip` score is now one `fsumOfProducts:with:` call, products and sum in C; the `fsum`
+  unit (the same sum over Arrays of products) is 29%, 32% and 45% of the `ip` time, and the rest of
+  a score is interpreted overhead: the call, the dispatch on the metric and the copy of each
+  `PBTuple` vector to an Array (below). A score per vector costs 17.1, 20.5 and 29.9 us for `ip`,
+  16.3, 19.3 and 29.8 us for `l2`, and 35.4, 39.7 and 59.7 us for cosine; the scores are 2.5 (cosine,
+  dim 128) to 18.3 (`ip`, dim 8) times `proto_db`'s pure-Python scores (69.5 to 161.1 times on 0.14.1).
+- **products and naive** run no primitive; their 0.9x to 1.0x against the 0.14.1 run is the noise
+  between the two runs, not a regression.
+- **PBTuple against Array.** The primitives read Arrays and OrderedCollections directly, any other
+  sequence through `size` and `at:`; the indexes hold vectors as `PBTuple`s. Measured on the same
+  data, one process per dim, minimum of 5 (`score:query:vector:` over the 10^4 vectors, us): `ip`
+  with the `PBTuple`s handed to the primitive 175566, 355939 and 1117629 at dim 8, 32 and 128;
+  with each operand copied to an Array first 151814, 176236 and 296936; with Arrays held beforehand
+  (no copy, a bound) 107284, 134877 and 234988. Cosine: 529291, 1080980 and 3083632; copied 377236,
+  438701 and 578321; bound 323380, 377313 and 498554. `fsumOfProducts:with:` alone, `PBTuple`s
+  against Arrays: 77939 against 15954, 264050 against 40180, 1004944 against 168326. The copy is one
+  Array per operand per score, and it is a net win at every dim and metric (1.2 to 5.3 times), so
+  `score:query:vector:` copies a `PBTuple` or `PBFrozenList` operand to an Array when the primitives
+  are in use (`2f6ab44`); the table above is measured with it. A first run without the copy
+  (`cd89a2e`, same day) measured `ip` at 160858, 348247 and 1054215 us.
+- The figures are one machine's, under a load average near 3; nothing is asserted about time.
+
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded

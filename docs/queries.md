@@ -911,7 +911,12 @@ protoBaseST ports CPython's `math.fsum` line for line, special values and overfl
 doubles, whose `+`, `-`, `*` and `/` are one rounding each in protoST. Nothing else is needed for
 correctness: no protoST primitive, no change to protoCore. The cost of the port is measured:
 on 10^4 vectors (bench VB0, 2026-11-20, minimum of 5 runs), protoBaseST's fsum costs 4.9, 8.8 and 10.0 times a naive sum at dim 8, 32 and 128, and takes 68%, 84% and 87% of an inner-product score's time (in `proto_db` the C `math.fsum` takes 25% to 34%); a score is 69.5 to 161.1 times `proto_db`'s pure-Python one ([Performance, Vectors](deviations.md#vectors)). A protoST primitive for these sums is specified, and is built only if the measurement
-of V8 shows the interpreted kernel dominates search time (ruling VQ2).
+of V8 shows the interpreted kernel dominates search time (ruling VQ2). The maintainer decided it
+ahead of V8: protoST 0.15.0 has Float fsum:, fsumOfProducts:with: and
+fsumOfSquaredDifferences:with: (protoST's), and `PBVectorMath` uses them when a feature probe finds them,
+with the same answers to the bit (the vendored cases run on both paths). On 0.15.0 a score costs 16
+to 60 us per vector at dim 8 to 128, 2.5 to 18.3 times `proto_db`'s pure-Python score, and the sum is
+no longer most of it (bench VB0 on 0.15.0, same section); on 0.14.1 the Smalltalk kernel runs alone.
 
 Ranking is nearest first, ties by the member key's order (`vector_backends.py:147-163`). For records
 the member key is the oid, so the order is the same in both implementations on the same database.

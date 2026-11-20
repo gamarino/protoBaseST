@@ -79,7 +79,10 @@
   sizes, a protoST without the primitives), and the primitives' errors become the kernel's
   (`PBValidationError` with CPython's text, infinity in `sumNonNegative:`). Pinned on both paths,
   in one process, by `tests/conformance/vector_math.st` (every case run with the primitives and
-  with the Smalltalk kernel forced, a test-only switch) and `tests/unit/vec_math.st`.
+  with the Smalltalk kernel forced, a test-only switch) and `tests/unit/vec_math.st`. A score's
+  `PBTuple` operands are copied to Arrays, which the primitives read directly (a net win, measured).
+  VB0 on 0.15.0: a score 3.8 to 56.1 times faster than on 0.14.1, 2.5 to 18.3 times `proto_db`'s
+  pure-Python one (`docs/deviations.md`, Performance, "Vectors").
 
 ## 0.3.0 (2026-11-20)
 
