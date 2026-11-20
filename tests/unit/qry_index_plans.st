@@ -222,8 +222,9 @@ elIndexes := PBFrozenDict withAssociations: {
   'RangeIndex on r' -> ((PBRangeIndex name: 'r' path: 'r') build: values) }.
 kinds := elIndexes keys asArray.
 ordered := { 'RangeIndex' -> PBKeySpec element. 'RangeIndex on r' -> (PBKeySpec path: 'r') }.
-"near[] is refused when the term is made (spec 3.3), so its case is left out."
-cases := (data at: 'cases') select: [:case | (case at: 'index') notNil and: [((case at: 'id') includesSubstring: 'near[]') not]].
+"The near[] terms are among the cases (vectors phase V2): no key-group index supports one, as in
+ proto_db."
+cases := (data at: 'cases') select: [:case | (case at: 'index') notNil].
 tokensOf := [:case | PBExpression compile: (atoms decode: (case at: 'tokens'))].
 "explain less its estimate, as MessagePack bytes (py_term_cases.py explained)"
 explainOf := [:aPlan | MessagePack encode: (TermAtoms tree: (PBFrozenDict withAssociations:
@@ -242,7 +243,7 @@ cases do: [:case |
       ((QData bagOf: got) = (scan value: values value: expr) and: [got size = (theirs at: 'rows')]) ifFalse: [
         fails add: (case at: 'id') , ' on ' , k]]]].
 c that: 'plan: answers what a scan finds for every operator of the vector, as many rows as proto_db''s plan'
-  is: { cases size. pathPairs. fails asArray } equals: { 175. 14. #() }.
+  is: { cases size. pathPairs. fails asArray } equals: { 183. 14. #() }.
 
 fails := OrderedCollection new.
 cases do: [:case |

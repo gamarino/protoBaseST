@@ -130,12 +130,14 @@ is found by one descent. That is what gives windows and pages their O(log n + pa
 A `PBVectorIndex` and any index kind protoBaseST does not know are read and kept, never maintained:
 a collection holding one keeps refusing every change with `PBNotSupportedError` naming it, because
 maintaining its other indexes and not that one would write a stale index (spec 3.3, ruling IQ5).
-Vector search (`near[]`) is out of scope; a term with that operator is `PBNotSupportedError` when
-built. That includes a custom index kind written by another `proto_db` program
+That includes a custom index kind written by another `proto_db` program
 (`indexing-framework.rst`, "Writing a custom index"): protoBaseST reads it as an opaque atom, keeps
 it, and its collection refuses changes. `proto_db`'s index contract is ported as tests of the two
 built-in kinds (`tests/unit/idx_contract.st`, `tests/unit/idx_contract_plans.st`), not as an
-extension point for new kinds.
+extension point for new kinds. Vector search (`near[]`) is not answered yet: since the vectors
+phase's V2 a term with that operator is built, its value a `PBNearQuery`, but no plan answers it
+until V6 and V7, so a query naming it is refused when it is planned (`PBValidationError`, from the
+residual `PBFilter`).
 
 ## Key specs, MISSING and nil
 
@@ -845,7 +847,8 @@ Indexes change nothing in cluster mode's protocol (spec 5.8):
 > [vector_search.st.pending](../examples/queries/pending/vector_search.st.pending), a port of
 > `proto_db`'s `examples/vector_search.py` that **has never run**; the vectors tasks V1 to V7 build
 > the API and V7 makes the program run. Until then everything above this section holds as written:
-> a collection holding a vector index refuses changes, and `near[]` is refused when built. Figures
+> a collection holding a vector index refuses changes, and a `near[]` term (built since V2) is
+> refused when a query is planned. Figures
 > marked `[measured in V<n>: ...]` do not exist yet. The tutorial is
 > [chapter 20](tutorial/20-vector-search.md).
 

@@ -1235,7 +1235,7 @@ projection name would read backwards (ruling IQ2).
 answers a `PBQueryPlan`; `where:` also takes the 0.1 list syntax as an `Array`. Sort keys are
 `PBSortKey key: aPathOrFieldOrBlock descending: aBoolean` (plan call IP14). `PBPlanner normalize:`
 answers a condition with negations pushed inward and the one exact rewrite (`not isNone` is
-`notNone`). Malformed arguments are `PBValidationError` (`proto_db`'s `planner.py:278-343`: the
+`notNone`); a negated `near[]` term is `PBNotSupportedError` (`planner.py:114-116`). Malformed arguments are `PBValidationError` (`proto_db`'s `planner.py:278-343`: the
 source, the condition, the sort keys, and a limit or offset that is not an Integer >= 0). The source
 is a `PBIndexedCollection` (its indexes are consulted in sorted name order, less an index of an
 unknown kind and a `PBVectorIndex`), its `asQueryPlan` (the same), or any other `PBQueryPlan` (no
@@ -1373,7 +1373,7 @@ hnsw graph needs hnswlib, a native library protoST cannot load. Its maintenance,
 
 | Message | Meaning |
 |---|---|
-| `PBNearQuery vector: aSequence k: anIntegerOrNil threshold: aNumberOrNil metric: aStringOrNil`, `vector:k:`, `vector:threshold:`, `vector:k:threshold:` | A query: a non-empty sequence of finite numbers (Integers, Floats, `Decimal`s; not Booleans), stored as a `PBTuple` of Floats converted as Python's `float()` converts them; `k` an Integer of at least 1; a finite threshold; a metric or nil; at least one of `k` and the threshold. Anything else is `PBValidationError` with `proto_db`'s text, and with CPython's text where `proto_db` raises a Python error (an Integer beyond the Float range, a signalling-NaN `Decimal`; DV7). |
+| `PBNearQuery vector: aSequence k: anIntegerOrNil threshold: aNumberOrNil metric: aStringOrNil`, `vector:k:`, `vector:threshold:`, `vector:k:threshold:` | A query: a non-empty sequence of finite numbers (Integers, Floats, `Decimal`s; not Booleans), stored as a `PBTuple` of Floats converted as Python's `float()` converts them; `k` an Integer of at least 1; a finite threshold; a metric or nil; at least one of `k` and the threshold. Anything else is `PBValidationError` with `proto_db`'s text, and with CPython's text where `proto_db` raises a Python error (an Integer beyond the Float range, a signalling-NaN `Decimal`; DV7; a metric Python cannot hash, such as an `Array`, gets `proto_db`'s metric text). |
 | `vector`, `k`, `threshold`, `metric` | Its fields. |
 | `=`, `hash` | By value, with Python's float equality (`0.0 = -0.0`, and the two hash alike). |
 | `describe` | `{ 'vector'. 'k'. 'threshold'. 'metric' }` as a `PBFrozenDict`. |

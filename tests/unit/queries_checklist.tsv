@@ -89,10 +89,10 @@ test_terms.py::test_in	ported	tests/unit/qry_terms.st	in over sequences and sets
 test_terms.py::test_unorderable_keys_only_match_presence_and_not_equal	ported	tests/unit/qry_terms.st	unorderable keys, the element itself and paths
 test_terms.py::test_path_none_is_the_element_itself	ported	tests/unit/qry_terms.st	unorderable keys, the element itself and paths
 test_terms.py::test_dotted_and_extractor_paths	ported	tests/unit/qry_terms.st	unorderable keys, the element itself and paths
-test_terms.py::test_near_is_not_answered_by_the_scan_oracle	deferred	V2	PBNearQuery and near[] terms, with their list syntax and refusals, are built in V2 (Addendum V, 2.6).
-test_terms.py::test_near_values_are_canonical_and_hashable	deferred	V2	PBNearQuery and near[] terms, with their list syntax and refusals, are built in V2 (Addendum V, 2.6).
-test_terms.py::test_near_query_validation	deferred	V2	PBNearQuery and near[] terms, with their list syntax and refusals, are built in V2 (Addendum V, 2.6).
-test_terms.py::test_near_terms_need_a_near_query	deferred	V2	PBNearQuery and near[] terms, with their list syntax and refusals, are built in V2 (Addendum V, 2.6).
+test_terms.py::test_near_is_not_answered_by_the_scan_oracle	ported	tests/unit/vec_terms.st	matches: of a near[] term is PBNotSupportedError
+test_terms.py::test_near_values_are_canonical_and_hashable	ported	tests/unit/vec_terms.st	near queries are frozen values with Python's float equality
+test_terms.py::test_near_query_validation	ported	tests/unit/vec_terms.st	PBNearQuery validation is proto_db's
+test_terms.py::test_near_terms_need_a_near_query	ported	tests/unit/vec_terms.st	near[] terms take a PBNearQuery or a mapping of its fields
 test_terms.py::test_in_over_a_set_is_stored_in_a_canonical_order	ported	tests/unit/qry_terms.st	in over sequences and sets
 test_terms.py::test_invalid_terms_are_rejected	ported	tests/unit/qry_terms.st	invalid terms are refused
 test_terms.py::test_describe	ported	tests/unit/qry_terms.st	describe and display values
@@ -102,24 +102,24 @@ test_expressions.py::test_and_or_need_two_expression_operands	ported	tests/unit/
 test_expressions.py::test_not_not_simplifies	ported	tests/unit/qry_expressions.st	not not answers the original
 test_expressions.py::test_nodes_are_immutable_hashable_and_comparable	ported	tests/unit/qry_expressions.st	nodes are frozen values compared by structure
 test_expressions.py::test_repr_is_readable	ported	tests/unit/qry_expressions.st	nodes are frozen values compared by structure
-test_expressions.py::test_describe_is_json_serialisable	deferred	V2	Reopened (Addendum V 5.4): ported in tests/unit/qry_expressions.st ('describe and termsDo:') less its near[] sub-case at line 84-89 of the tag, which V2 adds with the near terms.
+test_expressions.py::test_describe_is_json_serialisable	ported	tests/unit/qry_expressions.st	describe and termsDo:
 test_expressions.py::test_iter_terms_walks_the_tree_in_order	ported	tests/unit/qry_expressions.st	describe and termsDo:
-test_expressions.py::test_compile_every_operator	deferred	V2	Reopened (Addendum V 5.4): ported in tests/unit/qry_expressions.st ('compile: reads every operator and the prefix stream') less its near[] sub-case at line 117-119 of the tag, which V2 adds with the near terms.
+test_expressions.py::test_compile_every_operator	ported	tests/unit/qry_expressions.st	compile: reads every operator and the prefix stream
 test_expressions.py::test_compile_prefix_stream_operators	ported	tests/unit/qry_expressions.st	compile: reads every operator and the prefix stream
 test_expressions.py::test_compile_implicit_and_and_nested_lists	ported	tests/unit/qry_expressions.st	compile: reads every operator and the prefix stream
-test_expressions.py::test_compile_round_trips_nested_trees	deferred	V2	Reopened (Addendum V 5.4): ported in tests/unit/qry_expressions.st ('compile: reads every operator and the prefix stream') less its near[] sub-case at line 154 of the tag, which V2 adds with the near terms.
-test_expressions.py::test_compile_rejects_invalid_input	deferred	V2	Reopened (Addendum V 5.4): ported in tests/unit/qry_expressions.st ('compile: refuses malformed input') less its near[] sub-case at line 167 of the tag, which V2 adds with the near terms.
+test_expressions.py::test_compile_round_trips_nested_trees	ported	tests/unit/qry_expressions.st	compile: reads every operator and the prefix stream
+test_expressions.py::test_compile_rejects_invalid_input	ported	tests/unit/qry_expressions.st	compile: refuses malformed input
 test_expressions.py::test_evaluate_term_is_the_scan_oracle	ported	tests/unit/qry_expressions.st	evaluate: is the scan oracle and short-circuits
 test_expressions.py::test_evaluate_truth_tables	ported	tests/unit/qry_expressions.st	evaluate: is the scan oracle and short-circuits
 test_expressions.py::test_not_of_a_comparison_on_a_missing_key_is_true	ported	tests/unit/qry_expressions.st	evaluate: is the scan oracle and short-circuits
 test_expressions.py::test_mixed_types_and_equal_but_distinct_values	ported	tests/unit/qry_expressions.st	evaluate: is the scan oracle and short-circuits
 test_expressions.py::test_and_or_short_circuit	ported	tests/unit/qry_expressions.st	evaluate: is the scan oracle and short-circuits
-test_expressions.py::test_evaluate_near_is_not_a_scan_predicate	deferred	V2	The evaluate: refusal of an expression holding near[] is built with the terms in V2.
+test_expressions.py::test_evaluate_near_is_not_a_scan_predicate	ported	tests/unit/vec_terms.st	evaluate: refuses a near[] term it reaches
 test_expressions.py::test_evaluate_rejects_non_expressions	n/a	Python-only API	evaluate is a function of any object in proto_db; in protoST evaluate: is a message every PBExpression answers, so no other object reaches it to be refused.
 test_expressions.py::test_contains_semantics	ported	tests/unit/qry_expressions.st	contains and truthiness
 test_expressions.py::test_truthiness_operators	ported	tests/unit/qry_expressions.st	contains and truthiness
 test_expressions.py::test_module_reexports_term	n/a	Python-only API	Checks which Python module re-exports Term, which has no protoST counterpart.
-test_expressions.py::test_term_equality_and_hash_follow_values_equal	deferred	V2	Reopened (Addendum V 5.4): ported in tests/unit/qry_expressions.st ('terms are expressions, equal by value semantics') less its near[] sub-case at line 296 of the tag, which V2 adds with the near terms.
+test_expressions.py::test_term_equality_and_hash_follow_values_equal	ported	tests/unit/qry_expressions.st	terms are expressions, equal by value semantics
 test_expressions.py::test_contains_on_dicts_and_collection_atoms	ported	tests/unit/qry_expressions.st	contains and truthiness
 test_planner.py::test_no_where_is_the_scan_itself	ported	tests/unit/qry_planner.st	no condition is the scan itself; a scan source and the list syntax use the indexes; another plan gets a Filter
 test_planner.py::test_collection_scan_plan_source_uses_the_collection_indexes	ported	tests/unit/qry_planner.st	no condition is the scan itself; a scan source and the list syntax use the indexes; another plan gets a Filter
@@ -308,7 +308,7 @@ test_plans.py::test_collection_scan_explain_has_estimate_and_children	ported	tes
 test_plans.py::test_index_plan_lookup_range_and_ordered_scan	ported	tests/unit/qry_index_plans.st	presence, equality and unorderable keys answer like a scan; ordered scans follow the total order
 test_plans.py::test_vector_search_wraps_the_index_plan	deferred	V6	PBVectorSearch and its explain and estimate are built with the vector plans in V6.
 test_plans.py::test_filter_matches_reference_and_estimates_selectivity	ported	tests/unit/qry_plans.st	Filter keeps half per term: And multiplies, Or is 1 - prod(1 - s), Not is 1 - s; BlockFilter is one term
-test_plans.py::test_filter_accepts_prefix_lists_and_rejects_near	deferred	V2	The PBFilter refusal of a near[] term is built with the terms in V2.
+test_plans.py::test_filter_accepts_prefix_lists_and_rejects_near	ported	tests/unit/vec_terms.st	PBFilter takes prefix lists and refuses near[]
 test_plans.py::test_python_filter_is_explicit_and_never_swallows	ported	tests/unit/qry_plans.st	a BlockFilter is explicit and never swallows an error of its block
 test_plans.py::test_union_max_multiplicity_and_equal_but_distinct_values	ported	tests/unit/qry_plans.st	Union keeps the largest multiplicity and Intersect the smallest, by element identity
 test_plans.py::test_union_of_same_element_from_two_branches_yields_it_once	ported	tests/unit/qry_plans.st	Union keeps the largest multiplicity and Intersect the smallest, by element identity

@@ -10,14 +10,6 @@
 # Task 7: the planner
 # Task 9: PBPager
 # Vectors phase (Addendum V, docs/superpowers/specs/2026-11-19-vectors-addendum.md), drafted by V0.
-# V2: near queries and near[] terms
-vector:k:threshold:metric:	V2
-vector:k:	V2
-vector:threshold:	V2
-vector:k:threshold:	V2
-vector	V2
-k	V2
-threshold	V2
 # V3: PBVectorIndex, its constructors, readers and hooks
 name:keySpec:dim:metric:backend:params:	V3
 name:keySpec:dim:	V3

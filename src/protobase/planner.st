@@ -1,8 +1,10 @@
 "-- planner.st: the query planner, PBPlanner --
 
 A port of proto_db's proto_db/query/planner.py at v2.0.0rc4 (proto_db spec section 10, decision
-D37), line by line, less the near[] rules (planner.py:15-26 and 199-234: vector search is out of
-scope, design spec 3.3; a near[] term is refused when the term is built, terms.st).
+D37), line by line, less the near[] rules of planning (planner.py:15-26, 129-135 and 194-275,
+vectors phase V7); normalize: has its near[] refusal (planner.py:114-116, V2). Until V7 no vector
+index is consulted, so a near[] conjunct is left to the residual PBFilter, which refuses it
+(PBValidationError, plans.py:458-462) where proto_db's planner refuses it as unsupported.
 
   PBPlanner plan: aSource where: aCondition orderBy: keys limit: anIntegerOrNil offset: anInteger
       the cheapest plan answering the multiset a scan filtered by the condition answers
@@ -16,7 +18,7 @@ scope, design spec 3.3; a near[] term is refused when the term is built, terms.s
       negations pushed through PBAnd and PBOr by De Morgan, junctions flattened; a negated term
       stays a PBNot of the term, except the one exact rewrite not '?N' = '?!N' and not '?!N' = '?N'
       (planner.py normalize; D36 amendment: not (x == 5) is not x != 5, since PBMissing satisfies
-      only the former).
+      only the former); a negated near[] term is PBNotSupportedError (planner.py:114-116).
 
 The rules, as planner.py's module docstring states them:
 
@@ -114,7 +116,8 @@ PBPlanner class >> plan: aSource where: aCondition orderBy: aKeys limit: aLimit 
   ^ plan.
 
 "anExpression with negations pushed through PBAnd and PBOr and junctions flattened (planner.py
- normalize); PBValidationError for anything that is not a PBExpression."
+ normalize); PBValidationError for anything that is not a PBExpression, PBNotSupportedError for a
+ negated near[] term (planner.py:114-116)."
 PBPlanner class >> normalize: anExpression
   (PBExpression _isExpression: anExpression) ifFalse: [
     ^ PBValidationError signal: 'normalize: needs a PBExpression, not ' , (PBKeySpec _repr: anExpression)].
@@ -127,6 +130,9 @@ PBPlanner class >> _normalize: anExpression negate: aBoolean
     aBoolean ifFalse: [^ anExpression].
     anExpression op = '?N' ifTrue: [^ PBTerm path: anExpression path op: '?!N'].
     anExpression op = '?!N' ifTrue: [^ PBTerm path: anExpression path op: '?N'].
+    anExpression op = PBTerm nearOperator ifTrue: [
+      ^ PBNotSupportedError signal: 'A negated ''near[]'' term cannot be planned (' , anExpression printString
+        , '): there is no per-element semantics to complement a vector search'].
     ^ PBNot of: anExpression].
   (anExpression isKindOf: PBBlockPredicate) ifTrue: [
     ^ aBoolean ifTrue: [PBNot of: anExpression] ifFalse: [anExpression]].

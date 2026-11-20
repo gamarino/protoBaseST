@@ -1,7 +1,8 @@
 "-- terms.st: PBTerm and the expression language (PBExpression, PBAnd, PBOr, PBNot, PBBlockPredicate) --
 
 A port of proto_db's proto_db/query/terms.py and proto_db/query/expressions.py at v2.0.0rc4
-(proto_db spec section 10, decisions D28 and D36), less the vector parts (spec 3.3).
+(proto_db spec section 10, decisions D28 and D36), near[] included (vectors phase V2, Addendum V
+2.6).
 
 A PBTerm is (path, op, value): the key its path names (PBKeySpec forTermPath:, a dotted path, nil
 for the element itself, '@name' for a registered extractor) compared with value by op, one of
@@ -14,10 +15,13 @@ proto_db's operator strings:
   'between(]' 'between[)'        excludes both, (] the lower, [) the upper
   '?N' '?!N' '?T' '?!T'          no operand (PBTerm path:op:)
   'contains'                     one orderable operand
+  'near[]'                       a PBNearQuery (vectors.st), or a Dictionary or PBFrozenDict of its
+                                 fields (converted, PBNearQuery _from:)
 
-'near[]' (vector search) is refused with PBNotSupportedError (spec 3.3). An operand is made
-canonical (PBCodec canonical:) and must be orderable and not PBMissing; anything else is
-PBValidationError (terms.py:152-213).
+An operand is made canonical (PBCodec canonical:) and must be orderable and not PBMissing; anything
+else is PBValidationError (terms.py:152-213). A near[] term is answered by vector plans, never by
+the scan oracle: its matches:, and so the evaluate: of an expression that reaches it, signal
+PBNotSupportedError (terms.py:218-219), and it is equal to another by its PBNearQuery.
 
 matches: is the scan oracle every index must agree with (terms.py:215-253, D28): '==' and 'in'
 compare order keys (1 = 1.0 = Decimal 1, true is not 1, nil is a value); a PBMissing key (an absent
@@ -43,14 +47,15 @@ description}), asList (the 0.1 prefix list syntax) and termsDo:.
 PBExpression compile: anArray reads the 0.1 prefix syntax (expressions.py module docstring): a list
 (an Array, an OrderedCollection or a PBFrozenList) is a stream of expressions joined by an implicit
 AND; an expression is 'path op' for the unary operators, 'path op value' for the comparisons, 'in'
-and 'contains', 'path between-op low high', '&' e1 e2 and '|' e1 e2 (binary, prefix), '!' e, a
-nested list, or an expression already built. Malformed input is PBValidationError naming the
-position (counted from 0, as proto_db counts it).
+and 'contains', 'path between-op low high', 'path near[] vector threshold' (the 0.1 cosine
+threshold query) or 'path near[] aNearQueryOrMapping', '&' e1 e2 and '|' e1 e2 (binary, prefix),
+'!' e, a nested list, or an expression already built. Malformed input is PBValidationError naming
+the position (counted from 0, as proto_db counts it).
 
 Messages follow proto_db's, with protoST's names; a value is quoted as Python's repr does for a
 String (PBKeySpec _repr:). describe renders an operand as proto_db's display_value: nil, Booleans,
 Integers, Strings and finite Floats as they are, tuples and lists as Arrays, a map as {'@dict' ->
-pairs}, any other value as Python's repr of it ('Decimal(''1.50'')', 'datetime.date(2026, 1, 2)',
+pairs}, a PBNearQuery as its describe, any other value as Python's repr of it ('Decimal(''1.50'')', 'datetime.date(2026, 1, 2)',
 b'...', 'inf'), so explain reads the same in both languages; the exceptions (an atom, an
 instant-form datetime in an IANA zone) are listed in docs/deviations.md."
 
@@ -61,6 +66,7 @@ Import from: 'protobase/registry'.
 Import from: 'protobase/codec'.
 Import from: 'protobase/keyspec'.
 Import from: 'protobase/collections'.
+Import from: 'protobase/vectors'.
 Import from: 'decimal'.
 Import from: 'calendar'.
 Import from: 'uuid'.
@@ -146,13 +152,13 @@ PBExpression class >> _twoOperands: aToken at: anIndex of: aTokenArray
 
 "expressions.py _Compiler.parse_term: the term whose path is at anIndex."
 PBExpression class >> _parseTerm: aTokenArray at: anIndex
-  | path op rest |
+  | path op rest value |
   path := aTokenArray at: anIndex.
   anIndex + 1 > aTokenArray size ifTrue: [
     ^ PBValidationError signal: 'Term at position ' , (anIndex - 1) printString , ' needs an operator after path '
       , (PBKeySpec _repr: path)].
   op := aTokenArray at: anIndex + 1.
-  ((self _isText: op) and: [(PBTerm operators includes: op) or: [op = PBTerm nearOperator]]) ifFalse: [
+  ((self _isText: op) and: [PBTerm operators includes: op]) ifFalse: [
     ^ PBValidationError signal: 'Unknown operator ' , (PBKeySpec _repr: op) , ' at position ' , anIndex printString
       , '; expected one of ' , PBTerm _operatorList].
   rest := aTokenArray size - (anIndex + 1).
@@ -164,7 +170,21 @@ PBExpression class >> _parseTerm: aTokenArray at: anIndex
     ^ { PBTerm path: path op: op value: { aTokenArray at: anIndex + 2. aTokenArray at: anIndex + 3 }. anIndex + 4 }].
   rest < 1 ifTrue: [
     ^ PBValidationError signal: 'Operator ' , (PBKeySpec _repr: op) , ' at position ' , anIndex printString , ' needs a value'].
-  ^ { PBTerm path: path op: op value: (aTokenArray at: anIndex + 2). anIndex + 3 }.
+  value := aTokenArray at: anIndex + 2.
+  (op = PBTerm nearOperator and: [(self _isNearValue: value) not]) ifTrue: [
+    "The 0.1 form: a cosine threshold query (expressions.py:352-356)."
+    rest < 2 ifTrue: [
+      ^ PBValidationError signal: '''near[]'' at position ' , anIndex printString
+        , ' needs a vector and a threshold (or a NearQuery / mapping of its fields)'].
+    ^ { PBTerm path: path op: op value: (PBNearQuery vector: value k: nil threshold: (aTokenArray at: anIndex + 3) metric: 'cosine').
+      anIndex + 4 }].
+  ^ { PBTerm path: path op: op value: value. anIndex + 3 }.
+
+"Whether anObject is a near[] value of the long form: a PBNearQuery or a mapping (a Dictionary or
+ a PBFrozenDict; expressions.py: isinstance(value, (NearQuery, dict)))."
+PBExpression class >> _isNearValue: anObject
+  anObject isClassObject ifTrue: [^ false].
+  ^ (anObject isKindOf: PBNearQuery) or: [(anObject isKindOf: Dictionary) or: [anObject isKindOf: PBFrozenDict]].
 
 "Whether anObject is a String (not a Symbol)."
 PBExpression class >> _isText: anObject
@@ -201,9 +221,9 @@ PBExpression >> not
 
 "=== PBTerm =================================================================="
 
-"proto_db's operator strings, in terms.py's order (less 'near[]', which is refused)."
+"proto_db's operator strings (terms.py OPERATORS), in the order of test_terms.py's vocabulary test."
 PBTerm class >> operators
-  ^ #('==' '!=' '<' '<=' '>' '>=' 'in' 'between[]' 'between()' 'between(]' 'between[)' '?N' '?!N' 'contains' '?T' '?!T').
+  ^ #('==' '!=' '<' '<=' '>' '>=' 'in' 'between[]' 'between()' 'between(]' 'between[)' '?N' '?!N' 'near[]' 'contains' '?T' '?!T').
 
 "The operators that take no value (terms.py UNARY_OPERATORS)."
 PBTerm class >> unaryOperators
@@ -215,11 +235,11 @@ PBTerm class >> betweenOperators
 PBTerm class >> scalarOperators
   ^ #('==' '!=' '<' '<=' '>' '>=').
 
-"proto_db's vector operator, refused here (spec 3.3)."
+"proto_db's vector operator (terms.py NEAR): its value is a PBNearQuery."
 PBTerm class >> nearOperator
   ^ 'near[]'.
 
-"The operators as Python prints sorted(OPERATORS), less 'near[]'."
+"The operators as Python prints sorted(OPERATORS)."
 PBTerm class >> _operatorList
   ^ '[' , (', ' join: ((self operators asSortedCollection: [:a :b | a <= b]) asArray collect: [:each | PBCodec repr: each])) , ']'.
 
@@ -228,9 +248,10 @@ PBTerm class >> path: aStringOrNil op: anOperator value: aValue
   | spec operands keys canonical low high |
   spec := PBKeySpec forTermPath: aStringOrNil.
   (PBExpression _isText: anOperator) ifFalse: [^ self _unknownOperator: anOperator].
-  anOperator = self nearOperator ifTrue: [
-    ^ PBNotSupportedError signal: 'The operator ''near[]'' is answered by a vector search; vector indexes and vector search are not supported by protoBaseST (spec 3.3)'].
   (self operators includes: anOperator) ifFalse: [^ self _unknownOperator: anOperator].
+  anOperator = self nearOperator ifTrue: [
+    canonical := PBNearQuery _from: aValue.
+    ^ self _path: aStringOrNil op: anOperator value: canonical spec: spec valueKey: canonical operandKeys: #()].
   ((self scalarOperators includes: anOperator) or: [anOperator = 'contains']) ifTrue: [
     canonical := self _operand: aValue op: anOperator.
     keys := { PBKeys orderKey: canonical }.
@@ -381,6 +402,7 @@ PBTerm class >> _displayLeaf: aValue
   aValue isInteger ifTrue: [^ aValue].
   (PBExpression _isText: aValue) ifTrue: [^ aValue].
   (aValue isFloat and: [aValue isNaN not and: [aValue isInfinite not]]) ifTrue: [^ aValue].
+  (aValue isKindOf: PBNearQuery) ifTrue: [^ aValue describe].
   ^ self _pythonRepr: aValue.
 
 "Python's repr of aValue, for the values display_value renders as text. An atom is shown as
@@ -515,7 +537,7 @@ PBTerm >> op
   ^ op.
 
 "The canonical operand: one value, a PBTuple of operands for 'in', the PBTuple (low, high) for
- the between operators, nil for the unary ones."
+ the between operators, the PBNearQuery for 'near[]', nil for the unary ones."
 PBTerm >> value
   ^ value.
 
@@ -524,9 +546,12 @@ PBTerm >> keySpecObject
   ^ keySpecObject.
 
 "Whether anElement satisfies the term: the scan oracle (terms.py Term.matches, D28; the module
- comment). An extractor's exception passes through unwrapped."
+ comment). An extractor's exception passes through unwrapped. A near[] term is
+ PBNotSupportedError: its answer depends on the index's metric and on the whole collection."
 PBTerm >> matches: anElement
   | key k low high |
+  op = self class nearOperator ifTrue: [
+    ^ PBNotSupportedError signal: '''near[]'' terms are answered by vector plans, not by a scan'].
   key := keySpecObject extract: anElement.
   (op = '?N' or: [op = '?!N']) ifTrue: [^ (key == PBMissing default or: [key isNil]) = (op = '?N')].
   key == PBMissing default ifTrue: [^ false].
@@ -556,11 +581,16 @@ PBTerm >> evaluate: anElement
 PBTerm >> describe
   ^ PBFrozenDict withAssociations: { 'path' -> path. 'op' -> op. 'value' -> (self class displayValue: value) }.
 
-"{ path. op } for a unary operator, { path. op. low. high } for a between operator, { path. 'in'.
- operands } for 'in', { path. op. value } otherwise (terms.py Term.to_list)."
+"{ path. op } for a unary operator, { path. op. low. high } for a between operator, { path.
+ 'near[]'. vector. threshold } for a cosine threshold query (the 0.1 form; vector an Array), { path.
+ 'in'. operands } for 'in', { path. op. value } otherwise, a near[] term's value its PBNearQuery
+ (terms.py Term.to_list)."
 PBTerm >> asList
   (self class unaryOperators includes: op) ifTrue: [^ { path. op }].
   (self class betweenOperators includes: op) ifTrue: [^ { path. op. value at: 1. value at: 2 }].
+  op = self class nearOperator ifTrue: [
+    (value k isNil and: [value metric = 'cosine']) ifTrue: [^ { path. op. value vector asArray. value threshold }].
+    ^ { path. op. value }].
   op = 'in' ifTrue: [^ { path. op. value asArray }].
   ^ { path. op. value }.
 

@@ -22,12 +22,14 @@ the helper printed it: the test checks that QData still draws them) and 'cases',
   tokens     the wire form (codec.encode_value) of the 0.1 prefix list given to
              Expression.compile, each atom written {'@ref': [oid, 0, type tag]}
   error      nil, or the class name of the error Expression.compile raised
-             ('ProtoValidationError', 'ProtoNotSupportedError')
+             ('ProtoValidationError', 'ProtoNotSupportedError'; for the cases whose id names DV7,
+             Python's own 'OverflowError', 'ValueError' or 'TypeError', which protoBaseST refuses
+             with PBValidationError, deviation DV7)
   answers    nil, or one boolean per value: proto_db's evaluate(expression, value)
   match_error nil, or the class name of the error evaluate raised on whichever value failed
              first (the values are evaluated in order and the first error stops the case)
-  to_list    nil, or the wire form of expression.to_list() (nil for near[], whose list holds a
-             NearQuery, which has no wire form)
+  to_list    nil, or the wire form of expression.to_list() (nil for a near[] term other than a
+             cosine threshold query, whose list holds a NearQuery, which has no wire form)
   describe   nil, or the msgpack bytes of expression.describe()
   index      nil unless the case compiles to one Term; then a map from 'EqualityIndex' and
              'RangeIndex' (each built over the values with KeySpec.element(), named 'v'), and
@@ -47,7 +49,9 @@ The cases: every operator with operands of several ranks (numbers of each type, 
 booleans, bytes, dates, instants, tuples, an atom), the degenerate terms of the plan's Review
 Focus 4 (an empty 'in', between 5 and 3, 'in' with duplicates and mixed types, a 1000-value 'in',
 a path with an empty segment, a path starting with '@', a path that is not a String), refused
-operands, and expressions in the prefix syntax ('&', '|', '!', implicit AND, nested lists).
+operands, near[] terms (vectors phase V2: both list forms, every metric, k and threshold, and the
+NearQuery refusals, Python's own errors among them), and expressions in the prefix syntax ('&',
+'|', '!', implicit AND, nested lists).
 """
 import hashlib
 import os
@@ -167,7 +171,6 @@ def cases(an_atom):
         ("path '@' unregistered extractor (degenerate)", ["@tests.terms.unregistered", "==", 1]),
         ("path not a String (degenerate)", [3, "==", 1]),
         ("unknown operator", [None, "=~", 1]),
-        ("near[] refused", ["v", "near[]", {"vector": [1.0, 0.0], "k": 2}]),
         ("== a list", [None, "==", [1]]),
         ("== a map", [None, "==", {"a": 1}]),
         ("< nan", [None, "<", float("nan")]),
@@ -179,6 +182,56 @@ def cases(an_atom):
         ("?N with a value", [None, "?N", 3]),
         ("== without a value", [None, "=="]),
         ("contains a list", [None, "contains", [1]]),
+        # near[] (vectors phase V2): built from a NearQuery mapping or the 0.1 cosine threshold
+        # form; matches/evaluate refuse it (match_error), the indexes above never support it
+        ("near[] a mapping with k", ["v", "near[]", {"vector": [1.0, 0.0], "k": 2}]),
+        ("near[] the 0.1 cosine threshold form", ["v", "near[]", [1, 0], 0.8]),
+        ("near[] threshold and metric l2", ["v", "near[]", {"vector": [1, Decimal("0.5"), -0.0], "threshold": 2,
+                                                             "metric": "l2"}]),
+        ("near[] k, threshold and metric ip", ["v", "near[]", {"vector": [3], "k": 1, "threshold": -1.5,
+                                                                "metric": "ip"}]),
+        ("near[] k and metric cosine", ["v", "near[]", {"vector": [1.0, 2.0], "k": 3, "metric": "cosine"}]),
+        ("near[] a k of 2^64 - 1 (degenerate)", ["v", "near[]", {"vector": [1.0], "k": 2 ** 64 - 1}]),
+        ("near[] a subnormal Decimal component (degenerate)", ["v", "near[]", {"vector": [Decimal("1E-320")],
+                                                                              "k": 1}]),
+        ("near[] on the element", [None, "near[]", {"vector": [1.0], "k": 1}]),
+        ("near[] under !", ["!", "v", "near[]", {"vector": [1.0], "k": 1}]),
+        ("near[] and a term", ["&", "v", "near[]", {"vector": [1.0], "k": 1}, None, ">", 0]),
+        ("a term or near[]", ["|", None, "?!N", "v", "near[]", [1.0], 0.5]),
+        ("near[] without k or threshold (degenerate)", ["v", "near[]", {"vector": [1.0]}]),
+        ("near[] an empty vector (degenerate)", ["v", "near[]", {"vector": [], "k": 1}]),
+        ("near[] a scalar vector (degenerate)", ["v", "near[]", {"vector": 1.0, "k": 1}]),
+        ("near[] a string vector (degenerate)", ["v", "near[]", {"vector": "ab", "k": 1}]),
+        ("near[] k 0 (degenerate)", ["v", "near[]", {"vector": [1.0], "k": 0}]),
+        ("near[] k true (degenerate)", ["v", "near[]", {"vector": [1.0], "k": True}]),
+        ("near[] k 1.5 (degenerate)", ["v", "near[]", {"vector": [1.0], "k": 1.5}]),
+        ("near[] a nan component (degenerate)", ["v", "near[]", {"vector": [float("nan")], "k": 1}]),
+        ("near[] an inf component (degenerate)", ["v", "near[]", {"vector": [float("inf")], "k": 1}]),
+        ("near[] a true component (degenerate)", ["v", "near[]", {"vector": [True], "k": 1}]),
+        ("near[] a string component (degenerate)", ["v", "near[]", {"vector": ["1"], "k": 1}]),
+        ("near[] a Decimal component beyond the float range (degenerate)",
+         ["v", "near[]", {"vector": [Decimal("1E+400")], "k": 1}]),
+        ("near[] a Decimal NaN component (degenerate)", ["v", "near[]", {"vector": [Decimal("NaN")], "k": 1}]),
+        ("near[] a nan threshold (degenerate)", ["v", "near[]", {"vector": [1.0], "threshold": float("nan")}]),
+        ("near[] a string threshold (degenerate)", ["v", "near[]", {"vector": [1.0], "threshold": "0.1"}]),
+        ("near[] metric manhattan (degenerate)", ["v", "near[]", {"vector": [1.0], "k": 1, "metric": "manhattan"}]),
+        ("near[] metric L2 (degenerate)", ["v", "near[]", {"vector": [1.0], "k": 1, "metric": "L2"}]),
+        ("near[] metric 3 (degenerate)", ["v", "near[]", {"vector": [1.0], "k": 1, "metric": 3}]),
+        ("near[] a mapping with an unknown key (degenerate)", ["v", "near[]", {"vector": [1.0], "k": 1, "x": 2}]),
+        ("near[] a mapping without vector (degenerate)", ["v", "near[]", {"k": 1}]),
+        ("near[] the 0.1 form without a threshold (degenerate)", ["v", "near[]", [1, 0]]),
+        ("near[] the 0.1 form with a nil threshold (degenerate)", ["v", "near[]", [1, 0], None]),
+        ("near[] the 0.1 form with a scalar vector (degenerate)", ["v", "near[]", 5, 0.3]),
+        ("near[] a tuple value (degenerate)", ["v", "near[]", ([1.0, 0.0], 3)]),
+        ("near[] without a value (degenerate)", ["v", "near[]"]),
+        # Python's own errors, which protoBaseST refuses with PBValidationError (deviation DV7)
+        ("near[] an int component beyond the float range (DV7 d)", ["v", "near[]", {"vector": [2 ** 1100], "k": 1}]),
+        ("near[] an int threshold beyond the float range (DV7 d)",
+         ["v", "near[]", {"vector": [1.0], "threshold": 2 ** 1100}]),
+        ("near[] a signalling-NaN Decimal component (DV7 c)", ["v", "near[]", {"vector": [Decimal("sNaN")], "k": 1}]),
+        ("near[] a signalling-NaN Decimal threshold (DV7 c)",
+         ["v", "near[]", {"vector": [1.0], "threshold": Decimal("-sNaN")}]),
+        ("near[] a list metric (DV7 f)", ["v", "near[]", {"vector": [1.0], "k": 1, "metric": ["l2"]}]),
         # expressions in the prefix syntax
         ("& two terms", ["&", None, ">", 0, None, "<", 3]),
         ("| two terms", ["|", None, "==", "s1", None, "?N"]),
@@ -213,12 +266,19 @@ def index_row(index, term) -> dict:
             "exact_rows": plan.exact_rows(), "explain": explain}
 
 
-def outcome(tokens, values, indexes):
+def outcome(case_id, tokens, values, indexes):
     row = {"tokens": wire_bytes(tokens), "error": None, "answers": None, "match_error": None,
            "to_list": None, "describe": None, "index": None}
     try:
         expr = Expression.compile(tokens)
     except (ProtoValidationError, ProtoNotSupportedError) as e:
+        row["error"] = type(e).__name__
+        return row
+    except (OverflowError, ValueError, TypeError) as e:
+        # Python's own errors, raised by math.isfinite and the metric's set membership in
+        # NearQuery (terms.py:93, 123): only the DV7 cases may raise them
+        if "(DV7" not in case_id:
+            raise
         row["error"] = type(e).__name__
         return row
     try:
@@ -248,7 +308,7 @@ def main() -> None:
                "RangeIndex on r": RangeIndex("r", KeySpec.path("r")).build(values)}
     rows = []
     for name, tokens in cases(an_atom):
-        row = outcome(tokens, values, indexes)
+        row = outcome(name, tokens, values, indexes)
         row["id"] = name
         rows.append(row)
     data = {"tag": TAG, "count": COUNT, "seed": SEED,

@@ -1,10 +1,11 @@
-"-- vectors.st: the vector math kernel and Python's random sample --
+"-- vectors.st: the vector math kernel, Python's random sample and near queries --
 
 The numbers under vector indexes (Addendum V, docs/superpowers/specs/2026-11-19-vectors-addendum.md,
 sections 2.2 and 2.5), computed exactly as proto_db v2.0.0rc4 computes them in
 proto_db/indexing/vector_backends.py with CPython 3.14, so that answers, list numbers and centroids
 are the same bits (format spec, 'Vector indexes': scores are defined with math.fsum and IEEE sqrt).
-Not public API: nothing outside the vector port should depend on these two classes.
+PBVectorMath and PBPythonRandom are not public API: nothing outside the vector port should depend
+on them. PBNearQuery is the public value of a near[] term (terms.st).
 
   PBVectorMath (class side only)
     floatOf: x                      Python's float(x) of an Integer, a Float or a Decimal: one
@@ -31,6 +32,16 @@ Not public API: nothing outside the vector port should depend on these two class
     sampleRange: n count: k seed: s     random.Random(s).sample(range(n), k), an Array of Integers
     bits: k count: m seed: s            the first m values of random.Random(s).getrandbits(k)
 
+  PBNearQuery (public; vectors phase V2)
+    vector: v k: k threshold: t metric: m      proto_db's NearQuery (terms.py:98-125): v a
+                                    non-empty sequence of finite numbers, stored as a PBTuple of
+                                    Floats (floatOf:); k an Integer >= 1 or nil; t a finite number
+                                    (a Float) or nil, not both nil; m 'cosine', 'l2', 'ip' or nil
+                                    (the index's metric). Also vector:k:, vector:threshold:,
+                                    vector:k:threshold:, and _from: (a PBNearQuery, or a mapping of
+                                    its fields, terms.py _near_query). Equal and hashed by value,
+                                    0.0 = -0.0; describe is terms.py's display_value of it
+
 Floats. protoST's Float + - * / are one IEEE double operation each, sqrt is std::sqrt and
 Float raisedTo: an Integer is libm pow (Addendum V, 2.2.3); no build flag contracts or
 reassociates them (tests/unit/vec_math.st's IEEE self-test pins it). Three squares, three
@@ -50,10 +61,14 @@ Import from: 'protobase/errors'.
 Import from: 'protobase/keys'.
 Import from: 'protobase/values'.
 Import from: 'protobase/codec'.
+Import from: 'protobase/keyspec'.
 Import from: 'decimal'.
 
 Object subclass: #PBVectorMath.
 PBVectorMath comment: 'The vector math kernel of the vector indexes (class side only): CPython''s float(), math.fsum and proto_db v2.0.0rc4''s scores, ranking and pure-Python k-means, bit for bit. Not public API.'.
+
+Object subclass: #PBNearQuery instanceVariableNames: 'vector k threshold metric'.
+PBNearQuery comment: 'proto_db''s NearQuery: the frozen value of a near[] term, a query vector of finite Floats with k nearest members and/or a threshold, and a metric or nil.'.
 
 Object subclass: #PBPythonRandom.
 PBPythonRandom comment: 'CPython 3.14''s random.Random (MT19937, its integer seeding, getrandbits, _randbelow and sample), for the initial centroids of proto_db''s k-means. Class side only; the state is local to each call. Not public API.'.
@@ -478,3 +493,151 @@ PBPythonRandom class >> _randbelow: anInteger state: aState
   r := self _getrandbits: k state: aState.
   [r >= anInteger] whileTrue: [r := self _getrandbits: k state: aState].
   ^ r.
+
+"=== PBNearQuery ============================================================"
+
+"The query aSequence with anIntegerOrNil nearest members and/or within aNumberOrNil, ranked by the
+ metric aStringOrNil (nil: the index's own), validated as terms.py NearQuery.__post_init__
+ (terms.py:113-125), in its order: the vector (a non-empty Array, OrderedCollection, PBFrozenList
+ or PBTuple, Python's list or tuple; every component a finite number, converted to a Float), then
+ k and the threshold (at least one; k an Integer >= 1, not a Boolean; the threshold a finite
+ number), then the metric. Refusals are PBValidationError with proto_db's text, or with CPython's
+ where proto_db fails with one of Python's own errors (deviation DV7; _finiteNumber:what:, and an
+ unhashable metric, Python's TypeError from set membership, refused with proto_db's metric text)."
+PBNearQuery class >> vector: aSequence k: anIntegerOrNil threshold: aNumberOrNil metric: aStringOrNil
+  | components threshold |
+  ((self _isSequence: aSequence) and: [aSequence isEmpty not]) ifFalse: [
+    ^ PBValidationError signal: 'near[] needs a non-empty vector, not ' , (PBKeySpec _repr: aSequence)].
+  components := aSequence asArray collect: [:x | self _finiteNumber: x what: 'A vector component'].
+  (anIntegerOrNil isNil and: [aNumberOrNil isNil]) ifTrue: [
+    ^ PBValidationError signal: 'near[] needs k, threshold or both'].
+  (anIntegerOrNil isNil or: [anIntegerOrNil isClassObject not and: [anIntegerOrNil isInteger and: [anIntegerOrNil >= 1]]]) ifFalse: [
+    ^ PBValidationError signal: 'near[] k must be an int >= 1, not ' , (PBKeySpec _repr: anIntegerOrNil)].
+  threshold := aNumberOrNil isNil ifTrue: [nil] ifFalse: [self _finiteNumber: aNumberOrNil what: 'near[] threshold'].
+  (aStringOrNil isNil or: [(self _isText: aStringOrNil) and: [self _metrics includes: aStringOrNil]]) ifFalse: [
+    ^ PBValidationError signal: 'near[] metric must be one of [''cosine'', ''ip'', ''l2''] or None, not '
+      , (PBKeySpec _repr: aStringOrNil)].
+  ^ self basicNew _setVector: (PBTuple _trustedOn: components) k: anIntegerOrNil threshold: threshold
+    metric: (aStringOrNil isNil ifTrue: [nil] ifFalse: [aStringOrNil copy]).
+
+PBNearQuery class >> vector: aSequence k: anInteger
+  ^ self vector: aSequence k: anInteger threshold: nil metric: nil.
+
+PBNearQuery class >> vector: aSequence threshold: aNumber
+  ^ self vector: aSequence k: nil threshold: aNumber metric: nil.
+
+PBNearQuery class >> vector: aSequence k: anInteger threshold: aNumber
+  ^ self vector: aSequence k: anInteger threshold: aNumber metric: nil.
+
+"The metrics a query may name (terms.py NEAR_METRICS)."
+PBNearQuery class >> _metrics
+  ^ #('cosine' 'l2' 'ip').
+
+"The PBNearQuery anObject names: itself, or a Dictionary or PBFrozenDict holding 'vector' and only
+ 'vector', 'k', 'threshold' and 'metric' (String keys), converted (terms.py _near_query,
+ terms.py:128-137); PBValidationError otherwise."
+PBNearQuery class >> _from: anObject
+  | keys unknown at |
+  (anObject isClassObject not and: [anObject isKindOf: PBNearQuery]) ifTrue: [^ anObject].
+  (anObject isClassObject not and: [(anObject isKindOf: Dictionary) or: [anObject isKindOf: PBFrozenDict]]) ifFalse: [
+    ^ PBValidationError signal: 'near[] needs a NearQuery (or a mapping of its fields), not ' , (PBKeySpec _repr: anObject)].
+  keys := OrderedCollection new.
+  anObject keysAndValuesDo: [:k :v | keys add: k].
+  unknown := keys reject: [:k | (self _isText: k) and: [#('vector' 'k' 'threshold' 'metric') includes: k]].
+  (unknown isEmpty and: [keys anySatisfy: [:k | (self _isText: k) and: [k = 'vector']]]) ifFalse: [
+    ^ PBValidationError signal: 'A near[] mapping needs ''vector'' and only vector/k/threshold/metric, got '
+      , (self _sortedTexts: keys)].
+  at := [:name | | found | found := nil. anObject keysAndValuesDo: [:k :v | k = name ifTrue: [found := v]]. found].
+  ^ self vector: (at value: 'vector') k: (at value: 'k') threshold: (at value: 'threshold') metric: (at value: 'metric').
+
+"Python's sorted(map(str, keys)) as its repr prints it: the keys' texts (a String as itself, any
+ other key as its printString), sorted by code point, each quoted."
+PBNearQuery class >> _sortedTexts: aCollection
+  | texts |
+  texts := (aCollection collect: [:k | (self _isText: k) ifTrue: [k] ifFalse: [k printString]]) asArray.
+  texts := texts asSortedCollection: [:a :b | a <= b].
+  ^ '[' , (', ' join: (texts asArray collect: [:each | PBCodec repr: each])) , ']'.
+
+"terms.py _finite_number: aValue as a Float when it is an Integer, a Float or a Decimal (not a
+ Boolean) that is finite; PBValidationError '<what> must be a finite number, not <repr>'
+ otherwise. Python's math.isfinite converts with float() first, so an Integer beyond the Float
+ range is 'int too large to convert to float' (its OverflowError) and a signalling-NaN Decimal
+ 'cannot convert signaling NaN to float' (float()'s ValueError, PBVectorMath floatOf:): DV7."
+PBNearQuery class >> _finiteNumber: aValue what: aText
+  | f |
+  (PBVectorMath _isComponent: aValue) ifFalse: [
+    ^ PBValidationError signal: aText , ' must be a finite number, not ' , (PBKeySpec _repr: aValue)].
+  f := PBVectorMath floatOf: aValue.
+  f isNil ifTrue: [^ PBValidationError signal: 'int too large to convert to float'].
+  (PBVectorMath _isFinite: f) ifFalse: [
+    ^ PBValidationError signal: aText , ' must be a finite number, not ' , (PBKeySpec _repr: aValue)].
+  ^ f.
+
+"Python's list or tuple: an Array, an OrderedCollection, a PBFrozenList or a PBTuple."
+PBNearQuery class >> _isSequence: anObject
+  anObject isClassObject ifTrue: [^ false].
+  ^ (anObject isKindOf: Array) or: [(anObject isKindOf: OrderedCollection) or: [
+    (anObject isKindOf: PBFrozenList) or: [anObject isKindOf: PBTuple]]].
+
+"Whether anObject is a String (not a Symbol): Python's str."
+PBNearQuery class >> _isText: anObject
+  ^ anObject isClassObject not and: [anObject isString and: [anObject isSymbol not]].
+
+PBNearQuery >> _setVector: aTuple k: anIntegerOrNil threshold: aFloatOrNil metric: aStringOrNil
+  "Runs once, on a fresh instance."
+  vector isNil ifFalse: [^ PBUserError signal: 'PBNearQuery is immutable'].
+  vector := aTuple.
+  k := anIntegerOrNil.
+  threshold := aFloatOrNil.
+  metric := aStringOrNil.
+  ^ self.
+
+"The query vector, a PBTuple of finite Floats."
+PBNearQuery >> vector
+  ^ vector.
+
+"The number of nearest members, an Integer >= 1, or nil."
+PBNearQuery >> k
+  ^ k.
+
+"The threshold, a finite Float, or nil."
+PBNearQuery >> threshold
+  ^ threshold.
+
+"'cosine', 'l2', 'ip', or nil for the index's own metric."
+PBNearQuery >> metric
+  ^ metric.
+
+"{ 'vector'. 'k'. 'threshold'. 'metric' } as a PBFrozenDict, the vector an Array (terms.py
+ display_value of a NearQuery, terms.py:323-325)."
+PBNearQuery >> describe
+  ^ PBFrozenDict withAssociations: { 'vector' -> vector asArray. 'k' -> k. 'threshold' -> threshold. 'metric' -> metric }.
+
+"Equal by fields, the Floats by Python's float equality (0.0 = -0.0), as the dataclass's __eq__."
+PBNearQuery >> = anObject
+  (anObject isClassObject not and: [anObject class == PBNearQuery]) ifFalse: [^ false].
+  (k = anObject k and: [threshold = anObject threshold and: [metric = anObject metric]]) ifFalse: [^ false].
+  vector size = anObject vector size ifFalse: [^ false].
+  1 to: vector size do: [:i | (vector at: i) = (anObject vector at: i) ifFalse: [^ false]].
+  ^ true.
+
+"Equal queries hash alike: a zero Float, 0.0 or -0.0, hashes as 0.0."
+PBNearQuery >> hash
+  | h |
+  h := ((k hash bitXor: metric hash) bitXor: (self class _floatHash: threshold)) \\ 1073741824.
+  vector do: [:x | h := (h * 31 + (self class _floatHash: x)) \\ 1073741824].
+  ^ h.
+
+PBNearQuery class >> _floatHash: aFloatOrNil
+  aFloatOrNil isNil ifTrue: [^ nil hash].
+  ^ aFloatOrNil = 0.0 ifTrue: [0.0 hash] ifFalse: [aFloatOrNil hash].
+
+"PBNearQuery(vector=(1.0, 0.0), k=3, threshold=nil, metric=nil): the vector as Python prints a
+ tuple."
+PBNearQuery >> printOn: aStream
+  aStream nextPutAll: 'PBNearQuery(vector=('.
+  vector asArray doWithIndex: [:x :i |
+    i > 1 ifTrue: [aStream nextPutAll: ', '].
+    aStream print: x].
+  vector size = 1 ifTrue: [aStream nextPut: $,].
+  aStream nextPutAll: '), k='; print: k; nextPutAll: ', threshold='; print: threshold; nextPutAll: ', metric='; print: metric; nextPut: $).
