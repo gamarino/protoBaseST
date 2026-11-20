@@ -245,7 +245,7 @@ test_vector_index.py::test_exact_backend_equals_brute_force_at_extreme_magnitude
 test_vector_index.py::test_results_are_nearest_first_and_ties_follow_the_member_key	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_duplicates_are_counted_and_equal_values_come_back_exactly	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_invalid_vectors_are_kept_aside_and_never_returned	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_zero_vectors_have_cosine_similarity_zero	deferred	V1	It checks scores only, which the vector math kernel of V1 computes (PBVectorMath).
+test_vector_index.py::test_zero_vectors_have_cosine_similarity_zero	ported	tests/unit/vec_math.st	zero vectors have cosine similarity zero; l2 and ip of small vectors
 test_vector_index.py::test_with_removed_of_an_absent_element_raises	deferred	V3	The withRemoved: hook of PBVectorIndex and its refusal of an absent element land in V3.
 test_vector_index.py::test_ivf_flat_with_full_probe_equals_exact	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_ivf_flat_trains_on_growth_and_stays_consistent	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).

@@ -2,7 +2,8 @@
 # Runs bench/query_workload.st (protoBaseST, on $PROTOST) and bench/py_query_workload.py (proto_db,
 # the interop venv) on the same workloads, verifies the work and prints the timings (spec 7.3).
 #
-# Usage: bench/run_query.sh [ids...]          (default: M1 M2 M3; the planner workloads P1 P2 P3 and the query workloads Q1-Q5 by name)
+# Usage: bench/run_query.sh [ids...]          (default: M1 M2 M3; the planner workloads P1 P2 P3, the query workloads Q1-Q5
+#                                              and the vector workload VB0 by name)
 #
 # A workload is split into units, <id>:<size>:<plan> (M1: 600:idx0, 600:idx1, 600:idx3; M2: <n>:build
 # and <n>:fold for each size of QUERY_M2_SIZES, default "100 1000 10000 100000"), and every unit runs
@@ -34,6 +35,17 @@
 # overwritten by each run; M1's spaces go to new directories under QUERY_OUT/data. Nothing is removed.
 # QUERY_M1_COMMITS (default 200) sets M1's transactions, QUERY_M3_COMMITS (default 120, the cluster
 # workload's total) M3's.
+#
+# VB0, the vector math kernel (vectors phase task V1, Addendum V 5.5, an input to ruling VQ2): units
+# VB0:<n>:d<dim>-<op> for n = QUERY_VB0_SIZE (default 10000), each dim of QUERY_VB0_DIMS (default
+# "8 32 128") and op products, naive, fsum, ip, l2, cosine (bench/vector_workload.st states them),
+# run by bench/vector_workload.st and bench/py_vector_workload.py instead of the query workloads.
+# Their data, proto_db's clustered benchmark set, is written once per dim and run of this script by
+# bench/py_vector_data.py to a new MessagePack file under QUERY_OUT/data, which both sides read
+# (QUERY_VECTOR_DATA). proto_db runs in its reference mode (numpy and hnswlib blocked: every score is
+# its pure-Python function); the default mode, proto_db with numpy, needs tests/interop/.venv-numpy,
+# which does not exist yet, and the skip is printed. VB0's checksums are CRC-32s of the results'
+# bytes, so 'verified' means every sum, score and product equals proto_db's to the bit.
 #
 # M3's cluster units (plan Task 4b) run bench/run_cluster.sh once per round (RUNS=1, MODES=3, the
 # profile m3-<plan>, KEEP_TMP=1, CLUSTER_TMPDIR a new directory under QUERY_OUT/data, so nothing
@@ -75,6 +87,8 @@ for id in "${@:-M1 M2 M3}"; do
             Q4) for p in all sel unsel; do units+=("Q4:2000:$p-index" "Q4:2000:$p-scan"); done ;;
             Q5) for n in ${QUERY_Q5_SIZES:-2000 10000}; do
                     for p in page-rank page-mat page-skip count-index count-scan; do units+=("Q5:$n:$p"); done; done ;;
+            VB0) for d in ${QUERY_VB0_DIMS:-8 32 128}; do
+                    for p in products naive fsum ip l2 cosine; do units+=("VB0:${QUERY_VB0_SIZE:-10000}:d$d-$p"); done; done ;;
             *) fail "unknown workload $one" ;;
         esac
     done
@@ -120,6 +134,17 @@ cluster_unit() {
 }
 CLUSTER_HEAP="${QUERY_CLUSTER_HEAP_LIMIT_CELLS:-32000000}"
 
+# vector_data <unit>: the data file of a VB unit (one per size and dim, written once per run of this script).
+VECTOR_DATA_DIR="$OUT/data/vectors-$$-$(date +%s%N)"
+vector_data() {
+    local unit="$1" n plan dim file
+    n="$(cut -d: -f2 <<< "$unit")"; plan="$(cut -d: -f3 <<< "$unit")"; dim="${plan%%-*}"; dim="${dim#d}"
+    file="$VECTOR_DATA_DIR/n$n-d$dim.msgpack"
+    [[ -f "$file" ]] || "$PY" "$HERE/py_vector_data.py" "$n" "$dim" "$file" || fail "py_vector_data.py $n $dim failed"
+    echo "$file"
+}
+for unit in "${units[@]}"; do [[ "$unit" == VB* ]] && { vector_data "$unit" > /dev/null || fail "cannot write the data of $unit"; }; done
+
 load_before="$(cut -d' ' -f1-3 /proc/loadavg)"
 for ((r = 1; r <= RUNS; r++)); do
     for unit in "${units[@]}"; do
@@ -129,7 +154,16 @@ for ((r = 1; r <= RUNS; r++)); do
         for impl in py st; do
             out="$dir/$impl.$r"
             data="$OUT/data/${unit//:/_}-$impl-$r-$$-$(date +%s%N)"
-            if [[ $impl == py ]]; then
+            if [[ "$unit" == VB* ]]; then
+                vdata="$(vector_data "$unit")"
+                if [[ $impl == py ]]; then
+                    (cd "$HERE" && QUERY_VECTOR_DATA="$vdata" /usr/bin/time -f '%M' -o "$out.rss" \
+                        "$PY" py_vector_workload.py "$unit") > "$out" 2>&1
+                else
+                    (cd "$HERE" && QUERY_VECTOR_DATA="$vdata" STPATH="$REPO/src" /usr/bin/time -f '%M' -o "$out.rss" \
+                        "$PROTOST" vector_workload.st "$unit") > "$out" 2>&1
+                fi
+            elif [[ $impl == py ]]; then
                 (cd "$HERE" && QUERY_DATA="$data" /usr/bin/time -f '%M' -o "$out.rss" \
                     "$PY" py_query_workload.py "$unit") > "$out" 2>&1
             else
@@ -171,6 +205,10 @@ done
 echo "verified: $RUNS runs of each implementation report the same work (rows, queries, plan, checksum)"
 echo "RUNS=$RUNS interleaved, one process per unit; load average before: $load_before, after: $(cut -d' ' -f1-3 /proc/loadavg)"
 echo "protost: $PROTOST (PROTOCORE_HEAP_LIMIT_CELLS=$PROTOCORE_HEAP_LIMIT_CELLS; cluster members $CLUSTER_HEAP); Python: $("$PY" --version 2>&1)"
+if [[ " ${units[*]}" == *" VB"* ]]; then
+    echo "proto_db mode (vector units): reference, numpy: blocked, hnswlib: blocked; libc $("$PY" -c 'import platform; print(*platform.libc_ver())')"
+    [[ -x "$REPO/tests/interop/.venv-numpy/bin/python" ]] || echo "SKIP: proto_db's default mode (numpy): tests/interop/.venv-numpy is absent"
+fi
 commit="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo '?')"
 [[ -z "$(git -C "$REPO" status --porcelain -- src bench 2>/dev/null)" ]] || commit="$commit (src or bench modified or untracked)"
 echo "$(date -u +%Y-%m-%dT%H:%MZ); protoBaseST $commit; $("$PROTOST" --version 2>&1 | head -n 1)"

@@ -33,6 +33,7 @@ Import from: 'protobase/keygroups'.
 Import from: 'protobase/collections'.
 Import from: 'protobase/records'.
 Import from: 'protobase/indexes'.
+Import from: 'protobase/vectors'.
 Import from: 'protobase/terms'.
 Import from: 'protobase/plans'.
 Import from: 'protobase/planner'.

@@ -1403,11 +1403,19 @@ Float or `Decimal`), `canonicalVector:dim:`, `fsum:` (CPython's `math.fsum`), `s
 `score:query:vector:`, `scoreFloor:threshold:`, `rank:query:metric:k:threshold:`, `normalized:`,
 `trainingOrderOf:` and `kmeans:nlist:iterations:seed:`. `PBPythonRandom` (class side) holds
 `sampleRange:count:seed:` (`random.Random(seed).sample(range(n), k)`) and `bits:count:seed:` (a
-test entry point: the first values of `random.getrandbits`).
+test entry point: the first values of `random.getrandbits`). `canonicalVector:dim:` answers a `PBTuple`
+of Floats or nil; `normalized:` and `kmeans:nlist:iterations:seed:` answer Arrays of Floats (k-means: an
+Array of centroids); `rank:query:metric:k:threshold:` takes entries `{memberKey. element. count. vector}`
+and answers `{element. count}` pairs. Where CPython raises an error of its own (the overflow and the
+infinities of opposite signs of Python's math.fsum, Python's float of a signalling-NaN `Decimal`, a
+sample larger than its population), they
+signal `PBValidationError` with CPython's text (DV7). Every result is pinned bit for bit by
+`tests/unit/vec_math.st`, `tests/unit/vec_random.st` and the `proto_db` vectors of
+`tests/conformance/vector_math.st`.
 
 ## The module and its files
 
 `Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`, `keyspec`,
-`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `keygroups`, `collections`, `records`, `indexes`, `terms`, `plans`, `planner`, `query`, `pager`, `roots`, `publisher`,
+`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `keygroups`, `collections`, `records`, `indexes`, `vectors`, `terms`, `plans`, `planner`, `query`, `pager`, `roots`, `publisher`,
 `round`, `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar`, `uuid` and `net`.

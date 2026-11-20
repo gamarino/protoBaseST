@@ -10,19 +10,6 @@
 # Task 7: the planner
 # Task 9: PBPager
 # Vectors phase (Addendum V, docs/superpowers/specs/2026-11-19-vectors-addendum.md), drafted by V0.
-# V1: the vector math kernel and Python's sample (internal: PBVectorMath, PBPythonRandom)
-floatOf:	V1
-canonicalVector:dim:	V1
-fsum:	V1
-sumNonNegative:	V1
-score:query:vector:	V1
-scoreFloor:threshold:	V1
-rank:query:metric:k:threshold:	V1
-normalized:	V1
-trainingOrderOf:	V1
-kmeans:nlist:iterations:seed:	V1
-sampleRange:count:seed:	V1
-bits:count:seed:	V1
 # V2: near queries and near[] terms
 vector:k:threshold:metric:	V2
 vector:k:	V2
