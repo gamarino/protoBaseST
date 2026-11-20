@@ -1,7 +1,7 @@
 "EXPECT: ok"
 "Indexed queries, plan Task 9: pagers under concurrent writers (proto_db
- tests/concurrency/test_pager_stability.py at v2.0.0rc4, D56, R77). Three writer actors keep
- committing insertions before, inside and after the pages being read, and removals, while three
+ tests/concurrency/test_pager_stability.py at v2.0.0rc4, D56, R77). Three writer actors commit
+ insertions before, inside and after the pages being read, and removals, while three
  reader actors page through snapshots: an ordered scan (by rank), a range ordered by its key,
  descending (by rank), and an unindexed condition (materialised). Each reader takes four snapshots,
  the k-th after at least 8 k commits, builds its pager on it and reads every page, waiting before
@@ -17,14 +17,15 @@ Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_queries'.
 
-"A writer: commits until the readers are done (aStop). aCount caps the commits of all the writers
- together (aProgress) that no reader waits for, as proto_db's MAX_COMMITS (CI-314: every row the
- writers add lengthens each reader's next query, so unbounded writers on a slow machine grow the
- readers' work faster than they finish it); past it a writer commits only while a reader waits for
- a commit (aDemand above aProgress), and otherwise waits a millisecond. The writers outlive every
- reader and never leave one waiting, so commits land between the pages of every pager by
- construction, not by the relative speed of the actors (with a plain cap, a slow reader's last
- pager could see no commit: seen in plan Task 10). The three writers change
+"A writer: until the readers are done (aStop), commits only while a reader waits for a commit
+ (aDemand, the largest commit count a reader waits for, above aProgress, the commits of all the
+ writers together), and otherwise waits a millisecond. The writers are demand-driven, never free
+ running: the commits are those the readers ask for (24 before the four snapshots and one per page
+ boundary, at most two more per request when the three writers race), so the readers' work does
+ not depend on how fast the writers run (proto_db bounds free-running writers with MAX_COMMITS,
+ CI-314; free-running writers with a cap made a run take 13 s or 6 minutes, by scheduling, in plan
+ Task 10). The writers outlive every reader and answer every request, so commits land before each
+ snapshot and between the pages of every pager by construction. The three writers change
  one PBList root, which never merges, so every concurrent commit but one conflicts and is
  retried; a writer whose run: exhausts its retries (PBConflictError: the others kept winning)
  starts the same change again, until it commits or the readers are done. Losing a race is the
@@ -33,17 +34,17 @@ Import from: '_queries'.
  the writer's answer."
 Object subclass: #PageWriter.
 
-"Commits changes to the root 'items' of db while all the writers together have committed fewer
- than aCount times, drawing them from QData random: aSeed; adds one to aProgress after each commit
+"Commits changes to the root 'items' of db while a reader waits for a commit (aDemand above
+ aProgress), until aStop, drawing them from QData random: aSeed; adds one to aProgress after each commit
  and to aDone at the end. Answers { commits. insertions. removals }
  (the root never falls to 50 elements, so every removal drawn is made), or the class and text of
  the first error."
-PageWriter >> write: db seed: aSeed commits: aCount progress: aProgress demand: aDemand done: aDone stop: aStop
+PageWriter >> write: db seed: aSeed progress: aProgress demand: aDemand done: aDone stop: aStop
   | rnd n inserted removed |
   rnd := QData random: aSeed.
   n := 0. inserted := 0. removed := 0.
   ^ [[aStop value] whileFalse: [
-     (aProgress value < aCount or: [aProgress value < aDemand value]) ifFalse: [(Future after: 1) wait] ifTrue: [ | choice slot gone committed |
+     aProgress value < aDemand value ifFalse: [(Future after: 1) wait] ifTrue: [ | choice slot gone committed |
        n := n + 1.
        choice := rnd next.
        slot := (rnd next * 400) truncated.
@@ -73,7 +74,7 @@ PageWriter >> write: db seed: aSeed commits: aCount progress: aProgress demand: 
 Object subclass: #PageReader.
 
 "Waits until aProgress holds at least aTarget, or every writer is done, raising aDemand to
- aTarget first so that the writers commit past their cap."
+ aTarget first so that the writers commit."
 PageReader >> wait: aProgress for: aTarget demand: aDemand done: aDone
   aDemand swap: [:x | x max: aTarget].
   [aProgress value < aTarget and: [aDone value < 3]] whileTrue: [(Future after: 1) wait].
@@ -121,7 +122,7 @@ demand := Atom on: 0.
 done := Atom on: 0.
 stop := Atom on: false.
 writers := (1 to: 3) asArray collect: [:s |
-  PageWriter new asActor write: db seed: s commits: 1500 progress: progress demand: demand done: done stop: stop].
+  PageWriter new asActor write: db seed: s progress: progress demand: demand done: done stop: stop].
 readers := {
   PageReader new asActor read: db query: [:q | q orderBy: 'k'] size: 23 progress: progress demand: demand done: done.
   PageReader new asActor read: db query: [:q | (q where: ((PBField path: 'k') >= 1000)) orderBy: 'k' descending: true]
