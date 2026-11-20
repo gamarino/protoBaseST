@@ -73,6 +73,7 @@ all addAll: {
   { 'd1-cosine-exact'. 1. 'cosine'. 'exact'. params value: #(). 'd1'. 'element' }.
   { 'd1-l2-hnsw'. 1. 'l2'. 'hnsw'. params value: { 'M' -> 2 }. 'd1'. 'element' }.
   { 'd1-ip-exact'. 1. 'ip'. 'exact'. params value: { 'numpy' -> false }. 'd1'. 'element' }.
+  { 'd1-l2-ivf'. 1. 'l2'. 'ivf_flat'. params value: { 'nlist' -> 3. 'retrain_growth' -> 1.5 }. 'd1'. 'element' }.
   { 'd16-cosine-hnsw'. 16. 'cosine'. 'hnsw'. params value: { 'M' -> 4. 'seed' -> 9 }. 'd16'. 'path vec' }.
   { 'd16-l2-exact'. 16. 'l2'. 'exact'. params value: #(). 'd16'. 'path vec' }.
   { 'd16-ip-hnsw'. 16. 'ip'. 'hnsw'. params value: #(). 'd16'. 'path vec' } }.
@@ -102,26 +103,30 @@ kinds do: [:kind |
     (history at: 2) do: [:i | index := index withRemoved: (recs at: i + 1)].
     show value: (kind at: 1) , ' history ' , name value: (index withAdded: (recs at: (history at: 3) + 1))]].
 "The ivf_flat growth histories, py_vector_index.py's IVF_GROWTH: { label. dim. metric. params. set.
- key spec }, each from an empty index."
+ key spec }, each from an empty index; an operation 2 dumps the index (the shrink history's turns)."
 { { 'ivf-l2 growth big'. 3. 'l2'. params value: { 'nlist' -> 4. 'nprobe' -> 2. 'train_iters' -> 3. 'seed' -> 5. 'retrain_growth' -> 1.5 }.
     'big'. 'path vec' }.
   { 'ivf-cosine growth recs'. 3. 'cosine'. params value: { 'nlist' -> 3. 'seed' -> (2 raisedTo: 40). 'retrain_growth' -> 2 }.
     'recs'. 'path vec' }.
   { 'ivf-ip growth d16'. 16. 'ip'. params value: { 'nlist' -> 5. 'train_iters' -> 2. 'seed' -> 7. 'retrain_growth' -> 1.25 }.
     'd16'. 'path vec' }.
-  { 'ivf-l2 growth vals'. 3. 'l2'. params value: { 'nlist' -> 2. 'retrain_growth' -> 3.0 }. 'vals'. 'element' } } do: [:growth |
+  { 'ivf-l2 growth vals'. 3. 'l2'. params value: { 'nlist' -> 2. 'retrain_growth' -> 3.0 }. 'vals'. 'element' }.
+  { 'ivf-cosine shrink d1'. 1. 'cosine'. params value: { 'nlist' -> 2. 'retrain_growth' -> 1.5 }. 'd1'. 'element' } } do: [:growth |
   | elements index |
   elements := sets at: (growth at: 5).
   index := PBVectorIndex name: 'vi'
     keySpec: ((growth at: 6) = 'element' ifTrue: [PBKeySpec element] ifFalse: [PBKeySpec path: 'vec'])
     dim: (growth at: 2) metric: (growth at: 3) backend: 'ivf_flat' params: (growth at: 4).
   (ops at: (growth at: 1)) asArray doWithIndex: [:op :n | | before |
-    before := index trainedSize.
-    index := (op at: 1) = 0
-      ifTrue: [index withAdded: (elements at: (op at: 2) + 1)]
-      ifFalse: [index withRemoved: (elements at: (op at: 2) + 1)].
-    index trainedSize = before ifFalse: [
-      show value: (growth at: 1) , ' op ' , n printString , ' trained at ' , index trainedSize printString value: index]].
+    (op at: 1) = 2
+      ifTrue: [show value: (growth at: 1) , ' op ' , n printString , ' checkpoint' value: index]
+      ifFalse: [
+        before := index trainedSize.
+        index := (op at: 1) = 0
+          ifTrue: [index withAdded: (elements at: (op at: 2) + 1)]
+          ifFalse: [index withRemoved: (elements at: (op at: 2) + 1)].
+        index trainedSize = before ifFalse: [
+          show value: (growth at: 1) , ' op ' , n printString , ' trained at ' , index trainedSize printString value: index]]].
   show value: (growth at: 1) , ' end' value: index].
 "The refusals, as py_vector_index.py refusals prints them."
 refused := [:label :block | | text |

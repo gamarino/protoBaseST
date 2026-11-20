@@ -32,7 +32,7 @@ so that the records are the same atoms with the same oids on both sides:
            without then given one, and built with invalid elements, all of them removed, then
            given another; and 'growth', per history of IVF_GROWTH, a seeded sequence of [op, i]
            over its set (0 adds element i, 1 removes element i, always one the index holds; mostly
-           new elements, some added twice), from an empty index
+           new elements, some added twice; 2 dumps the index), from an empty index
 'dump' (and _st_vector_index.st on the same space) prints, for each index kind of KINDS and each
 (set, key spec) of SPECS, then for each kind of DIM_KINDS (dims 1 and 16, the three metrics), the
 index build makes over the set, then the index the ops derive from the build over the set's first
@@ -85,18 +85,23 @@ KINDS = [("exact-l2", "l2", "exact", {}),
 DIM_KINDS = [("d1-cosine-exact", 1, "cosine", "exact", {}, "d1", "element"),
              ("d1-l2-hnsw", 1, "l2", "hnsw", {"M": 2}, "d1", "element"),
              ("d1-ip-exact", 1, "ip", "exact", {"numpy": False}, "d1", "element"),
+             ("d1-l2-ivf", 1, "l2", "ivf_flat", {"nlist": 3, "retrain_growth": 1.5}, "d1", "element"),
              ("d16-cosine-hnsw", 16, "cosine", "hnsw", {"M": 4, "seed": 9}, "d16", "path vec"),
              ("d16-l2-exact", 16, "l2", "exact", {}, "d16", "path vec"),
              ("d16-ip-hnsw", 16, "ip", "hnsw", {}, "d16", "path vec")]
 #: (label, dim, metric, params, set, key spec, operations): the ivf_flat growth histories, from an
 #: empty index, crossing nlist and retrain_growth (vectors V4); the ip metric assigns lists by l2.
+#: The last one, operations None, is not seeded: it adds every element of its set, then removes
+#: them all (a trained index shrunk below nlist, to nothing: it stays trained), then adds ten again
+#: (filed under the old centroids), with a dump at each turn (op 2).
 IVF_GROWTH = [("ivf-l2 growth big", 3, "l2", {"nlist": 4, "nprobe": 2, "train_iters": 3, "seed": 5,
                                               "retrain_growth": 1.5}, "big", "path vec", 160),
               ("ivf-cosine growth recs", 3, "cosine", {"nlist": 3, "seed": 2**40, "retrain_growth": 2},
                "recs", "path vec", 90),
               ("ivf-ip growth d16", 16, "ip", {"nlist": 5, "train_iters": 2, "seed": 7, "retrain_growth": 1.25},
                "d16", "path vec", 110),
-              ("ivf-l2 growth vals", 3, "l2", {"nlist": 2, "retrain_growth": 3.0}, "vals", "element", 60)]
+              ("ivf-l2 growth vals", 3, "l2", {"nlist": 2, "retrain_growth": 3.0}, "vals", "element", 60),
+              ("ivf-cosine shrink d1", 1, "cosine", {"nlist": 2, "retrain_growth": 1.5}, "d1", "element", None)]
 #: The values the refusal cases tamper with (an index over them, the element key spec, dim 3).
 TAMPER_VALUES = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1, 2, 3), None, "abc", (1.0, 2.0)]
 #: The invalid-tree histories, named as 'ops' lists them.
@@ -188,6 +193,10 @@ def make(directory):
                             [valid_at[:20] + invalid_at[:8], invalid_at[:8], invalid_at[8]]]
         for label, _, _, _, set_name, _, length in IVF_GROWTH:
             n = len(sets[set_name])
+            if length is None:
+                ops[label] = ([[0, i] for i in range(n)] + [[2, 0]] + [[1, i] for i in reversed(range(n))]
+                              + [[2, 0]] + [[0, i] for i in range(10)])
+                continue
             held, seq = [], []
             for _ in range(length):
                 r = rnd.random()
@@ -382,6 +391,9 @@ def run(directory):
             spec = KeySpec.element() if spec_name == "element" else KeySpec.path("vec")
             index = VectorIndex("vi", spec, dim, metric, "ivf_flat", **params)
             for n, (op, i) in enumerate(ops[label], 1):
+                if op == 2:
+                    show(f"{label} op {n} checkpoint", index)
+                    continue
                 before = index.trained_size
                 index = index.with_added(elements[i]) if op == 0 else index.with_removed(elements[i])
                 if index.trained_size != before:

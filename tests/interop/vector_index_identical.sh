@@ -7,7 +7,7 @@
 # exact backend (l2, and cosine with numpy false), the hnsw backend (ip with M and seed, and
 # cosine) and the ivf_flat backend (l2 with nlist, nprobe, train_iters and seed; cosine with
 # retrain_growth), over the path 'vec' and the element key specs, and for dims 1 and 16 over the
-# three metrics, proto_db's build and protoBaseST's build: are dumped atom by atom (the index state,
+# three metrics (ivf_flat at dim 1 too), proto_db's build and protoBaseST's build: are dumped atom by atom (the index state,
 # every node of the store and invalid trees, the encoded bytes of each), and so are the indexes a
 # seeded sequence of with_added / with_removed / with_replaced (withAdded:, withRemoved:,
 # withReplaced:with:) derives from the build over each set's first half, and the three
@@ -15,9 +15,10 @@
 # a build without grows a CountedKeyNode tree; a build whose invalid tree is emptied, then grown
 # again, grows a CountedKeyNode tree). Then the four ivf_flat growth histories (l2, cosine, ip;
 # dims 3 and 16; records and plain values), each from an empty index through a seeded sequence of
-# additions, repeated additions and removals: the index is dumped after every operation that
-# trained or retrained it, crossing nlist and then retrain_growth again and again, and at the end,
-# so every set of centroids proto_db's pure-Python k-means computes (numpy blocked, the host libm's
+# additions, repeated additions and removals, and a fifth at dim 1 (cosine) that adds every element,
+# removes them all (a trained index shrunk below nlist, to nothing) and adds ten again: the index
+# is dumped after every operation that trained or retrained it, crossing nlist and then
+# retrain_growth again and again, at the fifth history's two turns, and at the end, so every set of centroids proto_db's pure-Python k-means computes (numpy blocked, the host libm's
 # pow, deviation DV3) must be protoBaseST's, byte for byte, and so must every list. Then both print
 # the text of 73 refusals: definitions, removals of what the index does not hold, and validate: of
 # tampered indexes, exact and ivf_flat (proto_db's texts, the values in them rendered as Python's
@@ -42,7 +43,7 @@ mkdir -p "$OUT" || fail "cannot create $OUT"
     tail -n 5 "$OUT/st.txt"; fail "_st_vector_index.st exited non-zero"; }
 [[ "$(tail -n 1 "$OUT/py.txt")" == "end" && "$(tail -n 1 "$OUT/st.txt")" == "end" ]] || fail "a dump did not finish ($OUT)"
 indexes=$(grep -c '^index ' "$OUT/py.txt")
-[[ "$indexes" -eq 92 ]] || fail "expected 92 index dumps, proto_db printed $indexes"
+[[ "$indexes" -eq 101 ]] || fail "expected 101 index dumps, proto_db printed $indexes"
 refusals=$(grep -c '^refusal ' "$OUT/py.txt")
 [[ "$refusals" -eq 73 ]] || fail "expected 73 refusals, proto_db printed $refusals"
 cmp -s "$OUT/py.txt" "$OUT/st.txt" || {

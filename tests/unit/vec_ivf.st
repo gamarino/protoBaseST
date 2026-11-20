@@ -12,8 +12,8 @@
  a k-means whose squared distances are subnormal (they decide the nearest centroid, where a
  flush to zero would tie them), and a half-way case, where the libm pow squares of k-means put a
  vector nearer the second centroid while the correctly rounded squares (x * x) would tie it with
- the first. The node identity of whole histories against proto_db is
- tests/interop/vector_index_identical.sh's. Each check gathers its mismatches and requires none,
+ the first. Rows 1 to 4 check the port against proto_db's rules and against itself; the
+ byte identity of whole histories with proto_db is tests/interop/vector_index_identical.sh's. Each check gathers its mismatches and requires none,
  so one label covers one behaviour."
 Import from: 'protobase'.
 Import from: '_check'.
@@ -48,12 +48,15 @@ lists := [:anIndex | anIndex storeEntries collect: [:a | { a key at: 1. hexes va
 fails := OrderedCollection new.
 elements := records value: (coords value: 80 value: 4 value: 3).
 index := vi value: (PBKeySpec path: 'vec') value: 4 value: 'l2' value: { 'nlist' -> 4. 'nprobe' -> 4 }.
+sizes := OrderedCollection new.
 elements doWithIndex: [:e :i |
   index := index withAdded: e.
+  (sizes isEmpty or: [sizes last ~= index trainedSize]) ifTrue: [sizes add: index trainedSize].
   i = 3 ifTrue: [
     expect value: 'untrained below nlist' value: { index centroids size. index trainedSize. (index storeEntries collect: [:a | a key at: 1]) asSet asArray }
       value: { 0. 0. #(-1) }]].
-expect value: 'trained' value: { index centroids size. index trainedSize >= 4. index trainedSize <= 80 } value: #(4 true true).
+expect value: 'trained at 4, retrained at 16 and 64 (retrain_growth 4.0)' value: { index centroids size. sizes asArray }
+  value: #(4 #(0 4 16 64)).
 expect value: 'every member in a trained list'
   value: (index storeEntries reject: [:a | (a key at: 1) between: 0 and: 3]) size value: 0.
 expect value: 'the grown index validates' value: (index validate: elements) == index value: true.
@@ -87,7 +90,11 @@ c that: 'ivf_flat training depends on the data and the seed only' is: fails asAr
  Float product compared exactly with the member count: 1.5 * 2 = 3.0 retrains at 3, 1.5 * 3 = 4.5
  at 5, and 2.2 * 25 = 55.00000000000001 not at 55 but at 56. Only a new member can trigger it: a
  second occurrence of a member, a removal, or an element whose key is not a vector never does.
- An Integer retrain_growth is stored as a Float and compared the same way."
+ An Integer retrain_growth is stored as a Float and compared the same way. A trained index never
+ untrains: emptied by removals (below nlist, then to no member) it keeps its centroids and
+ trained_size, and members added again are filed under the old centroids, without a retrain until
+ the threshold (tests/interop/vector_index_identical.sh's shrink history pins the same against
+ proto_db)."
 fails := OrderedCollection new.
 index := vi value: PBKeySpec element value: 1 value: 'l2' value: { 'nlist' -> 2. 'retrain_growth' -> 1.5 }.
 sizes := OrderedCollection new.
@@ -101,6 +108,17 @@ expect value: 'growth 1.5' value: sizes asArray
 index := index withRemoved: (tup value: #(8.0)).
 expect value: 'a removal keeps the training' value: { index memberCount. index trainedSize. PBVectorIvfFlat needsTraining: index }
   value: #(7 8 false).
+summary := index centroids.
+#(7.0 6.0 5.0 4.0 3.0 2.0 1.0) do: [:x | index := index withRemoved: (tup value: { x })].
+index := index withRemoved: (tup value: #(3.0)).
+expect value: 'emptied, still trained' value: { index memberCount. index trainedSize. index centroids = summary. PBVectorIvfFlat needsTraining: index }
+  value: #(0 8 true false).
+index := (index withAdded: (tup value: #(1.0))) withAdded: (tup value: #(9.0)).
+expect value: 'regrown under the old centroids'
+  value: { index memberCount. index trainedSize. index centroids = summary.
+    index storeEntries collect: [:a | a key at: 1].
+    { PBVectorIvfFlat listFor: index vector: (tup value: #(1.0)). PBVectorIvfFlat listFor: index vector: (tup value: #(9.0)) } }
+  value: { 2. 8. true. #(0 1). #(0 1) }.
 index := (vi value: PBKeySpec element value: 1 value: 'l2' value: { 'nlist' -> 2. 'retrain_growth' -> 2.2 })
   build: ((1 to: 25) asArray collect: [:i | tup value: { i asFloat }]).
 expect value: 'built at 25' value: { index trainedSize. 2.2 * 25.0 > 55.0 } value: #(25 true).
