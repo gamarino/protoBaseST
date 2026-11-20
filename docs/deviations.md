@@ -2056,9 +2056,10 @@ What the table says, and what it does not:
   68% (dim 8), 84% (32) and 87% (128) of the `ip` time in protoBaseST, against 25%, 32% and 34% in
   `proto_db`, whose `math.fsum` is C. The correctly rounded sum costs 4.9, 8.8 and 10.0 times a naive
   interpreted sum: the ratio grows with the dimension (more partials per sum).
-- **A score per vector** costs about 65 us (dim 8), 290 us (32) and 1.2 ms (128) for `ip` and `l2`,
-  2.5 to 3 times that for cosine (two norms and a dot product, three fsums); 70 to 160 times
-  `proto_db`'s pure-Python scores. An exact search over 10^4 vectors of dim 32 would spend about 3 s in
+- **A score per vector** (the minimum divided by 10^4) costs 65, 292 and 1163 us for `ip` at dim 8,
+  32 and 128, 72, 313 and 1334 us for `l2`, and 2.63, 3.06 and 2.88 times the `ip` time for cosine (two
+  norms and a dot product, three fsums); the scores are 69.5 (`l2`, dim 8) to 161.1 (cosine, dim 32)
+  times `proto_db`'s pure-Python scores. An exact search over 10^4 vectors of dim 32 would spend about 3 s in
   the kernel alone; V8 measures searches, and ruling VQ2 decides on those figures whether the protoST
   fsum primitive (Addendum V, 2.2.4) is built.
 - **Peak resident set** is not determinant: protoCore keeps memory until it needs it, up to the heap

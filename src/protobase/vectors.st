@@ -243,7 +243,8 @@ PBVectorMath class >> scoreFloor: aMetric threshold: aThreshold
   ^ aMetric = 'l2' ifTrue: [aThreshold negated] ifFalse: [aThreshold].
 
 "rank_entries (vector_backends.py:147-167): the {element. count} pairs of the best anInteger
- entries (all of them when nil) that pass aThreshold, nearest first. anEntries holds
+ entries (all of them when nil; cut as Python's del scored[k:], so 0 keeps none and a negative k
+ drops that many from the end) that pass aThreshold, nearest first. anEntries holds
  {memberKey. element. count. vector}. The sort key is Python's (-score, order_key(memberKey)):
  ties, -0.0 and 0.0 included, go to the smaller order key (PBKeys orderKey:)."
 PBVectorMath class >> rank: anEntries query: q metric: aMetric k: anInteger threshold: aThreshold
@@ -256,8 +257,16 @@ PBVectorMath class >> rank: anEntries query: q metric: aMetric k: anInteger thre
       scored add: {s negated. PBKeys orderKey: (entry at: 1). entry at: 2. entry at: 3}]].
   sorted := scored asArray sort: [:a :b |
     (a at: 1) < (b at: 1) or: [(a at: 1) = (b at: 1) and: [(a at: 2) <= (b at: 2)]]].
-  (anInteger notNil and: [sorted size > anInteger]) ifTrue: [sorted := sorted copyFrom: 1 to: (anInteger max: 0)].
+  anInteger isNil ifFalse: [sorted := sorted copyFrom: 1 to: (self _sliceEnd: anInteger size: sorted size)].
   ^ sorted collect: [:each | {each at: 3. each at: 4}].
+
+"How many items Python's del aList[anInteger:] keeps of aSize: the slice start anInteger, a negative
+ one counted from the end (aSize + anInteger), clamped to 0..aSize (CPython's PySlice_AdjustIndices).
+ So k = 0 keeps nothing, k = -1 drops the last item, and a k beyond either end keeps all or nothing."
+PBVectorMath class >> _sliceEnd: anInteger size: aSize
+  ^ anInteger < 0
+    ifTrue: [aSize + anInteger max: 0]
+    ifFalse: [anInteger min: aSize].
 
 "_normalized (vector_backends.py:561-563): aVector divided by its norm (the sqrt of fsum of
  x * x), or aVector itself when the norm is 0.0; an Array of Floats."

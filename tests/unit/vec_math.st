@@ -15,7 +15,8 @@
  CPython's msum cases (Lib/test/test_math.py testFsum) and its special values and two errors;
  the scores of test_zero_vectors_have_cosine_similarity_zero (:195-199); the scores' order of
  operations, scoreFloor:threshold:, normalized: and the overflow refusals (DV7 a); rank: ties
- (nearest first, then the member key's order key); the three squares (x * x in scores and norms,
+ (nearest first, then the member key's order key) and its cut, Python's del scored[k:] for k = 0 and
+ negative k; the three squares (x * x in scores and norms,
  raisedTo: 2 in k-means, on a half-way case, with a k-means witness whose centroids change if the
  square multiplies); trainingOrderOf: against byte order; and the IEEE self-test of 2.2.3 (error-free
  transformations, signed zeros, subnormals, half-way products, sqrt, the libm pow square)."
@@ -260,7 +261,7 @@ entries := {{5. 'a'. 1. {1.0. 0.0}}. {'m'. 'b'. 2. {0.0. 1.0}}. {-3. 'c'. 1. {0.
   {0. 'g'. 2. {-0.0. 0.0}}}.
 ranked := [:q :m :k :t | (PBVectorMath rank: entries query: q metric: m k: k threshold: t)
   collect: [:pair | (pair at: 1) , (pair at: 2) printString]].
-c that: 'rank: answers {element. count} nearest first, ties by the member key''s order key'
+c that: 'rank: answers {element. count} nearest first, ties by the member key''s order key; k is cut as Python''s del scored[k:] (0 and negative k included)'
   is: {ranked value: {1.0. 1.0} value: 'cosine' value: nil value: nil.
        ranked value: {1.0. 0.0} value: 'cosine' value: 3 value: nil.
        ranked value: {1.0. 0.0} value: 'cosine' value: nil value: 0.5.
@@ -270,10 +271,14 @@ c that: 'rank: answers {element. count} nearest first, ties by the member key''s
        ranked value: {0.0. 0.0} value: 'ip' value: nil value: nil.
        ranked value: {1.0. 0.0} value: 'ip' value: 3 value: nil.
        ranked value: {1.0. 0.0} value: 'ip' value: nil value: 0.5.
-       ranked value: {1.0. 0.0} value: 'ip' value: 0 value: nil}
+       ranked value: {1.0. 0.0} value: 'ip' value: 0 value: nil.
+       ranked value: {1.0. 0.0} value: 'ip' value: -1 value: nil.
+       ranked value: {1.0. 0.0} value: 'ip' value: -3 value: nil.
+       ranked value: {1.0. 0.0} value: 'ip' value: -10 value: nil}
   equals: {#('e1' 'a1' 'f1' 'b2' 'g2' 'c1' 'd3'). #('e1' 'a1' 'f1'). #('e1' 'a1' 'f1').
            #('g2' 'c1' 'e1' 'a1' 'b2' 'd3' 'f1'). #('e1' 'a1' 'g2'). #('e1' 'a1').
-           #('c1' 'g2' 'e1' 'a1' 'f1' 'b2' 'd3'). #('f1' 'e1' 'a1'). #('f1' 'e1' 'a1'). #()}.
+           #('c1' 'g2' 'e1' 'a1' 'f1' 'b2' 'd3'). #('f1' 'e1' 'a1'). #('f1' 'e1' 'a1'). #().
+           #('f1' 'e1' 'a1' 'c1' 'g2' 'b2'). #('f1' 'e1' 'a1' 'c1'). #()}.
 
 "--- 10. The three squares (2.2.2, 2.5 step 3) ---"
 x := 130492547.0.

@@ -11,7 +11,8 @@
  (k = n.bit_length(), redrawn while >= n), seen through one-element samples; sample in its pool
  branch (n <= setsize), with k = 0, and k beyond the population refused with CPython's text; sample
  in its selection-set branch (setsize = 21, plus 4 ** ceil(log(3k, 4)) for k > 5), on both sides of
- that threshold and on a population of 2^33."
+ that threshold (k = 6 at 85 and 86; k = 22 at 277 and 278, setsize 21 + 4^4) and on a population
+ of 2^33."
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -45,15 +46,17 @@ c that: '_randbelow redraws getrandbits(n bit length) while the draw is >= n'
 
 c that: 'sample: the pool branch, k = 0, and k beyond the population refused'
   is: {PBPythonRandom sampleRange: 21 count: 21 seed: 3. PBPythonRandom sampleRange: 85 count: 6 seed: 5.
-       PBPythonRandom sampleRange: 10 count: 0 seed: 0.
+       PBPythonRandom sampleRange: 10 count: 0 seed: 0. PBPythonRandom sampleRange: 277 count: 22 seed: 5.
        refused value: [PBPythonRandom sampleRange: 3 count: 4 seed: 0].
        refused value: [PBPythonRandom sampleRange: 3 count: -1 seed: 0]}
   equals: {#(7 18 17 4 11 15 10 9 1 13 0 20 19 3 12 5 16 8 6 14 2). #(79 32 45 67 3 59). #().
+           #(130 183 271 14 238 127 26 80 57 190 240 126 194 52 274 6 110 208 143 93 199 81).
            'Sample larger than population or is negative'. 'Sample larger than population or is negative'}.
 
 c that: 'sample: the selection-set branch, at its threshold and on a population of 2^33'
   is: {PBPythonRandom sampleRange: 86 count: 6 seed: 5. PBPythonRandom sampleRange: 22 count: 3 seed: 3.
-       PBPythonRandom sampleRange: (2 raisedTo: 33) count: 5 seed: 11}
-  equals: {#(79 32 45 83 67 3). #(7 18 17). #(6294919105 2522798642 6493598146 3405809747 4699224467)}.
+       PBPythonRandom sampleRange: (2 raisedTo: 33) count: 5 seed: 11. PBPythonRandom sampleRange: 278 count: 22 seed: 5}
+  equals: {#(79 32 45 83 67 3). #(7 18 17). #(6294919105 2522798642 6493598146 3405809747 4699224467).
+           #(130 183 271 14 238 127 26 80 57 190 240 126 194 52 6 110 208 143 93 199 81 36)}.
 
 c report displayNl.

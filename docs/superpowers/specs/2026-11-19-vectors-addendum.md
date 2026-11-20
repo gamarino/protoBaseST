@@ -216,19 +216,27 @@ corrupt, `vector.py:372-374`).
     results below `2^-1022` (`Decimal('1e-310')`): first to 53 bits, then to the subnormal's
     fewer bits. Rounding once, at the precision of the target exponent, is what the parser
     already does.
-  - **Checked by an exact oracle.** `vec_math.st` checks, for seeded and adversarial Decimals,
-    that the answer `f` is the nearest Float: with the exact value `d asExactFraction` and the
-    neighbours of `f`, `|d - f| <= |d - neighbour|`, ties to the even significand, compared
-    exactly with protoST 0.14.1's exact Fraction comparison (`fraction_prims.cpp`), besides the
-    CPython vectors (5.2): subnormal half-way Decimals, `2^-1074` halves, the largest finite
-    Float's half-way neighbour, zero with extreme exponents, `-0`.
+  - **Checked by an exact oracle** *(corrected in V1)*. `vec_math.st` checks, for seeded and
+    adversarial Decimals, that the answer `f` is the nearest Float: the Decimal's exact value
+    `N / D` (`N` = coefficient `* 10^max(e, 0)`, `D = 10^max(-e, 0)`) lies between the midpoints
+    of `f` and its two neighbours, each an Integer count of `2^-1076` taken from the Floats' bits,
+    and on a midpoint only when `f`'s significand is even; every comparison is exact Integer
+    cross-multiplication (`N * 2^1076` against `midpoint * D`), and no Fraction is built. Besides
+    the CPython vectors (5.2): subnormal half-way Decimals, `2^-1074` halves, the largest finite
+    Float's half-way neighbour, zero with extreme exponents, `-0`. *The first draft subtracted
+    Fractions (`|d - f|` against `|d - neighbour|`) and compared them with protoST 0.14.1's exact
+    Fraction comparison; it was exact but each subtraction at denominators around `10^1100` and
+    `2^1074` costs about 2.3 s in protoST 0.14.1 (the reduction's gcd), so the test ran six
+    minutes. The cross-multiplication is equally exact and runs in about a second.*
   - protoST's `Fraction >> asFloat` is never used: it divides two rounded Floats
     (`protoST lib/kernel/fraction.st:32-33`).
 - **`fsum: anArray`**: a line-for-line port of CPython's `math_fsum` (Shewchuk's algorithm with
   the final half-way correction; `Modules/mathmodule.c`), on protoST Floats, whose `+`, `-`, `*`, `/`
-  are single IEEE double operations in C++. Its special-value path is ported too: an infinite term
-  makes the sum that infinity, `+inf` and `-inf` together, or a NaN term, signal. It signals the
-  two errors CPython raises (intermediate overflow; `-inf + inf`) as `PBVectorMath` errors;
+  are single IEEE double operations in C++. Its special-value path is ported too *(corrected in
+  V1)*: an infinite term makes the sum that infinity, a NaN term makes it NaN (CPython's `fsum`
+  returns NaN for a NaN term; it does not raise), and `+inf` and `-inf` together signal. It
+  signals the two errors CPython raises (intermediate overflow, checked even after a NaN or an
+  infinite term; `-inf + inf`) as `PBValidationError` with CPython's text (DV7);
   `sumNonNegative:` maps overflow to `Float infinity` as `_sum_nonnegative` does
   (`vector_backends.py:92-97`). `ip` and the cosine dot product are **not** guarded in `proto_db`
   (`vector_backends.py:128`, `136`): an exact sum that overflows propagates Python's

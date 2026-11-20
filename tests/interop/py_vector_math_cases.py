@@ -460,7 +460,8 @@ def main():
     samples = []
     for seed in seeds:
         for n, k in ((1, 1), (5, 0), (5, 5), (21, 3), (22, 3), (85, 6), (86, 6), (100, 10), (1000, 10),
-                     (2 ** 32 + 7, 4), (2 ** 33, 3), (60, 60), (341, 22), (342, 22)):
+                     (2 ** 32 + 7, 4), (2 ** 33, 3), (60, 60), (341, 22), (342, 22),
+                     (277, 22), (278, 22)):  # k = 22: setsize = 21 + 4 ** 4 = 277
             samples.append([str(seed), str(n), k, [str(j) for j in random.Random(seed).sample(range(n), k)]])
     data["sample"] = samples
     km = []
