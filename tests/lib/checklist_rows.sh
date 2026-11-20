@@ -2,7 +2,8 @@
 # and the row rules of a checklist of proto_db's tests (a source file, not a test; the runner skips
 # it). A table row is `proto_db file::function <TAB> status <TAB> a <TAB> b`, and the status is:
 #   ported    <protoBaseST .st/.sh test file, repo-relative>  <check label>
-#   deferred  <task id the plan has a '### Task <id>:' heading for>  <reason of at least six words>
+#   deferred  <task id the plan has a '### Task <id>:' heading for, or a named task the caller
+#             accepts (V0, V-pin ...)>  <reason of at least six words>
 #   n/a       <one of the caller's n/a reasons>  <reason of at least six words>
 # The check fails on a function without a row, a row for a function the tag does not have, a
 # duplicate row, a malformed row, a missing file or a label that is not a whole check label of its
@@ -12,10 +13,16 @@
 # The caller sets TAG, then calls:
 #   checklist_prepare                 skip (77) / fail on a missing checkout or tag, needs python3
 #   checklist_list <repo path>...     the test functions of those files at the tag, as file::function
-#                                     (sets CHECKLIST_LISTING, CHECKLIST_NFILES)
-#   checklist_run <table> <plan> <min> <max> <strict 0|1> <n/a reasons, '|' separated> <sh check command>
+#                                     (sets CHECKLIST_LISTING, CHECKLIST_NFILES); an argument
+#                                     <repo path>::<function> lists that one function only (a file
+#                                     only some of whose tests are in scope), and fails when the tag
+#                                     does not define it
+#   checklist_run <table> <plan> <min> <max> <strict 0|1> <n/a reasons, '|' separated> <sh check command> [named tasks]
 #                                     the task ids are min..max (numbers need no plan heading unless
-#                                     strict; lettered ids always need one)
+#                                     strict; lettered ids always need one); the optional last
+#                                     argument lists, space separated, further task ids accepted as
+#                                     written (the vectors phase's V0 ... V10, V-pin, VP), reported
+#                                     after the numbered ones in the order given
 # and reads REPO (the repository root) and PB (the protoBase checkout).
 
 checklist_prepare() {
@@ -33,19 +40,26 @@ checklist_prepare() {
 }
 
 checklist_list() {
-    local f
-    CHECKLIST_NFILES=$#
+    local f path fn
+    CHECKLIST_NFILES="$(for f in "$@"; do echo "${f%%::*}"; done | sort -u | wc -l)"
     CHECKLIST_LISTING="$(for f in "$@"; do
-        git -C "$PB" show "$TAG:$f" | grep -E '^def test_|^    def test_' \
-            | sed -E 's/^ *def (test_[A-Za-z0-9_]*).*/\1/' | sed "s|^|$(basename "$f")::|"
+        path="${f%%::*}"
+        git -C "$PB" show "$TAG:$path" | grep -E '^def test_|^    def test_' \
+            | sed -E 's/^ *def (test_[A-Za-z0-9_]*).*/\1/' | sed "s|^|$(basename "$path")::|" \
+            | if [[ "$f" == *::* ]]; then
+                  fn="$(basename "$path")::${f#*::}"
+                  grep -Fx "$fn" || echo "MISSING::$fn"
+              else
+                  cat
+              fi
     done)"
 }
 
 checklist_run() {
-    local table="$1" plan="$2" tmin="$3" tmax="$4" strict="$5" na="$6" shcheck="$7" lettered
+    local table="$1" plan="$2" tmin="$3" tmax="$4" strict="$5" na="$6" shcheck="$7" named="${8:-}" lettered
     lettered="$(sed -n -E 's/^### Task ([0-9]+[a-z]?):.*/\1/p' "$plan" 2>/dev/null | tr '\n' ' ')"
     python3 -I - "$REPO" "$table" "$CHECKLIST_LISTING" "$CHECKLIST_NFILES" "${CHECKLIST_FINAL:-0}" \
-        "$lettered" "$tmin" "$tmax" "$strict" "$na" "$shcheck" <<'PY'
+        "$lettered" "$tmin" "$tmax" "$strict" "$na" "$shcheck" "$named" <<'PY'
 import os, re, sys
 repo, table, listing, nfiles = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 final = sys.argv[5] == "1"
@@ -53,6 +67,7 @@ planned = set(sys.argv[6].split())       # the tasks the plan has a '### Task <i
 tmin, tmax, strict = int(sys.argv[7]), int(sys.argv[8]), sys.argv[9] == "1"
 NA = tuple(sys.argv[10].split("|"))
 shcheck = sys.argv[11]                   # the command whose argument names a check of a .sh test
+named = sys.argv[12].split()             # further task ids accepted as written (V0, V-pin ...)
 
 
 def labels_of(text):
@@ -94,6 +109,9 @@ def sh_labels_of(text):
 
 functions = [l.strip() for l in listing.splitlines() if l.strip()]
 errors = []
+for f in [f for f in functions if f.startswith("MISSING::")]:
+    errors.append("the file list names %s, which the tag does not define" % f[len("MISSING::"):])
+functions = [f for f in functions if not f.startswith("MISSING::")]
 seen_fn = set()
 for f in functions:
     if f in seen_fn:
@@ -133,10 +151,17 @@ else:
             if b not in texts[path]:
                 errors.append("%s: %s: %r is not a check label of %s" % (where, key, b, a))
                 continue
+        elif status == "deferred" and a in named:
+            if len(b.split()) < 6:
+                errors.append("%s: %s: the deferral needs a specific reason" % (where, key))
+                continue
+            deferred.setdefault((1, named.index(a), a), []).append(key)
+            if final:
+                errors.append("%s: %s is still deferred to Task %s (CHECKLIST_FINAL=1)" % (where, key, a))
         elif status == "deferred":
             task = re.fullmatch(r"([0-9]+)([a-z]?)", a)
             if not task or not tmin <= int(task.group(1)) <= tmax:
-                errors.append("%s: %s: deferred to %r, not a task of the plan (%d..%d, or one with a letter)" % (where, key, a, tmin, tmax))
+                errors.append("%s: %s: deferred to %r, not a task of the plan (%d..%d, or one with a letter%s)" % (where, key, a, tmin, tmax, (", or " + " ".join(named)) if named else ""))
                 continue
             if (task.group(2) or strict) and a not in planned:
                 errors.append("%s: %s: deferred to Task %s, which the plan has no heading for" % (where, key, a))
@@ -144,7 +169,7 @@ else:
             if len(b.split()) < 6:
                 errors.append("%s: %s: the deferral needs a specific reason" % (where, key))
                 continue
-            deferred.setdefault((int(task.group(1)), task.group(2)), []).append(key)
+            deferred.setdefault((0, int(task.group(1)), task.group(2)), []).append(key)
             if final:
                 errors.append("%s: %s is still deferred to Task %s (CHECKLIST_FINAL=1)" % (where, key, a))
         elif status == "n/a":
@@ -166,7 +191,8 @@ for e in errors:
 print("%d files, %d test functions, %d rows" % (nfiles, len(functions), len(rows)))
 print("ported %d, deferred %d, n/a %d" % (counts["ported"], counts["deferred"], counts["n/a"]))
 for task in sorted(deferred):
-    print("deferred to Task %d%s (%d):" % (task[0], task[1], len(deferred[task])))
+    label = "%d%s" % (task[1], task[2]) if task[0] == 0 else task[2]
+    print("deferred to Task %s (%d):" % (label, len(deferred[task])))
     for key in deferred[task]:
         print("  " + key)
 if errors:

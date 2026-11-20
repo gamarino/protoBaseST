@@ -7,6 +7,10 @@
 - **Scope in one line:** port `proto_db`'s index maintenance (equality and range indexes), its
   term and expression language, its planner and its plan operators, an idiomatic Smalltalk query
   front end, and in-process paging by rank. **Vector indexes and vector search are excluded.**
+  *Superseded for vectors by [Addendum V](2026-11-19-vectors-addendum.md) (2026-11-19, ruled; folded in here by the vectors task V0):
+  vector indexes and vector search are in scope for 0.4.0, except the hnsw graph, whose search is
+  refused (ruling VQ1). The rows and sections below that state the exclusion carry a note
+  "Addendum V"; the text before each note records what 0.3.0 shipped.*
 - **Maintainer's requirement (2026-11-18, binding):** the implementation ships with complete
   documentation (reference and a conceptual guide, including how to read `explain`), tutorial
   chapters linked from the README that teach the reasoning, runnable examples that run as tests,
@@ -97,7 +101,7 @@ paths at `b99285b` (= `v2.0.0rc4` for these files).
 |---|---|---|
 | `Index` base: immutable atom, `name`, `key_spec`, `_definition`, `_with` | `indexing/base.py:56-215` | **Read only.** `PBIndex` (`indexes.st`) decodes `name`, `key_spec`, `member_tokens`. No `_with`, no new versions. |
 | Abstract hooks `with_added`, `with_removed`, `supports`, `estimate`, `plan` | `base.py:240-261` | **Missing.** |
-| Defaults `supports_order`, `ordered_plan`, `supports_filtered`, `filtered_plan`, `with_replaced`, `empty`, `build`, `explain`, `validate` | `base.py:265-338` | **Missing.** (`filtered_*` serve vectors only: out of scope.) |
+| Defaults `supports_order`, `ordered_plan`, `supports_filtered`, `filtered_plan`, `with_replaced`, `empty`, `build`, `explain`, `validate` | `base.py:265-338` | **Missing.** (`filtered_*` serve vectors only: out of scope.) *Addendum V: `supportsFiltered:` (false) and `filteredPlan:where:` (`PBNotSupportedError`) are ported as `PBIndex` defaults in V6 (addendum 2.1).* |
 | `has_current_tokens` (format-3 member tokens, D58) | `base.py:287-291`, `keyed.py:397-400` | **Exists** as `hasMemberTokens` (`indexes.st`), with `proto_db`'s comparison of `member_tokens == 1`. |
 | `_plan_cacheable` / `_plans_deterministic` (D56) | `base.py:141`, `219-225` | **Missing** (only the query cache uses it; deferred with the cache). |
 | `element_identity` | `base.py:22-53` | **Missing.** Needed by `validate`, `Union`, `Intersect`, `Distinct`. |
@@ -116,7 +120,7 @@ paths at `b99285b` (= `v2.0.0rc4` for these files).
 | `explain`, structural `validate`, misfiled detection | `keyed.py:651-737` | **Missing.** |
 | `EqualityIndex` (`==`, `in`, `!=`, `?N`, `?!N`) | `indexing/equality.py:23-35` | **Read only.** |
 | `RangeIndex` (also `<` `<=` `>` `>=`, four `between`; ordered iteration) | `indexing/range.py:33-58` | **Read only.** |
-| `VectorIndex`, backends, `near[]` | `indexing/vector.py`, `vector_backends.py` | **Read only. Excluded** (section 3.3). |
+| `VectorIndex`, backends, `near[]` | `indexing/vector.py`, `vector_backends.py` | **Read only. Excluded** (section 3.3). *Addendum V: ported (exact, ivf_flat; hnsw maintained, its search refused), addendum 1.1-1.3 and 2.3-2.5.* |
 
 ### 2.2 Persistent trees the indexes need
 
@@ -150,7 +154,7 @@ paths at `b99285b` (= `v2.0.0rc4` for these files).
 
 | `proto_db` feature | Python | protoBaseST status |
 |---|---|---|
-| Operators `==` `!=` `<` `<=` `>` `>=` `in`, four `between`, `?N` `?!N`, `contains`, `?T` `?!T`, `near[]` | `query/terms.py:59-89` | **Missing** (`near[]` excluded). |
+| Operators `==` `!=` `<` `<=` `>` `>=` `in`, four `between`, `?N` `?!N`, `contains`, `?T` `?!T`, `near[]` | `query/terms.py:59-89` | **Missing** (`near[]` excluded). *Addendum V: `near[]` and `PBNearQuery` in V2 (addendum 2.6).* |
 | `Term(path, op, value)`: validation, canonical operands, `in` over a set sorted by order key, equality by `values_equal` | `terms.py:152-213` | **Missing.** |
 | `Term.matches` (the scan oracle, D28 semantics) | `terms.py:215-253` | **Missing.** |
 | `contains` semantics | `terms.py:282-301` | **Missing.** |
@@ -170,7 +174,7 @@ paths at `b99285b` (= `v2.0.0rc4` for these files).
 | Disjunction: `Union` only if every branch has an index-only plan | `planner.py:250-261` | **Missing.** |
 | Order: one key may use an ordered index scan with the whole predicate as residual, competing with `Sort` | `planner.py:263-275` | **Missing.** |
 | `plan_query(source, where, order_by, limit, offset)` and argument checks | `planner.py:278-343` | **Missing.** |
-| `near[]` rules, `filtered_knn` | `planner.py:15-26`, `199-234` | **Excluded.** |
+| `near[]` rules, `filtered_knn` | `planner.py:15-26`, `199-234` | **Excluded.** *Addendum V: ported in V7 (addendum 2.8).* |
 | `Estimate`, `QueryPlan` (`execute`, `explain`, `estimate`, `window`, `exact_rows`) | `query/plans.py:75-177` | **Missing.** |
 | `CollectionScan`, `ValuesScan` | `plans.py:222-281` | **Missing.** |
 | `IndexPlan`, `ordered_index_scan` | `plans.py:284-386` | **Missing.** |
@@ -178,7 +182,7 @@ paths at `b99285b` (= `v2.0.0rc4` for these files).
 | `Union` (max multiplicity), `Intersect` (min multiplicity) by `element_key` | `plans.py:96-99`, `537-608` | **Missing.** |
 | `Project`, `Sort` (stable, total order, unorderable last), `Limit` (by rank when possible), `Count` (by rank), `Distinct` | `plans.py:611-880` | **Missing.** |
 | `GroupBy`, `Join`, `Unnest` | `plans.py:883-1101` | **Missing.** Deferred (3.2). |
-| `VectorSearch` | `plans.py:389-436` | **Excluded.** |
+| `VectorSearch` | `plans.py:389-436` | **Excluded.** *Addendum V: `PBVectorSearch` in V6 (addendum 2.7).* |
 
 ### 2.6 Front end, paging, cache
 
@@ -218,6 +222,7 @@ paths at `b99285b` (= `v2.0.0rc4` for these files).
    merges (`rebaseOnto:`) onto indexed currents; collection `validate`.
 4. **The term and expression language:** every operator except `near[]`, `matches:` with D28
    semantics, `And` / `Or` / `Not`, the 0.1 prefix list syntax (both directions), `describe`.
+   *(Addendum V adds `near[]`, in V2.)*
 5. **The planner** (`normalize`, access paths, the cost model, ties, unions, order) and the plan
    operators `CollectionScan`, `IndexPlan` (lookup, range, complement, ordered scan), `Filter`,
    `BlockFilter` (the counterpart of `PythonFilter`), `Union`, `Intersect`, `Project`, `Sort`,
@@ -236,19 +241,23 @@ paths at `b99285b` (= `v2.0.0rc4` for these files).
 | `RepeatedKeysDictionary` writes | A non-goal of the prototype (`deviations.md`), unchanged. An indexed one is still refused. | Its own task. |
 | Collection `rebuilt` (misfiled format-3 repair) | A repair tool for damage format 3 left; `validate` reports it (`PBMisfiledError` is new, 5.3). | Port with `validate`'s misfiled checks if a real format-3 database needs it. |
 
-### 3.3 Excluded: vector indexes and vector search
+### 3.3 Vector indexes and vector search: see Addendum V
 
-The `near[]` operator, `PBVectorIndex` writes and training, `VectorSearch`, `filtered_plan` and
-the planner's kNN rules (`planner.py:15-26`, `199-234`) are **out of scope**. Consequences, all
-explicit:
+*Rewritten by the vectors task V0 (2026-11-20).* This section first excluded vector indexes and
+vector search from this feature: the `near[]` operator, `PBVectorIndex` writes and training,
+`VectorSearch`, `filtered_plan` and the planner's kNN rules were out of scope, a collection holding
+a `PBVectorIndex` refused every change and merge (`PBNotSupportedError` naming it), a `near[]` term
+was refused when built, and `supports:` answered false so the planner never offered a vector index.
+That is what 0.3.0 ships (rulings IC2, IQ5).
 
-- A collection holding a `PBVectorIndex` keeps refusing every change with `PBNotSupportedError`
-  naming the vector index, and so does a merge onto one. Maintaining its other indexes and not
-  the vector one would write a stale index.
-- A collection holding an index of a type protoBaseST does not know (an opaque atom: a custom
-  `proto_db` index kind) refuses changes the same way.
-- A term with the operator `near[]` is `PBNotSupportedError` when built, naming the exclusion.
-- A `PBVectorIndex` never answers `supports:` with true, so the planner never offers it.
+The maintainer's decision of 2026-11-19 put vectors in scope as a separate phase, released as
+0.4.0 (ruling VQ3). Its design is [Addendum V](2026-11-19-vectors-addendum.md) (revision 2, ruled): everything of `proto_db`'s vector feature
+that needs no native library is ported, node-identical on the same disk format; the hnsw backend
+is maintained and validated, and its search is refused (ruling VQ1). Only an index of a kind
+protoBaseST does not know (an opaque atom: a custom `proto_db` index kind) still keeps its
+collection read only; the narrowing is ruling IQ5a, effective in task V5. The tasks are the
+addendum's V-pin and V0 to V10, planned in `docs/superpowers/plans/2026-11-20-vectors.md` (section
+11 below).
 
 ---
 
@@ -285,7 +294,9 @@ marked as such and never invented.
 - **`proto_db` is the reference** (decisions.md, the rule above all). Semantics, plan choices,
   `explain` keys and node names follow it; a difference is a deviation with its reason.
 - **Refuse, never diverge.** Anything the port cannot do exactly (a vector index, an unknown index
-  kind, an unregistered extractor) is an explicit error naming it.
+  kind, an unregistered extractor) is an explicit error naming it. *Addendum V (3.1): an unknown
+  index kind, an unregistered extractor, an hnsw search, and a value `proto_db` itself fails on
+  with a raw Python error (DV7).*
 - **Immutability.** Every index hook answers a new index; plans are immutable once built; a
   query object answers a new query on every message.
 - **No locks in the Smalltalk layer.** Plans hold only immutable values, so they run on any
@@ -306,9 +317,9 @@ machinery), `terms.st`, `plans.st`, `planner.st`, `query.st`, `pager.st`; `avl.s
 | `PBIndex` | `Index` | `keySpec` keeps answering the persisted tuple (the 0.1.0 API); the new `keySpecObject` answers it as a `PBKeySpec` (maintainer, 2026-11-18). Gains `withAdded:`, `withRemoved:`, `withReplaced:with:`, `supports:`, `estimate:`, `plan:`, `supportsOrder:`, `orderedPlan:`, `empty`, `build:`, `explain`, `validate:`; `_with:` builds a new unsaved version (as `PBIndexedCollection >> _withChanges:log:complete:` does). Abstract hooks signal `PBUserError` ("subclass responsibility"). |
 | `PBKeyGroupIndex` | `KeyGroupIndex` | Groups, side group, member keys, rank segments, cost model. `name:keySpec:` (the primitive; it takes a `PBKeySpec`) makes an empty index with `member_tokens` 1; `name:path:` is a convenience for `name: n keySpec: (PBKeySpec path: p)`. |
 | `PBEqualityIndex`, `PBRangeIndex` | `EqualityIndex`, `RangeIndex` | Supported operators; `PBRangeIndex` adds ordered iteration. |
-| `PBVectorIndex` | `VectorIndex` | Unchanged, read only; `supports:` answers false; it makes its collection refuse writes. |
+| `PBVectorIndex` | `VectorIndex` | Unchanged, read only; `supports:` answers false; it makes its collection refuse writes. *Addendum V: implemented (constructors, hooks, `validate:`, `explain`, `supports:`, plans; addendum 2.3), V3 to V6.* |
 | `PBIndexSet` | `IndexSet` | Gains `withIndex:`, `without:`, `onAdd:`, `onRemove:`, `onReplace:with:`, `rebuiltStale:`. |
-| `PBIndexedCollection` | `IndexedCollection` | Gains `addIndex:`, `removeIndex:`, `validate`, `asQueryPlan`, `_scanWindowFrom:to:`; `_checkWritable:` narrows to vector and unknown index kinds. |
+| `PBIndexedCollection` | `IndexedCollection` | Gains `addIndex:`, `removeIndex:`, `validate`, `asQueryPlan`, `_scanWindowFrom:to:`; `_checkWritable:` narrows to vector and unknown index kinds. *Addendum V: to unknown kinds only, in V5 (addendum 2.10).* |
 | `PBTerm` | `Term` | `path:op:value:` and `path:op:`; operators as `proto_db`'s strings (`'=='`, `'between[]'`, `'?N'`...), so the list syntax and explain read the same in both languages; `matches:`, `describe`, `asList`. |
 | `PBAnd`, `PBOr`, `PBNot` | `And`, `Or`, `Not` | n-ary, flattened, immutable; `evaluate:` (via `matches:`), `describe`, `asList`. |
 | `PBBlockPredicate` | `PythonPredicate` | An opaque predicate: a block and a description. |
@@ -355,7 +366,8 @@ new version with the extended log and the receiver's indexes, with no index work
 
 **Stale indexes.** Before the first change, an index with `hasMemberTokens` false is rebuilt from
 the elements (`_current_indexes`, `:450-454`, D58). This closes the not-done item "No rebuilding
-of format-3 indexes" for key-group indexes; a stale vector index still refuses (3.3).
+of format-3 indexes" for key-group indexes; a stale vector index still refuses (3.3). *Addendum V:
+a format-3 vector index is rebuilt by `empty build:` like any other, training included (V5).*
 
 **Index-definition changes in the log.** `addIndex:` logs `('@index_add' name index)` and
 `removeIndex:` logs `('@index_remove' name)` on the `ConcurrentOptimized` classes, never on
@@ -365,7 +377,8 @@ of format-3 indexes" for key-group indexes; a stale vector index still refuses (
 **Merges.** `rebaseOnto:` replays the net element ops through the public mutators of `current`,
 which maintain `current`'s indexes, then the index-definition ops per name, with
 `PBConflictError` for an index this log created that `current` also has (`:594-631`). The refusal
-in `rebaseOnto:` moves from "any index" to "a vector or unknown index". The publisher's merge
+in `rebaseOnto:` moves from "any index" to "a vector or unknown index" (*Addendum V: to "an
+unknown index", V5; a replayed add can retrain an IVF index inside the merge*). The publisher's merge
 (`transactions.st:671-675`) needs no other change. **This runs during the commit's build**, in
 the publisher (standalone) or the round's build (cluster), so a path key spec reads atoms there
 and an extractor key spec runs its block there. Ruling IQ1 (9.2): this is allowed, as in
@@ -411,7 +424,7 @@ it. The rules that make the bytes equal:
 3. **Same hook order** in every mutator (5.3).
 
 **Rule for what cannot be maintained:** a collection holding a vector index or an unknown index
-kind is read and refused for writes (3.3); a key-group index with format-3 tokens is rebuilt on
+kind is read and refused for writes (3.3; *Addendum V: an unknown kind only, from V5*); a key-group index with format-3 tokens is rebuilt on
 first change. An index built by `proto_db` with an extractor that this process has not registered
 is read, and a query whose plan never extracts a key (an index access path with no residual
 filter on the extractor's path) runs, because a lookup reads only the trees; a query whose plan
@@ -504,7 +517,8 @@ same plan in both implementations, with these specifics:
   (`math_prims.cpp`, `prim_LogBase`), which can differ from C's `log2` in the last bit. Two
   candidates whose costs differ by one ulp could then rank differently (risk R2). Ruling IQ4:
   this is a documented deviation; protoST is not changed. The query vectors compare plans and
-  report near-tie differences; results must always match.
+  report near-tie differences; results must always match. *Addendum V: the same near-tie rule
+  (IP8) covers the hnsw estimate's `log2(members + 2)`, also `PBCost class >> log2:` (DV6).*
 - **Same `explain`.** The keys (`plan`, `estimate`, `children`, `index`, `term`, `predicate`,
   `keys`, `limit`, `offset`, `by_rank`) and node names are `proto_db`'s, except `BlockFilter` with
   `description`. An index's `explain` gives `kind` as `proto_db`'s class name (`'EqualityIndex'`,
@@ -593,7 +607,10 @@ plan are within that tolerance of each other: both are optimal under their own a
 equal costs mean the two candidates tied. Any other plan difference fails. (`explain` shows the
 chosen plan only, so the rule compares the two chosen plans, never a rejected candidate.) The same generator also checks, on the Python
 side, that each recorded result equals a scan (the invariant), so a vector can never encode a
-`proto_db` bug as truth without the generator failing.
+`proto_db` bug as truth without the generator failing. *Addendum V (5.3): a scan refuses `near[]`,
+so for a vector case the check is `near_oracle` (exact backends, and IVF with `nprobe == nlist`); a
+partial IVF probe is approximate by design, so its recorded answer is `proto_db`'s, with its recall
+against `near_oracle` recorded but not gated, and protoBaseST must return exactly that answer.*
 
 Upstream: these vectors are protoBaseST's, not `proto_db`'s. Proposing them for `proto_db`'s own
 conformance set is IQ6, kept as a proposal and not sent (ruling, 9.2).
@@ -604,6 +621,11 @@ conformance set is IQ6, kept as a proposal and not sent (ruling, 9.2).
 - No pager tokens, no query cache (3.2): their `proto_db` tests are listed as not ported, with the
   reason, in a checklist (`tests/unit/queries_checklist.tsv`, as the cluster's
   `cluster_checklist.tsv`).
+- *Addendum V:* the vector deviations DV1 to DV9 (addendum section 4): hnsw search refused, the
+  `exact` backend's `numpy` parameter without effect, IVF training on the pure-Python path only,
+  no derived-structure cache, a block in a `VectorSearch`'s `where` described as `block`, the hnsw
+  estimate's `log2`, Python's raw errors refused as `PBValidationError`, error texts that name
+  Python rewritten, and the measured performance.
 
 ---
 
@@ -620,7 +642,11 @@ Every `proto_db` test of the in-scope parts is ported or justified in
 `test_index_rank.py` (5); `tests/concurrency/test_index_weights_concurrency.py` (1),
 `test_indexed_roots.py` (2), `test_pager_stability.py` (1); and, as excluded or deferred rows,
 `test_vector_index.py` (30), `test_query_cache.py` (19) and
-`tests/property/test_query_cache_soundness.py` (3): 301 rows. The counts are of `def test_`
+`tests/property/test_query_cache_soundness.py` (3): 301 rows. *Addendum V (5.4): the 30
+`test_vector_index.py` rows are no longer excluded; each is deferred to the vectors task that ports
+it, or n/a with its reason (Python import mechanics; hnsw search, DV1; the derived cache, DV4); and
+the vector tests of `test_plans.py` (2), `test_format_neutral.py` (2) and `test_structure_depth.py`
+(1) join the checklist: 306 rows.* The counts are of `def test_`
 lines; parametrised cases are more. (The first version of this list omitted the key-spec, term,
 expression, property and concurrency files; corrected while writing the plan.)
 
@@ -669,6 +695,20 @@ from the model, or whose figures differ between implementations, or whose plan c
 | P2 | Model against timings | for a range term swept from very selective to unselective, and for `!=` on indexes with few and with nearly n key groups: the point where the cost model switches between the index plan and scan plus filter, and whether the measured times of the two plans (both forced) cross at that point. The model's crossover in collection size alone is one or two elements, so size is not the variable swept. |
 | P3 | Intersect | the two-index intersection built by hand against the planner's filter plan |
 
+*Addendum V (5.5)* adds workloads VB0 to VB5 to the same runner, under the same rules (one process
+per unit, the heap limit, peak RSS, a `WORK` line with a checksum, nothing asserted about time),
+on a seeded clustered data set written once by `bench/py_vector_data.py`, with `proto_db` in two
+modes (reference: numpy blocked; default: with numpy):
+
+| Id | Workload | Task |
+|---|---|---|
+| VB0 | The kernel: fsum against a naive sum, the score per metric (dim 8, 32, 128; 10^4 vectors), the input to ruling VQ2 | V1 |
+| VB1 | Exact kNN latency and the first query (10^3, 10^4; dim 8, 32; k 10; cosine, l2) | V6 |
+| VB2 | IVF: bulk build, query by `nprobe` (1, 4, nlist), recall at k against exact (10^4, dim 32, nlist = sqrt(n)) | V6 |
+| VB3 | Commits per second appending with no index, an exact and an IVF index crossing retrain thresholds (600 and 5000) | V5 |
+| VB4 | Filtered kNN at 1 %, 10 %, 50 % selectivity against the post-filter (10^4) | V7 |
+| VB5 | A blind write merged onto a vector-indexed current, standalone and in a three-member cluster (600) | V5 |
+
 **The comparison.** Every Q, M and P workload runs on both sides with the same seed, the same data
 and the same queries (the 0.1 list syntax, so the predicate is literally the same), and the runner
 checks equal checksums and equal plans before printing the ratio. Figures are recorded in a new
@@ -688,7 +728,8 @@ the load, both commits and both binaries, and are indicative only, as every figu
   what it chose.
 - `docs/deviations.md`: the indexed-collections entry is rewritten (vector and unknown kinds
   only); new entries for `BlockFilter`, the absent `select:`, the deferred items, and R2 if it
-  stays.
+  stays. *Addendum V: unknown kinds only (V5); entries DV1 to DV9, each by the task that makes it
+  true, and a "Vectors" performance subsection (V8).*
 - `docs/not-done.md`: index maintenance and index queries leave the slide; the deferred items of
   3.2 enter it.
 
@@ -706,9 +747,11 @@ that must be empty at release; extending the check is part of task T0.
 | 18 | **Queries and the planner** | The builder and the cascade trap; `explain` read node by node; why the planner sometimes scans (where the model switches, and whether the measured times agree); why `not (x = 5)` is not `x ~= 5`; why no intersection; block predicates and why they never use an index. | `examples/tutorial/18_queries_and_plans.st` |
 | 19 | **Ordered reads and pages** | Skip-k against rank access, measured; one snapshot means stable pages under concurrent commits. | `examples/tutorial/19_ordered_reads_and_pages.st` |
 | 11 (update) | One directory, two languages | An index added by Python, changed and merged by protoST, validated by Python. | `11_python_interop.sh` (extended) |
+| 20 (Addendum V) | **Vector search** | Documents with embeddings; nearest neighbours, the obvious way and the index; `near` with conditions (why the k nearest then filtered fails); thresholds; why correctly rounded sums; why `x ** 2` is not `x * x`; IVF-Flat recall; limits and choices (addendum 6.1). Drafted in V0, runnable in V9. | `examples/tutorial/20_vector_search.st` |
 
 Chapter 4's "Queries" section and "`proto_db`'s indexes" section become a short pointer to 17; chapter
-12 loses the indexed-write refusal except for vector and unknown kinds; `gemstone.md` (which
+12 loses the indexed-write refusal except for vector and unknown kinds (*Addendum V: unknown kinds
+only, from V5*); `gemstone.md` (which
 maps GemStone's indexes) and `soil.md` are re-checked. All are linked from `README.md` (the
 "Tutorials" table gains a "Queries, chapters 17-19" row) and from `docs/tutorial/README.md`.
 
@@ -726,7 +769,7 @@ Numbered IC1 to IC10 (indexed-queries calls); each can be overruled in `docs/dec
 | # | Call | Why | Cost if wrong |
 |---|---|---|---|
 | IC1 | Port `proto_db`'s structure (mutator-time maintenance, the same trees, the same cost model) rather than design a protoST-native index. | The format is shared; any other structure would be refused by `proto_db` or diverge. | None foreseen. |
-| IC2 | Vector and unknown index kinds keep their collection read only. | Vectors are excluded; maintaining only some indexes writes stale ones. | A collection with a vector index stays unchangeable from protoST. |
+| IC2 | Vector and unknown index kinds keep their collection read only. | Vectors are excluded; maintaining only some indexes writes stale ones. | A collection with a vector index stays unchangeable from protoST. *Addendum V: unknown kinds only (V5).* |
 | IC3 | Operators are `proto_db`'s strings inside `PBTerm`; the builder gives Smalltalk selectors on top. | One list syntax and one `explain` for both languages and for the vectors. | None. |
 | IC4 | No `=` override on `PBField`; `eq:` / `ne:` instead. | `=` must stay an equality for collections and tests. | A little less like Python's `F.city == "Oslo"`. |
 | IC5 | `PBQuery` immutable, like every value of the library. | `proto_db`'s `Queryable` is; the house rule is the same. | The cascade trap (taught first). |
@@ -746,7 +789,7 @@ The spec was approved on 2026-11-18 with these answers to the open questions it 
 | IQ2 | The shape of the query API. | **The proposal as written:** `eq:` / `ne:` with the binary comparisons, `&` / `|` / `not`, `project:` / `collect:` for projection, no `select:` on `PBQuery`, no selection blocks in the first release. | 5.5 as written. |
 | IQ3 | Scope cut: pager tokens, the query cache, `GroupBy` / `Join` / `Unnest`, computed values, `ValuesScan`. | **Deferred, as proposed.** | 3.2 as written; `not-done.md` lists them. |
 | IQ4 | A `log2` primitive in protoST for exact plan parity. | **No protoST change; a documented deviation.** The query vectors compare plans and report near-tie differences; results must always match. | R2 is a `deviations.md` entry; the query-vector runner reports a plan difference on a near-tie (costs within a relative 1e-12 of each other) as an expected difference and fails on any other plan difference and on every result difference. |
-| IQ5 | Vector and unknown index kinds keep their collection read only. | **Approved.** | IC2 as written. |
+| IQ5 | Vector and unknown index kinds keep their collection read only. | **Approved.** | IC2 as written. *Narrowed for vectors by IQ5a (below), effective in V5.* |
 | IQ6 | Propose query and index-shape vectors to `proto_db`. | **Stays a proposal; nothing is sent upstream.** | Recorded under "Proposals to `proto_db`" in `decisions.md`. |
 | IQ7 | Propose a portable plan digest to `proto_db`. | **Stays a proposal; nothing is sent upstream.** | The same. Pager tokens stay deferred. |
 | IQ8 | Release vehicle. | **0.3.0, after 0.2.0**, as proposed (IC10). | `CHANGELOG.md` gets a 0.3.0 section. |
@@ -758,6 +801,17 @@ maintainer chose per-commit failure in the cluster as well: an extractor's excep
 own commit standalone, in a group commit and in a cluster round, as rc4's standalone round does
 (`transactions.py:1149-1157`). In the cluster this is a documented deviation (`deviations.md`,
 cluster mode) and an unsent proposal (`decisions.md`, "Proposals to `proto_db`").
+
+**Addendum V rulings (2026-11-19)**, from [Addendum V](2026-11-19-vectors-addendum.md), section 8 (recorded in `docs/decisions.md`,
+section 5, by V0; IQ5a by V5):
+
+| # | Ruling |
+|---|---|
+| IQ5a | Supersedes IQ5 for vectors: unknown (opaque) index kinds keep their collection read only; vector indexes are maintained. Effective in V5, when every backend is maintained. |
+| VQ1 | hnsw search is refused: `PBNotSupportedError` at the first execution of a `VectorHnsw` plan, as `proto_db` refuses it without hnswlib; maintenance, `validate:`, `explain` and planning work (DV1). |
+| VQ2 | The fsum primitive (addendum 2.2.4) is specified now and built in protoST only if V8 shows the interpreted kernel dominates search time. |
+| VQ3 | Vectors ship in 0.4.0, after 0.3.0 is released; the phase first moves the stack to protoST 0.14.1 on protoCore 3.6.1 (V-pin). |
+| (execution) | No approval stops: the phase runs to the end; decisions taken on the way are recorded with their evidence in `docs/decisions.md`. |
 
 **Controller rulings 2026-11-18** (on gaps the documentation drafts found):
 
@@ -782,8 +836,8 @@ cluster mode) and an unsent proposal (`decisions.md`, "Proposals to `proto_db`")
 
 | # | Risk | Mitigation |
 |---|---|---|
-| R1 | **Speed.** protoBaseST's AVL operations are 12 to 31 times slower than `proto_db`'s (`deviations.md`, "AVL operations"). Each indexed write adds two levels of tree work per index (group tree and members tree). Indexed writes may be slow enough to dominate commits. | Measure first (M1, M3) and say so in chapter 17. No speed claim is made. |
-| R2 | **Planner ties.** `log2` computed as `ln x / ln 2` can differ from C's `log2` by one ulp, so two candidates of almost equal cost may rank differently in the two implementations: same answer, different plan. | Query vectors compare plans and report near-tie differences; results must always match (ruling IQ4: documented deviation, no protoST change). |
+| R1 | **Speed.** protoBaseST's AVL operations are 12 to 31 times slower than `proto_db`'s (`deviations.md`, "AVL operations"). Each indexed write adds two levels of tree work per index (group tree and members tree). Indexed writes may be slow enough to dominate commits. | Measure first (M1, M3) and say so in chapter 17. No speed claim is made. *Addendum V: vector maintenance adds a store tree per vector index and, at IVF retrain thresholds, a k-means inside the commit (VB3, VB5; risks RV1, RV3).* |
+| R2 | **Planner ties.** `log2` computed as `ln x / ln 2` can differ from C's `log2` by one ulp, so two candidates of almost equal cost may rank differently in the two implementations: same answer, different plan. | Query vectors compare plans and report near-tie differences; results must always match (ruling IQ4: documented deviation, no protoST change). *Addendum V: the hnsw estimate also uses `log2` (DV6).* |
 | R3 | **Application code in the commit build.** An extractor block runs during a merge in the publisher or the cluster round; a slow or failing block delays or fails that commit, and an impure one corrupts the index silently. | Ruling IQ1: exactly as in `proto_db`. The block's own exception passes through unchanged and fails that commit only; purity is a documented contract. |
 | R4 | **Shape drift in bulk builds.** A bulk build that balances differently from `_build_balanced` writes valid but different trees, breaking node-level conformance. | The shape-identity test (6.1.2) on every bulk path. |
 | R5 | **Plan digest is Python-specific.** Portable tokens cannot be ported as specified. | Deferred; IQ7 stays a proposal to `proto_db`, not sent. |
@@ -797,6 +851,11 @@ cluster mode) and an unsent proposal (`decisions.md`, "Proposals to `proto_db`")
 - **Nothing in protoCore.** Immutable maps and lists, atoms with compare-and-swap and actors are
   what the design needs, and they exist.
 - **Speed of the interpreter** (R1): not a gap to fix in this feature.
+- *Addendum V (2.2, 2.5):* for vectors protoST lacks nothing for correctness: IEEE `+ - * /`,
+  `sqrt`, `raisedTo:` (libm `pow`), `asFloat` and `String >> asNumber` suffice. The port depends on
+  CPython's MT19937 seeding and `random.sample`, ported in Smalltalk, and on the host's libm `pow`,
+  shared with CPython (risk RV7). The fsum primitive (VP) is conditional on ruling VQ2. protoCore
+  is unchanged.
 
 ### 10.3 Open questions
 
@@ -831,6 +890,26 @@ the audits once.
 | T8 | `PBQuery`, `PBField`, block predicates and the mixing rule. | Chapter 18 program out of `pending/`; bench Q1-Q4. |
 | T9 | `PBPager`. | Chapter 19; bench Q5. |
 | T10 | Final: the full suite, the large-seed property runs, the full `run_query.sh` comparison recorded in `deviations.md`, reference and guide completed against D1-D2, decisions and not-done updated (D7), README links. | All figures quoted in chapters 17-19 filled from the recorded run. |
+
+*Addendum V (section 7)* adds a phase after T10, on branch `feat/vectors`, planned in
+`docs/superpowers/plans/2026-11-20-vectors.md`. Unmeasured figures in its drafts are marked
+`[measured in V<n>: …]`.
+
+| Task | Content | Its docs and benchmarks |
+|---|---|---|
+| V-pin | The stack moves to protoST 0.14.1 on protoCore 3.6.1; the unsigned big-endian key primitive. | Requirements, decisions; headline benchmarks re-measured. |
+| V0 | Documentation drafts, rulings, pending selectors and markers, the checklist statuses; this spec and the queries plan folded. | Chapter 20, guide and reference drafts. |
+| V1 | The vector math kernel (`PBVectorMath`) and Python's sample (`PBPythonRandom`). | VB0. |
+| V2 | `PBNearQuery`, `near[]` terms, the list syntax, the refusals in scans and filters. | |
+| V3 | `PBVectorIndex` with the exact and hnsw backends: maintenance, build, validate, explain; index-level identity. | Reference "Vector indexes". |
+| V4 | IVF-Flat: lists, training, retraining; index-level identity without numpy. | DV3. |
+| V5 | Collections become writable (IQ5a); collection identity, stale rebuild, merges, both directions. | VB3, VB5. |
+| V6 | Vector search: supports, estimates, plans, `PBVectorSearch`, the contract. | VB1, VB2. |
+| V7 | The planner's `near[]` rules, `PBField near:`, the mixing rule, query vectors. | VB4; the guide's example runs. |
+| V8 | The full vector comparison; ruling VQ2 applied. | `deviations.md` "Vectors". |
+| VP | (only under VQ2) protoST `Float` fsum primitives. | |
+| V9 | Chapter 20 runnable, documentation complete, audits. | Every marker filled. |
+| V10 | Release 0.4.0. | CHANGELOG, README. |
 
 **Effort, honestly:** about 30 to 40 engineering days for T0-T10 (T1 3, T2 3, T3 5, T4 6, T5 2,
 T6 4, T7 4, T8 3, T9 2, T10 3, plus reviews), with docs and tutorials running alongside rather

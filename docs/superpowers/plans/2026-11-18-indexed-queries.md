@@ -6,7 +6,8 @@
 merged by blind writes exactly as `proto_db` does, plus `proto_db`'s term language, planner, plan
 operators and `explain`, an immutable Smalltalk query front end and in-process paging by rank,
 documented first and measured against `proto_db` on the same work. Vector indexes and vector
-search are excluded.
+search are excluded. *(Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`, puts
+them in scope for 0.4.0, in Phase 5 below.)*
 
 **Architecture:** a line-for-line port of `proto_db`'s structure (spec call IC1). An index is an
 immutable atom of the collection version: every mutator answers new content and new indexes in
@@ -27,7 +28,7 @@ implementation task makes its part runnable and measured.
 **Spec:** `docs/superpowers/specs/2026-11-18-indexed-queries-design.md` (read all of it, including
 section 9.2, the maintainer's rulings IQ1-IQ8 and the controller rulings CR1-CR10 of 2026-11-18, and section 4, the binding
 deliverables D1-D7). The normative behaviour is `proto_db` at `v2.0.0rc4`: `proto_db/indexing/*`,
-`proto_db/query/*` (less `cache.py` and the vector parts), `proto_db/collections/{avl,base,lists,
+`proto_db/query/*` (less `cache.py` and the vector parts, which Addendum V and Phase 5 port), `proto_db/collections/{avl,base,lists,
 dictionaries,hash_dictionaries,sets}.py`, `docs/source/indexing-framework.rst` and
 `docs/source/query-planner.rst`. Read every `proto_db` file with
 `git -C "$PROTOBASE_REPO" show v2.0.0rc4:<path>`; never modify that repository. **When a rule is
@@ -41,7 +42,9 @@ From the maintainer's briefs and the approved spec:
 - `proto_db` is the reference: semantics, plan choices, `explain` keys and node names follow it;
   every difference is a `docs/deviations.md` entry with its reason.
 - Refuse, never diverge: what the port cannot do exactly (a vector index, an unknown index kind,
-  an unregistered extractor, `near[]`) is an explicit error naming it.
+  an unregistered extractor, `near[]`) is an explicit error naming it. *(Addendum V, 3.1, for
+  Phase 5: an unknown index kind, an unregistered extractor, an hnsw search, and a value
+  `proto_db` itself fails on with a raw Python error, DV7.)*
 - On-disk format shared with `proto_db`, same bytes: format 4, no new record type; index trees
   node-identical to `proto_db`'s for the same operations.
 - Everything immutable; mutable state only through `Atom` (the extractor registry is one `Atom`
@@ -236,7 +239,11 @@ reviews, fixes and integrates.
 - Produces: one row per `proto_db` test function of the files of spec 7.1 (301 rows at
   `v2.0.0rc4`); statuses `ported <file> <check label>`, `deferred <task 1..10, or 4a/4b> <reason>`,
   `n/a <excluded: vector | deferred: cache | deferred: tokens | Python-only API> <reason>`. Every
-  later task turns its deferred rows into `ported` rows.
+  later task turns its deferred rows into `ported` rows. *(Addendum V, 5.4, applied by its task V0:
+  the `n/a excluded: vector` rows became `deferred V1` to `deferred V7`, or `n/a` with the reasons
+  `Python-only API`, `deviation: DV1` and `deviation: DV4`; the class `excluded: vector` is gone;
+  five vector tests of `test_plans.py`, `test_format_neutral.py` and `test_structure_depth.py` were
+  added: 306 rows.)*
 
 - [ ] **Step 1: extract the shared helper, then write the check.** Move the cluster checklist's
   parsing and row rules into `tests/lib/checklist_rows.sh`, make `cluster_checklist.sh` call it,
@@ -553,7 +560,7 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
     rebuild; a concurrent `addIndex:` of the same name in both is `PBConflictError` containing the
     name; different names both survive; `removeIndex:` against a concurrent write keeps the write
     and drops the index; a merge onto a current that holds a vector index is
-    `PBNotSupportedError`.
+    `PBNotSupportedError`. *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: a merge onto a vector-indexed current is maintained from V5; The task is done; this text records its history.)*
   - `idx_merge_extractor.st` (`"EXPECT: ok 4"`, ruling IQ1, Review Focus 1): extractor
     `'flaky'` raises for one marked element. (a) Standalone: the commit whose merge extracts it
     fails with the block's own exception (`ZeroDivide`), unchanged; the next commit succeeds. (b) `group commit: one extractor fails` (CR8): a
@@ -611,7 +618,7 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
   - `PBTerm class >> path: aStringOrNil op: anOperatorString value: aValue` and
     `path:op:` (the unary operators `'?N' '?!N' '?T' '?!T'`); operators exactly
     `'==' '!=' '<' '<=' '>' '>=' 'in' 'between[]' 'between()' 'between[)' 'between(]' '?N' '?!N'
-    'contains' '?T' '?!T'`; `'near[]'` signals `PBNotSupportedError` containing `'vector'`;
+    'contains' '?T' '?!T'`; `'near[]'` signals `PBNotSupportedError` containing `'vector'` *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: `near[]` is accepted from V2; The task is done; this text records its history.)*;
     validation and canonical operands as `terms.py:152-213` (`in` over a set sorted by order key).
   - `PBTerm >> path`, `op`, `value`, `keySpecObject` (the `PBKeySpec` of its path; every selector
     answering a `PBKeySpec` is named `keySpecObject`, ruling 2026-11-19; `PBTerm` has no
@@ -630,7 +637,7 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
   behaviours that apply; `matches:` on `QData values:` equals `proto_db`'s answers recorded in
   `terms.msgpack` for every operator; `degenerate terms as proto_db` (Review Focus 4);
   `compile:` of every recorded list gives a term whose `asList` is the same list and whose
-  `describe` is `proto_db`'s text; `near[]` refused; `& | not take expressions only` (CR5): a
+  `describe` is `proto_db`'s text; `near[]` refused *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: `near[]` is accepted from V2; The task is done; this text records its history.)*; `& | not take expressions only` (CR5): a
   block argument to `&` or `|` signals `PBValidationError`.
 - [ ] **Step 2:** write `py_term_cases.py`, vendor its output and regenerate the directory's
   `manifest.sha256`, run
@@ -735,7 +742,7 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
   `PBPlanner class >> normalize: anExpression`. A pure function of its arguments: indexes in
   sorted name order, conjuncts deduplicated in order, candidates ranked by
   `{cost. scans. sorted index names}`, `Union` only when every branch is index-only, ordered
-  index scan against `Sort`; argument errors as `planner.py:278-343`; no `near[]` rules.
+  index scan against `Sort`; argument errors as `planner.py:278-343`; no `near[]` rules. *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: the `near[]` rules are ported in V7; The task is done; this text records its history.)*
 
 - [ ] **Step 1: write the failing tests.**
   - `qry_planner.st` (`"EXPECT: ok 16"`): the 38 `test_planner.py` behaviours that apply
@@ -1005,6 +1012,39 @@ A failure found here is fixed in the owning module, fail-first.
   `docs/deviations.md` is rewritten as a present-tense fact of what is shipped or still not
   done; `grep -n "0.3.0" docs/not-done.md docs/deviations.md` shows no future-tense line.
 - [ ] **Step 6:** commit `Queries: final verification`; report to the maintainer. Do not merge, tag or push.
+
+---
+
+## Phase 5: vectors (Addendum V)
+
+The maintainer's decision of 2026-11-19 ("Vectors: implement them. Scope extension: spec addendum +
+plan tasks after Task 10, following proto_db rc4 VectorIndex/near[]/VectorSearch") adds a phase
+after Task 10, specified by `docs/superpowers/specs/2026-11-19-vectors-addendum.md` (Addendum V,
+revision 2, ruled; folded into the spec by its task V0) and executed by its own plan,
+`docs/superpowers/plans/2026-11-20-vectors.md`, on branch `feat/vectors` cut from `main` after the
+0.3.0 release. The task texts live there, once, as the addendum's section 7 renumbered for the
+execution tooling; this table only maps them. Every Global Constraint above applies, with the
+"Refuse, never diverge" list of Addendum V, 3.1; there are no approval stops (addendum, section 8).
+
+| Execution plan task | Addendum name | Content |
+|---|---|---|
+| 1 | V-pin | The stack moves to protoST 0.14.1 on protoCore 3.6.1. |
+| 2 | V0 | Documentation drafts, rulings, pending selectors and markers, the checklist statuses; the spec and this plan folded. |
+| 3 | V1 | The vector math kernel and Python's random sample; VB0. |
+| 4 | V2 | Near queries, `near[]` terms, the list syntax, the refusals in scans and filters. |
+| 5 | V3 | `PBVectorIndex` with the exact and hnsw backends, node-identical at the index level. |
+| 6 | V4 | IVF-Flat lists, training and retraining. |
+| 7 | V5 | Collections holding vector indexes become writable (IQ5a); merges; both directions; VB3, VB5. |
+| 8 | V6 | Vector search plans, `PBVectorSearch`, the contract; VB1, VB2. |
+| 9 | V7 | The planner's `near[]` rules, `PBField near:`, the mixing rule, query vectors; VB4. |
+| 10 | V8 | The full vector comparison; ruling VQ2 applied. |
+| 11 | VP | (only under VQ2) protoST `Float` fsum primitives. |
+| 12 | V9 | Chapter 20 runnable, documentation complete, audits. |
+| 13 | V10 | Release protoBaseST 0.4.0. |
+
+The checklist (`tests/unit/queries_checklist.sh`) accepts `deferred V<n>` rows by reading the
+`### Task <n> (<name>):` headings of that plan; the marker guard accepts `[measured in V<n>: …]` and
+`[measured in V-pin: …]`; the pending-selector list accepts the tasks V1 to V10.
 
 ---
 

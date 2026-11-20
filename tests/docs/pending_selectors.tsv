@@ -1,6 +1,7 @@
 # Selectors the documentation cites before they exist (plan call IP5), and the plan task whose
 # Interfaces block produces each. Read by tests/docs/reference_selectors.sh; each task removes its
-# own lines when it defines them; the list is empty at release (PENDING_FINAL=1, Task 10).
+# own lines when it defines them; the list is empty at release (PENDING_FINAL=1, Task 10 of the
+# queries plan; V9 of the vectors phase, whose lines name their task V1-V10).
 # Columns: selector<TAB>task
 # Task 2: key specs and the extractor registry
 # Task 3: key-group indexes
@@ -8,3 +9,44 @@
 # Task 5: terms and expressions
 # Task 7: the planner
 # Task 9: PBPager
+# Vectors phase (Addendum V, docs/superpowers/specs/2026-11-19-vectors-addendum.md), drafted by V0.
+# V1: the vector math kernel and Python's sample (internal: PBVectorMath, PBPythonRandom)
+floatOf:	V1
+canonicalVector:dim:	V1
+fsum:	V1
+sumNonNegative:	V1
+score:query:vector:	V1
+scoreFloor:threshold:	V1
+rank:query:metric:k:threshold:	V1
+normalized:	V1
+trainingOrderOf:	V1
+kmeans:nlist:iterations:seed:	V1
+sampleRange:count:seed:	V1
+bits:count:seed:	V1
+# V2: near queries and near[] terms
+vector:k:threshold:metric:	V2
+vector:k:	V2
+vector:threshold:	V2
+vector:k:threshold:	V2
+vector	V2
+k	V2
+threshold	V2
+# V3: PBVectorIndex, its constructors, readers and hooks
+name:keySpec:dim:metric:backend:params:	V3
+name:keySpec:dim:	V3
+name:keySpec:dim:metric:	V3
+name:path:dim:metric:	V3
+paramAt:	V3
+memberCount	V3
+invalidCount	V3
+# V6: vector search plans
+supportsFiltered:	V6
+filteredPlan:where:	V6
+nearOracle:keySpec:query:metric:predicate:	V6
+index:term:where:	V6
+# V7: the front end
+near:	V7
+near:k:	V7
+near:threshold:	V7
+near:k:threshold:	V7
+near:k:threshold:metric:	V7

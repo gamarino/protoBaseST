@@ -78,6 +78,18 @@ chapters 14 to 16 runs. What a cluster costs, measured on one machine, is in cha
 
 Chapter 11 also gains a section, "Indexes, from both sides" (`11_indexed_interop.sh`).
 
+### Vector search (0.4.0, draft)
+
+> **Draft.** Chapter 20 is written before the code, from
+> [Addendum V](../superpowers/specs/2026-11-19-vectors-addendum.md) to the indexed-queries spec. Its
+> program is in [examples/queries/pending/](../../examples/queries/pending/README.md) and has never
+> run; the vectors task V9 makes it run and moves it to `examples/tutorial/`. Figures marked
+> `[measured in V<n>: ...]` do not exist yet.
+
+| # | Chapter | Program |
+|---|---|---|
+| 20 | [Vector search](20-vector-search.md) (draft) | `20_vector_search.st` (pending) |
+
 ## Running the programs
 
 You need protoST 0.14.1 or newer and this repository's `src/` on the module path (README,
@@ -110,7 +122,7 @@ Both are explained in chapter 2, and both surprise Smalltalk programmers:
 - [reference.md](../reference.md): every public class and message, the indexed-query API
   included.
 - [queries.md](../queries.md): indexed queries and the query planner, the conceptual guide
-  (0.3.0).
+  (0.3.0), with a draft section on vector search (0.4.0).
 - [deviations.md](../deviations.md): every difference from `proto_db`, every refusal, and the
   performance figures.
 - [decisions.md](../decisions.md): the choices, with what each costs if it is wrong.

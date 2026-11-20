@@ -1,7 +1,8 @@
 # The query examples
 
 > **protoBaseST 0.3.0.** Every program of this directory runs as a test;
-> [pending/](pending/README.md) is empty.
+> [pending/](pending/README.md) holds the two vector-search programs of 0.4.0 (Addendum V), written
+> before their API and not run yet.
 
 Programs for indexed queries: the guide [docs/queries.md](../../docs/queries.md) quotes the ones
 in this directory, and the query chapters of the tutorial (17-19, and chapter 11's section

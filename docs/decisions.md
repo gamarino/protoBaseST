@@ -12,7 +12,8 @@ Three kinds, in this order, for the single-process prototype and then for cluste
    CC25, and the rulings taken while the cluster tasks ran.
 5. [Indexed queries](#5-indexed-queries) (0.3.0): the spec's calls IC1 to IC10, the maintainer's
    rulings IQ1 to IQ8, the controller rulings CR1 to CR10, the planner's calls IP1 to IP17, and the
-   rulings taken while the tasks ran; then [the proposals to `proto_db`](#proposals-to-proto_db).
+   rulings taken while the tasks ran; and, for vector search (0.4.0), the maintainer's rulings VQ1
+   to VQ3 and the execution rule; then [the proposals to `proto_db`](#proposals-to-proto_db).
 
 The first two kinds are quoted as decided; where a later ruling superseded one, it says so in the
 entry. The rule that governs them all is the maintainer's: **when in doubt, `proto_db` is the
@@ -262,7 +263,9 @@ Tasks 11 and 12, the atom weight, added by the maintainer's second decision of 2
 reference is `proto_db` `v2.0.0rc4`: its `indexing`, `query` and `collections` packages and its
 `indexing-framework.rst` and `query-planner.rst`. Vector indexes and vector search were excluded
 from this feature (spec 3.3); the maintainer has since asked for them as a separate scope
-extension, not part of 0.3.0.
+extension, not part of 0.3.0: [Addendum V](superpowers/specs/2026-11-19-vectors-addendum.md),
+executed by `docs/superpowers/plans/2026-11-20-vectors.md` and released as 0.4.0
+([below](#vector-search-the-maintainers-rulings-vq1-to-vq3-2026-11-19)).
 
 ### The spec's calls, IC1 to IC10
 
@@ -353,6 +356,30 @@ how.
 | 10 | A save builds each atom's state once (the walk keeps it for the record and the atom cache), the atom cache stubs each reference once, and the attribute name rule compares the reserved names one by one. | Measured before the final comparison: a save built a shaped atom's state three times and stubbed each reference twice; a literal `Array`'s `includes:` cost most of the name rule (4.6 µs, now 2.0 µs per call). | None: same answers and errors (`tests/unit/atom_weight_stage2.st`). |
 | 10 (soaks) | The soaks run as disjoint seed ranges in parallel processes (`PBST_PROP_SEED_FROM`, `QData seedRange:`), each with a two-hour timeout; Q1 at 10^5 stays out of the default sizes. | One process for 5000 property seeds would take about 13 hours, and idx_contract's 200 seeds about 2.3 hours; a range is the same seeds the single process runs. Q1 at 10^5 became feasible (one run, 6 minutes for all four processes), but five interleaved runs would add about half an hour to every Q1. | A range split could hide an interaction between seeds of one process: they share only the save directory (and, in the property test, its reader actors), so a range writes fewer collections per directory than one process would; a reader who needs 10^5 sets `QUERY_Q1_SIZES`. |
 | V-pin | **protoST 0.14.1 on protoCore 3.6.1 (with protoIO 0.7.0) is the floor of 0.4.0**, replacing protoST 0.12.0 on protoCore 3.6.0. | 0.14.0 adds the exact `Fraction` comparison and `ByteArray >> unsignedIntegerFrom:to:bigEndian:`, which the vector work needs (no `respondsTo:` fallback, so the floor is the release that has them); 0.14.1 is the same API plus the fix for S43 (a ThreadSanitizer capped-wait polling flake) and S44 (empty conversions), so the pin is the later patch, not 0.14.0. The default suite passed 276 of 276 on it before any code change. | A protoST regression is reported upstream with a minimal repro, never worked around. |
+
+### Vector search: the maintainer's rulings VQ1 to VQ3 (2026-11-19)
+
+The maintainer's decision of 2026-11-19 ("Vectors: implement them. Scope extension: spec addendum +
+plan tasks after Task 10, following proto_db rc4 VectorIndex/near[]/VectorSearch") opened the
+vectors phase. Its design is
+[Addendum V](superpowers/specs/2026-11-19-vectors-addendum.md) (revision 2, ruled), which extends
+the indexed-queries spec; its plan is `docs/superpowers/plans/2026-11-20-vectors.md` (the
+addendum's tasks V-pin and V0 to V10, and the conditional VP). The rulings below were settled on
+2026-11-19 (addendum, section 8) and recorded here by task V0. The V-pin row above (protoST 0.14.1
+on protoCore 3.6.1 as the floor of 0.4.0) belongs to the same phase.
+
+| # | Question | Ruling | Consequence | As executed |
+|---|---|---|---|---|
+| VQ1 | **hnsw search.** Refuse it, answer it with an exact search under the `VectorHnsw` node, or write an HNSW graph in Smalltalk? | **Refuse.** `PBNotSupportedError` at the first execution of a `VectorHnsw` plan, as `proto_db` refuses it without `hnswlib` (`tests/unit/test_vector_index.py:520-531`); maintenance, `validate:`, `explain` and planning work. | "Refuse, never diverge" holds, and hnsw-indexed collections are writable from protoST. An exact answer under an hnsw node would show `proto_db`'s hnsw estimate for a full scan; a Smalltalk graph would be new, unreproducible against hnswlib, and slow to build per process. Deviation DV1. | Pending: the refusal lands in V6 (search), the maintenance in V3 and V5. |
+| VQ2 | **A protoST primitive for fsum** (addendum 2.2.4). | **Specified now; built in protoST only if V8 shows the interpreted kernel dominates search time**: the kernel's share of an exact query, from benches VB0 and VB1, above one half for any unit of VB1. | Correctness never depends on it; the Smalltalk kernel stays as the oracle and the fallback (a feature probe, so the protoST floor stays 0.14.1). It cannot serve k-means, whose square is `** 2` (libm `pow`), not a product. | Pending: V8 records the computation, its figures and the outcome here. |
+| VQ3 | **Release vehicle.** | **0.4.0, after 0.3.0 (queries) is released.** | 0.3.0 ships after the queries' Task 10 with IQ5 as approved, on protoST 0.12.0. The vectors phase moves the stack to protoST 0.14.1 (V-pin) and ends with the 0.4.0 release (V10). | V-pin done (row above); the release is V10. |
+| (execution) | **Approval stops.** | **None.** The phase runs to the end: spec, implementation, tests, documentation, tutorial chapter 20, examples, merge, publication. | Decisions the tasks take (the VQ2 outcome, declined review findings) are recorded with their evidence in this file instead of waiting for approval. | In force from V-pin. |
+
+The phase's calls on scope, recorded in the addendum and not repeated here: everything of
+`proto_db`'s vector feature that needs no native library is ported (section 1); its deviations are
+DV1 to DV9 (section 4), entered in `deviations.md` by the task that makes each one true; ruling IQ5
+is narrowed for vectors by a ruling IQ5a, recorded here by task V5, when collections holding vector
+indexes become writable.
 
 ## Proposals to `proto_db`
 
