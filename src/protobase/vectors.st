@@ -253,6 +253,14 @@ PBVectorMath class >> _fsum: aSequence overflow: anOverflowBlock
   ^ self _primitive: [Float fsum: aSequence] overflow: anOverflowBlock
     otherwise: [self _smalltalkFsum: aSequence overflow: anOverflowBlock].
 
+"aSequence as the fsum primitives read it fastest: itself when it is an Array or an
+ OrderedCollection, or when the kernel does not use the primitives; a fresh Array of its items
+ otherwise (a PBTuple or a PBFrozenList, which the primitives would read through size and at:)."
+PBVectorMath class >> _primitiveOperand: aSequence
+  self usesFsumPrimitive ifFalse: [^ aSequence].
+  ((aSequence isKindOf: Array) or: [aSequence isKindOf: OrderedCollection]) ifTrue: [^ aSequence].
+  ^ aSequence asArray.
+
 "fsum of (a at: i) * (b at: i) for i from 1 to anInteger (Python's zip of the two): one IEEE
  product each, then fsum. The primitive fsumOfProducts:with: when both sequences hold exactly
  anInteger items, the products made here otherwise."
@@ -363,9 +371,14 @@ PBVectorMath class >> _smalltalkFsum: aSequence overflow: anOverflowBlock
    cosine: (fsum(a * b) / |q|) / |v|, each norm the sqrt of fsum of x * x; 0.0 when either is zero.
  Pairs as Python's zip (the shorter sequence ends it). ip and the cosine's sums are not guarded in
  proto_db: an exact sum that overflows is PBValidationError (Python's OverflowError, DV7). An
- unknown metric is PBValidationError with proto_db's text."
-PBVectorMath class >> score: aMetric query: q vector: v
-  | n nq nv |
+ unknown metric is PBValidationError with proto_db's text. With the fsum primitives, a PBTuple or
+ PBFrozenList operand is first copied to an Array (_primitiveOperand:), which the primitives read
+ directly: measured 1.2 to 5.3 times faster per score than their generic size/at: path, the copy
+ included (docs/deviations.md, Performance, Vectors)."
+PBVectorMath class >> score: aMetric query: aQuery vector: aVector
+  | q v n nq nv |
+  q := self _primitiveOperand: aQuery.
+  v := self _primitiveOperand: aVector.
   n := q size min: v size.
   aMetric = 'ip' ifTrue: [^ self _fsumOfProducts: q with: v size: n overflow: [self _overflow]].
   aMetric = 'l2' ifTrue: [^ (self _sumSquaredDifferences: q with: v size: n) sqrt negated].
