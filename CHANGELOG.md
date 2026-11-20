@@ -19,7 +19,7 @@
   equality by value. The process-wide registry (`registerExtractor:block:version:`,
   `unregisterExtractor:`, `extractorVersion:`, `isExtractorRegistered:`) is one `Atom` of a
   `PBFrozenDict`, changed by compare-and-swap; an extractor's own exception passes through
-  `extract:` unchanged (ruling IQ1).
+  `extract:` unwrapped (ruling IQ1).
 - **Member keys** (`PBMemberKeys`, `src/protobase/keygroups.st`, from `keyed.py`): `surrogate:`,
   `memberKeyOf:`, the equal-member bounds `lowestOf:` / `highestOf:`, `checkDepth:index:` (the
   depth refusal in `proto_db`'s words, naming the index) and `depthLimits`, conformance-tested

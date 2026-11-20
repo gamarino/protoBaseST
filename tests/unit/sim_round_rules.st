@@ -213,10 +213,11 @@ c that: 'a base re-commit whose read of its base outlives the permission is a re
   equals: { #acknowledged. 2. false. true. 0. #none. 0 }.
 
 "(27) { the two outcomes, sorted. attempts of the failed commit. its first error's class. the
- planted error itself. the other commit saw the error }, valid permission then expired"
-c that: 'an entry''s build error that is not a PBDBError fails it alone, never a conflict; the other entry of the round commits ({ outcomes. attempts. error class. the planted error. the other saw it })'
+ planted error itself. the other commit saw the error. the other's attempts. replicates under the
+ failed permission }, valid permission then expired"
+c that: 'an entry''s build error that is not a PBDBError fails it alone, never a conflict; the other entry of the round commits ({ outcomes. attempts. error class. the planted error. the other saw it. its attempts. replicates under the failed permission })'
   is: (PBSimSoak same: [:n | { RoundFamilies buildErrorAlone: RoundRules new seed: n error: (ZeroDivide new messageText: 'ZeroDivide'; yourself) late: false.
       RoundFamilies buildErrorAlone: RoundRules new seed: n error: (ZeroDivide new messageText: 'ZeroDivide'; yourself) late: true }] over: #(1 2 3 4 5))
-  equals: { { #('acknowledged' 'failed'). 1. ZeroDivide. true. false }. { #('acknowledged' 'failed'). 1. ZeroDivide. true. false } }.
+  equals: { { #('acknowledged' 'failed'). 1. ZeroDivide. true. false. 1. 1 }. { #('acknowledged' 'failed'). 1. ZeroDivide. true. false. 1. 0 } }.
 
 c report.
