@@ -1043,7 +1043,18 @@ Nothing new: a vector index is maintained in the mutators, so a merge of a blind
 the current version's vector indexes as it maintains its key-group indexes, and nothing on the
 cluster's wire changes. One cost is new: a mutator that crosses an IVF retrain threshold runs
 k-means inside that commit, standalone in the publisher, and in a cluster in the round's build under
-the cluster-wide write permission. Measured: [measured in V5: bench VB3, commits per second with no index, an exact index and an IVF index crossing retrain thresholds]; [measured in V5: bench VB5, a blind write merged onto a vector-indexed current, standalone and in a three-member cluster]. A
+the cluster-wide write permission. Measured (bench VB3, 200 appends committed one by one to a list of 600
+vectors of dim 8, protoST 0.15.0): 36.7, 16.6 and 3.3 commits per second with no index, an exact
+index and an IVF index retraining at every 3 % of growth (`proto_db` 157, 133 and 51), and about
+the same over 5000 vectors (32.2, 15.1 and 3.3); a retrain is k-means over every member, about 10 s
+in protoBaseST for 650 vectors against 0.2 s in `proto_db`. Bench VB5, 120 blind writes merged onto
+a vector-indexed dictionary of 600: 16.2 and 3.2 commits per second standalone with an exact and an
+IVF index (`proto_db` 129.7 and 48.7), 8.4 and 2.7 in a three-member cluster
+([deviations.md](deviations.md#vectors)). In a cluster the retrain runs under the write
+permission, which `proto_db`'s default 2000 ms lease lets a member believe for 667 ms: a retrain
+that takes longer never commits (every attempt outlasts its permission and is refused as a
+retryable conflict), so an IVF index whose k-means is that slow needs a longer lease
+(`leaseDuration`); VB5's IVF cluster unit runs with 90 s. A
 format-3 vector index (written before member tokens existed) is rebuilt at the first change of its
 collection, as `proto_db`'s `rebuilt_stale()` does: `empty build:` over the elements, a training
 included for IVF. An index of a kind protoBaseST does not know still keeps its collection read

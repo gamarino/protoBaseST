@@ -94,6 +94,13 @@
   mode; `tests/interop/setup_venv_numpy.sh` makes its venv), two rows of
   `tests/interop/concurrency.sh` and the format-3 rebuild in
   `tests/conformance/legacy_database.st`.
+- **Benchmarks VB3 and VB5** (`bench/run_query.sh VB3 VB5`, `bench/_vector_bench.st`): appends
+  committed to a vector-indexed list of 600 and 5000, and blind writes merged onto a
+  vector-indexed dictionary, standalone and in a three-member cluster, self-verified against
+  `proto_db`'s checksums (the IVF centroids included). On protoST 0.15.0 an IVF retrain dominates:
+  3.3 commits per second against 16.6 with an exact index and 36.7 with none; in a cluster a
+  retrain longer than the write permission (667 ms with the default lease) never commits, so VB5's
+  IVF cluster unit runs with a 90 s lease (`docs/deviations.md`, Performance, "Vectors").
 
 ## 0.3.0 (2026-11-20)
 

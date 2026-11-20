@@ -287,9 +287,16 @@ lesson check: 'its search is refused' signals: PBNotSupportedError containing: '
 - **Every write pays for the index.** A vector index is part of the collection version, so every
   commit that adds a document adds it to the index, and a commit that crosses a retrain threshold
   of an IVF index runs k-means inside that commit, in the merge of a blind write too:
-  [measured in V5: bench VB3, commits per second with no index, an exact index and an IVF index crossing retrain thresholds, 600 and 5000 elements]; in a cluster, that k-means runs in the round's build, under the
-  cluster-wide write permission:
-  [measured in V5: bench VB5, a blind write merged onto a vector-indexed current, standalone and in a three-member cluster].
+  appending to a list of 600 vectors commits 36.7 times per second with no index, 16.6 with an
+  exact index and 3.3 with an IVF index retraining at every 3 % of growth (5000 vectors: 32.2,
+  15.1 and 3.3; bench VB3, protoST 0.15.0, where `proto_db` commits 157, 133 and 51 times). In a
+  cluster, that k-means runs in the round's build, under the cluster-wide write permission: 120
+  blind writes onto a vector-indexed dictionary commit 8.4 times per second with an exact index
+  and 2.7 with an IVF index in a three-member cluster (16.2 and 3.2 standalone; bench VB5). A
+  retrain takes about 10 s for 650 vectors here, longer than the 667 ms a write permission lasts
+  under the default lease, so an IVF index retrained in a cluster needs a longer `leaseDuration`
+  (VB5 used 90 s): with the default one, such a commit never succeeds
+  ([deviations.md](../deviations.md#vectors)).
 - **A dedicated vector database** is the better tool when vector search is the whole workload: such
   systems offer more index kinds, quantisation and GPU execution (general knowledge, not measured
   here). The point of a vector index in protoBaseST is the one `proto_db` makes: the vectors live in

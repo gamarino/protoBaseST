@@ -2132,6 +2132,57 @@ What changed, and what did not:
   (`cd89a2e`, same day) measured `ip` at 160858, 348247 and 1054215 us.
 - The figures are one machine's, under a load average near 3; nothing is asserted about time.
 
+**VB3 and VB5, vector index maintenance** (vectors phase task V5). `RUNS=5 bench/run_query.sh VB3
+VB5`, measured 2026-11-20 17:11-18:06 UTC on the same machine, load average 2.58 before and 2.37
+after (the runner starts only below 3); protoBaseST `880127e` (clean tree), protoST 0.15.0
+(`worktrees/pinned-0150/protoST/build_release/protost`, the benchmark binary; the tests of the
+same commit pass on the floor, protoST 0.14.1 at `worktrees/pinned-361/protoST/build_release/protost`),
+`proto_db` `v2.0.0rc4` on CPython 3.14.6 and glibc 2.43 in its reference mode (numpy and hnswlib
+blocked; `tests/interop/.venv-numpy` exists, but `proto_db`'s numpy centroids cannot be verified
+against protoBaseST's, DV3, so that mode is not measured). Data: `proto_db`'s clustered set at dim
+8 (`bench/py_vector_data.py`); indexes on the element, l2: exact, or `ivf_flat` with nlist 16,
+train_iters 10, seed 51 and retrain_growth 1.03 (`bench/_vector_bench.st`). Every run of both
+implementations reported the same work, `verified`: rows, commits and a CRC-32 over the elements,
+the index counts and, for VB3, every IVF centroid; each run with an IVF index is refused unless the
+index retrained past its start. Commits per second are the commits divided by the minimum time over
+5 runs (the median is within 3 % of it everywhere):
+
+| unit | proto_db | protoBaseST | peak RSS MB py / st |
+|---|---|---|---|
+| VB3, 600 + 200 appends, no index | 157.3 | 36.7 | 26 / 1106 |
+| VB3, 600 + 200 appends, exact | 132.6 | 16.6 | 36 / 5102 |
+| VB3, 600 + 200 appends, IVF (nine retrains, at 618 to 787) | 51.1 | 3.3 | 45 / 5082 |
+| VB3, 5000 + 200 appends, no index | 151.9 | 32.2 | 34 / 2480 |
+| VB3, 5000 + 200 appends, exact | 126.4 | 15.1 | 64 / 5137 |
+| VB3, 5000 + 200 appends, IVF (one retrain, at 5150) | 56.9 | 3.3 | 83 / 5161 |
+| VB5, 120 blind writes merged onto 600, exact | 129.7 | 16.2 | 32 / 3929 |
+| VB5, the same, IVF (six retrains, at 618 to 719) | 48.7 | 3.2 | 39 / 5082 |
+| VB5, the same in a three-member cluster, exact | - | 8.4 | - / 2074 (largest member) |
+| VB5, the same in a three-member cluster, IVF (90 s lease) | - | 2.7 | - / 2090 (largest member) |
+
+- **A retrain is the cost.** Each VB3 commit reads the list and appends one vector; with an exact
+  index protoBaseST commits 2.2 times slower than with none, `proto_db` 1.2 times. An IVF retrain
+  is k-means over every member on the pure-Python path, which protoBaseST runs operation for
+  operation in Smalltalk (`raisedTo: 2` squares, fsum distances; the 0.15.0 primitives do not cover
+  it): one training took 10.6 s over 631 vectors and 15.2 s over 696 on protoST 0.14.1, against
+  194 and 207 ms in `proto_db` (measured once each, `build:` alone). That is why VB3's IVF rate is
+  the same at 600 (nine retrains, over 618 to 787 vectors) and at 5000 (one retrain over 5150 vectors).
+- **In a cluster a retrain needs a long lease.** The merge of a blind write, and its retrain, runs
+  in the round's build, under the write permission, which a member believes for a third of the
+  lease (the drift margin is two thirds): 667 ms with `proto_db`'s default 2000 ms. A retrain that
+  takes longer outlasts its permission at every attempt (a truthful retryable conflict, R121), so it
+  never commits. Measured with retrain_growth 1.05 and the default lease (protoST 0.14.1): no member
+  of the IVF cluster unit finished its 40 commits within 1700 s, while the exact unit finishes in
+  15 s. VB5's IVF cluster unit therefore runs with `leaseDuration` 90000 ms (a 30 s permission;
+  `bench/run_query.sh`, `QUERY_VB5_IVF_LEASE_MS`) and an acquire timeout of three leases (the new
+  members' startup grace grows to 150 s, untimed): it then commits with no retry in 5 of 5 runs.
+  The exact cluster unit, on the default lease, retried 33, 31, 28, 27 and 28 times per 120
+  commits. `proto_db`'s own k-means fits the default permission at this size; at a few thousand
+  members it would not either. Safety is not affected: a refused attempt writes nothing.
+- The peak resident set of a protoBaseST unit is mostly the heap budget it is allowed
+  (`QUERY_HEAP_LIMIT_CELLS`, about 5 GB), which protoCore keeps until it needs it; it is not a
+  measure of the working set.
+
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded
