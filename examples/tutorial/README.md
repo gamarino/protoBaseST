@@ -34,7 +34,7 @@ check; a lesson that stops on an unexpected error leaves that directory behind.
 | 01 | [01_first_commit.st](01_first_commit.st) | A space, a database, roots and a first commit; reading it back from a new space | [01](../../docs/tutorial/01-first-commit.md) |
 | 02 | [02_values_and_versions.st](02_values_and_versions.st) | Collections are values: every change answers a new version; zero-based lists | [02](../../docs/tutorial/02-values-and-versions.md) |
 | 03 | [03_records.st](03_records.st) | Record classes (`PBObject` subclasses), type names, reserved behaviour names, new versions of records | [03](../../docs/tutorial/03-records.md) |
-| 04 | [04_collections_and_queries.st](04_collections_and_queries.st) | Dictionaries, sets, counted sets, tuple keys; queries as walks and hand-kept indexes; `proto_db`'s indexes are read only | [04](../../docs/tutorial/04-collections-and-queries.md) |
+| 04 | [04_collections_and_queries.st](04_collections_and_queries.st) | Dictionaries, sets, counted sets, tuple keys; queries as walks and hand-kept indexes; `proto_db`'s indexes read (maintained and queried from chapter 17 on) | [04](../../docs/tutorial/04-collections-and-queries.md) |
 | 05 | [05_transactions_and_conflicts.st](05_transactions_and_conflicts.st) | Snapshots, read sets, `PBConflictError`, abort, `run:` retries | [05](../../docs/tutorial/05-transactions-and-conflicts.md) |
 | 06 | [06_blind_writes.st](06_blind_writes.st) | Blind writes merge; counted sets compose; `replace: true`; lists replace | [06](../../docs/tutorial/06-blind-writes.md) |
 | 07 | [07_mutables_and_history.st](07_mutables_and_history.st) | `PBMutableObject` cells, history, `snapshotAt:`, as-of reads | [07](../../docs/tutorial/07-mutables-and-history.md) |

@@ -119,4 +119,5 @@ and what replaces it; [chapter 18](18-queries-and-plans.md) queries the indexes.
 
 - Keys compare by the format's rule; tuples are composite keys.
 - Queries are walks or hand-kept lookup collections, updated in the same transaction.
-- `proto_db`'s indexes are read, not queried or maintained.
+- `proto_db`'s indexes are read here; chapters 17-19 maintain and query them (0.3.0), chapter 20
+  the vector indexes (0.4.0).

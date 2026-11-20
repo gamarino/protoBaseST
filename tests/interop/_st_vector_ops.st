@@ -21,14 +21,17 @@
  tests/interop/vector_both_directions.sh: write makes the database 'bd' (the records of bd_vec and
  the five collections with the exact, hnsw and ivf_flat indexes); change runs every mutator of
  each kind on its root, adds and removes an index, commits, then commits two blind writes of
- 'dict' and 'bag' (the second merged by its commit onto the vector-indexed current); verify
+ 'dict' and 'bag' (the second merged by its commit onto the vector-indexed current, where its
+ four new members cross each ivf index's retrain threshold: the merge retrains, which change
+ asserts and prints as py_vector_replay.py does); verify
  validates every root and prints one line per root: its count, its index names, and each index's
  members and invalid occurrences (vector search, which py_vector_replay.py verify also runs, is
  the vectors phase's V6)."
 Import from: 'protobase'.
 
 | args mode dir segment dump print kinds classes records ops defs apply mergeLog results currents space
-  tx old before blind changed vec record bdIndexes bdBuild bdChanges db extra a b tup |
+  tx old before blind changed vec record bdIndexes bdBuild bdChanges db extra a b tup after dictA
+  trainedSizes |
 args := Smalltalk arguments.
 (args size = 2 and: [#('replay' 'write' 'change' 'verify') includes: args first]) ifFalse: [
   'usage: protost _st_vector_ops.st replay|write|change|verify <directory>' displayNl.
@@ -194,6 +197,14 @@ vec := [:i |
                 ifFalse: [(i // 4) printString , '.' , (#('25' '5' '75') at: i \\ 4)]).
               0.5. -1.0 }]]]].
 record := [:i | PBObject withAll: { 'n' -> i. 'vec' -> (vec value: i) }].
+"py_vector_replay.py trained_sizes: the trained size of the ivf index of 'dict' and 'bag' in the
+ current version."
+trainedSizes := [:aDatabase | | t sizes |
+  t := aDatabase newTransaction.
+  sizes := Dictionary new.
+  #('dict' 'bag') do: [:kind | sizes at: kind put: ((t getRootObject: kind) getIndex: 'ivf') trainedSize].
+  t abort.
+  sizes].
 bdIndexes := [{
   PBVectorIndex name: 'exact' keySpec: (PBKeySpec path: 'vec') dim: 3 metric: 'cosine' backend: 'exact' params: nil.
   PBVectorIndex name: 'hnsw' keySpec: (PBKeySpec path: 'vec') dim: 3 metric: 'l2' backend: 'hnsw' params: nil.
@@ -257,14 +268,23 @@ mode = 'change' ifTrue: [
   extra := (0 to: 3) collect: [:i | record value: 100 + i].
   kinds do: [:kind | tx setRootObject: kind value: (bdChanges value: kind value: (tx getRootObject: kind) value: records value: extra)].
   tx commit.
+  before := trainedSizes value: db.
   a := db newTransaction.
   b := db newTransaction.
-  a setRootObject: 'dict' value: ((a newDictionary setAt: 200 value: (record value: 200)) setAt: 201 value: (record value: 201)).
-  a setRootObject: 'bag' value: ((a newCountedSet add: (record value: 202)) add: (records at: 11)).
+  dictA := a newDictionary.
+  200 to: 203 do: [:i | dictA := dictA setAt: i value: (record value: i)].
+  a setRootObject: 'dict' value: dictA.
+  a setRootObject: 'bag' value: (((((a newCountedSet add: (record value: 202)) add: (record value: 203))
+    add: (record value: 204)) add: (record value: 205)) add: (records at: 11)).
   b setRootObject: 'dict' value: ((b newDictionary setAt: 210 value: (record value: 210)) removeAt: 100).
   b setRootObject: 'bag' value: ((b newCountedSet add: (record value: 211)) remove: (records at: 12)).
   b commit.
   a commit.
+  after := trainedSizes value: db.
+  #('dict' 'bag') do: [:kind |
+    (after at: kind) = (before at: kind) ifTrue: [
+      Error signal: kind , ': the merge did not retrain the ivf index (trained size ' , (before at: kind) printString , ')'].
+    ('merged ' , kind , ': ivf trained size ' , (before at: kind) printString , ' -> ' , (after at: kind) printString) displayNl].
   space close.
   Smalltalk exit: 0].
 

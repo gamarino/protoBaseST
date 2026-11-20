@@ -293,9 +293,12 @@ lesson check: 'its search is refused' signals: PBNotSupportedError containing: '
   cluster, that k-means runs in the round's build, under the cluster-wide write permission: 120
   blind writes onto a vector-indexed dictionary commit 8.4 times per second with an exact index
   and 2.7 with an IVF index in a three-member cluster (16.2 and 3.2 standalone; bench VB5). A
-  retrain takes about 10 s for 650 vectors here, longer than the 667 ms a write permission lasts
-  under the default lease, so an IVF index retrained in a cluster needs a longer `leaseDuration`
-  (VB5 used 90 s): with the default one, such a commit never succeeds
+  retrain takes about 3 s for 650 vectors on protoST 0.15.0 (8 s on 0.14.1), longer than the
+  667 ms a write permission lasts under the default lease, so an IVF index retrained in a cluster
+  needs a longer `leaseDuration` (VB5 used 90 s): with the default one, such a commit never
+  succeeds. The longer lease has a cost: if the member holding the permission dies, nobody writes
+  until its lease and drift margin have passed. This will be measured again when the k-means
+  distance gets a protoST primitive (planned for protoST 0.16.0)
   ([deviations.md](../deviations.md#vectors)).
 - **A dedicated vector database** is the better tool when vector search is the whole workload: such
   systems offer more index kinds, quantisation and GPU execution (general knowledge, not measured

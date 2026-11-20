@@ -136,7 +136,7 @@ Not tested, or not proven:
 | Computed values, `startswith` / `endswith`, field-to-field comparison | Deferred (spec 3.2, ruling IQ3) | In `proto_db` they are not terms: they always become a `PythonFilter` (`linq.py:37-46`). | A block predicate through `where:` does the same job, as a `BlockFilter` that never uses an index. |
 | `RepeatedKeysDictionary` writes | Not a goal (unchanged) | A non-goal of the prototype; an indexed one is refused as before. | Its own task. |
 | Collection `rebuilt` (misfiled format-3 repair) | Deferred (spec 3.2) | A repair tool for damage format 3 left; `validate` reports it (`PBMisfiledError`). | Nothing repairs a misfiled collection. What would close it: a port with `validate`'s misfiled checks, if a real format-3 database needs it. |
-| Vector indexes and vector search | Excluded from 0.3.0 (spec 3.3) | `near[]`, `PBVectorIndex` writes and training, `VectorSearch` and the planner's kNN rules were out of this feature's scope; maintaining a collection's other indexes and not its vector one would write a stale index. | A collection with a vector index is read only from protoST. The maintainer has asked for vectors as a separate scope extension after 0.3.0. |
+| Vector indexes and vector search | Excluded from 0.3.0 (spec 3.3) | `near[]`, `PBVectorIndex` writes and training, `VectorSearch` and the planner's kNN rules were out of this feature's scope; maintaining a collection's other indexes and not its vector one would write a stale index. | In 0.3.0 a collection with a vector index was read only from protoST. The vectors phase (0.4.0) lifts it: such collections are written and merged since its task V5; vector search is its V6 and V7. |
 
 ## What would come next, if the workshop wants it
 

@@ -57,7 +57,10 @@ kind built through its mutators with the three indexes of BD_INDEXES (exact cosi
 ivf_flat l2 trained and retrained), committed. 'change' opens such a space (written by either
 implementation), runs every mutator of each kind on its root (bd_changes), adds and removes an
 index, commits, then makes two transactions blind-write 'dict' and 'bag' (new collections, the
-roots never read) and commits both: the second commit merges onto the vector-indexed current.
+roots never read) and commits both: the second commit merges onto the vector-indexed current, and
+its four new members take each ivf index from 28 to 32, past 1.5 times its trained size of 21, so
+that merge retrains it over the other writer's centroids; 'change' refuses a merge that did not
+and prints each root's trained sizes before and after.
 'verify' validates every root and, for the exact index and for the ivf_flat index probed in full
 (nprobe = nlist, the exact answer), runs near queries and compares them with near_oracle; it
 prints one summary line per root.
@@ -467,15 +470,33 @@ def change(directory):
         for kind in KINDS:
             tx.set_root_object(kind, bd_changes(kind, tx.get_root_object(kind), records, extra))
         tx.commit()
+        before = trained_sizes(db)
         a, b = db.new_transaction(), db.new_transaction()
-        a.set_root_object("dict", a.new_dictionary().set_at(200, bd_record(200)).set_at(201, bd_record(201)))
-        a.set_root_object("bag", a.new_counted_set().add(bd_record(202)).add(records[10]))
+        dict_a = a.new_dictionary()
+        for i in range(200, 204):
+            dict_a = dict_a.set_at(i, bd_record(i))
+        a.set_root_object("dict", dict_a)
+        a.set_root_object("bag", a.new_counted_set().add(bd_record(202)).add(bd_record(203))
+                          .add(bd_record(204)).add(bd_record(205)).add(records[10]))
         b.set_root_object("dict", b.new_dictionary().set_at(210, bd_record(210)).remove_at(100))
         b.set_root_object("bag", b.new_counted_set().add(bd_record(211)).remove(records[11]))
         b.commit()
         a.commit()
+        after = trained_sizes(db)
+        for kind in ("dict", "bag"):
+            if after[kind] == before[kind]:
+                raise SystemExit(f"{kind}: the merge did not retrain the ivf index (trained size {before[kind]})")
+            print(f"merged {kind}: ivf trained size {before[kind]} -> {after[kind]}")
     finally:
         space.close()
+
+
+def trained_sizes(db):
+    """The trained size of the ivf index of 'dict' and 'bag' in the current version."""
+    tx = db.new_transaction()
+    sizes = {kind: tx.get_root_object(kind).get_index("ivf").trained_size for kind in ("dict", "bag")}
+    tx.abort()
+    return sizes
 
 
 def ids(elements):

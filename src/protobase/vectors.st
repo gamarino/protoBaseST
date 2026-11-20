@@ -455,24 +455,31 @@ PBVectorMath class >> trainingOrderOf: aVector
  _sum_nonnegative of (a - b) ** 2 (libm pow: raisedTo: 2), ties to the lowest index; each new
  centroid is the component sums, added in data order with plain IEEE + from 0.0, divided by the
  count (a Float by an Integer below 2^53: one rounding); an empty cluster keeps its centroid.
- aVectors is a sequence of equal-length sequences of Floats; the answer an Array of nlist Arrays."
+ aVectors is a sequence of equal-length sequences of Floats; the answer an Array of nlist Arrays.
+ Each distance is _kmeansDistance:to:'s, computed inline into a reused buffer."
 PBVectorMath class >> kmeans: aVectors nlist: anNlist iterations: anIterations seed: aSeed
-  | vectors dim centroids sums counts |
-  vectors := aVectors asArray.
+  | vectors dim centroids sums counts squares |
+  "Each vector copied to an Array once (a PBTuple's at: is dearer), one squares buffer for every
+   distance, and the sums accumulated in place: the same operations in the same order as
+   _kmeansDistance:to: and a fresh sum per vector, so the centroids are the same bytes."
+  vectors := aVectors asArray collect: [:v | v asArray].
   centroids := ((PBPythonRandom sampleRange: vectors size count: anNlist seed: aSeed) sort: [:a :b | a <= b])
-    collect: [:i | (vectors at: i + 1) asArray].
+    collect: [:i | (vectors at: i + 1) copy].
   dim := (vectors at: 1) size.
+  squares := Array new: dim.
   anIterations timesRepeat: [
     sums := (1 to: anNlist) asArray collect: [:j | Array new: dim withAll: 0.0].
     counts := Array new: anNlist withAll: 0.
     vectors do: [:v | | best bestDistance sum |
       best := nil.
-      1 to: anNlist do: [:c | | d |
-        d := self _kmeansDistance: v to: (centroids at: c).
+      1 to: anNlist do: [:c | | d centroid |
+        centroid := centroids at: c.
+        1 to: dim do: [:i | squares at: i put: ((v at: i) - (centroid at: i) raisedTo: 2)].
+        d := self sumNonNegative: squares.
         (best isNil or: [d < bestDistance]) ifTrue: [best := c. bestDistance := d]].
       counts at: best put: (counts at: best) + 1.
       sum := sums at: best.
-      sums at: best put: ((1 to: (sum size min: v size)) asArray collect: [:i | (sum at: i) + (v at: i)])].
+      1 to: dim do: [:i | sum at: i put: (sum at: i) + (v at: i)]].
     centroids := (1 to: anNlist) asArray collect: [:j |
       (counts at: j) = 0
         ifTrue: [centroids at: j]

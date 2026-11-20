@@ -8,7 +8,10 @@
 #      the ivf one trained and retrained by numpy); protoBaseST changes every root with every
 #      mutator of its kind, adds an exact index and removes the hnsw one, commits, then commits
 #      two blind writes of 'dict' and 'bag' (the second merged by its commit onto the
-#      vector-indexed current: a retrain there replaces numpy's centroids by protoBaseST's);
+#      vector-indexed current, where its four new members take each ivf index from 28 to 32
+#      members, past 1.5 times its trained size of 21: the merge retrains over numpy's centroids,
+#      replacing them by protoBaseST's; change refuses a merge that did not retrain and prints the
+#      trained sizes, which must be the ones proto_db prints for the same change in direction 2);
 #      proto_db validates every root and answers near queries on the exact index and on the
 #      ivf_flat index probed in full, each equal to near_oracle (py_vector_replay.py verify), and
 #      protoBaseST validates every root too.
@@ -56,7 +59,12 @@ sed 's/ queries=[0-9]*//' "$OUT/py-first.py" | cmp -s - "$OUT/py-first.st" || {
 
 # 2. protoBaseST writes, proto_db changes and merges.
 st write "$OUT/st-first" > "$OUT/st-first.write" 2>&1 || { tail -n 5 "$OUT/st-first.write"; fail "protoBaseST could not write the space"; }
-pyn change "$OUT/st-first" 2> "$OUT/st-first.meta" || { cat "$OUT/st-first.meta"; fail "proto_db could not change protoBaseST's space"; }
+pyn change "$OUT/st-first" > "$OUT/st-first.change" 2> "$OUT/st-first.meta" || { cat "$OUT/st-first.meta"; fail "proto_db could not change protoBaseST's space"; }
+# Both merges retrained, in both directions, with the same trained sizes.
+cmp -s "$OUT/py-first.change" "$OUT/st-first.change" || {
+    diff "$OUT/py-first.change" "$OUT/st-first.change"; fail "the merges' retrains differ ($OUT)"; }
+[[ "$(grep -c '^merged \(dict\|bag\): ivf trained size [0-9]* -> [0-9]*$' "$OUT/st-first.change")" -eq 2 ]] || {
+    cat "$OUT/st-first.change"; fail "expected a retrain in the merge of 'dict' and of 'bag'"; }
 st verify "$OUT/st-first" > "$OUT/st-first.st" 2>&1 || { tail -n 5 "$OUT/st-first.st"; fail "protoBaseST refused the space proto_db changed"; }
 pyn verify "$OUT/st-first" > "$OUT/st-first.py" 2>> "$OUT/st-first.meta" || {
     tail -n 5 "$OUT/st-first.meta"; fail "proto_db refused its own changes"; }
@@ -65,4 +73,5 @@ sed 's/ queries=[0-9]*//' "$OUT/st-first.py" | cmp -s - "$OUT/st-first.st" || {
 [[ "$(wc -l < "$OUT/py-first.st")" -eq 5 && "$(wc -l < "$OUT/st-first.st")" -eq 5 ]] || fail "expected five roots in each space"
 queries=$(sed -n 's/.* queries=\([0-9]*\).*/\1/p' "$OUT/py-first.py" "$OUT/st-first.py" | paste -sd+ | bc)
 echo "NOTE: proto_db ran with $mode"
-echo "vector-indexed collections in both directions with proto_db's default mode: 2 spaces, 10 roots validated by both, $queries near queries answered by proto_db as near_oracle"
+echo "NOTE: merge retrains: $(paste -sd';' "$OUT/st-first.change")"
+echo "vector-indexed collections in both directions with proto_db's default mode: 2 spaces, 10 roots validated by both, 4 merge retrains, $queries near queries answered by proto_db as near_oracle"

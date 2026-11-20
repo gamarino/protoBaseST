@@ -69,4 +69,5 @@ done
 # concurrent addIndex: cases (indexed queries plan Task 4b) and the two vector-indexed roots
 # (vectors phase V5).
 [[ "$count" -eq 31 ]] || fail "expected the 13 rows of design spec 10.4, the swapped row 7, the 13 counted set cases, the 2 addIndex: cases and the 2 vector-indexed roots, ran $count"
+echo "NOTE: py_case.py ran with $(step "$PY" py_case.py mode)"
 echo "concurrency table: $count cases, ProtoBase's outcomes in both assignments"

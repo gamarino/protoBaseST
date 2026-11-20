@@ -2163,10 +2163,29 @@ index retrained past its start. Commits per second are the commits divided by th
 - **A retrain is the cost.** Each VB3 commit reads the list and appends one vector; with an exact
   index protoBaseST commits 2.2 times slower than with none, `proto_db` 1.2 times. An IVF retrain
   is k-means over every member on the pure-Python path, which protoBaseST runs operation for
-  operation in Smalltalk (`raisedTo: 2` squares, fsum distances; the 0.15.0 primitives do not cover
-  it): one training took 10.6 s over 631 vectors and 15.2 s over 696 on protoST 0.14.1, against
-  194 and 207 ms in `proto_db` (measured once each, `build:` alone). That is why VB3's IVF rate is
-  the same at 600 (nine retrains, over 618 to 787 vectors) and at 5000 (one retrain over 5150 vectors).
+  operation: each distance's sum is `sumNonNegative:`, which is the fsum primitive on protoST
+  0.15.0 and the Smalltalk msum on 0.14.1 (where it is about 78 % of a distance); the `pow` squares
+  (`raisedTo: 2`, a primitive call each) and the boxed Floats they allocate stay in Smalltalk on
+  both. That is why VB3's IVF rate is the same at 600 (nine retrains, over 618 to 787 vectors) and
+  at 5000 (one retrain over 5150 vectors). One training, `build:` of the VB data at dim 8, nlist 16,
+  10 iterations, each size in a fresh process (indicative: single runs, load about 1.6, after the
+  fix-round-1 k-means below):
+
+  | | 631 vectors | 696 vectors |
+  |---|---|---|
+  | protoBaseST, protoST 0.14.1 (the floor) | 7752 ms | 8421 ms |
+  | protoBaseST, protoST 0.15.0 (the bench binary) | 2799 ms | 3058 ms |
+  | `proto_db`, pure path, `build:` | 193 ms | 214 ms |
+  | `proto_db`, pure path, `_kmeans` alone (the reviewer's figures) | 153 ms | 173 ms |
+  | `proto_db`, numpy 2.3.5 (its default mode), `_kmeans` alone (the reviewer's figures) | 4.4 ms | 4.3 ms |
+
+  The VB3/VB5 figures above were measured before that fix (V5 fix round 1:
+  `kmeans:nlist:iterations:seed:` copies each vector to an Array once, reuses one squares buffer
+  and adds the sums in place, the same operations in the same order, so the centroids are the same
+  bytes); the review measured that k-means at 3835 ms (631) on 0.15.0 and 9547 ms on 0.14.1. A
+  first figure of this section, 10.6 s over 631 and 15.2 s over 696, was 0.14.1, both sizes in one
+  process: a retrain gets slower as the process ages (the review timed four in one 0.15.0 process at
+  2.3, 2.7, 3.5 and 3.4 s, whatever the size), which made 696 look much dearer than 631.
 - **In a cluster a retrain needs a long lease.** The merge of a blind write, and its retrain, runs
   in the round's build, under the write permission, which a member believes for a third of the
   lease (the drift margin is two thirds): 667 ms with `proto_db`'s default 2000 ms. A retrain that
@@ -2178,7 +2197,12 @@ index retrained past its start. Commits per second are the commits divided by th
   members' startup grace grows to 150 s, untimed): it then commits with no retry in 5 of 5 runs.
   The exact cluster unit, on the default lease, retried 33, 31, 28, 27 and 28 times per 120
   commits. `proto_db`'s own k-means fits the default permission at this size; at a few thousand
-  members it would not either. Safety is not affected: a refused attempt writes nothing.
+  members it would not either. Safety is not affected: a refused attempt writes nothing. A longer
+  lease has a price: when the holder of the write permission dies, no member can write until its
+  lease and drift margin have passed (with 90 s, two and a half minutes), and a starting member
+  grants nothing for the same span. The advice stands until the k-means distance gets a protoST
+  primitive (planned for protoST 0.16.0), when the retrain will be measured again against the
+  default 667 ms permission.
 - The peak resident set of a protoBaseST unit is mostly the heap budget it is allowed
   (`QUERY_HEAP_LIMIT_CELLS`, about 5 GB), which protoCore keeps until it needs it; it is not a
   measure of the working set.

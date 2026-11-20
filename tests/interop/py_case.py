@@ -23,12 +23,20 @@ expected  prints the outcome line and the dump the JSON records (ProtoBase's out
 
 Exit 0 when the mode ran, whatever the outcomes; any other failure exits non-zero.
 """
-import json
-import os
-import shutil
-import subprocess
 import sys
-from pathlib import Path
+
+# Addendum V 5.2: a generator that must reproduce IVF training blocks numpy (and hnswlib), so the
+# vector rows' centroids are proto_db's pure-Python ones whatever the venv holds; 'mode' prints the
+# mode line. Never on stderr in the other modes: concurrency.sh compares their whole output.
+sys.modules["numpy"] = None
+sys.modules["hnswlib"] = None
+
+import json  # noqa: E402
+import os  # noqa: E402
+import platform  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 from proto_db import CountedSet, DBObject, Dictionary, FileStorage, List, ObjectSpace, Set
 from proto_db.indexing import EqualityIndex, KeySpec
@@ -307,7 +315,17 @@ def expected(case, variant):
         print(line)
 
 
+def mode_line():
+    """The mode of this process (Addendum V 5.2): numpy blocked, CPython, libc."""
+    from proto_db.indexing.vector_backends import numpy_module
+    numpy_text = "blocked" if numpy_module() is None and sys.modules.get("numpy", 0) is None else "importable"
+    return f"numpy: {numpy_text}; CPython {platform.python_version()}; libc {' '.join(platform.libc_ver())}"
+
+
 def main(argv):
+    if argv == ["mode"]:
+        print(mode_line())
+        return 0
     mode, case_id, directory = argv
     {"setup": setup, "both": both, "a": as_a, "b": as_b, "dump": dump,
      "expected": expected}[mode](load_case(case_id), directory)

@@ -23,7 +23,7 @@
 # the text of 73 refusals: definitions, removals of what the index does not hold, and validate: of
 # tampered indexes, exact and ivf_flat (proto_db's texts, the values in them rendered as Python's
 # repr; a total or a component equal under Python's == accepted). Every line must be equal. No
-# collection is written: collections holding a vector index refuse changes until V5. The space and
+# collection is written here: the collection level is tests/interop/vector_ops_identical.sh's (V5). The space and
 # the dumps go to a new directory under $VECTOR_INDEX_OUT (default tests/interop/out/vector_index,
 # ignored by git); nothing is removed. Exit 77 without the interop venv.
 set -u

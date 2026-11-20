@@ -100,7 +100,8 @@
   `proto_db`'s checksums (the IVF centroids included). On protoST 0.15.0 an IVF retrain dominates:
   3.3 commits per second against 16.6 with an exact index and 36.7 with none; in a cluster a
   retrain longer than the write permission (667 ms with the default lease) never commits, so VB5's
-  IVF cluster unit runs with a 90 s lease (`docs/deviations.md`, Performance, "Vectors").
+  IVF cluster unit runs with a 90 s lease, which lengthens the write outage when a member dies
+  (`docs/deviations.md`, Performance, "Vectors").
 
 ## 0.3.0 (2026-11-20)
 
