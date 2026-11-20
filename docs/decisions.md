@@ -381,6 +381,10 @@ DV1 to DV9 (section 4), entered in `deviations.md` by the task that makes each o
 is narrowed for vectors by a ruling IQ5a, recorded here by task V5, when collections holding vector
 indexes become writable.
 
+| # | Question | Ruling | Consequence | As executed |
+|---|---|---|---|---|
+| IQ5a | **Collections holding a vector index** (addendum 3.1, recorded by task V5). Under IQ5 a collection holding a `PBVectorIndex` was read only, because protoBaseST did not maintain that index. Once the index is maintained (V3, V4), does the refusal stay? | **No: IQ5 is narrowed to the index kinds protoBaseST does not know.** A collection holding a `PBVectorIndex` is written and merged like one holding key-group indexes: every mutator runs the vector index's hooks, a merge replays the log through them (an IVF retrain included, in the commit's build), a format-3 vector index is rebuilt at the first change (`rebuilt_stale`), and `addIndex:` of a vector index builds it over the elements. An index that is not a `PBIndex` (an opaque atom: a custom `proto_db` kind) still keeps its collection read only, a merge onto it included (`PBNotSupportedError` naming it). | `PBIndexedCollection >> _checkWritable:` refuses only an index that is not a `PBIndex`. Refuse, never diverge, still holds: every tree a mutator or a merge writes is `proto_db`'s node for node (without numpy; with numpy the centroids are the writer's, DV3). A commit that crosses an IVF retrain threshold runs k-means inside it (benches VB3, VB5). | Done in V5: `tests/unit/vec_collections.st` (every mutator of the five kinds, format-3 rebuilds, standalone and group-commit merges), `tests/interop/vector_ops_identical.sh` (the collection trees and merges byte for byte), `tests/interop/vector_both_directions.sh` (with `proto_db`'s numpy mode), rows `vector-indexed-root*` of `tests/interop/concurrency.sh`; the opaque-index refusal stays pinned by `tests/unit/indexed_refusal.st`. |
+
 ## Proposals to `proto_db`
 
 Text for the maintainer to file in the protoBase repository. Done first:

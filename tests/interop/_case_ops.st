@@ -14,8 +14,9 @@
   CaseTable databaseOf: aCase       'db' for a case on the database vector, 'cc' otherwise
   CaseTable setup: aCase in: aDir   creates the case's space in protoST (the vector is copied)
   CaseTable dump: aCase in: aDb     the dump lines (an Array of Strings), read in a new
-                                    transaction: the roots, the cells, then the index names of
-                                    the roots listed in 'indexes'
+                                    transaction: the roots, the cells, the index names of
+                                    the roots listed in 'indexes', then a line per root listed
+                                    in 'vectors' (vectorLine:of:)
   CaseSide new start: steps in: aDb runs the steps that come before the transaction ('reuse
                                     committed'), starts it and runs the steps; answers self
   aSide commit                      commits, unless a step failed; answers the outcome:
@@ -62,8 +63,8 @@ CaseTable class >> usesVector: aCase
 CaseTable class >> databaseOf: aCase
   ^ (self usesVector: aCase) ifTrue: ['db'] ifFalse: ['cc'].
 
-"A setup value: {'dict': {k: v}}, {'list': [v]}, {'set': [e]} or {'counted set': [e]} build a
- collection; any other value is itself."
+"A setup value: {'dict': {k: v}}, {'list': [v]}, {'set': [e]}, {'counted set': [e]} or {'vector
+ dict': {k: v}} (a dictionary holding vectorIndexes) build a collection; any other value is itself."
 CaseTable class >> setupValue: aValue
   | kind content result |
   (aValue isKindOf: Dictionary) ifFalse: [^ aValue].
@@ -85,7 +86,20 @@ CaseTable class >> setupValue: aValue
     result := PBCountedSet new.
     content do: [:e | result := result add: e].
     ^ result].
+  kind = 'vector dict' ifTrue: [
+    result := PBDictionary new.
+    self vectorIndexes do: [:index | result := result addIndex: index].
+    content keysAndValuesDo: [:k :v | result := result setAt: k value: v].
+    ^ result].
   ^ Error signal: 'CaseTable: unknown setup value ' , aValue printString.
+
+"The indexes of a {'vector dict': ...} setup value (py_case.py vector_indexes), on the element (a
+ 2-vector): an exact cosine index, and an ivf_flat l2 index trained at 2 members and retrained at
+ 3, 5, ..."
+CaseTable class >> vectorIndexes
+  ^ { PBVectorIndex name: 'exact' keySpec: PBKeySpec element dim: 2 metric: 'cosine' backend: 'exact' params: nil.
+    PBVectorIndex name: 'ivf' keySpec: PBKeySpec element dim: 2 metric: 'l2' backend: 'ivf_flat'
+      params: (Dictionary new at: 'nlist' put: 2; at: 'retrain_growth' put: 1.5; at: 'seed' put: 1; yourself) }.
 
 CaseTable class >> setup: aCase in: aDirectory
   | dir space |
@@ -144,8 +158,24 @@ CaseTable class >> dump: aCase in: aDatabase
   (aCase at: 'indexes' ifAbsent: [#()]) do: [:name |
     lines addLast: 'indexes ' , name , ' = ' , ((t getRootObject: name) indexNames
       inject: '' into: [:acc :each | acc isEmpty ifTrue: [each] ifFalse: [acc , ',' , each]])].
+  (aCase at: 'vectors' ifAbsent: [#()]) do: [:name |
+    lines addLast: (self vectorLine: name of: (t getRootObject: name))].
   t abort.
   ^ lines asArray.
+
+"py_case.py vector_line: validate's outcome, the keys, and per index its members, its invalid
+ occurrences, its trained size and its centroids (Python's repr, PBCodec _pyRepr:)."
+CaseTable class >> vectorLine: aName of: aCollection
+  | valid out |
+  valid := [aCollection validate. 'ok'] on: PBDBError do: [:e | e return: e class name asString].
+  out := WriteStream on: String new.
+  out nextPutAll: 'vectors ' , aName , ' = validate ' , valid , '; keys '
+    , (self join: ((aCollection keys asArray asSortedCollection: [:x :y | x <= y]) asArray collect: [:k | self render: k])).
+  aCollection indexNames do: [:indexName | | index |
+    index := aCollection getIndex: indexName.
+    out nextPutAll: '; ' , indexName , ' members ' , index memberCount printString , ' invalid ' , index invalidCount printString
+      , ' trained ' , index trainedSize printString , ' centroids ' , (PBCodec _pyRepr: index centroids)].
+  ^ out contents.
 
 Object subclass: #CaseSide instanceVariableNames: 'transaction outcome'.
 

@@ -127,12 +127,13 @@ Every node of both trees carries a *weight*, the number of occurrences below it,
 is found by one descent. That is what gives windows and pages their O(log n + page size) cost
 ([below](#ordered-reads-windows-and-pages)).
 
-A `PBVectorIndex` and any index kind protoBaseST does not know are read and kept, and a collection
-holding one keeps refusing every change with `PBNotSupportedError` naming it, because maintaining
-its other indexes and not that one would write a stale index (spec 3.3, ruling IQ5). Since the
-vectors phase's V3 the vector index itself is maintained by its hooks, validated and explained
-(exact and hnsw backends; [Vector search](#vector-search)); its collections become writable in V5.
-That includes a custom index kind written by another `proto_db` program
+An index kind protoBaseST does not know is read and kept, and a collection holding one keeps
+refusing every change with `PBNotSupportedError` naming it, because maintaining its other indexes
+and not that one would write a stale index (spec 3.3, ruling IQ5 as narrowed by IQ5a). A
+`PBVectorIndex` is not such a kind: it is maintained by its hooks in every mutator, validated and
+explained, with all three backends, and its collections are written and merged like any other
+(vectors phase V5; [Vector search](#vector-search)). Unknown kinds include a custom index kind
+written by another `proto_db` program
 (`indexing-framework.rst`, "Writing a custom index"): protoBaseST reads it as an opaque atom, keeps
 it, and its collection refuses changes. `proto_db`'s index contract is ported as tests of the two
 built-in kinds (`tests/unit/idx_contract.st`, `tests/unit/idx_contract_plans.st`), not as an
@@ -1042,8 +1043,15 @@ Nothing new: a vector index is maintained in the mutators, so a merge of a blind
 the current version's vector indexes as it maintains its key-group indexes, and nothing on the
 cluster's wire changes. One cost is new: a mutator that crosses an IVF retrain threshold runs
 k-means inside that commit, standalone in the publisher, and in a cluster in the round's build under
-the cluster-wide write permission. Measured: [measured in V5: bench VB3, commits per second with no index, an exact index and an IVF index crossing retrain thresholds]; [measured in V5: bench VB5, a blind write merged onto a vector-indexed current, standalone and in a three-member cluster]. An index of a kind protoBaseST does not know still keeps
-its collection read only; once the vectors land, that is the only kind that does.
+the cluster-wide write permission. Measured: [measured in V5: bench VB3, commits per second with no index, an exact index and an IVF index crossing retrain thresholds]; [measured in V5: bench VB5, a blind write merged onto a vector-indexed current, standalone and in a three-member cluster]. A
+format-3 vector index (written before member tokens existed) is rebuilt at the first change of its
+collection, as `proto_db`'s `rebuilt_stale()` does: `empty build:` over the elements, a training
+included for IVF. An index of a kind protoBaseST does not know still keeps its collection read
+only: since V5 that is the only kind that does (ruling IQ5a). The identity of every mutator and
+merge with `proto_db`'s trees is tested at the collection level
+(`tests/interop/vector_ops_identical.sh`), and `tests/interop/vector_both_directions.sh` hands
+vector-indexed collections back and forth with `proto_db` in its default mode (numpy), both sides
+validating what the other wrote (DV3).
 
 ## What it costs
 

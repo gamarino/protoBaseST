@@ -12,7 +12,8 @@
  at every leaf width; a field index over plain maps stores them through their surrogates; addIndex:
  over data it cannot store refuses at the call, the same way; and a refusal leaves the transaction
  usable. The limits are computed from PBMemberKeys' wrapping constants, never written as numbers
- alone. The vector halves of these files are deferred to the vectors phase (queries_checklist.tsv)."
+ alone. The vector halves of these files are tests/unit/vec_index.st's and
+ tests/unit/vec_collections.st's (vectors phases V3 and V5; queries_checklist.tsv)."
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -201,9 +202,9 @@ c that: 'a field index over plain maps stores the maps through their surrogates'
     (text includesSubstring: 'Index ''k'' (RangeIndex on k)') and: [text includesSubstring: 'member key would nest'] }
   equals: { PBCodec maxValueDepth. 1. true }.
 
-"test_an_index_added_over_existing_data_refuses_the_same_way, its equality index half (the vector
- index half is deferred to the vectors phase): addIndex: refuses at the call, and the transaction
- goes on."
+"test_an_index_added_over_existing_data_refuses_the_same_way, its equality index half (the whole
+ test, the vector index included, is tests/unit/vec_collections.st's check 2): addIndex: refuses
+ at the call, and the transaction goes on."
 deep := nest value: lists + 1 value: 1 value: #list.
 db := space newDatabase: 'added'.
 tx := db newTransaction.

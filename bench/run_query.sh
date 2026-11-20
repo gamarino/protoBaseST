@@ -3,7 +3,7 @@
 # the interop venv) on the same workloads, verifies the work and prints the timings (spec 7.3).
 #
 # Usage: bench/run_query.sh [ids...]          (default: M1 M2 M3; the planner workloads P1 P2 P3, the query workloads Q1-Q5
-#                                              and the vector workload VB0 by name)
+#                                              and the vector workloads VB0, VB3 and VB5 by name)
 #
 # A workload is split into units, <id>:<size>:<plan> (M1: 600:idx0, 600:idx1, 600:idx3; M2: <n>:build
 # and <n>:fold for each size of QUERY_M2_SIZES, default "100 1000 10000 100000"), and every unit runs
@@ -43,9 +43,29 @@
 # Their data, proto_db's clustered benchmark set, is written once per dim and run of this script by
 # bench/py_vector_data.py to a new MessagePack file under QUERY_OUT/data, which both sides read
 # (QUERY_VECTOR_DATA). proto_db runs in its reference mode (numpy and hnswlib blocked: every score is
-# its pure-Python function); the default mode, proto_db with numpy, needs tests/interop/.venv-numpy,
-# which does not exist yet, and the skip is printed. VB0's checksums are CRC-32s of the results'
-# bytes, so 'verified' means every sum, score and product equals proto_db's to the bit.
+# its pure-Python function, every IVF training its pure-Python k-means), the only mode whose work
+# protoBaseST reproduces to the bit (deviation DV3: with numpy, proto_db's centroids are numpy's), so
+# the only one these units can verify; the runner says whether tests/interop/.venv-numpy exists and
+# that its mode is not measured here. VB0's checksums are CRC-32s of the results' bytes, so
+# 'verified' means every sum, score and product equals proto_db's to the bit.
+#
+# VB3 and VB5, vector index maintenance (vectors phase task V5, Addendum V 5.5;
+# bench/vector_workload.st states them, bench/_vector_bench.st their data and checksum): VB3:<n>:d8-
+# <plan> for n of QUERY_VB3_SIZES (default "600 5000") and plan none, exact, ivf, each committing
+# QUERY_VB3_COMMITS (default 200) appends; VB5:600:d8-exact and VB5:600:d8-ivf, QUERY_VB5_COMMITS
+# (default 120) blind writes merged onto the vector-indexed current, and VB5:600:d8-exact-c3 and
+# VB5:600:d8-ivf-c3, the same 120 in a three-member cluster (profiles vb5-exact and vb5-ivf of
+# bench/cluster_workload.st, run as M3's cluster units below). Their data file holds n + the
+# commits vectors of dim 8. VB3's checksum covers the elements, the counts and every IVF centroid;
+# VB5's the content and the counts, not the centroids, which in a cluster depend on the commit
+# order. Both refuse a run whose IVF index never retrained. VB5:600:d8-ivf-c3 runs with a lease of
+# QUERY_VB5_IVF_LEASE_MS (default 90000 ms, a write permission believed for 30 s; the members' startup
+# grace, untimed, grows with it to 150 s), not proto_db's
+# default 2000 ms: a retrain is k-means in the round's build, under the permission, and protoBaseST's
+# k-means over ~650 vectors of dim 8 takes over 10 s, beyond the 667 ms a default permission is
+# believed, so with the default lease a retraining merge cannot commit: its build outlasts the
+# permission at every attempt (measured with retrain_growth 1.05: with the default lease no member finished its 40 commits
+# in 1700 s, against 15 s for the exact unit; docs/deviations.md, "Vectors").
 #
 # M3's cluster units (plan Task 4b) run bench/run_cluster.sh once per round (RUNS=1, MODES=3, the
 # profile m3-<plan>, KEEP_TMP=1, CLUSTER_TMPDIR a new directory under QUERY_OUT/data, so nothing
@@ -89,6 +109,9 @@ for id in "${@:-M1 M2 M3}"; do
                     for p in page-rank page-mat page-skip count-index count-scan; do units+=("Q5:$n:$p"); done; done ;;
             VB0) for d in ${QUERY_VB0_DIMS:-8 32 128}; do
                     for p in products naive fsum ip l2 cosine; do units+=("VB0:${QUERY_VB0_SIZE:-10000}:d$d-$p"); done; done ;;
+            VB3) for n in ${QUERY_VB3_SIZES:-600 5000}; do
+                    for p in none exact ivf; do units+=("VB3:$n:d8-$p"); done; done ;;
+            VB5) units+=(VB5:600:d8-exact VB5:600:d8-ivf VB5:600:d8-exact-c3 VB5:600:d8-ivf-c3) ;;
             *) fail "unknown workload $one" ;;
         esac
     done
@@ -97,19 +120,27 @@ done
 # value <file> <key>: the value of key=value in a line of key=value pairs.
 value() { tr ' ' '\n' < "$1" | sed -n "s/^$2=//p"; }
 
-# cluster_unit <unit> <round>: one run of an M3 cluster unit, written as a protoBaseST run of it
-# ($dir/st.<round>, .work, .rss), its work checked against proto_db's standalone unit of the plan.
+# cluster_unit <unit> <round>: one run of an M3 or VB5 cluster unit, written as a protoBaseST run of
+# it ($dir/st.<round>, .work, .rss), its work checked against proto_db's standalone unit of the plan.
 cluster_unit() {
-    local unit="$1" r="$2" plan dir ref expected tmp run t0 t1 rss f out att com rows queries checksum
-    plan="${unit##*:}"; plan="${plan%-c3}"
+    local unit="$1" r="$2" id plan dir ref expected tmp run t0 t1 rss f out att com rows queries checksum profile
+    id="${unit%%:*}"; plan="${unit##*:}"; plan="${plan%-c3}"
     dir="$OUT/${unit//:/_}"; out="$dir/st.$r"
-    ref="$OUT/M3_600_$plan/py.1.work"
-    [[ -f "$ref" ]] || fail "$unit needs proto_db's standalone M3 $plan run first"
+    ref="$OUT/${id}_600_$plan/py.1.work"
+    [[ -f "$ref" ]] || fail "$unit needs proto_db's standalone $id $plan run first"
     expected="$(value "$ref" rows):$(value "$ref" queries):$(value "$ref" checksum)"
     tmp="$OUT/data/${unit//:/_}-$r-$$-$(date +%s%N)"
     mkdir -p "$tmp" || fail "cannot create $tmp"
-    (cd "$HERE" && CLUSTER_M3_EXPECTED="$expected" PROTOCORE_HEAP_LIMIT_CELLS="$CLUSTER_HEAP" KEEP_TMP=1 \
-        CLUSTER_TMPDIR="$tmp" RUNS=1 PROFILES="m3-$plan" MODES=3 CLUSTER_SCALE=1 PROTOST="$PROTOST" \
+    lease=()
+    case "$id" in
+        M3) profile="m3-$plan" ;;
+        VB5) profile="vb5-${plan#d8-}"; [[ "$plan" == *-ivf ]] && lease=(CLUSTER_LEASE_MS="$VB5_IVF_LEASE_MS") ;;
+        *) fail "no cluster profile for $unit" ;;
+    esac
+    (cd "$HERE" && env "${lease[@]}" CLUSTER_M3_EXPECTED="$expected" CLUSTER_VB5_EXPECTED="$expected" \
+        QUERY_VECTOR_DATA="$( [[ "$id" == VB5 ]] && vector_data "$unit")" \
+        PROTOCORE_HEAP_LIMIT_CELLS="$CLUSTER_HEAP" KEEP_TMP=1 \
+        CLUSTER_TMPDIR="$tmp" RUNS=1 PROFILES="$profile" MODES=3 CLUSTER_SCALE=1 PROTOST="$PROTOST" \
         bash run_cluster.sh) > "$out.cluster" 2>&1 || { tail -n 30 "$out.cluster"; fail "st $unit run $r: run_cluster.sh failed"; }
     run="$(ls -d "$tmp"/pbst-cluster.* 2>/dev/null | head -n 1)"
     [[ -n "$run" && -f "$run/out/verify.result" ]] || fail "st $unit run $r: no verify.result under $tmp"
@@ -124,21 +155,27 @@ cluster_unit() {
         ((k > rss)) && rss=$k
     done
     IFS=: read -r rows queries checksum <<< "$(value "$run/out/verify.result" checksum)"
-    { echo "WORK id=M3 impl=st size=600 rows=$rows queries=$queries plan=$plan checksum=$checksum"
-      echo "TIME id=M3 impl=st size=600 plan=$plan-c3 us=$((t1 - t0))"
-      echo "RETRIES id=M3 plan=$plan-c3 retries=$((att - com))"
+    { echo "WORK id=$id impl=st size=600 rows=$rows queries=$queries plan=$plan checksum=$checksum"
+      echo "TIME id=$id impl=st size=600 plan=$plan-c3 us=$((t1 - t0))"
+      echo "RETRIES id=$id plan=$plan-c3 retries=$((att - com))"
       echo "query_workload ok"; } > "$out"
     echo "$rss" > "$out.rss"
     grep '^WORK ' "$out" | sed 's/ impl=[a-z]*//' > "$out.work"
     cmp -s "$out.work" "$ref" || { diff "$ref" "$out.work"; fail "st $unit run $r: the work differs from proto_db's"; }
 }
 CLUSTER_HEAP="${QUERY_CLUSTER_HEAP_LIMIT_CELLS:-32000000}"
+VB5_IVF_LEASE_MS="${QUERY_VB5_IVF_LEASE_MS:-90000}"
 
-# vector_data <unit>: the data file of a VB unit (one per size and dim, written once per run of this script).
+# vector_data <unit>: the data file of a VB unit (one per count and dim, written once per run of this
+# script): n vectors for VB0, n + the commits for VB3 and VB5 (the vectors their commits add).
 VECTOR_DATA_DIR="$OUT/data/vectors-$$-$(date +%s%N)"
 vector_data() {
     local unit="$1" n plan dim file
     n="$(cut -d: -f2 <<< "$unit")"; plan="$(cut -d: -f3 <<< "$unit")"; dim="${plan%%-*}"; dim="${dim#d}"
+    case "$unit" in
+        VB3:*) n=$((n + ${QUERY_VB3_COMMITS:-200})) ;;
+        VB5:*) n=$((n + ${QUERY_VB5_COMMITS:-120})) ;;
+    esac
     file="$VECTOR_DATA_DIR/n$n-d$dim.msgpack"
     [[ -f "$file" ]] || "$PY" "$HERE/py_vector_data.py" "$n" "$dim" "$file" || fail "py_vector_data.py $n $dim failed"
     echo "$file"
@@ -157,10 +194,10 @@ for ((r = 1; r <= RUNS; r++)); do
             if [[ "$unit" == VB* ]]; then
                 vdata="$(vector_data "$unit")"
                 if [[ $impl == py ]]; then
-                    (cd "$HERE" && QUERY_VECTOR_DATA="$vdata" /usr/bin/time -f '%M' -o "$out.rss" \
+                    (cd "$HERE" && QUERY_VECTOR_DATA="$vdata" QUERY_DATA="$data" /usr/bin/time -f '%M' -o "$out.rss" \
                         "$PY" py_vector_workload.py "$unit") > "$out" 2>&1
                 else
-                    (cd "$HERE" && QUERY_VECTOR_DATA="$vdata" STPATH="$REPO/src" /usr/bin/time -f '%M' -o "$out.rss" \
+                    (cd "$HERE" && QUERY_VECTOR_DATA="$vdata" QUERY_DATA="$data" STPATH="$REPO/src" /usr/bin/time -f '%M' -o "$out.rss" \
                         "$PROTOST" vector_workload.st "$unit") > "$out" 2>&1
                 fi
             elif [[ $impl == py ]]; then
@@ -205,9 +242,14 @@ done
 echo "verified: $RUNS runs of each implementation report the same work (rows, queries, plan, checksum)"
 echo "RUNS=$RUNS interleaved, one process per unit; load average before: $load_before, after: $(cut -d' ' -f1-3 /proc/loadavg)"
 echo "protost: $PROTOST (PROTOCORE_HEAP_LIMIT_CELLS=$PROTOCORE_HEAP_LIMIT_CELLS; cluster members $CLUSTER_HEAP); Python: $("$PY" --version 2>&1)"
+[[ " ${units[*]}" == *"VB5:600:d8-ivf-c3"* ]] && echo "VB5 ivf cluster unit: lease $VB5_IVF_LEASE_MS ms (proto_db's default 2000 ms for every other cluster unit)"
 if [[ " ${units[*]}" == *" VB"* ]]; then
     echo "proto_db mode (vector units): reference, numpy: blocked, hnswlib: blocked; libc $("$PY" -c 'import platform; print(*platform.libc_ver())')"
-    [[ -x "$REPO/tests/interop/.venv-numpy/bin/python" ]] || echo "SKIP: proto_db's default mode (numpy): tests/interop/.venv-numpy is absent"
+    if [[ -x "$REPO/tests/interop/.venv-numpy/bin/python" ]]; then
+        echo "NOTE: proto_db's default mode (numpy) is not measured: its centroids are numpy's, so its work cannot be verified against protoBaseST's (DV3)"
+    else
+        echo "SKIP: proto_db's default mode (numpy): tests/interop/.venv-numpy is absent"
+    fi
 fi
 commit="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo '?')"
 [[ -z "$(git -C "$REPO" status --porcelain -- src bench 2>/dev/null)" ]] || commit="$commit (src or bench modified or untracked)"

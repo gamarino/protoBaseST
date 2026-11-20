@@ -40,7 +40,7 @@ Contents:
 | `DBObject`, `MutableObject` | `PBObject`, `PBMutableObject` |
 | `List`, `Dictionary`, `HashDictionary` | `PBList`, `PBDictionary`, `PBHashDictionary` |
 | `Set`, `CountedSet`, `RepeatedKeysDictionary` | `PBSet`, `PBCountedSet`, `PBRepeatedKeysDictionary` |
-| `EqualityIndex`, `RangeIndex`, `VectorIndex` | `PBEqualityIndex`, `PBRangeIndex`, `PBVectorIndex` (maintained since 0.4.0's V3; its collections are read only until V5) |
+| `EqualityIndex`, `RangeIndex`, `VectorIndex` | `PBEqualityIndex`, `PBRangeIndex`, `PBVectorIndex` (maintained since 0.4.0's V3; its collections written and merged since V5) |
 | `FrozenList`, `FrozenDict`, `MISSING`, a Python tuple | `PBFrozenList`, `PBFrozenDict`, `PBMissing`, `PBTuple` |
 | `OpaqueAtom` | `PBOpaqueAtom` |
 | `Proto...Error` | `PB...Error` |
@@ -237,9 +237,9 @@ kept byte for byte.
 All inherit from `PBIndexedCollection` (`proto_db`'s `IndexedCollection`). Every write answers a
 new version. Values, keys and elements pass through `PBCodec canonical:` at once; a key or
 element that is not orderable (a NaN, a list, a map) is `PBValidationError`. Every write
-maintains the collection's indexes in the same step ([Collections gain](#indexes)); a collection
-holding a vector index or an index of an unknown kind is read only (`PBNotSupportedError` naming
-it). An index on an unregistered extractor fails any change that evaluates the extractor
+maintains the collection's indexes in the same step ([Collections gain](#indexes)), vector indexes
+included; a collection holding an index of an unknown kind is read only (`PBNotSupportedError`
+naming it; ruling IQ5a). An index on an unregistered extractor fails any change that evaluates the extractor
 (`PBValidationError` naming it), as in `proto_db`.
 
 **Common** (`PBIndexedCollection`):
@@ -1159,7 +1159,8 @@ filed under its member key, the `PBTuple` `((0, element) | (1, surrogate), exact
 
 `PBVectorIndex` answers no term yet (`supports:` answers false until the vectors phase's V6). Its
 hooks, `validate:` and `explain` work as an index's ([Vector indexes](#vector-indexes), task V3),
-but every change to a collection holding one is still `PBNotSupportedError` naming it, until V5.
+and every mutator of a collection holding one runs them (task V5; a merge onto it too, a
+format-3 one rebuilt at the first change).
 An index of a kind protoBaseST does not know refuses every hook, through the `PBIndexSet` hooks.
 
 **Collections** gain (on `PBIndexedCollection`):
@@ -1332,10 +1333,11 @@ and what a page costs, are in [queries.md](queries.md#ordered-reads-windows-and-
 > **Draft: this section is implemented up to its task markers.** It is the API of
 > [Addendum V](superpowers/specs/2026-11-19-vectors-addendum.md) (sections 2.1 to 2.9), written
 > before the code; V1 (the kernel), V2 (near queries) and V3 (the vector index's definition,
-> hooks, `validate:` and `explain`, for the exact and hnsw backends) are done. `tests/docs/pending_selectors.tsv` names, for each selector below that does not
+> hooks, `validate:` and `explain`, for the exact and hnsw backends), V4 (ivf_flat) and V5
+> (collections holding vector indexes written and merged) are done. `tests/docs/pending_selectors.tsv` names, for each selector below that does not
 > exist yet, the vectors task that builds it (V1 to V7); each task moves its part of this section
-> from draft to fact. Until V5, a collection holding a `PBVectorIndex` refuses changes as
-> [Indexes](#indexes) says, and until V2 `'near[]'` is refused when built. The concepts are in
+> from draft to fact. A collection holding a `PBVectorIndex` is written and merged like any other
+> (V5, ruling IQ5a). The concepts are in
 > [queries.md, Vector search](queries.md#vector-search); the tutorial is
 > [chapter 20](tutorial/20-vector-search.md).
 

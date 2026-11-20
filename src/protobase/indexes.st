@@ -11,8 +11,10 @@ tests/interop/index_build_identical.sh). The vector index is a port of vector.py
 (vectors phase V3, Addendum V 2.3): its definition, hooks, validate: and explain,
 node-identical to proto_db's for the exact and hnsw backends
 (tests/interop/vector_index_identical.sh), and so are the ivf_flat lists,
-training and retraining (V4); its backends are in vectors.st, vector search lands
-in V6, and a collection holding a vector index stays read only until V5.
+training and retraining (V4); its backends are in vectors.st, and vector search
+lands in V6. Collections holding vector indexes are written and merged like any other
+(V5, ruling IQ5a): their mutators run these hooks, node-identical to proto_db's at the
+collection level too (tests/interop/vector_ops_identical.sh).
 
   PBIndex           proto_db.indexing.Index (abstract): name, key_spec
   PBKeyGroupIndex   proto_db.indexing.keyed.KeyGroupIndex (abstract): groups,

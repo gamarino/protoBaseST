@@ -188,7 +188,7 @@ SmallInteger milliseconds, not float seconds.
 | `DBObject`, `MutableObject` | `PBObject`, `PBMutableObject` |
 | `List`, `Dictionary`, `HashDictionary` | `PBList`, `PBDictionary`, `PBHashDictionary` |
 | `Set`, `CountedSet`, `RepeatedKeysDictionary` | `PBSet`, `PBCountedSet`, `PBRepeatedKeysDictionary` |
-| `EqualityIndex`, `RangeIndex`, `VectorIndex` | `PBEqualityIndex`, `PBRangeIndex`, `PBVectorIndex` (read only; maintained and searched in 0.4.0, hnsw search refused: draft) |
+| `EqualityIndex`, `RangeIndex`, `VectorIndex` | `PBEqualityIndex`, `PBRangeIndex`, `PBVectorIndex` (maintained, its collections written and merged; searched in 0.4.0, hnsw search refused: draft) |
 | `FrozenList`, `FrozenDict`, `MISSING`, a Python tuple | `PBFrozenList`, `PBFrozenDict`, `PBMissing`, `PBTuple` |
 | `OpaqueAtom` | `PBOpaqueAtom` |
 | `KeySpec`, `Term`, `And`, `Or`, `Not`, `PythonPredicate` | `PBKeySpec`, `PBTerm`, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate` |
@@ -244,7 +244,7 @@ because `proto_db` has none; the tutorial shows the three-line helper.
 
 If a value, type, version or operation cannot be stored or done exactly, protoBaseST signals an
 error naming it. It does not store something else in its place. A `Symbol` longer than six bytes,
-a protoST `Dictionary` (its order is unspecified), a `Fraction`, a write to a collection holding a vector index,
+a protoST `Dictionary` (its order is unspecified), a `Fraction`, a write to a collection holding an unknown index kind,
 a wall clock in an IANA zone: each is refused, and each refusal protects a specific property of
 the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cost of each.
 

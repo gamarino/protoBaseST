@@ -38,8 +38,8 @@
 # is a module parse error that the text does not name, so a broken import cannot pass.
 # A path argument that does not exist, or a run that finds no test, fails.
 # Files whose name starts with "_" are helpers. The tooling scripts tests/run_tests.sh,
-# tests/interop/env.sh, tests/interop/setup_venv.sh and tests/conformance/fetch_vectors.sh, tests/conformance/fetch_query_vectors.sh, tests/conformance/fetch_vector_math_vectors.sh, tests/lib/checklist_rows.sh (exact
-# paths) and the directories .venv, out and fixtures are never run as tests. So are the step
+# tests/interop/env.sh, tests/interop/setup_venv.sh, tests/interop/setup_venv_numpy.sh and tests/conformance/fetch_vectors.sh, tests/conformance/fetch_query_vectors.sh, tests/conformance/fetch_vector_math_vectors.sh, tests/lib/checklist_rows.sh (exact
+# paths) and the directories .venv, .venv-numpy, out and fixtures are never run as tests. So are the step
 # scripts of the ERP demo, examples/erp/{2_payments,3_tag,4_report}.st: they take the database
 # directory as an argument and run, in order, under examples/erp/run_demo.sh (which is the test).
 # The lessons of examples/tutorial are ordinary tests (each .st ends with '<lesson> ok (N checks)',
@@ -86,14 +86,14 @@ for p in "$@"; do
         skip_audit="$AUDIT"
         [[ "$p" == "$AUDIT" || "$p" == "$AUDIT"/* ]] && skip_audit=""
         while IFS= read -r f; do files+=("$f"); done < <(
-            find "$p" \( -name .venv -o -name out -o -name fixtures -o -path "${skip_audit:-/nonexistent}" \) -prune -o -type f \
+            find "$p" \( -name .venv -o -name .venv-numpy -o -name out -o -name fixtures -o -path "${skip_audit:-/nonexistent}" \) -prune -o -type f \
                 \( -name '*.st' -o -name '*.sh' \) ! -name '_*' \
                 -print | sort)
     else
         files+=("$p")
     fi
 done
-TOOLING=" tests/run_tests.sh tests/interop/env.sh tests/interop/setup_venv.sh tests/conformance/fetch_vectors.sh tests/conformance/fetch_query_vectors.sh tests/conformance/fetch_vector_math_vectors.sh tests/lib/checklist_rows.sh examples/erp/2_payments.st examples/erp/3_tag.st examples/erp/4_report.st "
+TOOLING=" tests/run_tests.sh tests/interop/env.sh tests/interop/setup_venv.sh tests/interop/setup_venv_numpy.sh tests/conformance/fetch_vectors.sh tests/conformance/fetch_query_vectors.sh tests/conformance/fetch_vector_math_vectors.sh tests/lib/checklist_rows.sh examples/erp/2_payments.st examples/erp/3_tag.st examples/erp/4_report.st "
 kept=()
 for f in "${files[@]}"; do
     [[ "$TOOLING" == *" ${f#"$REPO"/} "* ]] || kept+=("$f")

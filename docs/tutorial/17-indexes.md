@@ -199,9 +199,10 @@ an equal representative: `1`, `1.0` and `Decimal 1.00` are one key and three val
 | `PBEqualityIndex` | `eq:`, `in:`, `ne:`, `isNone`, `notNone` | |
 | `PBRangeIndex` | the same, and `<`, `<=`, `>`, `>=`, `between:and:` and its three half-open forms | yields its elements in key order, which ordered reads and pages use (chapter 19) |
 
-A `PBVectorIndex` written by `proto_db` stays read only: a collection holding one keeps refusing
-every change, naming it, because maintaining its other indexes and not that one would write a stale
-index (spec 3.3, ruling IQ5). An index of a kind protoBaseST does not know is refused the same way.
+A `PBVectorIndex` is maintained the same way since 0.4.0: every mutator and every merge runs its
+hooks, as `proto_db`'s do ([chapter 20](20-vector-search.md)). An index of a kind protoBaseST does
+not know is not: a collection holding one keeps refusing every change, naming it, because
+maintaining its other indexes and not that one would write a stale index (spec 3.3, ruling IQ5a).
 
 ## Keys: paths, MISSING and nil
 

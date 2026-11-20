@@ -53,9 +53,8 @@
   `PBVectorHnsw` (`src/protobase/vectors.st`). Every value a vector refusal quotes, `PBNearQuery`'s
   included, is rendered as Python's `repr` (`True`, `None`, `(1.0,)`, `[1, 2]`) by one helper,
   `PBCodec _pyRepr:`, moved from `PBTerm` (where `describe` uses it) to `src/protobase/codec.st`.
-  `PBMemberKeys checkDepth:memberKey:index:outer:` counts the store key's two containers. A
-  collection holding a vector index still refuses changes (V5), and no index answers `near[]` yet
-  (V6). Pinned by `tests/unit/vec_index.st`, `tests/interop/vector_index_identical.sh` (48 indexes
+  `PBMemberKeys checkDepth:memberKey:index:outer:` counts the store key's two containers. Its
+  collections were still read only until V5 (below), and no index answers `near[]` yet (V6). Pinned by `tests/unit/vec_index.st`, `tests/interop/vector_index_identical.sh` (48 indexes
   of dims 3, 1 and 16, `build:`, seeded hook sequences and the three invalid-tree histories, byte
   for byte, and 59 refusal texts), and the `vectors`, `hnsw` and `ivf` roots of
   `tests/conformance/database_contents.st`.
@@ -83,6 +82,18 @@
   `PBTuple` operands are copied to Arrays, which the primitives read directly (a net win, measured).
   VB0 on 0.15.0: a score 3.8 to 56.1 times faster than on 0.14.1, 2.5 to 18.3 times `proto_db`'s
   pure-Python one (`docs/deviations.md`, Performance, "Vectors").
+- **Collections holding vector indexes are written and merged** (task V5, ruling IQ5a): every
+  mutator of `PBList`, `PBDictionary`, `PBHashDictionary`, `PBSet` and `PBCountedSet` maintains
+  their vector indexes, `addIndex:` and `removeIndex:` of a vector index work, a format-3 vector
+  index is rebuilt at the first change as `proto_db`'s `rebuilt_stale` does, and a blind write
+  merges onto a vector-indexed current, standalone and in a group commit (an IVF retrain runs in the
+  commit's build). Only an index of a kind protoBaseST does not know keeps its collection read only.
+  Pinned by `tests/unit/vec_collections.st`, `tests/interop/vector_ops_identical.sh` (every
+  mutator, slice and merge node for node with `proto_db` without numpy),
+  `tests/interop/vector_both_directions.sh` (spaces handed both ways with `proto_db` in its numpy
+  mode; `tests/interop/setup_venv_numpy.sh` makes its venv), two rows of
+  `tests/interop/concurrency.sh` and the format-3 rebuild in
+  `tests/conformance/legacy_database.st`.
 
 ## 0.3.0 (2026-11-20)
 

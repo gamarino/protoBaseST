@@ -356,6 +356,6 @@ test_structure_depth.py::test_an_orderable_element_of_an_index_may_nest_the_limi
 test_structure_depth.py::test_an_unorderable_element_nests_through_its_surrogate	ported	tests/unit/idx_depth_tokens.st	an unorderable element nests through its surrogate: lists and maps
 test_structure_depth.py::test_the_member_key_limit_is_exact	ported	tests/unit/idx_depth_tokens.st	the member-key limit is exact at every leaf width
 test_structure_depth.py::test_a_field_index_over_plain_maps_stores_the_maps_through_their_surrogates	ported	tests/unit/idx_depth_tokens.st	a field index over plain maps stores the maps through their surrogates
-test_structure_depth.py::test_a_vector_index_store_key_adds_its_own_tuple	deferred	V5	It appends to a vector-indexed collection and commits, which V5 makes writable.
-test_structure_depth.py::test_an_index_added_over_existing_data_refuses_the_same_way	deferred	V5	Its equality index half is ported in tests/unit/idx_depth_tokens.st; its vector index half (addIndex: of a VectorIndex, the store key's outer containers) needs V5.
+test_structure_depth.py::test_a_vector_index_store_key_adds_its_own_tuple	ported	tests/unit/vec_collections.st	the store key of a vector index adds its own tuple; an invalid member is stored under its member key alone
+test_structure_depth.py::test_an_index_added_over_existing_data_refuses_the_same_way	ported	tests/unit/vec_collections.st	addIndex: of a vector index over data it cannot store refuses the same way, and the transaction goes on
 test_structure_depth.py::test_a_refusal_leaves_the_transaction_usable	ported	tests/unit/idx_depth_tokens.st	a refusal leaves the transaction usable
