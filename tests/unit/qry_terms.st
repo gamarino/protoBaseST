@@ -106,6 +106,7 @@ expect value: 'operands' value: s value value: (PBTuple withAll: #(5 'a' 9)).
 expect value: 'in matches' value: (matching value: s) value: #('FIVE' 'A_STR').
 expect value: 'in a Set' value: (matching value: (t value: 'x' value: 'in' value: (Set withAll: #(1)))) value: #('ONE' 'ONE_F').
 expect value: 'in nothing' value: (matching value: (t value: 'x' value: 'in' value: #())) value: #().
+expect value: 'in an empty Set' value: (t value: 'x' value: 'in' value: Set new) value value: (PBTuple withAll: #()).
 expect value: 'in a list or a tuple' value: ({ PBFrozenList withAll: #(5). PBTuple withAll: #(5). OrderedCollection with: 5 }
   collect: [:each | matching value: (t value: 'x' value: 'in' value: each)]) value: #(#('FIVE') #('FIVE') #('FIVE')).
 s := t value: 'x' value: 'in' value: (Set withAll: { 3. 'b'. 1. 2.5. 'a' }).

@@ -634,7 +634,7 @@ PBKeyGroupIndex >> _sortedRank: aBlock
 PBKeyGroupIndex >> _sortedSegments: aTerm descending: aBoolean
   | segments |
   segments := aTerm op = 'in'
-    ifTrue: [((self _lookupKeysOf: aTerm) asSortedCollection: [:a :b | a <= b]) asArray collect: [:k |
+    ifTrue: [((self _lookupKeysOf: aTerm) asArray sorted: [:a :b | a <= b]) collect: [:k |
       PBKeyGroups segmentOfGroup: (self _lookupKey: k)]]
     ifFalse: [self _termSegments: aTerm].
   ^ aBoolean ifTrue: [PBKeyGroups reverseSegments: segments] ifFalse: [segments].

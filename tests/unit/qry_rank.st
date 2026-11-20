@@ -203,6 +203,11 @@ fails := OrderedCollection new.
       case checkPlan: filtered label: 'filter ' , term printString , ' ' , d printString.
       case checkPlan: (PBLimit source: filtered limit: (case between: 0 and: 6) offset: (case between: 0 and: 6))
         label: 'limit over filter ' , term printString]].
+  "An 'in' sorted by the index key sorts its operands' groups, none for no operand (Task 10 soak,
+   seed 25)."
+  #(#() #(3 1)) do: [:operands | #(false true) do: [:d |
+    case checkPlan: (PBSort source: (index plan: (PBTerm path: 'k' op: 'in' value: operands)) keys: { PBSortKey key: 'k' descending: d })
+      label: 'sort in ' , operands printString , ' ' , d printString]].
   plan := index plan: (PBTerm path: 'k' op: '>' value: 0).
   ({ PBSort source: plan keys: { PBSortKey key: 'tag' descending: false }.
      PBSort source: plan keys: { PBSortKey key: 'k' descending: false. PBSortKey key: 'tag' descending: false }.

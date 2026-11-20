@@ -244,9 +244,9 @@ PBTerm class >> path: aStringOrNil op: anOperator value: aValue
     (aValue isKindOf: Set) ifTrue: [
       | sorted |
       sorted := ((1 to: operands size) asArray collect: [:i | (keys at: i) -> (operands at: i)])
-        asSortedCollection: [:a :b | a key <= b key].
-      operands := sorted asArray collect: [:each | each value].
-      keys := sorted asArray collect: [:each | each key]].
+        sorted: [:a :b | a key <= b key].
+      operands := sorted collect: [:each | each value].
+      keys := sorted collect: [:each | each key]].
     canonical := PBTuple withAll: operands.
     ^ self _path: aStringOrNil op: anOperator value: canonical spec: spec valueKey: (PBKeys orderKey: canonical) operandKeys: keys].
   (self betweenOperators includes: anOperator) ifTrue: [
