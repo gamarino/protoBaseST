@@ -40,7 +40,7 @@ Contents:
 | `DBObject`, `MutableObject` | `PBObject`, `PBMutableObject` |
 | `List`, `Dictionary`, `HashDictionary` | `PBList`, `PBDictionary`, `PBHashDictionary` |
 | `Set`, `CountedSet`, `RepeatedKeysDictionary` | `PBSet`, `PBCountedSet`, `PBRepeatedKeysDictionary` |
-| `EqualityIndex`, `RangeIndex`, `VectorIndex` | `PBEqualityIndex`, `PBRangeIndex`, `PBVectorIndex` (decoded, read only) |
+| `EqualityIndex`, `RangeIndex`, `VectorIndex` | `PBEqualityIndex`, `PBRangeIndex`, `PBVectorIndex` (maintained since 0.4.0's V3; its collections are read only until V5) |
 | `FrozenList`, `FrozenDict`, `MISSING`, a Python tuple | `PBFrozenList`, `PBFrozenDict`, `PBMissing`, `PBTuple` |
 | `OpaqueAtom` | `PBOpaqueAtom` |
 | `Proto...Error` | `PB...Error` |
@@ -288,7 +288,7 @@ out; an absent element answers a new version with the same content), `countOf:`,
 
 **Indexes** are decoded, kept, maintained and queried (0.3.0: [Indexed queries](#indexed-queries-030)): `PBEqualityIndex`, `PBRangeIndex`
 (`PBKeyGroupIndex`), `PBVectorIndex` (`dim`, `metric`, `backend`, `params`, `centroids`,
-`trainedSize`, `storeEntries`). On all: `name`, `keySpec`, `hasMemberTokens` (false for an index
+`trainedSize`, `storeEntries`, and the rest of [Vector indexes](#vector-indexes)). On all: `name`, `keySpec`, `hasMemberTokens` (false for an index
 written by format 3), `totalCount`. `PBIndexSet` (`names`, `get:`, `size`, `isEmpty`) holds a
 collection's indexes.
 
@@ -1157,10 +1157,10 @@ filed under its member key, the `PBTuple` `((0, element) | (1, surrogate), exact
 | `PBEqualityIndex` | `'=='`, `'in'`, `'!='`, `'?N'`, `'?!N'` |
 | `PBRangeIndex` | the same, and `'<'`, `'<='`, `'>'`, `'>='`, `'between[]'`, `'between()'`, `'between(]'`, `'between[)'` |
 
-`PBVectorIndex` is unchanged and read only: `supports:` answers false, and every hook (`withAdded:`,
-`withRemoved:`, `withReplaced:with:`, `empty`, `build:`, `validate:`, `explain`, and `name:keySpec:`),
-like every change to a collection holding one, is `PBNotSupportedError` naming it. An index of a
-kind protoBaseST does not know is refused the same way, by the `PBIndexSet` hooks.
+`PBVectorIndex` answers no term yet (`supports:` answers false until the vectors phase's V6). Its
+hooks, `validate:` and `explain` work as an index's ([Vector indexes](#vector-indexes), task V3),
+but every change to a collection holding one is still `PBNotSupportedError` naming it, until V5.
+An index of a kind protoBaseST does not know refuses every hook, through the `PBIndexSet` hooks.
 
 **Collections** gain (on `PBIndexedCollection`):
 
@@ -1329,9 +1329,10 @@ and what a page costs, are in [queries.md](queries.md#ordered-reads-windows-and-
 
 ## Vector search (0.4.0, draft)
 
-> **Draft: nothing in this section is implemented.** It is the API of
+> **Draft: this section is implemented up to its task markers.** It is the API of
 > [Addendum V](superpowers/specs/2026-11-19-vectors-addendum.md) (sections 2.1 to 2.9), written
-> before the code. `tests/docs/pending_selectors.tsv` names, for each selector below that does not
+> before the code; V1 (the kernel), V2 (near queries) and V3 (the vector index's definition,
+> hooks, `validate:` and `explain`, for the exact and hnsw backends) are done. `tests/docs/pending_selectors.tsv` names, for each selector below that does not
 > exist yet, the vectors task that builds it (V1 to V7); each task moves its part of this section
 > from draft to fact. Until V5, a collection holding a `PBVectorIndex` refuses changes as
 > [Indexes](#indexes) says, and until V2 `'near[]'` is refused when built. The concepts are in
@@ -1353,12 +1354,12 @@ of `proto_db`'s `indexing/vector.py`:
 
 | Message | Meaning |
 |---|---|
-| `PBVectorIndex name: aString keySpec: aKeySpec dim: anInteger metric: aString backend: aString params: aDictionaryOrNil` | An empty unsaved index (task V3). `dim` an Integer of at least 1 (a Boolean is refused); `metric` one of `'cosine'`, `'l2'`, `'ip'`; `backend` one of `'exact'`, `'ivf_flat'`, `'hnsw'`; `params` nil (the defaults) or a `Dictionary` or `PBFrozenDict` of name to value, validated and completed as `proto_db`'s `vector_backends.normalize_params` does and stored as a `PBTuple` of `(name, value)` pairs sorted by name. Checked in `proto_db`'s order, so the first fault reported is the same; each fault is `PBValidationError` with `proto_db`'s text. The inherited `name:keySpec:` is `PBValidationError` (a vector index needs `dim`). |
+| `PBVectorIndex name: aString keySpec: aKeySpec dim: anInteger metric: aString backend: aString params: aDictionaryOrNil` | An empty unsaved index (task V3, done). `dim` an Integer of at least 1 (a Boolean is refused); `metric` one of `'cosine'`, `'l2'`, `'ip'`; `backend` one of `'exact'`, `'ivf_flat'`, `'hnsw'`; `params` nil (the defaults) or a `Dictionary` or `PBFrozenDict` of name (a String) to value, validated and completed as `proto_db`'s `vector_backends.normalize_params` does and stored as a `PBTuple` of `(name, value)` pairs sorted by name in code-point order (`'M'` before `'ef_construction'`). The parameters: `'exact'` takes `'numpy'` (a Boolean, default true, written and without effect: DV2); `'ivf_flat'` takes `'nlist'` (default 16), `'nprobe'` (1 to `'nlist'`, default 4 or `'nlist'` when smaller), `'seed'` (an Integer of at least 0, default 0), `'train_iters'` (default 10), `'retrain_growth'` (a finite number above 1, default 4.0, stored as a Float; an Integer beyond the Float range is CPython's text, DV7 e); `'hnsw'` takes `'M'` (at least 2, default 16), `'seed'`, `'ef_construction'` (default 200), `'ef_search'` (default 64). Checked in `proto_db`'s order (the name and key spec, `dim`, `metric`, `backend`, the parameter names, then the backend's parameters in the order its dict literal evaluates them), so the first fault reported is the same; each fault is `PBValidationError` with `proto_db`'s text. The inherited `name:keySpec:` is `PBValidationError` (a vector index needs `dim`). |
 | `name:keySpec:dim:`, `name:keySpec:dim:metric:`, `name:path:dim:metric:` | Conveniences: cosine and exact by default; `name:path:dim:metric:` for a single path. |
-| `dim`, `metric`, `backend`, `params`, `paramAt: aName`, `centroids`, `trainedSize`, `memberCount`, `invalidCount` | The definition; one parameter; the IVF centroids (a `PBTuple` of `PBTuple`s of Floats) and the member count they were trained at; the distinct members of the store; the elements kept aside as invalid. |
-| `withAdded: e`, `withRemoved: e`, `withReplaced: old with: new`, `empty`, `build: aCollection` | As for every index (task V3; IVF training in V4): a new unsaved version. An element whose key is not a valid vector goes to the invalid group; a valid one is one more occurrence of its member in the store, under its list number. Adding a member can train or retrain an IVF index. Removing an element the index does not hold is `PBValidationError`. A signalling-NaN `Decimal` component is `PBValidationError` (`proto_db` raises Python's `ValueError` there; DV7). |
-| `validate: aCollection` | `proto_db`'s checks: the trees, the training state, every member under its own key and list with its own vector, positive counts, the invalid group, the totals, and the stored multiset against the elements; `PBCorruptionError` with `proto_db`'s texts. |
-| `explain` | A `PBFrozenDict`: `'index'`, `'kind'` (`'VectorIndex'`), `'key'`, then `'dim'`, `'metric'`, `'backend'`, `'params'`, `'entries'`, `'vectors'`, `'members'`, `'invalid'`, and for an IVF index `'lists'` (trained centroids, 0 untrained) and `'trained_size'`. |
+| `dim`, `metric`, `backend`, `params`, `paramAt: aName`, `centroids`, `trainedSize`, `memberCount`, `invalidCount` | The definition; one parameter (nil when the backend has none of that name); the IVF centroids (a `PBTuple` of `PBTuple`s of Floats) and the member count they were trained at; the distinct members of the store; the occurrences kept aside as invalid. Also `store` (the store tree), `invalid` (the invalid group, the `PBTuple` (members, total)), `storeEntries` and `totalCount`. |
+| `withAdded: e`, `withRemoved: e`, `withReplaced: old with: new`, `empty`, `build: aCollection` | As for every index (task V3, done for exact and hnsw; IVF lists and training in V4, until when an `'ivf_flat'` index refuses them with `PBNotSupportedError`): a new unsaved version, node for node `proto_db`'s (`tests/interop/vector_index_identical.sh`). An element whose key is not a vector of `dim` finite numbers (a `PBTuple` or `PBFrozenList` of Integers, Floats or `Decimal`s, not Booleans, with a finite norm) goes to the invalid group; a valid one is one more occurrence of its member (its exact member key) in the store, under its list number (0 for exact and hnsw). Adding a member can train or retrain an IVF index. Removing an element the index does not hold, or an equal element with another exact token, is `PBValidationError`. An element whose member key would nest deeper than the format allows is `PBValidationError` with `proto_db`'s text; the store key wraps a valid member in 2 more containers. A signalling-NaN `Decimal` component is `PBValidationError` with CPython's text (`proto_db` raises Python's `ValueError` there; DV7 b). Node classes are `proto_db`'s: a build makes `PBKeyNode` trees; the invalid group grows `PBCountedKeyNode`s only from empty. |
+| `validate: aCollection` | `proto_db`'s checks (task V3, done), in its order: the training state, the trees, every member under its own key and list with its own vector, positive counts, the invalid group, the totals, and the stored multiset against the elements; `PBCorruptionError` with `proto_db`'s texts. On an index written by format 3 the member keys' tokens are not compared. Answers the index. |
+| `explain` | A `PBFrozenDict`: `'index'`, `'kind'` (`'VectorIndex'`), `'key'`, then `'dim'`, `'metric'`, `'backend'`, `'params'` (a `PBFrozenDict`), `'entries'` (occurrences), `'vectors'` (those with a valid vector), `'members'` (distinct ones), `'invalid'` (task V3, done), and for an IVF index `'lists'` (trained centroids, 0 untrained) and `'trained_size'` (V4). |
 | `supports: aTerm`, `supportsFiltered: aTerm` | Whether the index answers a `near[]` term (task V6): on its own key spec, with no metric or its own, and a vector valid for its `dim`. `supportsFiltered:` is the same for a vector index; `PBIndex` answers false. |
 | `estimate: aTerm`, `plan: aTerm`, `filteredPlan: aTerm where: anExpression` | The model estimate ([queries.md](queries.md#the-cost-model-for-vectors)); a `PBIndexPlan` of kind `'VectorExact'`, `'VectorIvfFlat'` or `'VectorHnsw'` (with `'where'` when filtered). An unsupported term is `PBNotSupportedError`; a condition holding a `near[]` term is `PBValidationError`. `PBIndex >> filteredPlan:where:` is `PBNotSupportedError`. |
 | `PBVectorIndex nearOracle: elements keySpec: aKeySpec query: aPBNearQuery metric: aString predicate: aBlockOrExpressionOrNil` | The brute-force definition of the answer, `proto_db`'s `vector.near_oracle`, used by the tests and the contract. |
@@ -1366,6 +1367,13 @@ of `proto_db`'s `indexing/vector.py`:
 An execution of a `'VectorHnsw'` plan is `PBNotSupportedError` naming the index (ruling VQ1): the
 hnsw graph needs hnswlib, a native library protoST cannot load. Its maintenance, `validate:`,
 `explain` and planning work.
+
+The backends are `PBVectorExact`, `PBVectorIvfFlat` and `PBVectorHnsw` (`src/protobase/vectors.st`),
+stateless classes as `proto_db`'s are: `PBVectorBackend named: aString` (`proto_db`'s backend_for), and on each
+`backendName`, `kindName`, `defaults`, `check: aDictionary` (the completed parameters, as
+Associations in `proto_db`'s order), `listFor: anIndex vector: aVector`, `needsTraining: anIndex`,
+`train: anIndex vectors: aVectors` and `explainOf: anIndex`. They serve the index; an application
+names a backend by its String.
 
 ### Near queries
 

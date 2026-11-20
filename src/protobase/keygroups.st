@@ -25,8 +25,11 @@ exactToken:, the canonical encoding, D58) tells apart values that are equal but 
   PBMemberKeys checkDepth: anElement index: anIndex
                                      anElement, or PBValidationError (proto_db's sentence, naming
                                      anIndex) when its member key would nest deeper than
-                                     MAX_VALUE_DEPTH
+                                     MAX_VALUE_DEPTH; checkDepth:memberKey:index:outer: for a
+                                     member key stored inside outer more containers (a vector
+                                     index's store key adds 2)
   PBMemberKeys depthLimits           the deepest elements an index can store, by shape
+                                     (depthLimitsWrapping: for a member key inside more containers)
   PBMemberKeys identityOf: anElement proto_db's element_identity, for comparing multisets
   PBMemberKeys orderKeyOrNil: aValue the order key of aValue, nil when it is unorderable
 
@@ -207,8 +210,13 @@ PBMemberKeys class >> surrogateLeaf
  (the containers of an orderable element, its own wire depth), 'lists' and 'maps' (levels of an
  element of nested lists, or of nested maps, around a scalar leaf, through the surrogate)."
 PBMemberKeys class >> depthLimits
+  ^ self depthLimitsWrapping: self memberKeyWrapping.
+
+"As depthLimits, for member keys that sit inside anInteger containers (keyed.py
+ element_depth_limits(wrapping)): a vector index's store key wraps its member keys in 2 more."
+PBMemberKeys class >> depthLimitsWrapping: anInteger
   | room |
-  room := PBCodec maxValueDepth - self memberKeyWrapping.
+  room := PBCodec maxValueDepth - anInteger.
   ^ PBFrozenDict withAssociations: {
     'orderable' -> room.
     'lists' -> (room - self surrogateLeaf // self surrogateListLevel).
@@ -217,28 +225,34 @@ PBMemberKeys class >> depthLimits
 "anElement, or PBValidationError when its member key would nest deeper than MAX_VALUE_DEPTH, with
  proto_db's sentence naming anIndex (keyed.py check_member_key): a scalar or an atom nests a few
  containers only; a container is bounded first from its own depth, and only an element that could
- pass the limit costs the walk of its member key. There is no outer parameter: in proto_db only the
- vector index stores member keys inside more containers, and protoBaseST never writes a vector
- index (ruling IQ5)."
+ pass the limit costs the walk of its member key."
 PBMemberKeys class >> checkDepth: anElement index: anIndex
-  ^ self checkDepth: anElement memberKey: nil index: anIndex.
+  ^ self checkDepth: anElement memberKey: nil index: anIndex outer: 0.
 
 "As checkDepth:index:, for a caller that has the member key aKeyOrNil already (nil: computed when
  the bound needs it), as with_added passes it to check_member_key."
 PBMemberKeys class >> checkDepth: anElement memberKey: aKeyOrNil index: anIndex
-  | max depth limits |
+  ^ self checkDepth: anElement memberKey: aKeyOrNil index: anIndex outer: 0.
+
+"As checkDepth:memberKey:index:, for a member key stored inside anOuter more containers
+ (keyed.py check_member_key's outer): a vector index files a member with a valid vector under the
+ store key (list number, member key), 2 containers more (vector.py STORE_KEY_WRAPPING), and an
+ invalid one under its member key alone (0)."
+PBMemberKeys class >> checkDepth: anElement memberKey: aKeyOrNil index: anIndex outer: anOuter
+  | max depth wrapping limits |
   (anElement isClassObject not and: [
       (anElement isKindOf: _PBSequence) or: [anElement isKindOf: PBFrozenDict]]) ifFalse: [^ anElement].
   max := PBCodec maxValueDepth.
-  self memberKeyWrapping + (self surrogateListLevel * (PBCodec valueDepth: anElement)) + self surrogateLeaf <= max
+  self memberKeyWrapping + anOuter + (self surrogateListLevel * (PBCodec valueDepth: anElement)) + self surrogateLeaf <= max
     ifTrue: [^ anElement].
-  depth := PBCodec valueDepth: (aKeyOrNil isNil ifTrue: [self memberKeyOf: anElement] ifFalse: [aKeyOrNil]).
+  depth := (PBCodec valueDepth: (aKeyOrNil isNil ifTrue: [self memberKeyOf: anElement] ifFalse: [aKeyOrNil])) + anOuter.
   depth <= max ifTrue: [^ anElement].
-  limits := self depthLimits.
+  wrapping := self memberKeyWrapping + anOuter.
+  limits := self depthLimitsWrapping: wrapping.
   ^ PBValidationError signal: anIndex _subject , ' cannot store this element: its member key would nest '
     , depth printString , ' MessagePack containers deep, more than MAX_VALUE_DEPTH = ' , max printString
     , ' (format spec, "Value nesting depth"). The index stores an orderable element inside '
-    , self memberKeyWrapping printString , ' containers, so it may nest at most ' , (limits at: 'orderable') printString
+    , wrapping printString , ' containers, so it may nest at most ' , (limits at: 'orderable') printString
     , '; an unorderable one (holding a list, a map or NaN) through its surrogate, '
     , self surrogateListLevel printString , ' containers per list level and ' , self surrogateMapLevel printString
     , ' per map level: at most ' , (limits at: 'lists') printString , ' nested lists or '

@@ -1,4 +1,4 @@
-"EXPECT: database contents ok (database contents 17/17)"
+"EXPECT: database contents ok (database contents 19/19)"
 "The database section read as a database (README, 'Using the vectors', 7, second
  part), on a copy of vectors/database: following space.root -> SpaceRoot ->
  databases['db'] -> DatabaseRoot, PBNotation describeDatabase: of a snapshot of the
@@ -8,8 +8,14 @@
  origin), so an expected difference names exactly what differs, and the trained
  ivf_flat index must hold the listed centroids, trained size and list of every stored
  vector (computing the list assignment is a writer's check: the prototype never
- writes a vector index). The ids are 'database', 'databases', 'root names',
- 'root <name>', 'mutables', 'indexes', 'origin' and 'ivf'."
+ writes a vector index). The exact index of the 'vectors' root and the hnsw index of
+ the 'hnsw' root (proto_db tests/conformance/generate.py:633-643) pass validate:
+ against their collections, and their explain is proto_db's (vectors phase V3,
+ Addendum V 5.2): the manifest does not record explain, so the expected entries are
+ proto_db v2.0.0rc4's VectorIndex.explain() of these two indexes, read from this
+ vector's database with numpy and hnswlib blocked and written here. The ids are
+ 'database', 'databases', 'root names', 'root <name>', 'mutables', 'indexes',
+ 'origin', 'ivf', 'vector index vectors' and 'vector index hnsw'."
 Import from: 'protobase'.
 Import from: '_vectors'.
 | manifest contents dir space db snap run mismatch ids expectedWhole names ivf |
@@ -17,7 +23,7 @@ manifest := Vectors manifest.
 contents := (manifest at: 'database') at: 'contents'.
 names := (contents at: 'roots') collect: [:pair | pair at: 1].
 ids := { 'database'. 'databases'. 'root names' } , (names collect: [:n | 'root ' , n])
-  , #('mutables' 'indexes' 'origin' 'ivf').
+  , #('mutables' 'indexes' 'origin' 'ivf' 'vector index vectors' 'vector index hnsw').
 run := VectorRun section: 'database_contents' ids: ids.
 mismatch := [:what :actual :expected |
   actual = expected ifTrue: [nil] ifFalse: [
@@ -70,6 +76,28 @@ run stage: 'describe' of: 'ivf' do: [
     { entry key at: 1. (entry value at: 3) asArray collect: [:x | PBNotation describe: x] }]).
   mismatch value: 'the ivf index' value: actual value: (contents at: 'ivf')].
 run end: 'ivf'.
+{ { 'vectors'. 'near'. {
+      'index' -> 'near'. 'kind' -> 'VectorIndex'. 'key' -> 'emb'. 'dim' -> 2. 'metric' -> 'l2'. 'backend' -> 'exact'.
+      'params' -> (PBFrozenDict withAssociations: { 'numpy' -> true }).
+      'entries' -> 2. 'vectors' -> 2. 'members' -> 2. 'invalid' -> 0 } }.
+  { 'hnsw'. 'hnsw'. {
+      'index' -> 'hnsw'. 'kind' -> 'VectorIndex'. 'key' -> 'emb'. 'dim' -> 2. 'metric' -> 'cosine'. 'backend' -> 'hnsw'.
+      'params' -> (PBFrozenDict withAssociations: { 'M' -> 16. 'ef_construction' -> 200. 'ef_search' -> 64. 'seed' -> 0 }).
+      'entries' -> 2. 'vectors' -> 2. 'members' -> 2. 'invalid' -> 0 } } } do: [:case |
+  | id |
+  id := 'vector index ' , (case at: 1).
+  run begin.
+  run stage: 'validate and explain' of: id do: [
+    | collection index elements problem |
+    collection := snap getRootObject: (case at: 1).
+    index := collection getIndex: (case at: 2).
+    elements := OrderedCollection new.
+    collection do: [:e | elements addLast: e].
+    problem := [index validate: elements asArray. nil] on: Error do: [:e | e return: e class name , ': ' , e messageText].
+    problem isNil
+      ifTrue: [mismatch value: 'explain of ' , (case at: 2) value: index explain associations value: (case at: 3)]
+      ifFalse: ['validate: of ' , (case at: 2) , ' failed: ' , problem]].
+  run end: id].
 space close.
 dir deleteAll.
 run failures > 0

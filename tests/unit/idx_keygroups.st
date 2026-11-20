@@ -9,7 +9,8 @@
  Focus 2); empty keeps the definition; build: equals the fold of withAdded: node for node, and the
  stored bytes do not depend on how a value was built; explain keeps proto_db's keys and kind
  names (plan call CR4); validate: passes on built indexes and tells corruption from misfiling; a
- vector index and an index of an unknown kind refuse every hook (spec 3.3); keySpec stays the
+ vector index answers every hook (vectors V3) and an index of an unknown kind refuses every hook
+ (spec 3.3); keySpec stays the
  tuple and keySpecObject answers the PBKeySpec (plan call IP3); the depth refusal is proto_db's
  sentence word for word; index sets apply the hooks to every index. Each check gathers its
  mismatches and requires none, so one label covers one behaviour."
@@ -350,21 +351,21 @@ kinds do: [:k |
   expect value: k name , ' the message' value: (text includesSubstring: 'holds a misfiled entry: the key ''Rome'' is stored after ''Zz''') value: true].
 c that: 'validate: signals PBMisfiledError on a misfiled member' is: fails asArray equals: #().
 
-"Spec 3.3: a vector index refuses every hook, and so does an index set over an index of a kind
- protoBaseST does not know (an opaque atom)."
+"A vector index answers every hook (vectors phase V3; it refused them while protoBaseST read vector
+ indexes only, spec 3.3, ruling IQ5), and an index set holding one applies them; an index set
+ over an index of a kind protoBaseST does not know (an opaque atom) refuses every hook."
 fails := OrderedCollection new.
-vector := PBVectorIndex _unsavedWithState: (PBFrozenDict withAssociations: {
-  'name' -> 'by_emb'. 'key_spec' -> (PBTuple withAll: #('path' 'emb')). 'dim' -> 2. 'metric' -> 'l2'. 'backend' -> 'flat'.
-  'params' -> nil. 'store' -> nil. 'invalid' -> nil. 'total_count' -> 0. 'centroids' -> (PBTuple withAll: #()).
-  'trained_size' -> 0. 'member_tokens' -> 1 }).
-{ [vector withAdded: 1]. [vector withRemoved: 1]. [vector withReplaced: 1 with: 2]. [vector empty]. [vector build: #(1)].
-  [vector validate: #()]. [vector explain]. [PBVectorIndex name: 'v' keySpec: PBKeySpec element] } doWithIndex: [:hook :i |
-  expect value: 'vector hook ' , i printString value: (refused value: hook) value: PBNotSupportedError.
-  expect value: 'vector hook ' , i printString , ' message' value: ((refusedText value: hook) includesSubstring: 'vector') value: true].
-expect value: 'vector names itself' value: ((refusedText value: [vector withAdded: 1]) beginsWith: 'Index ''by_emb'' (VectorIndex on emb) withAdded:') value: true.
+vector := PBVectorIndex name: 'by_emb' keySpec: (PBKeySpec path: 'emb') dim: 2 metric: 'l2'.
+rec := PBObject withAll: { 'emb' -> (PBTuple withAll: #(1.0 0.0)) }.
+rec2 := PBObject withAll: { 'emb' -> nil }.
+{ [vector withAdded: rec]. [(vector withAdded: rec) withRemoved: rec]. [(vector withAdded: rec) withReplaced: rec with: rec2].
+  [vector empty]. [vector build: { rec. rec2 }] } doWithIndex: [:hook :i |
+  expect value: 'vector hook ' , i printString value: (hook value) class value: PBVectorIndex].
+expect value: 'vector validate: answers the index' value: ((vector build: { rec }) validate: { rec }) class value: PBVectorIndex.
+expect value: 'vector explain' value: ((vector build: { rec. rec2 }) explain at: 'invalid') value: 1.
 expect value: 'vector key spec reads' value: vector keySpecObject value: (PBKeySpec path: 'emb').
 set := PBIndexSet new withIndex: vector.
-expect value: 'an index set with a vector index' value: ((refusedText value: [set onAdd: 1]) includesSubstring: 'vector') value: true.
+expect value: 'an index set with a vector index' value: ((set onAdd: rec) get: 'by_emb') totalCount value: 1.
 opaque := PBOpaqueAtom named: 'acme.indexing.CustomIndex' unloadedAt: (PBAtomPointer segment: (ByteArray new: 16) offset: 1) storage: Object new.
 set := PBIndexSet _unsavedWithState: (PBFrozenDict withAssociations: {
   'root' -> ((PBAvl keyPut: nil key: 'custom' value: opaque nodeClass: PBKeyNode) at: 1) }).
@@ -372,7 +373,7 @@ set := PBIndexSet _unsavedWithState: (PBFrozenDict withAssociations: {
   expect value: 'unknown kind ' , i printString value: (refused value: hook) value: PBNotSupportedError.
   expect value: 'unknown kind ' , i printString , ' message' value: (refusedText value: hook)
     value: 'The index ''custom'' is of the type acme.indexing.CustomIndex, which protoBaseST does not know: a collection holding it is read only (design spec 3.3)'].
-c that: 'vector and unknown index kinds refuse every hook' is: fails asArray equals: #().
+c that: 'a vector index answers every hook; an unknown index kind refuses every hook' is: fails asArray equals: #().
 
 "The depth refusal of checkDepth:index: (keyed.py check_member_key) is proto_db's sentence, word
  for word (taken from proto_db at the tag), from withAdded: and from build: alike; one level less

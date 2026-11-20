@@ -10,14 +10,6 @@
 # Task 7: the planner
 # Task 9: PBPager
 # Vectors phase (Addendum V, docs/superpowers/specs/2026-11-19-vectors-addendum.md), drafted by V0.
-# V3: PBVectorIndex, its constructors, readers and hooks
-name:keySpec:dim:metric:backend:params:	V3
-name:keySpec:dim:	V3
-name:keySpec:dim:metric:	V3
-name:path:dim:metric:	V3
-paramAt:	V3
-memberCount	V3
-invalidCount	V3
 # V6: vector search plans
 supportsFiltered:	V6
 filteredPlan:where:	V6

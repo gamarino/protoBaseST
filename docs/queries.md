@@ -127,9 +127,11 @@ Every node of both trees carries a *weight*, the number of occurrences below it,
 is found by one descent. That is what gives windows and pages their O(log n + page size) cost
 ([below](#ordered-reads-windows-and-pages)).
 
-A `PBVectorIndex` and any index kind protoBaseST does not know are read and kept, never maintained:
-a collection holding one keeps refusing every change with `PBNotSupportedError` naming it, because
-maintaining its other indexes and not that one would write a stale index (spec 3.3, ruling IQ5).
+A `PBVectorIndex` and any index kind protoBaseST does not know are read and kept, and a collection
+holding one keeps refusing every change with `PBNotSupportedError` naming it, because maintaining
+its other indexes and not that one would write a stale index (spec 3.3, ruling IQ5). Since the
+vectors phase's V3 the vector index itself is maintained by its hooks, validated and explained
+(exact and hnsw backends; [Vector search](#vector-search)); its collections become writable in V5.
 That includes a custom index kind written by another `proto_db` program
 (`indexing-framework.rst`, "Writing a custom index"): protoBaseST reads it as an opaque atom, keeps
 it, and its collection refuses changes. `proto_db`'s index contract is ported as tests of the two
@@ -846,7 +848,9 @@ Indexes change nothing in cluster mode's protocol (spec 5.8):
 > and `linq.py`, all at `v2.0.0rc4`). Its code blocks come from
 > [vector_search.st.pending](../examples/queries/pending/vector_search.st.pending), a port of
 > `proto_db`'s `examples/vector_search.py` that **has never run**; the vectors tasks V1 to V7 build
-> the API and V7 makes the program run. Until then everything above this section holds as written:
+> the API and V7 makes the program run; V1 (the kernel), V2 (`near[]` terms) and V3 (the index's
+> definition, hooks, `validate:` and `explain`, exact and hnsw) are done. Until V7 everything above
+> this section holds as written:
 > a collection holding a vector index refuses changes, and a `near[]` term (built since V2) is
 > refused when a query is planned. Figures
 > marked `[measured in V<n>: ...]` do not exist yet. The tutorial is
@@ -891,7 +895,9 @@ without a separate structure. `proto_db` also keeps a process-wide cache of deri
 classes, and the same hook order (Addendum V, 2.11). One trap is recorded there: the invalid group
 is a `KeyNode` tree when built in bulk and a `CountedKeyNode` tree when grown from empty, and a new
 node always takes the class of the existing root, so the two histories give different bytes in
-`proto_db`, and must in protoBaseST.
+`proto_db`, and must in protoBaseST. Both histories, `build:` and seeded hook sequences over
+records and plain values of every numeric form are compared atom by atom with `proto_db`'s by
+`tests/interop/vector_index_identical.sh` (V3: equal, for the exact and hnsw backends).
 
 ### Scores, and why a correctly rounded sum
 

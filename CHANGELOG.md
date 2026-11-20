@@ -35,6 +35,21 @@
   No plan answers `near[]` yet (V6, V7). Pinned by `tests/unit/vec_terms.st` and 42 `near[]` cases
   added to the term vector (`tests/interop/py_term_cases.py`,
   `tests/conformance/vectors-index-keys/terms.msgpack`).
+- **Vector indexes, exact and hnsw** (task V3): `PBVectorIndex` (`src/protobase/indexes.st`) is a
+  port of `proto_db`'s `VectorIndex`: `name:keySpec:dim:metric:backend:params:` and its conveniences
+  validate the definition in `proto_db`'s order with its texts (parameters completed and stored as
+  sorted pairs; `retrain_growth` an Integer beyond the Float range refused with CPython's text,
+  DV7 e); `withAdded:`, `withRemoved:`, `withReplaced:with:`, `empty` and `build:` maintain the store
+  and the invalid group node for node as `proto_db` does, node classes included (an invalid tree
+  built in bulk stays a `KeyNode` tree, one grown from empty is a `CountedKeyNode` tree); `validate:`
+  and `explain` are `proto_db`'s; a signalling-NaN `Decimal` component of a stored element is refused
+  with CPython's text (DV7 b). The backends are `PBVectorExact`, `PBVectorIvfFlat` (its parameter
+  checks only; lists and training are V4's) and `PBVectorHnsw` (`src/protobase/vectors.st`).
+  `PBMemberKeys checkDepth:memberKey:index:outer:` counts the store key's two containers. A
+  collection holding a vector index still refuses changes (V5), and no index answers `near[]` yet
+  (V6). Pinned by `tests/unit/vec_index.st`, `tests/interop/vector_index_identical.sh` (32 indexes,
+  `build:`, seeded hook sequences and the two invalid-tree histories, byte for byte) and the
+  `vectors` and `hnsw` roots of `tests/conformance/database_contents.st`.
 - **Benchmark VB0** (`bench/run_query.sh VB0`, `bench/vector_workload.st`,
   `bench/py_vector_workload.py`, `bench/py_vector_data.py`): the kernel alone, fsum against a naive
   sum and the three scores, at dim 8, 32 and 128 over 10^4 vectors, self-verified against

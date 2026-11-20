@@ -238,7 +238,7 @@ test_pager.py::test_extractor_tokens_resume_in_processes_with_other_hash_seeds	n
 test_pager.py::test_a_forged_atom_operand_in_a_token_is_a_client_error	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
 test_pager.py::test_a_pager_whose_plan_has_no_structured_digest_has_no_token	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
 test_pager.py::test_resume_reads_the_database_identity_once_per_handle	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
-test_vector_index.py::test_definition_type_names_and_validation	deferred	V3	Definition and validation of every backend, PBVectorIvfFlat check: included, land in V3.
+test_vector_index.py::test_definition_type_names_and_validation	ported	tests/unit/vec_index.st	the definition is validated in proto_db's order, with its texts
 test_vector_index.py::test_supports_only_near_on_its_key_with_matching_dimension_and_metric	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_exact_backend_equals_brute_force	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_exact_backend_equals_brute_force_at_extreme_magnitudes	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
@@ -246,7 +246,7 @@ test_vector_index.py::test_results_are_nearest_first_and_ties_follow_the_member_
 test_vector_index.py::test_duplicates_are_counted_and_equal_values_come_back_exactly	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_invalid_vectors_are_kept_aside_and_never_returned	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_zero_vectors_have_cosine_similarity_zero	ported	tests/unit/vec_math.st	zero vectors have cosine similarity zero; l2 and ip of small vectors
-test_vector_index.py::test_with_removed_of_an_absent_element_raises	deferred	V3	The withRemoved: hook of PBVectorIndex and its refusal of an absent element land in V3.
+test_vector_index.py::test_with_removed_of_an_absent_element_raises	ported	tests/unit/vec_index.st	withRemoved: of an element the index does not hold is PBValidationError
 test_vector_index.py::test_ivf_flat_with_full_probe_equals_exact	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_ivf_flat_trains_on_growth_and_stays_consistent	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_ivf_flat_partial_probe_has_good_recall_and_widens_for_k	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
@@ -345,12 +345,12 @@ test_plan_windows.py::test_a_subclass_redefining_elements_is_not_windowed	ported
 # test_format_neutral.py: the index tests only (member tokens, format-3 indexes).
 test_format_neutral.py::test_removing_a_decoded_value_removes_that_member_not_an_equal_one	ported	tests/unit/idx_depth_tokens.st	removing a decoded value removes that member, not an equal one
 test_format_neutral.py::test_removing_an_equal_but_different_value_is_refused	ported	tests/unit/idx_depth_tokens.st	removing an equal but different value is refused by the equality and the range index
-test_format_neutral.py::test_vector_removal_is_exact_too	deferred	V3	Exact removal of equal values from a vector index needs the hooks of V3.
+test_format_neutral.py::test_vector_removal_is_exact_too	ported	tests/unit/vec_index.st	removal is exact: an equal value with another token is not removed
 test_format_neutral.py::test_validate_reports_a_member_under_another_token	ported	tests/unit/idx_depth_tokens.st	validate: reports a member under another token
 test_format_neutral.py::test_the_reviewers_end_to_end_repro	ported	tests/unit/idx_depth_tokens.st	the reviewers' end-to-end case: after a reopen the scan and the index answer the same element
 test_format_neutral.py::test_an_index_with_format_3_tokens_is_rebuilt_at_its_first_change	ported	tests/unit/idx_depth_tokens.st	an index with format-3 tokens is rebuilt at the first change of its collection
 test_format_neutral.py::test_validate_accepts_an_index_with_format_3_tokens	ported	tests/unit/idx_depth_tokens.st	validate: accepts an index with format-3 tokens and still checks the rest
-test_format_neutral.py::test_validate_accepts_a_vector_index_with_format_3_tokens	deferred	V3	validate: of a format-3 vector index is ported with PBVectorIndex in V3.
+test_format_neutral.py::test_validate_accepts_a_vector_index_with_format_3_tokens	ported	tests/unit/vec_index.st	validate: accepts a vector index with format-3 tokens and still checks the rest
 # test_structure_depth.py: the index tests only (the member key wraps the element).
 test_structure_depth.py::test_an_orderable_element_of_an_index_may_nest_the_limit_less_the_member_key	ported	tests/unit/idx_depth_tokens.st	an orderable element may nest the limit less the member key
 test_structure_depth.py::test_an_unorderable_element_nests_through_its_surrogate	ported	tests/unit/idx_depth_tokens.st	an unorderable element nests through its surrogate: lists and maps

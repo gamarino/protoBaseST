@@ -42,6 +42,21 @@ on them. PBNearQuery is the public value of a near[] term (terms.st).
                                     PBTerm, terms.st, as terms.py _near_query). Equal and hashed by
                                     value, 0.0 = -0.0; describe is terms.py's display_value of it
 
+  PBVectorBackend, PBVectorExact, PBVectorIvfFlat, PBVectorHnsw (class side only; vectors phase V3)
+    named: aString                  backend_for: the backend class, or PBValidationError
+    backendName, kindName, defaults the backend's name, its plan kind ('VectorExact'...) and its
+                                    parameters with their defaults
+    check: aDictionary              the backend's parameter checks, in proto_db's order, answering
+                                    the completed parameters (Associations)
+    normalize: params backend: name normalize_params: the PBTuple of (name, value) PBTuples a
+                                    vector index stores, sorted by name in code-point order
+    listFor: index vector: v, needsTraining: index, train: index vectors: vs, explainOf: index
+                                    the list of a vector (0 for exact and hnsw), the retrain test,
+                                    the centroids, the backend's explain entries; ivf_flat's are V4's
+                                    (PBNotSupportedError until then)
+    The index (PBVectorIndex, indexes.st) holds every value; the backends are stateless and this
+    module never imports indexes.st.
+
 Floats. protoST's Float + - * / are one IEEE double operation each, sqrt is std::sqrt and
 Float raisedTo: an Integer is libm pow (Addendum V, 2.2.3); no build flag contracts or
 reassociates them (tests/unit/vec_math.st's IEEE self-test pins it). Three squares, three
@@ -616,3 +631,262 @@ PBNearQuery >> printOn: aStream
     aStream print: x].
   vector size = 1 ifTrue: [aStream nextPut: $,].
   aStream nextPutAll: '), k='; print: k; nextPutAll: ', threshold='; print: threshold; nextPutAll: ', metric='; print: metric; nextPut: $).
+
+"=== PBVectorBackend: the backends of PBVectorIndex (vector_backends.py:305-333, 338-383, 480-524,
+     566-734, 751-832) ===========================================================================
+
+Stateless strategies, class side only, as proto_db's backend objects are: every method takes the
+index, and every value it needs (its params, centroids, store) is read from it. PBVectorBackend
+named: is backend_for. The index lives in indexes.st, which imports this module; this module never
+imports indexes.st."
+
+Object subclass: #PBVectorBackend.
+PBVectorBackend comment: 'The backends of PBVectorIndex (proto_db vector_backends.py _Backend): parameter checks, list numbers, training and explain entries; class side only, stateless.'.
+
+PBVectorBackend subclass: #PBVectorExact.
+PBVectorExact comment: 'proto_db''s ExactBackend: every member in list 0, no training.'.
+
+PBVectorBackend subclass: #PBVectorIvfFlat.
+PBVectorIvfFlat comment: 'proto_db''s IvfFlatBackend: inverted lists around persisted centroids (its lists and training are the vectors phase''s task V4).'.
+
+PBVectorBackend subclass: #PBVectorHnsw.
+PBVectorHnsw comment: 'proto_db''s HnswBackend: maintained and validated like the exact backend (list 0, no training); its search is refused (ruling VQ1).'.
+
+"The backend named aName (vector_backends.py backend_for): PBVectorExact, PBVectorIvfFlat or
+ PBVectorHnsw; anything else, a non-String included, is PBValidationError with proto_db's text."
+PBVectorBackend class >> named: aName
+  (PBNearQuery _isText: aName) ifTrue: [
+    aName = 'exact' ifTrue: [^ PBVectorExact].
+    aName = 'ivf_flat' ifTrue: [^ PBVectorIvfFlat].
+    aName = 'hnsw' ifTrue: [^ PBVectorHnsw]].
+  ^ PBValidationError signal: 'Unknown vector backend ' , (self _repr: aName)
+    , '; expected one of [''exact'', ''ivf_flat'', ''hnsw'']'.
+
+"The backend's name, as an index stores it in 'backend'."
+PBVectorBackend class >> backendName
+  ^ self _subclassResponsibility: 'backendName'.
+
+"The kind of its index plans: 'VectorExact', 'VectorIvfFlat' or 'VectorHnsw' (_Backend.kind)."
+PBVectorBackend class >> kindName
+  ^ self _subclassResponsibility: 'kindName'.
+
+"The parameter names and their defaults, an Array of Associations (_Backend.DEFAULTS)."
+PBVectorBackend class >> defaults
+  ^ self _subclassResponsibility: 'defaults'.
+
+"The validated complete parameters of aDictionary (a Dictionary or PBFrozenDict of the given
+ ones; names it does not know were refused before), an Array of name -> value Associations in
+ the order proto_db's dict literal evaluates them (_Backend.check). Refusals are
+ PBValidationError with proto_db's texts."
+PBVectorBackend class >> check: aDictionary
+  ^ self _subclassResponsibility: 'check:'.
+
+"The list number of aVector in anIndex's store: 0 for a backend without lists (_Backend.list_for)."
+PBVectorBackend class >> listFor: anIndex vector: aVector
+  ^ 0.
+
+"Whether anIndex, just grown by one member, must be retrained: never for a backend without lists
+ (_Backend.needs_training)."
+PBVectorBackend class >> needsTraining: anIndex
+  ^ false.
+
+"The centroids for aVectors: none for a backend without lists, the empty PBTuple
+ (_Backend.train)."
+PBVectorBackend class >> train: anIndex vectors: aVectors
+  ^ PBTuple withAll: #().
+
+"The backend's own entries of explain, an Array of Associations: none (_Backend.explain)."
+PBVectorBackend class >> explainOf: anIndex
+  ^ #().
+
+PBVectorBackend class >> _subclassResponsibility: aSelector
+  ^ PBUserError signal: self name , ' must implement ' , aSelector.
+
+"vector_backends.py normalize_params: aParams (nil, a Dictionary or a PBFrozenDict from parameter
+ name to value) validated and completed by the backend aName, as a PBTuple of (name, value)
+ PBTuples sorted by name in code-point order (Python's sorted of str): ('M', 16) before
+ ('ef_construction', 200). Checked in proto_db's order: the backend name, the parameter names
+ (unknown ones listed sorted), then the backend's check:. A params that is neither nil nor a
+ dictionary, or a name that is not a String, is PBValidationError (Python's keyword arguments are
+ always str)."
+PBVectorBackend class >> normalize: aParams backend: aName
+  | backend given names unknown |
+  backend := self named: aName.
+  given := Dictionary new.
+  aParams isNil ifFalse: [
+    (aParams isClassObject not and: [(aParams isKindOf: Dictionary) or: [aParams isKindOf: PBFrozenDict]]) ifFalse: [
+      ^ PBValidationError signal: 'PBVectorIndex params must be nil, a Dictionary or a PBFrozenDict of parameter names to values, not '
+        , (self _repr: aParams)].
+    aParams keysAndValuesDo: [:k :v |
+      (PBNearQuery _isText: k) ifFalse: [
+        ^ PBValidationError signal: 'PBVectorIndex parameter names must be Strings, not ' , (self _repr: k)].
+      given at: k put: v]].
+  names := backend defaults collect: [:a | a key].
+  unknown := (given keys reject: [:k | names includes: k]) asArray.
+  unknown isEmpty ifFalse: [
+    ^ PBValidationError signal: 'Unknown parameters ' , (self _reprList: unknown) , ' for the '
+      , (self _repr: aName) , ' vector backend; expected ' , (self _reprList: names)].
+  ^ PBTuple withAll: (((backend check: given) asArray sort: [:a :b | self _codePoints: a key notAfter: b key])
+    collect: [:a | PBTuple withAll: { a key. a value }]).
+
+"Whether aString sorts before or equal to anotherString by code point (Python's str order)."
+PBVectorBackend class >> _codePoints: aString notAfter: anotherString
+  1 to: (aString size min: anotherString size) do: [:i | | x y |
+    x := (aString at: i) asInteger.
+    y := (anotherString at: i) asInteger.
+    x = y ifFalse: [^ x < y]].
+  ^ aString size <= anotherString size.
+
+"Python's repr of a list of str, sorted: ['a', 'b']."
+PBVectorBackend class >> _reprList: aStrings
+  | out |
+  out := WriteStream on: String new.
+  out nextPut: $[.
+  (aStrings asArray sort: [:a :b | self _codePoints: a notAfter: b]) doWithIndex: [:s :i |
+    i > 1 ifTrue: [out nextPutAll: ', '].
+    out nextPutAll: (PBCodec repr: s)].
+  out nextPut: $].
+  ^ out contents.
+
+"Python's repr of aValue in proto_db's parameter messages: True and False, inf, -inf and nan,
+ Decimal('2'), a String quoted, nil as None; any other value as PBKeySpec _repr: shows it."
+PBVectorBackend class >> _repr: aValue
+  aValue == true ifTrue: [^ 'True'].
+  aValue == false ifTrue: [^ 'False'].
+  aValue isClassObject ifTrue: [^ PBKeySpec _repr: aValue].
+  (aValue isFloat and: [(PBVectorMath _isFinite: aValue) not]) ifTrue: [
+    aValue isNaN ifTrue: [^ 'nan'].
+    ^ aValue > 0 ifTrue: ['inf'] ifFalse: ['-inf']].
+  (aValue isKindOf: Decimal) ifTrue: [^ 'Decimal(' , (PBCodec repr: aValue printString) , ')'].
+  ^ PBKeySpec _repr: aValue.
+
+"Whether aValue is an Integer that is not a Boolean (Python's isinstance(v, int) and not bool)."
+PBVectorBackend class >> _isInt: aValue
+  aValue isClassObject ifTrue: [^ false].
+  ^ aValue isInteger and: [aValue ~~ true and: [aValue ~~ false]].
+
+"_positive_int: aValue, an Integer >= 1, or PBValidationError naming the parameter aName."
+PBVectorBackend class >> _positiveInt: aName value: aValue
+  ((self _isInt: aValue) and: [aValue >= 1]) ifFalse: [
+    ^ PBValidationError signal: 'Vector index parameter ' , (PBCodec repr: aName) , ' must be an int >= 1, not '
+      , (self _repr: aValue)].
+  ^ aValue.
+
+"_bool: aValue, a Boolean, or PBValidationError naming the parameter aName."
+PBVectorBackend class >> _bool: aName value: aValue
+  (aValue == true or: [aValue == false]) ifFalse: [
+    ^ PBValidationError signal: 'Vector index parameter ' , (PBCodec repr: aName) , ' must be a bool, not '
+      , (self _repr: aValue)].
+  ^ aValue.
+
+"The seed checks of the ivf_flat and hnsw backends: an Integer >= 0."
+PBVectorBackend class >> _seed: aValue
+  ((self _isInt: aValue) and: [aValue >= 0]) ifFalse: [
+    ^ PBValidationError signal: 'Vector index parameter ''seed'' must be an int >= 0, not ' , (self _repr: aValue)].
+  ^ aValue.
+
+"_growth (vector_backends.py:319-322): aValue, an Integer or a Float (not a Boolean), finite and
+ above 1, as a Float. Python's math.isfinite converts an int with float() first, so an Integer
+ beyond the Float range is CPython's OverflowError, 'int too large to convert to float',
+ signalled as PBValidationError (deviation DV7 e). The comparison with 1 is exact for an Integer,
+ as Python's; the Float stored is float(value), one rounding (PBVectorMath floatOf:)."
+PBVectorBackend class >> _growth: aName value: aValue
+  | f |
+  f := nil.
+  (self _isInt: aValue) ifTrue: [
+    f := PBVectorMath floatOf: aValue.
+    f isNil ifTrue: [^ PBValidationError signal: 'int too large to convert to float']].
+  (aValue isClassObject not and: [aValue isFloat]) ifTrue: [
+    (PBVectorMath _isFinite: aValue) ifTrue: [f := aValue]].
+  (f notNil and: [aValue > 1]) ifFalse: [
+    ^ PBValidationError signal: 'Vector index parameter ' , (PBCodec repr: aName) , ' must be a finite number > 1, not '
+      , (self _repr: aValue)].
+  ^ f.
+
+"--- PBVectorExact (ExactBackend, vector_backends.py:480-524) ---"
+
+PBVectorExact class >> backendName
+  ^ 'exact'.
+
+PBVectorExact class >> kindName
+  ^ 'VectorExact'.
+
+PBVectorExact class >> defaults
+  ^ { 'numpy' -> true }.
+
+"numpy (a Boolean, default true): kept and written; protoBaseST has no numpy screening, whose
+ answers are the exact ones by construction (deviation DV2)."
+PBVectorExact class >> check: aDictionary
+  ^ { 'numpy' -> (self _bool: 'numpy' value: (aDictionary at: 'numpy' ifAbsent: [true])) }.
+
+"--- PBVectorIvfFlat (IvfFlatBackend, vector_backends.py:566-734) ---"
+
+PBVectorIvfFlat class >> backendName
+  ^ 'ivf_flat'.
+
+PBVectorIvfFlat class >> kindName
+  ^ 'VectorIvfFlat'.
+
+PBVectorIvfFlat class >> defaults
+  ^ { 'nlist' -> 16. 'nprobe' -> 4. 'train_iters' -> 10. 'seed' -> 0. 'retrain_growth' -> 4.0 }.
+
+"nlist (an Integer >= 1, default 16), nprobe (1 to nlist, default 4 min: nlist), seed (an
+ Integer >= 0, default 0), train_iters (an Integer >= 1, default 10), retrain_growth (a finite
+ number above 1, default 4.0, stored as a Float), checked in that order, the order in which
+ proto_db's dict literal evaluates them (vector_backends.py:577-586)."
+PBVectorIvfFlat class >> check: aDictionary
+  | nlist nprobe seed |
+  nlist := self _positiveInt: 'nlist' value: (aDictionary at: 'nlist' ifAbsent: [16]).
+  nprobe := self _positiveInt: 'nprobe' value: (aDictionary at: 'nprobe' ifAbsent: [4 min: nlist]).
+  nprobe > nlist ifTrue: [
+    ^ PBValidationError signal: 'nprobe (' , nprobe printString , ') cannot exceed nlist (' , nlist printString , ')'].
+  seed := self _seed: (aDictionary at: 'seed' ifAbsent: [0]).
+  ^ { 'nlist' -> nlist. 'nprobe' -> nprobe.
+    'train_iters' -> (self _positiveInt: 'train_iters' value: (aDictionary at: 'train_iters' ifAbsent: [10])).
+    'seed' -> seed.
+    'retrain_growth' -> (self _growth: 'retrain_growth' value: (aDictionary at: 'retrain_growth' ifAbsent: [4.0])) }.
+
+"The lists, the training and the explain entries of the ivf_flat backend are the vectors phase's
+ task V4 (Addendum V, 2.4 and 2.5). Until then an ivf_flat index can be defined, and every
+ operation that needs its lists refuses rather than file a member under a list proto_db would not
+ choose."
+PBVectorIvfFlat class >> _untilV4: aSelector
+  ^ PBNotSupportedError signal: 'PBVectorIvfFlat ' , aSelector
+    , ': the lists and the training of the ivf_flat backend land in the vectors phase''s task V4'.
+
+PBVectorIvfFlat class >> listFor: anIndex vector: aVector
+  ^ self _untilV4: 'listFor:vector:'.
+
+PBVectorIvfFlat class >> needsTraining: anIndex
+  ^ self _untilV4: 'needsTraining:'.
+
+PBVectorIvfFlat class >> train: anIndex vectors: aVectors
+  ^ self _untilV4: 'train:vectors:'.
+
+PBVectorIvfFlat class >> explainOf: anIndex
+  ^ self _untilV4: 'explainOf:'.
+
+"--- PBVectorHnsw (HnswBackend, vector_backends.py:751-821) ---"
+
+PBVectorHnsw class >> backendName
+  ^ 'hnsw'.
+
+PBVectorHnsw class >> kindName
+  ^ 'VectorHnsw'.
+
+PBVectorHnsw class >> defaults
+  ^ { 'M' -> 16. 'ef_construction' -> 200. 'ef_search' -> 64. 'seed' -> 0 }.
+
+"M (an Integer >= 2, default 16), seed (an Integer >= 0, default 0), ef_construction and
+ ef_search (Integers >= 1, defaults 200 and 64), checked in proto_db's order
+ (vector_backends.py:763-770). The graph they parameterise is hnswlib's and is never built here
+ (deviation DV1); they are kept and written."
+PBVectorHnsw class >> check: aDictionary
+  | m seed |
+  m := self _positiveInt: 'M' value: (aDictionary at: 'M' ifAbsent: [16]).
+  m < 2 ifTrue: [^ PBValidationError signal: 'Vector index parameter ''M'' must be >= 2, not ' , (self _repr: m)].
+  seed := self _seed: (aDictionary at: 'seed' ifAbsent: [0]).
+  ^ { 'M' -> m.
+    'ef_construction' -> (self _positiveInt: 'ef_construction' value: (aDictionary at: 'ef_construction' ifAbsent: [200])).
+    'ef_search' -> (self _positiveInt: 'ef_search' value: (aDictionary at: 'ef_search' ifAbsent: [64])).
+    'seed' -> seed }.
