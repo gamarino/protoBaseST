@@ -174,3 +174,4 @@ PBPlanner>>_setBase:indexes:
 PBField>>_setPath:spec:
 PBQuery>>_setSource:ops:
 PBPager>>_setPlan:pageSize:rows:ranked:
+PBNearQuery>>_setVector:k:threshold:metric:
