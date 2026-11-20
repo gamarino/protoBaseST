@@ -42,14 +42,19 @@
   DV7 e); `withAdded:`, `withRemoved:`, `withReplaced:with:`, `empty` and `build:` maintain the store
   and the invalid group node for node as `proto_db` does, node classes included (an invalid tree
   built in bulk stays a `KeyNode` tree, one grown from empty is a `CountedKeyNode` tree); `validate:`
-  and `explain` are `proto_db`'s; a signalling-NaN `Decimal` component of a stored element is refused
-  with CPython's text (DV7 b). The backends are `PBVectorExact`, `PBVectorIvfFlat` (its parameter
-  checks only; lists and training are V4's) and `PBVectorHnsw` (`src/protobase/vectors.st`).
+  and `explain` are `proto_db`'s (a stored total or vector component compared with Python's `==`:
+  `true` is 1); a signalling-NaN `Decimal` component of a stored element is refused with CPython's
+  text (DV7 b). The backends are `PBVectorExact`, `PBVectorIvfFlat` (its parameter checks and
+  explain entries; lists and training are V4's, refused naming the index until then) and
+  `PBVectorHnsw` (`src/protobase/vectors.st`). Every value a vector refusal quotes, `PBNearQuery`'s
+  included, is rendered as Python's `repr` (`True`, `None`, `(1.0,)`, `[1, 2]`) by one helper,
+  `PBCodec _pyRepr:`, moved from `PBTerm` (where `describe` uses it) to `src/protobase/codec.st`.
   `PBMemberKeys checkDepth:memberKey:index:outer:` counts the store key's two containers. A
   collection holding a vector index still refuses changes (V5), and no index answers `near[]` yet
-  (V6). Pinned by `tests/unit/vec_index.st`, `tests/interop/vector_index_identical.sh` (32 indexes,
-  `build:`, seeded hook sequences and the two invalid-tree histories, byte for byte) and the
-  `vectors` and `hnsw` roots of `tests/conformance/database_contents.st`.
+  (V6). Pinned by `tests/unit/vec_index.st`, `tests/interop/vector_index_identical.sh` (48 indexes
+  of dims 3, 1 and 16, `build:`, seeded hook sequences and the three invalid-tree histories, byte
+  for byte, and 59 refusal texts), and the `vectors`, `hnsw` and `ivf` roots of
+  `tests/conformance/database_contents.st`.
 - **Benchmark VB0** (`bench/run_query.sh VB0`, `bench/vector_workload.st`,
   `bench/py_vector_workload.py`, `bench/py_vector_data.py`): the kernel alone, fsum against a naive
   sum and the three scores, at dim 8, 32 and 128 over 10^4 vectors, self-verified against

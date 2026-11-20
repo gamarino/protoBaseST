@@ -886,7 +886,12 @@ class given only when the tree is empty (PBAvl keyPut:, avl.py key_put). build: 
 PBKeyNode trees (the store and the invalid members); withAdded: grows the store with PBKeyNodes and
 the invalid group as keyed.py group_add does (PBCountedKeyNode on an empty tree): an index built
 with invalid elements keeps its PBKeyNode invalid tree, one built without grows a PBCountedKeyNode
-tree from its first invalid element, as proto_db's does."
+tree from its first invalid element, as proto_db's does; so does one whose built invalid tree was
+emptied by removals.
+
+Texts: every refusal quotes the values proto_db quotes as Python's repr renders them (PBCodec
+_pyRepr:), and validate: compares a stored total or vector component with Python's == (true is 1,
+6.0 is 6: _number:equals:)."
 
 PBIndex subclass: #PBVectorIndex.
 
@@ -923,9 +928,9 @@ PBVectorIndex class >> name: aString keySpec: aPBKeySpec dim: aDim metric: aMetr
   | params |
   self _checkName: aString keySpec: aPBKeySpec.
   ((PBVectorBackend _isInt: aDim) and: [aDim >= 1]) ifFalse: [
-    ^ PBValidationError signal: 'A vector index needs an int dim >= 1, not ' , (PBVectorBackend _repr: aDim)].
+    ^ PBValidationError signal: 'A vector index needs an int dim >= 1, not ' , (PBCodec _pyRepr: aDim)].
   ((PBNearQuery _isText: aMetric) and: [self metrics includes: aMetric]) ifFalse: [
-    ^ PBValidationError signal: 'Unknown vector metric ' , (PBVectorBackend _repr: aMetric)
+    ^ PBValidationError signal: 'Unknown vector metric ' , (PBCodec _pyRepr: aMetric)
       , '; expected one of [''cosine'', ''l2'', ''ip'']'].
   params := PBVectorBackend normalize: aParams backend: aBackend.
   ^ self _newWithFields: {
@@ -1082,7 +1087,7 @@ PBVectorIndex >> withRemoved: anElement
   ^ self _with: { 'store' -> store. 'total_count' -> (self totalCount - 1) }.
 
 PBVectorIndex >> _notHeld: anElement
-  ^ PBValidationError signal: self _subject , ' does not hold ' , (PBKeys _preview: anElement)
+  ^ PBValidationError signal: self _subject , ' does not hold ' , (PBCodec _pyRepr: anElement)
     , '; an index can only remove an element it holds'.
 
 "An index over exactly the elements of aCollection (anything answering do:), built in bulk
@@ -1172,12 +1177,21 @@ PBVectorIndex >> _isInt: aValue atLeast: aMinimum
   ^ (PBVectorBackend _isInt: aValue) and: [aValue >= aMinimum].
 
 "Whether aVector, a stored vector, equals anActual, a canonical vector, as Python compares tuples:
- both tuples, of one length, item by item with float equality (0.0 = -0.0)."
+ both tuples, of one length, item by item with Python's == (_number:equals:)."
 PBVectorIndex >> _vector: aVector equals: anActual
   (aVector isClassObject not and: [aVector isKindOf: PBTuple]) ifFalse: [^ false].
   aVector size = anActual size ifFalse: [^ false].
-  1 to: aVector size do: [:i | (aVector at: i) = (anActual at: i) ifFalse: [^ false]].
+  1 to: aVector size do: [:i | (self class _number: (anActual at: i) equals: (aVector at: i)) ifFalse: [^ false]].
   ^ true.
+
+"Whether aNumber (an Integer or a Float) equals aValue, a stored value, as Python's == compares
+ them: a Boolean is the int 1 or 0 (bool is a subclass of int), an Integer, a Float or a Decimal
+ compares exactly (0.0 = -0.0, a NaN equals nothing), and any other value is unequal."
+PBVectorIndex class >> _number: aNumber equals: aValue
+  aValue == true ifTrue: [^ aNumber = 1].
+  aValue == false ifTrue: [^ aNumber = 0].
+  (aValue isClassObject not and: [aValue isNumber or: [aValue isKindOf: Decimal]]) ifFalse: [^ false].
+  ^ aNumber = aValue.
 
 "The training state (vector.py _check_centroids): a tuple of centroids and an Integer
  trained_size >= 0; none on a backend without lists; on ivf_flat, nlist centroids or none, a
@@ -1187,10 +1201,10 @@ PBVectorIndex >> _checkCentroids
   centroids := self stateAt: 'centroids'.
   trained := self stateAt: 'trained_size'.
   ((centroids isClassObject not and: [centroids isKindOf: PBTuple]) and: [self _isInt: trained atLeast: 0]) ifFalse: [
-    ^ self _corrupt: 'malformed training state ' , (PBKeys _preview: centroids) , ' / ' , (PBKeys _preview: trained)].
+    ^ self _corrupt: 'malformed training state ' , (PBCodec _pyRepr: centroids) , ' / ' , (PBCodec _pyRepr: trained)].
   self backend = 'ivf_flat' ifFalse: [
     (centroids isEmpty and: [trained = 0]) ifFalse: [
-      ^ self _corrupt: 'a ' , (PBVectorBackend _repr: self backend) , ' index holds IVF centroids'].
+      ^ self _corrupt: 'a ' , (PBCodec _pyRepr: self backend) , ' index holds IVF centroids'].
     ^ self].
   nlist := self paramAt: 'nlist'.
   (centroids notEmpty and: [centroids size ~= nlist]) ifTrue: [
@@ -1200,7 +1214,7 @@ PBVectorIndex >> _checkCentroids
   centroids do: [:c | | canonical |
     canonical := PBVectorMath canonicalVector: c dim: self dim.
     (canonical notNil and: [self _vector: c equals: canonical]) ifFalse: [
-      ^ self _corrupt: 'malformed centroid ' , (PBKeys _preview: c)]].
+      ^ self _corrupt: 'malformed centroid ' , (PBCodec _pyRepr: c)]].
 
 "The store's occurrences, counted into aStored (vector.py _check_store): the AVL invariants, then
  for each entry a (list number, member key) key, an (element, count, vector) value, a positive
@@ -1214,24 +1228,24 @@ PBVectorIndex >> _checkStore: aStored
   PBAvl keysAndValuesDo: [:key :entry |
     | element n vector actual expected id |
     ((key isClassObject not and: [key isKindOf: PBTuple]) and: [key size = 2 and: [PBVectorBackend _isInt: (key at: 1)]]) ifFalse: [
-      ^ self _corrupt: 'malformed store key ' , (PBKeys _preview: key)].
+      ^ self _corrupt: 'malformed store key ' , (PBCodec _pyRepr: key)].
     ((entry isClassObject not and: [entry isKindOf: PBTuple]) and: [entry size = 3]) ifFalse: [
-      ^ self _corrupt: 'malformed store entry ' , (PBKeys _preview: entry)].
+      ^ self _corrupt: 'malformed store entry ' , (PBCodec _pyRepr: entry)].
     element := entry at: 1.
     n := entry at: 2.
     vector := entry at: 3.
     (self _isInt: n atLeast: 1) ifFalse: [
-      ^ self _corrupt: 'element ' , (PBKeys _preview: element) , ' has the count ' , (PBKeys _preview: n)].
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' has the count ' , (PBCodec _pyRepr: n)].
     (self _memberKey: (key at: 2) matches: element current: current) ifFalse: [
-      ^ self _corrupt: 'element ' , (PBKeys _preview: element) , ' is stored under the wrong member key '
-        , (PBKeys _preview: (key at: 2))].
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' is stored under the wrong member key '
+        , (PBCodec _pyRepr: (key at: 2))].
     actual := self _vector: element.
     (actual notNil and: [self _vector: vector equals: actual]) ifFalse: [
-      ^ self _corrupt: 'element ' , (PBKeys _preview: element) , ' is stored with the vector ' , (PBKeys _preview: vector)
-        , ', its key gives ' , (PBKeySpec _repr: actual)].
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' is stored with the vector ' , (PBCodec _pyRepr: vector)
+        , ', its key gives ' , (PBCodec _pyRepr: actual)].
     expected := backend listFor: self vector: vector.
     (key at: 1) = expected ifFalse: [
-      ^ self _corrupt: 'element ' , (PBKeys _preview: element) , ' is in list ' , (key at: 1) printString
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' is in list ' , (key at: 1) printString
         , ', its vector belongs to ' , expected printString].
     id := self class _storedIdentity: element valid: true.
     aStored at: id put: (aStored at: id ifAbsent: [0]) + n.
@@ -1245,7 +1259,7 @@ PBVectorIndex >> _checkInvalid: aStored
   | group members total current seen |
   group := self stateAt: 'invalid'.
   ((group isClassObject not and: [group isKindOf: PBTuple]) and: [group size = 2]) ifFalse: [
-    ^ self _corrupt: 'malformed invalid group ' , (PBKeys _preview: group)].
+    ^ self _corrupt: 'malformed invalid group ' , (PBCodec _pyRepr: group)].
   members := group at: 1.
   total := group at: 2.
   PBAvl check: members.
@@ -1254,21 +1268,21 @@ PBVectorIndex >> _checkInvalid: aStored
   PBAvl keysAndValuesDo: [:key :entry |
     | element n id |
     ((entry isClassObject not and: [entry isKindOf: PBTuple]) and: [entry size = 2]) ifFalse: [
-      ^ self _corrupt: 'malformed invalid entry ' , (PBKeys _preview: entry)].
+      ^ self _corrupt: 'malformed invalid entry ' , (PBCodec _pyRepr: entry)].
     element := entry at: 1.
     n := entry at: 2.
     (self _isInt: n atLeast: 1) ifFalse: [
-      ^ self _corrupt: 'element ' , (PBKeys _preview: element) , ' has the count ' , (PBKeys _preview: n)].
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' has the count ' , (PBCodec _pyRepr: n)].
     (self _memberKey: key matches: element current: current) ifFalse: [
-      ^ self _corrupt: 'element ' , (PBKeys _preview: element) , ' is kept under the wrong member key '
-        , (PBKeys _preview: key)].
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' is kept under the wrong member key '
+        , (PBCodec _pyRepr: key)].
     (self _vector: element) isNil ifFalse: [
-      ^ self _corrupt: 'element ' , (PBKeys _preview: element) , ' has a valid vector but is kept as invalid'].
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' has a valid vector but is kept as invalid'].
     id := self class _storedIdentity: element valid: false.
     aStored at: id put: (aStored at: id ifAbsent: [0]) + n.
     seen := seen + n] over: members.
-  total = seen ifFalse: [
-    ^ self _corrupt: 'the invalid group records ' , (PBKeys _preview: total) , ' occurrences but holds ' , seen printString].
+  (self class _number: seen equals: total) ifFalse: [
+    ^ self _corrupt: 'the invalid group records ' , (PBCodec _pyRepr: total) , ' occurrences but holds ' , seen printString].
   ^ seen.
 
 "The identity of an occurrence in the stored multiset, ('vector' or 'invalid', element identity,
@@ -1287,8 +1301,8 @@ PBVectorIndex >> validate: aCollection
   self _checkCentroids.
   stored := Dictionary new.
   total := (self _checkStore: stored) + (self _checkInvalid: stored).
-  total = (self stateAt: 'total_count') ifFalse: [
-    ^ self _corrupt: 'total_count is ' , (PBKeys _preview: (self stateAt: 'total_count')) , ' but ' , total printString
+  (self class _number: total equals: (self stateAt: 'total_count')) ifFalse: [
+    ^ self _corrupt: 'total_count is ' , (PBCodec _pyRepr: (self stateAt: 'total_count')) , ' but ' , total printString
       , ' occurrences are stored'].
   expected := Dictionary new.
   aCollection do: [:element |

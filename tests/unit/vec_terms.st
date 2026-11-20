@@ -31,31 +31,37 @@ a1 := t value: 'a' value: '==' value: 1.
 "test_near_query_validation (terms.py NearQuery.__post_init__): every invalid form is
  PBValidationError with proto_db's text"
 fails := OrderedCollection new.
-{ { #(). 1. nil. nil } -> 'near[] needs a non-empty vector, not #()'.
+{ { #(). 1. nil. nil } -> 'near[] needs a non-empty vector, not []'.
   { #(1.0). nil. nil. nil } -> 'near[] needs k, threshold or both'.
   { #(1.0). 0. nil. nil } -> 'near[] k must be an int >= 1, not 0'.
-  { #(1.0). true. nil. nil } -> 'near[] k must be an int >= 1, not true'.
+  { #(1.0). true. nil. nil } -> 'near[] k must be an int >= 1, not True'.
   { #(1.0). 1.5. nil. nil } -> 'near[] k must be an int >= 1, not 1.5'.
-  { { Float nan }. 1. nil. nil } -> 'A vector component must be a finite number, not '.
-  { { Float infinity }. 1. nil. nil } -> 'A vector component must be a finite number, not '.
-  { { true }. 1. nil. nil } -> 'A vector component must be a finite number, not true'.
+  { { Float nan }. 1. nil. nil } -> 'A vector component must be a finite number, not nan'.
+  { { Float infinity }. 1. nil. nil } -> 'A vector component must be a finite number, not inf'.
+  { { Float infinity negated }. 1. nil. nil } -> 'A vector component must be a finite number, not -inf'.
+  { { true }. 1. nil. nil } -> 'A vector component must be a finite number, not True'.
   { #('1'). 1. nil. nil } -> 'A vector component must be a finite number, not ''1'''.
   { 1.0. 1. nil. nil } -> 'near[] needs a non-empty vector, not 1.0'.
   { 'ab'. 1. nil. nil } -> 'near[] needs a non-empty vector, not ''ab'''.
-  { #(1.0). nil. Float nan. nil } -> 'near[] threshold must be a finite number, not '.
+  { #(1.0). nil. Float nan. nil } -> 'near[] threshold must be a finite number, not nan'.
   { #(1.0). nil. '0.1'. nil } -> 'near[] threshold must be a finite number, not ''0.1'''.
   { #(1.0). 1. nil. 'manhattan' } -> 'near[] metric must be one of [''cosine'', ''ip'', ''l2''] or None, not ''manhattan'''.
-  { #(1.0). 1. nil. 'L2' } -> 'near[] metric must be one of'.
-  { { Decimal fromString: '1E+400' }. 1. nil. nil } -> 'A vector component must be a finite number, not '.
-  { { Decimal fromString: 'NaN' }. 1. nil. nil } -> 'A vector component must be a finite number, not '.
-  { { Object new }. 1. nil. nil } -> 'A vector component must be a finite number'.
-  { Set new. 1. nil. nil } -> 'near[] needs a non-empty vector' } do: [:each | | text |
-    text := msg value: [nq valueWithArguments: each key].
-    ((text beginsWith: 'PBValidationError: ') and: [text includesSubstring: each value]) ifFalse: [
-      fails add: each key printString , ': ' , text]].
+  { #(1.0). 1. nil. 'L2' } -> 'near[] metric must be one of [''cosine'', ''ip'', ''l2''] or None, not ''L2'''.
+  { #(1.0). 1. nil. 3 } -> 'near[] metric must be one of [''cosine'', ''ip'', ''l2''] or None, not 3'.
+  { { Decimal fromString: '1E+400' }. 1. nil. nil } -> 'A vector component must be a finite number, not Decimal(''1E+400'')'.
+  { { Decimal fromString: 'NaN' }. 1. nil. nil } -> 'A vector component must be a finite number, not Decimal(''NaN'')'.
+  { { PBTuple withAll: #(1.0) }. 1. nil. nil } -> 'A vector component must be a finite number, not (1.0,)'.
+  { { PBFrozenDict withAssociations: { 'a' -> nil } }. 1. nil. nil } -> 'A vector component must be a finite number, not {''a'': None}'.
+  { PBTuple withAll: #(). 1. nil. nil } -> 'near[] needs a non-empty vector, not ()' } do: [:each |
+    expect value: each key printString value: (msg value: [nq valueWithArguments: each key]) value: 'PBValidationError: ' , each value].
+"Values Python has no counterpart of are refused with the same sentence."
+{ { { Object new }. 1. nil. nil } -> 'A vector component must be a finite number, not '.
+  { Set new. 1. nil. nil } -> 'near[] needs a non-empty vector, not ' } do: [:each |
+    expect value: each key printString value: ((msg value: [nq valueWithArguments: each key]) beginsWith: 'PBValidationError: ' , each value)
+      value: true].
 "The order of proto_db's checks: the vector first, then k and threshold, then the metric."
 expect value: 'the vector is checked first' value: (msg value: [nq value: #() value: 0 value: Float nan value: 'x'])
-  value: 'PBValidationError: near[] needs a non-empty vector, not #()'.
+  value: 'PBValidationError: near[] needs a non-empty vector, not []'.
 expect value: 'then k' value: (msg value: [nq value: #(1) value: 0 value: Float nan value: 'x'])
   value: 'PBValidationError: near[] k must be an int >= 1, not 0'.
 expect value: 'then the threshold' value: ((msg value: [nq value: #(1) value: 1 value: Float nan value: 'x']) beginsWith: 'PBValidationError: near[] threshold')
@@ -82,7 +88,7 @@ fails := OrderedCollection new.
   { { Decimal fromString: 'sNaN' }. 1. nil. nil } -> 'PBValidationError: cannot convert signaling NaN to float'.
   { { 1. Decimal fromString: '-sNaN' }. 1. nil. nil } -> 'PBValidationError: cannot convert signaling NaN to float'.
   { #(1.0). nil. Decimal fromString: 'sNaN'. nil } -> 'PBValidationError: cannot convert signaling NaN to float'.
-  { #(1.0). 1. nil. #('l2') } -> 'PBValidationError: near[] metric must be one of [''cosine'', ''ip'', ''l2''] or None, not #(''l2'')' } do: [:each |
+  { #(1.0). 1. nil. #('l2') } -> 'PBValidationError: near[] metric must be one of [''cosine'', ''ip'', ''l2''] or None, not [''l2'']' } do: [:each |
     expect value: each key printString value: (msg value: [nq valueWithArguments: each key]) value: each value].
 "An earlier refusal wins, as in Python: the components are read in order, then k."
 expect value: 'a string before an sNaN' value: ((msg value: [nq value: { 'x'. Decimal fromString: 'sNaN' } value: 1 value: nil value: nil])
@@ -203,7 +209,9 @@ expect value: 'describe of the term' value: (t value: 'v' value: 'near[]' value:
   value: (dict value: { 'path' -> 'v'. 'op' -> 'near[]'. 'value' -> (dict value: { 'vector' -> #(1.0). 'k' -> nil. 'threshold' -> 0.5. 'metric' -> 'l2' }) }).
 expect value: 'displayValue: of a query' value: (PBTerm displayValue: q) value: q describe.
 expect value: 'describe is plain data' value: (refused value: [PBCodec canonical: (t value: 'v' value: 'near[]' value: q) describe]) value: nil.
-expect value: 'a query prints' value: q printString value: 'PBNearQuery(vector=(1.0, 0.0), k=3, threshold=nil, metric=nil)'.
+expect value: 'a query prints' value: q printString value: 'PBNearQuery(vector=(1.0, 0.0), k=3, threshold=None, metric=None)'.
+expect value: 'a query prints its values as Python does' value: (nq value: #(1 1.0e16) value: nil value: 0.5 value: 'l2') printString
+  value: 'PBNearQuery(vector=(1.0, 1e+16), k=None, threshold=0.5, metric=''l2'')'.
 c that: 'the list syntax reads and writes both near[] forms, and describe is proto_db''s' is: fails asArray equals: #().
 
 "test_filter_accepts_prefix_lists_and_rejects_near"
@@ -213,7 +221,7 @@ people := { rec value: { 'name' -> 'ann'. 'city' -> 'Rome' }. rec value: { 'name
 scan := (PBList new extend: people) asQueryPlan.
 expect value: 'a prefix list' value: (PBFilter source: scan terms: #('city' '==' 'Oslo')) execute asArray value: { people at: 2. people at: 4 }.
 expect value: 'a near[] term' value: (msg value: [PBFilter source: scan terms: { t value: 'v' value: 'near[]' value: (PBNearQuery vector: #(1.0) k: 1) }])
-  value: 'PBValidationError: A Filter cannot evaluate ''near[]'' terms (PBTerm(''v'', ''near[]'', PBNearQuery(vector=(1.0,), k=1, threshold=nil, metric=nil))); use a VectorSearch plan'.
+  value: 'PBValidationError: A Filter cannot evaluate ''near[]'' terms (PBTerm(''v'', ''near[]'', PBNearQuery(vector=(1.0,), k=1, threshold=None, metric=None))); use a VectorSearch plan'.
 { { 'v'. 'near[]'. #(1). 0.5 }. { a1. { '!'. 'v'. 'near[]'. #(1). 0.5 } }. { '|'. a1. { 'v'. 'near[]'. #(1). 0.5 } } } do: [:tokens |
   expect value: 'a near[] inside ' , tokens printString value: (refused value: [PBFilter source: scan terms: tokens]) value: PBValidationError].
 expect value: 'a String' value: (refused value: [PBFilter source: scan terms: 'city == ''Oslo''']) value: PBValidationError.
@@ -269,8 +277,9 @@ cases do: [:case | | id expr |
       fails add: id , ': asList ' , expr asList printString].
     (MessagePack encode: (TermAtoms tree: expr describe)) = (case at: 'describe') ifFalse: [
       fails add: id , ': describe ' , expr describe printString]]].
-"Where proto_db's text quotes only the mapping's keys, rendered by Python's str, it is the same text."
-(cases select: [:case | (case at: 'id') includesSubstring: 'keys of other types']) do: [:case |
+"Every refusal that is proto_db's own carries proto_db's text, the values it quotes rendered as
+ Python renders them (repr, or str for the keys of a mapping)."
+(cases select: [:case | (case at: 'error') = 'ProtoValidationError']) do: [:case |
   expect value: (case at: 'id') value: (msg value: [PBExpression compile: (atoms decode: (case at: 'tokens'))])
     value: 'PBValidationError: ' , (case at: 'error_text')].
 "The DV7 cases carry CPython's text."
@@ -280,11 +289,11 @@ cases do: [:case | | id expr |
     ((text = 'PBValidationError: int too large to convert to float' or: [text = 'PBValidationError: cannot convert signaling NaN to float'])
       or: [text beginsWith: 'PBValidationError: near[] metric must be one of']) ifFalse: [fails add: (case at: 'id') , ': ' , text]].
 "Counts of the vector: 42 near[] cases, 11 compiled (2 of them listed in the 0.1 form), 5 of
- Python's own errors."
+ Python's own errors, 26 of proto_db's own refusals."
 expect value: 'counts' value: { cases size. (cases select: [:case | (case at: 'error') isNil]) size.
     (cases select: [:case | (case at: 'to_list') notNil]) size.
     (cases select: [:case | (case at: 'id') includesSubstring: '(DV7']) size.
-    (cases select: [:case | (case at: 'id') includesSubstring: 'keys of other types']) size } value: #(42 11 2 5 1).
+    (cases select: [:case | (case at: 'error') = 'ProtoValidationError']) size } value: #(42 11 2 5 26).
 c that: 'the near[] cases of the term vector are proto_db''s' is: fails asArray equals: #().
 
 c report displayNl.

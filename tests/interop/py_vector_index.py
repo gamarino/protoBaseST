@@ -19,14 +19,21 @@ so that the records are the same atoms with the same oids on both sides:
            tokens, repeated values, a NaN and unorderable values (lists, maps) among them
   'big'    600 records over 125 distinct small vectors, a sixth of them occurring twice:
            store trees several levels deep
+  'd1'     plain values whose keys are valid 1-vectors (every numeric form, signed zeros, a
+           subnormal, equal values with other tokens) or not (another length, a Boolean, a NaN,
+           an infinity, a String, None, an int), some repeated
+  'd16'    records whose 'vec' is a valid 16-vector of Floats, Integers and Decimals, or one of
+           another length, holding a NaN, or None, some repeated
   'ops'    per element set, a seeded sequence of [op, i, j] (0 adds element i, 1 removes element
            i, always one the index holds, 2 replaces element i by element j); and 'histories',
-           the two invalid-tree histories of Addendum V 2.11 item 3: [build indices, added index]
-           of 'recs', built with invalid elements then given another, and built without, then
-           given one
+           the three invalid-tree histories of Addendum V 2.11 item 3: [build indices, removed
+           indices, added index] of 'recs', built with invalid elements then given another, built
+           without then given one, and built with invalid elements, all of them removed, then
+           given another
 'dump' (and _st_vector_index.st on the same space) prints, for each index kind of KINDS and each
-(set, key spec) of SPECS, the index build makes over the set, then the index the ops derive from
-the build over the set's first half; then, per kind, the two histories. Each index is printed as
+(set, key spec) of SPECS, then for each kind of DIM_KINDS (dims 1 and 16, the three metrics), the
+index build makes over the set, then the index the ops derive from the build over the set's first
+half; then, per kind of KINDS, the three histories; then the refusal texts (refusals). Each index is printed as
 'index <label>', then one line per atom reached from it, breadth first in the order the encoder
 meets the references: '<number> <type name> <hex of the msgpack of the encoded state>', a saved
 atom (an element) written as its own pointer, an unsaved one (a node) as the pointer (fixed
@@ -50,6 +57,8 @@ from proto_db.core import codec  # noqa: E402
 from proto_db.core.atom import AtomPointer  # noqa: E402
 from proto_db.core.dbobject import DBObject  # noqa: E402
 from proto_db.indexing import KeySpec  # noqa: E402
+from proto_db.collections import avl  # noqa: E402
+from proto_db.indexing.keyed import member_key  # noqa: E402
 from proto_db.indexing.vector import VectorIndex  # noqa: E402
 from proto_db.indexing.vector_backends import numpy_module  # noqa: E402
 from proto_db.values import FrozenDict, FrozenList  # noqa: E402
@@ -57,11 +66,24 @@ from proto_db.values import FrozenDict, FrozenList  # noqa: E402
 SEGMENT = uuid.UUID(bytes=bytes.fromhex("0123456789abcdef0123456789abcdef"))
 SEED = 20261120
 SPECS = [("recs", "path vec"), ("vals", "element"), ("big", "path vec")]
+#: (set, key spec) of the element sets of other dimensions, replayed like SPECS.
+DIM_SPECS = [("d1", "element"), ("d16", "path vec")]
 #: (label, metric, backend, params): the index kinds, each over every (set, key spec).
 KINDS = [("exact-l2", "l2", "exact", {}),
          ("exact-cosine-nonumpy", "cosine", "exact", {"numpy": False}),
          ("hnsw-ip", "ip", "hnsw", {"M": 8, "seed": 3}),
          ("hnsw-cosine", "cosine", "hnsw", {})]
+#: (label, dim, metric, backend, params, set, key spec): dims 1 and 16, each over the three metrics.
+DIM_KINDS = [("d1-cosine-exact", 1, "cosine", "exact", {}, "d1", "element"),
+             ("d1-l2-hnsw", 1, "l2", "hnsw", {"M": 2}, "d1", "element"),
+             ("d1-ip-exact", 1, "ip", "exact", {"numpy": False}, "d1", "element"),
+             ("d16-cosine-hnsw", 16, "cosine", "hnsw", {"M": 4, "seed": 9}, "d16", "path vec"),
+             ("d16-l2-exact", 16, "l2", "exact", {}, "d16", "path vec"),
+             ("d16-ip-hnsw", 16, "ip", "hnsw", {}, "d16", "path vec")]
+#: The values the refusal cases tamper with (an index over them, the element key spec, dim 3).
+TAMPER_VALUES = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1, 2, 3), None, "abc", (1.0, 2.0)]
+#: The invalid-tree histories, named as 'ops' lists them.
+HISTORIES = ("built with invalid", "built without invalid", "built, emptied, regrown")
 ABSENT = object()
 
 
@@ -104,9 +126,27 @@ def make(directory):
         grid = [(float(a), float(b), float(c)) for a in range(-2, 3) for b in range(-2, 3) for c in range(-2, 3)]
         big = [DBObject(n=i, vec=grid[(i * 7919) % len(grid)]) for i in range(600)]
         big += big[:100]
-        sets = {"recs": recs, "vals": vals, "big": big}
+        d1 = [(1.0,), (-2.5,), (0,), (3,), (Decimal("0.5"),), (-0.0,), (0.0,), (1e300,), (2**60 + 1,), FrozenList([7]),
+              (1,), (1.0,), (5e-324,), (1.0, 2.0), (), (True,), (float("nan"),), (float("inf"),), "x", None, 5,
+              (Decimal("NaN"),), FrozenList([1.0, 2.0])]
+        d1 += [d1[0], d1[2], d1[15], d1[19]]
+        d16 = []
+        for i in range(90):
+            r = rnd.random()
+            if r < 0.75:
+                vec = tuple(rnd.choice((float(rnd.randint(-3, 3)), rnd.randint(-3, 3), Decimal(rnd.randint(-6, 6)) / 2))
+                            for _ in range(16))
+            elif r < 0.85:
+                vec = tuple(float(rnd.randint(-3, 3)) for _ in range(rnd.choice((15, 17))))
+            elif r < 0.95:
+                vec = tuple([float("nan")] + [1.0] * 15)
+            else:
+                vec = None
+            d16.append(DBObject(n=i, vec=vec))
+        d16 += [d16[0], d16[5], d16[5]]
+        sets = {"recs": recs, "vals": vals, "big": big, "d1": d1, "d16": d16}
         ops = {}
-        for set_name, spec in SPECS:
+        for set_name, spec in SPECS + DIM_SPECS:
             elements = sets[set_name]
             held = list(range(len(elements) // 2))
             seq = []
@@ -127,10 +167,10 @@ def make(directory):
             ops[f"{set_name}/{spec}"] = seq
         valid_at = [i for i, k in enumerate(kinds) if k == "valid"]
         invalid_at = [i for i, k in enumerate(kinds) if k == "invalid"]
-        ops["histories"] = [[valid_at[:20] + invalid_at[:8], invalid_at[8]], [valid_at[:20], invalid_at[0]]]
-        tx.set_root_object("recs", recs)
-        tx.set_root_object("vals", vals)
-        tx.set_root_object("big", big)
+        ops["histories"] = [[valid_at[:20] + invalid_at[:8], [], invalid_at[8]], [valid_at[:20], [], invalid_at[0]],
+                            [valid_at[:20] + invalid_at[:8], invalid_at[:8], invalid_at[8]]]
+        for name, elements in sets.items():
+            tx.set_root_object(name, elements)
         tx.set_root_object("ops", ops)
         tx.commit()
     finally:
@@ -165,6 +205,90 @@ def show(label, index):
         print(line)
 
 
+#: The definitions refused, (dim, metric, backend, params), each in proto_db's order of checks.
+DEFINITIONS = [(0, "cosine", "exact", {}), (True, "cosine", "exact", {}), (2.0, "cosine", "exact", {}),
+               ("3", "cosine", "exact", {}), (None, "cosine", "exact", {}), (3, "dot", "exact", {}),
+               (3, None, "exact", {}), (3, 3, "exact", {}), (3, "l2", "annoy", {}), (3, "l2", None, {}),
+               (3, "l2", "exact", {"numpy": 1}), (3, "l2", "exact", {"numpy": None}), (3, "l2", "exact", {"nlist": 3}),
+               (3, "l2", "hnsw", {"M": 1}), (3, "l2", "hnsw", {"M": True}), (3, "l2", "hnsw", {"seed": -1}),
+               (3, "l2", "hnsw", {"seed": 1.5}), (3, "l2", "hnsw", {"ef_search": 0}),
+               (3, "l2", "hnsw", {"zz": 1, "aa": 2}), (3, "l2", "ivf_flat", {"nlist": 0}),
+               (3, "l2", "ivf_flat", {"nlist": 4, "nprobe": 5}), (3, "l2", "ivf_flat", {"retrain_growth": Decimal("2")}),
+               (3, "l2", "ivf_flat", {"retrain_growth": "2"}), (3, "l2", "ivf_flat", {"retrain_growth": float("inf")}),
+               (3, "l2", "ivf_flat", {"retrain_growth": True}), (3, "l2", "ivf_flat", {"retrain_growth": 1}),
+               (3, "l2", "ivf_flat", {"retrain_growth": 10**400}), (3, "l2", "ivf_flat", {"train_iters": None})]
+#: The class of each refusal as both sides name it (Python's own errors are PBValidationError, DV7).
+CLASSES = {"ProtoValidationError": "validation", "ProtoCorruptionError": "corruption",
+           "ProtoNotSupportedError": "not supported", "OverflowError": "validation", "ValueError": "validation"}
+
+
+def refused(label, block):
+    try:
+        block()
+        print(f"refusal {label}: none")
+    except Exception as e:  # noqa: BLE001 - every refusal is printed and compared
+        print(f"refusal {label}: {CLASSES.get(type(e).__name__, type(e).__name__)}: {e}")
+
+
+def refusals():
+    """The texts of the refusals both sides print: the definitions of DEFINITIONS, withRemoved: of
+    a value not held, and validate: of an index over TAMPER_VALUES tampered as tests/unit/vec_index.st
+    tampers it (Python's == on totals and stored components included)."""
+    for n, (dim, metric, backend, params) in enumerate(DEFINITIONS, 1):
+        refused(f"definition {n}", lambda: VectorIndex("vi", KeySpec.element(), dim, metric, backend, **params))
+    empty = VectorIndex("vi", KeySpec.element(), 3, "l2", "exact")
+    refused("not held, a vector", lambda: empty.with_removed((1.0, 0.5, 0.0)))
+    refused("not held, an invalid key", lambda: empty.with_removed("abc"))
+    values = TAMPER_VALUES
+    index = empty.build(values)
+    store, (members, total) = index.store, index.invalid
+    mk = member_key
+    vkey = (0, mk(values[0]))
+    entry = avl.key_get(store, vkey)
+
+    def put(tree, key, value):
+        return avl.key_put(tree, key, value)[0]
+
+    one = empty.build([values[0]])
+    abc = empty.build(["abc"])
+    tampered = [
+        ("invalid None", index._with(invalid=None)),
+        ("invalid triple", index._with(invalid=(None, 0, 0))),
+        ("invalid list", index._with(invalid=FrozenList([None, 0]))),
+        ("invalid entry single", index._with(invalid=(put(members, mk("abc"), ("abc",)), total))),
+        ("invalid count True", index._with(invalid=(put(members, mk("abc"), ("abc", True)), total))),
+        ("invalid count 0", index._with(invalid=(put(members, mk("abc"), ("abc", 0)), total))),
+        ("invalid wrong key", index._with(invalid=(put(avl.key_remove(members, mk("abc"))[0], mk("abd"), ("abc", 1)),
+                                                   total))),
+        ("invalid valid vector", index._with(invalid=(put(members, mk(values[0]), (values[0], 1)), total + 1),
+                                             total_count=index.total_count + 1)),
+        ("invalid total 5", index._with(invalid=(members, 5))),
+        ("invalid total True", abc._with(invalid=(abc.invalid[0], True))),
+        ("store key str", index._with(store=put(store, "x", entry))),
+        ("store key True", index._with(store=put(store, (True, vkey[1]), entry))),
+        ("store key triple", index._with(store=put(store, (0, vkey[1], 0), entry))),
+        ("store entry pair", index._with(store=put(store, vkey, entry[:2]))),
+        ("store count True", index._with(store=put(store, vkey, (entry[0], True, entry[2])))),
+        ("store count 1.0", index._with(store=put(store, vkey, (entry[0], 1.0, entry[2])))),
+        ("store wrong key", index._with(store=put(store, (0, mk(values[1])), entry))),
+        ("store vector", index._with(store=put(store, vkey, (entry[0], 1, (9.0, 9.0, 9.0))))),
+        ("store vector list", index._with(store=put(store, vkey, (entry[0], 1, FrozenList([1.0, 0.0, 0.0]))))),
+        ("store vector True", index._with(store=put(store, vkey, (entry[0], 1, (True, 0, 0))))),
+        ("store vector None", index._with(store=put(store, (0, mk("abc")), ("abc", 1, None)))),
+        ("trained_size True", index._with(trained_size=True)),
+        ("centroids list", index._with(centroids=FrozenList([]))),
+        ("centroids on exact", index._with(centroids=((1.0, 0.0, 0.0),), trained_size=1)),
+        ("total_count 7", index._with(total_count=7)),
+        ("total_count 6.0", index._with(total_count=6.0)),
+        ("total_count Decimal", index._with(total_count=Decimal(6))),
+        ("total_count False", one._with(total_count=False)),
+        ("total_count True", one._with(total_count=True))]
+    for label, bad in tampered:
+        elements = [values[0]] if label in ("total_count False", "total_count True") else (
+            ["abc"] if label == "invalid total True" else values)
+        refused(f"validate {label}", lambda: bad.validate(elements))
+
+
 def run(directory):
     if numpy_module() is not None:
         raise SystemExit("numpy is importable although it was blocked")
@@ -173,28 +297,33 @@ def run(directory):
     space = ObjectSpace(FileStorage(directory))
     try:
         tx = space.open_database("vec").new_transaction()
-        sets = {name: list(tx.get_root_object(name)) for name in ("recs", "vals", "big")}
+        sets = {name: list(tx.get_root_object(name)) for name in ("recs", "vals", "big", "d1", "d16")}
         ops = tx.get_root_object("ops")
+        kinds = [(kind, 3, metric, backend, params, set_name, spec_name)
+                 for kind, metric, backend, params in KINDS for set_name, spec_name in SPECS] + DIM_KINDS
+        for kind, dim, metric, backend, params, set_name, spec_name in kinds:
+            elements = sets[set_name]
+            spec = KeySpec.element() if spec_name == "element" else KeySpec.path("vec")
+            empty = VectorIndex("vi", spec, dim, metric, backend, **params)
+            label = f"{kind} {set_name} {spec_name}"
+            show(f"{label} build", empty.build(elements))
+            index = empty.build(elements[: len(elements) // 2])
+            for op, i, j in ops[f"{set_name}/{spec_name}"]:
+                if op == 0:
+                    index = index.with_added(elements[i])
+                elif op == 1:
+                    index = index.with_removed(elements[i])
+                else:
+                    index = index.with_replaced(elements[i], elements[j])
+            show(f"{label} hooks", index)
+        recs = sets["recs"]
         for kind, metric, backend, params in KINDS:
-            for set_name, spec_name in SPECS:
-                elements = sets[set_name]
-                spec = KeySpec.element() if spec_name == "element" else KeySpec.path("vec")
-                empty = VectorIndex("vi", spec, 3, metric, backend, **params)
-                label = f"{kind} {set_name} {spec_name}"
-                show(f"{label} build", empty.build(elements))
-                index = empty.build(elements[: len(elements) // 2])
-                for op, i, j in ops[f"{set_name}/{spec_name}"]:
-                    if op == 0:
-                        index = index.with_added(elements[i])
-                    elif op == 1:
-                        index = index.with_removed(elements[i])
-                    else:
-                        index = index.with_replaced(elements[i], elements[j])
-                show(f"{label} hooks", index)
-            recs = sets["recs"]
-            for name, (built, added) in zip(("built with invalid", "built without invalid"), ops["histories"]):
-                empty = VectorIndex("vi", KeySpec.path("vec"), 3, metric, backend, **params)
-                show(f"{kind} history {name}", empty.build([recs[i] for i in built]).with_added(recs[added]))
+            for name, (built, removed, added) in zip(HISTORIES, ops["histories"]):
+                index = VectorIndex("vi", KeySpec.path("vec"), 3, metric, backend, **params).build([recs[i] for i in built])
+                for i in removed:
+                    index = index.with_removed(recs[i])
+                show(f"{kind} history {name}", index.with_added(recs[added]))
+        refusals()
         tx.abort()
     finally:
         space.close()

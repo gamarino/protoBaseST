@@ -52,8 +52,10 @@ on them. PBNearQuery is the public value of a near[] term (terms.st).
                                     vector index stores, sorted by name in code-point order
     listFor: index vector: v, needsTraining: index, train: index vectors: vs, explainOf: index
                                     the list of a vector (0 for exact and hnsw), the retrain test,
-                                    the centroids, the backend's explain entries; ivf_flat's are V4's
-                                    (PBNotSupportedError until then)
+                                    the centroids, the backend's explain entries; ivf_flat's lists
+                                    and training are V4's (PBNotSupportedError naming the index
+                                    until then), its explain entries are answered now
+    Values quoted in refusals are rendered as Python's repr (PBCodec _pyRepr:).
     The index (PBVectorIndex, indexes.st) holds every value; the backends are stateless and this
     module never imports indexes.st.
 
@@ -522,16 +524,16 @@ PBPythonRandom class >> _randbelow: anInteger state: aState
 PBNearQuery class >> vector: aSequence k: anIntegerOrNil threshold: aNumberOrNil metric: aStringOrNil
   | components threshold |
   ((self _isSequence: aSequence) and: [aSequence isEmpty not]) ifFalse: [
-    ^ PBValidationError signal: 'near[] needs a non-empty vector, not ' , (PBKeySpec _repr: aSequence)].
+    ^ PBValidationError signal: 'near[] needs a non-empty vector, not ' , (PBCodec _pyRepr: aSequence)].
   components := aSequence asArray collect: [:x | self _finiteNumber: x what: 'A vector component'].
   (anIntegerOrNil isNil and: [aNumberOrNil isNil]) ifTrue: [
     ^ PBValidationError signal: 'near[] needs k, threshold or both'].
   (anIntegerOrNil isNil or: [anIntegerOrNil isClassObject not and: [anIntegerOrNil isInteger and: [anIntegerOrNil >= 1]]]) ifFalse: [
-    ^ PBValidationError signal: 'near[] k must be an int >= 1, not ' , (PBKeySpec _repr: anIntegerOrNil)].
+    ^ PBValidationError signal: 'near[] k must be an int >= 1, not ' , (PBCodec _pyRepr: anIntegerOrNil)].
   threshold := aNumberOrNil isNil ifTrue: [nil] ifFalse: [self _finiteNumber: aNumberOrNil what: 'near[] threshold'].
   (aStringOrNil isNil or: [(self _isText: aStringOrNil) and: [self _metrics includes: aStringOrNil]]) ifFalse: [
     ^ PBValidationError signal: 'near[] metric must be one of [''cosine'', ''ip'', ''l2''] or None, not '
-      , (PBKeySpec _repr: aStringOrNil)].
+      , (PBCodec _pyRepr: aStringOrNil)].
   ^ self basicNew _setVector: (PBTuple _trustedOn: components) k: anIntegerOrNil threshold: threshold
     metric: (aStringOrNil isNil ifTrue: [nil] ifFalse: [aStringOrNil copy]).
 
@@ -556,11 +558,11 @@ PBNearQuery class >> _metrics
 PBNearQuery class >> _finiteNumber: aValue what: aText
   | f |
   (PBVectorMath _isComponent: aValue) ifFalse: [
-    ^ PBValidationError signal: aText , ' must be a finite number, not ' , (PBKeySpec _repr: aValue)].
+    ^ PBValidationError signal: aText , ' must be a finite number, not ' , (PBCodec _pyRepr: aValue)].
   f := PBVectorMath floatOf: aValue.
   f isNil ifTrue: [^ PBValidationError signal: 'int too large to convert to float'].
   (PBVectorMath _isFinite: f) ifFalse: [
-    ^ PBValidationError signal: aText , ' must be a finite number, not ' , (PBKeySpec _repr: aValue)].
+    ^ PBValidationError signal: aText , ' must be a finite number, not ' , (PBCodec _pyRepr: aValue)].
   ^ f.
 
 "Python's list or tuple: an Array, an OrderedCollection, a PBFrozenList or a PBTuple."
@@ -622,15 +624,13 @@ PBNearQuery class >> _floatHash: aFloatOrNil
   aFloatOrNil isNil ifTrue: [^ nil hash].
   ^ aFloatOrNil = 0.0 ifTrue: [0.0 hash] ifFalse: [aFloatOrNil hash].
 
-"PBNearQuery(vector=(1.0, 0.0), k=3, threshold=nil, metric=nil): the vector as Python prints a
- tuple."
+"PBNearQuery(vector=(1.0, 0.0), k=3, threshold=None, metric=None): the fields as Python's dataclass
+ repr prints them (PBCodec _pyRepr:)."
 PBNearQuery >> printOn: aStream
-  aStream nextPutAll: 'PBNearQuery(vector=('.
-  vector asArray doWithIndex: [:x :i |
-    i > 1 ifTrue: [aStream nextPutAll: ', '].
-    aStream print: x].
-  vector size = 1 ifTrue: [aStream nextPut: $,].
-  aStream nextPutAll: '), k='; print: k; nextPutAll: ', threshold='; print: threshold; nextPutAll: ', metric='; print: metric; nextPut: $).
+  aStream nextPutAll: 'PBNearQuery(vector='; nextPutAll: (PBCodec _pyRepr: vector);
+    nextPutAll: ', k='; nextPutAll: (PBCodec _pyRepr: k);
+    nextPutAll: ', threshold='; nextPutAll: (PBCodec _pyRepr: threshold);
+    nextPutAll: ', metric='; nextPutAll: (PBCodec _pyRepr: metric); nextPut: $).
 
 "=== PBVectorBackend: the backends of PBVectorIndex (vector_backends.py:305-333, 338-383, 480-524,
      566-734, 751-832) ===========================================================================
@@ -659,7 +659,7 @@ PBVectorBackend class >> named: aName
     aName = 'exact' ifTrue: [^ PBVectorExact].
     aName = 'ivf_flat' ifTrue: [^ PBVectorIvfFlat].
     aName = 'hnsw' ifTrue: [^ PBVectorHnsw]].
-  ^ PBValidationError signal: 'Unknown vector backend ' , (self _repr: aName)
+  ^ PBValidationError signal: 'Unknown vector backend ' , (PBCodec _pyRepr: aName)
     , '; expected one of [''exact'', ''ivf_flat'', ''hnsw'']'.
 
 "The backend's name, as an index stores it in 'backend'."
@@ -716,16 +716,16 @@ PBVectorBackend class >> normalize: aParams backend: aName
   aParams isNil ifFalse: [
     (aParams isClassObject not and: [(aParams isKindOf: Dictionary) or: [aParams isKindOf: PBFrozenDict]]) ifFalse: [
       ^ PBValidationError signal: 'PBVectorIndex params must be nil, a Dictionary or a PBFrozenDict of parameter names to values, not '
-        , (self _repr: aParams)].
+        , (PBCodec _pyRepr: aParams)].
     aParams keysAndValuesDo: [:k :v |
       (PBNearQuery _isText: k) ifFalse: [
-        ^ PBValidationError signal: 'PBVectorIndex parameter names must be Strings, not ' , (self _repr: k)].
+        ^ PBValidationError signal: 'PBVectorIndex parameter names must be Strings, not ' , (PBCodec _pyRepr: k)].
       given at: k put: v]].
   names := backend defaults collect: [:a | a key].
   unknown := (given keys reject: [:k | names includes: k]) asArray.
   unknown isEmpty ifFalse: [
     ^ PBValidationError signal: 'Unknown parameters ' , (self _reprList: unknown) , ' for the '
-      , (self _repr: aName) , ' vector backend; expected ' , (self _reprList: names)].
+      , (PBCodec _pyRepr: aName) , ' vector backend; expected ' , (self _reprList: names)].
   ^ PBTuple withAll: (((backend check: given) asArray sort: [:a :b | self _codePoints: a key notAfter: b key])
     collect: [:a | PBTuple withAll: { a key. a value }]).
 
@@ -737,28 +737,9 @@ PBVectorBackend class >> _codePoints: aString notAfter: anotherString
     x = y ifFalse: [^ x < y]].
   ^ aString size <= anotherString size.
 
-"Python's repr of a list of str, sorted: ['a', 'b']."
+"Python's repr of sorted(aStrings), a list of str: ['a', 'b']."
 PBVectorBackend class >> _reprList: aStrings
-  | out |
-  out := WriteStream on: String new.
-  out nextPut: $[.
-  (aStrings asArray sort: [:a :b | self _codePoints: a notAfter: b]) doWithIndex: [:s :i |
-    i > 1 ifTrue: [out nextPutAll: ', '].
-    out nextPutAll: (PBCodec repr: s)].
-  out nextPut: $].
-  ^ out contents.
-
-"Python's repr of aValue in proto_db's parameter messages: True and False, inf, -inf and nan,
- Decimal('2'), a String quoted, nil as None; any other value as PBKeySpec _repr: shows it."
-PBVectorBackend class >> _repr: aValue
-  aValue == true ifTrue: [^ 'True'].
-  aValue == false ifTrue: [^ 'False'].
-  aValue isClassObject ifTrue: [^ PBKeySpec _repr: aValue].
-  (aValue isFloat and: [(PBVectorMath _isFinite: aValue) not]) ifTrue: [
-    aValue isNaN ifTrue: [^ 'nan'].
-    ^ aValue > 0 ifTrue: ['inf'] ifFalse: ['-inf']].
-  (aValue isKindOf: Decimal) ifTrue: [^ 'Decimal(' , (PBCodec repr: aValue printString) , ')'].
-  ^ PBKeySpec _repr: aValue.
+  ^ PBCodec _pyRepr: (aStrings asArray sort: [:a :b | self _codePoints: a notAfter: b]).
 
 "Whether aValue is an Integer that is not a Boolean (Python's isinstance(v, int) and not bool)."
 PBVectorBackend class >> _isInt: aValue
@@ -769,20 +750,20 @@ PBVectorBackend class >> _isInt: aValue
 PBVectorBackend class >> _positiveInt: aName value: aValue
   ((self _isInt: aValue) and: [aValue >= 1]) ifFalse: [
     ^ PBValidationError signal: 'Vector index parameter ' , (PBCodec repr: aName) , ' must be an int >= 1, not '
-      , (self _repr: aValue)].
+      , (PBCodec _pyRepr: aValue)].
   ^ aValue.
 
 "_bool: aValue, a Boolean, or PBValidationError naming the parameter aName."
 PBVectorBackend class >> _bool: aName value: aValue
   (aValue == true or: [aValue == false]) ifFalse: [
     ^ PBValidationError signal: 'Vector index parameter ' , (PBCodec repr: aName) , ' must be a bool, not '
-      , (self _repr: aValue)].
+      , (PBCodec _pyRepr: aValue)].
   ^ aValue.
 
 "The seed checks of the ivf_flat and hnsw backends: an Integer >= 0."
 PBVectorBackend class >> _seed: aValue
   ((self _isInt: aValue) and: [aValue >= 0]) ifFalse: [
-    ^ PBValidationError signal: 'Vector index parameter ''seed'' must be an int >= 0, not ' , (self _repr: aValue)].
+    ^ PBValidationError signal: 'Vector index parameter ''seed'' must be an int >= 0, not ' , (PBCodec _pyRepr: aValue)].
   ^ aValue.
 
 "_growth (vector_backends.py:319-322): aValue, an Integer or a Float (not a Boolean), finite and
@@ -800,7 +781,7 @@ PBVectorBackend class >> _growth: aName value: aValue
     (PBVectorMath _isFinite: aValue) ifTrue: [f := aValue]].
   (f notNil and: [aValue > 1]) ifFalse: [
     ^ PBValidationError signal: 'Vector index parameter ' , (PBCodec repr: aName) , ' must be a finite number > 1, not '
-      , (self _repr: aValue)].
+      , (PBCodec _pyRepr: aValue)].
   ^ f.
 
 "--- PBVectorExact (ExactBackend, vector_backends.py:480-524) ---"
@@ -846,25 +827,30 @@ PBVectorIvfFlat class >> check: aDictionary
     'seed' -> seed.
     'retrain_growth' -> (self _growth: 'retrain_growth' value: (aDictionary at: 'retrain_growth' ifAbsent: [4.0])) }.
 
-"The lists, the training and the explain entries of the ivf_flat backend are the vectors phase's
- task V4 (Addendum V, 2.4 and 2.5). Until then an ivf_flat index can be defined, and every
- operation that needs its lists refuses rather than file a member under a list proto_db would not
- choose."
-PBVectorIvfFlat class >> _untilV4: aSelector
-  ^ PBNotSupportedError signal: 'PBVectorIvfFlat ' , aSelector
-    , ': the lists and the training of the ivf_flat backend land in the vectors phase''s task V4'.
+"The lists and the training of the ivf_flat backend are the vectors phase's task V4 (Addendum V,
+ 2.4 and 2.5). Until then an ivf_flat index can be defined, given or rid of an element whose key
+ is not a vector (the invalid group needs no list), emptied, explained, and validated while it
+ stores no member; every operation that needs a list number or the training refuses with
+ PBNotSupportedError naming the index, rather than file a member under a list proto_db would not
+ choose: withAdded: and withRemoved: of an element with a valid vector, build: (which always
+ trains, as proto_db's does, even on no vectors), validate: of an index with a stored member."
+PBVectorIvfFlat class >> _untilV4: aSelector index: anIndex
+  ^ PBNotSupportedError signal: anIndex _subject , ' uses the ivf_flat backend, whose lists and training ('
+    , self name , ' ' , aSelector , ') land in the vectors phase''s task V4'.
 
 PBVectorIvfFlat class >> listFor: anIndex vector: aVector
-  ^ self _untilV4: 'listFor:vector:'.
+  ^ self _untilV4: 'listFor:vector:' index: anIndex.
 
 PBVectorIvfFlat class >> needsTraining: anIndex
-  ^ self _untilV4: 'needsTraining:'.
+  ^ self _untilV4: 'needsTraining:' index: anIndex.
 
 PBVectorIvfFlat class >> train: anIndex vectors: aVectors
-  ^ self _untilV4: 'train:vectors:'.
+  ^ self _untilV4: 'train:vectors:' index: anIndex.
 
+"lists (the number of centroids, 0 untrained) and trained_size (IvfFlatBackend.explain,
+ vector_backends.py:732-734): read from the index, so they need no training of its own."
 PBVectorIvfFlat class >> explainOf: anIndex
-  ^ self _untilV4: 'explainOf:'.
+  ^ { 'lists' -> anIndex centroids size. 'trained_size' -> anIndex trainedSize }.
 
 "--- PBVectorHnsw (HnswBackend, vector_backends.py:751-821) ---"
 
@@ -884,7 +870,7 @@ PBVectorHnsw class >> defaults
 PBVectorHnsw class >> check: aDictionary
   | m seed |
   m := self _positiveInt: 'M' value: (aDictionary at: 'M' ifAbsent: [16]).
-  m < 2 ifTrue: [^ PBValidationError signal: 'Vector index parameter ''M'' must be >= 2, not ' , (self _repr: m)].
+  m < 2 ifTrue: [^ PBValidationError signal: 'Vector index parameter ''M'' must be >= 2, not ' , (PBCodec _pyRepr: m)].
   seed := self _seed: (aDictionary at: 'seed' ifAbsent: [0]).
   ^ { 'M' -> m.
     'ef_construction' -> (self _positiveInt: 'ef_construction' value: (aDictionary at: 'ef_construction' ifAbsent: [200])).

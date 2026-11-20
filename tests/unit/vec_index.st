@@ -1,4 +1,4 @@
-"EXPECT: ok 11"
+"EXPECT: ok 12"
 "Vectors phase V3 (Addendum V, 2.3, 2.4, 2.11 and 5.1): PBVectorIndex as a structure, with the exact
  and hnsw backends, against proto_db v2.0.0rc4 (proto_db/indexing/vector.py:125-268 and 323-425,
  vector_backends.py:305-333, 480-490, 566-586 and 751-770, keyed.py:190-215). The behaviours of
@@ -7,8 +7,10 @@
  test_validate_detects_structural_corruption (its ivf half is V4's), and test_format_neutral.py's
  test_vector_removal_is_exact_too and test_validate_accepts_a_vector_index_with_format_3_tokens
  (mapped in tests/unit/queries_checklist.tsv); the first fault of a definition with two (2.3,
- 'Validation order'), every text taken from proto_db at the tag; PBVectorIvfFlat check: (its
- defaults and order); the retrain_growth refusals (deviation DV7 e) and the signalling-NaN
+ 'Validation order'), every text taken from proto_db at the tag, the values in it rendered as
+ Python's repr; an ivf_flat index until V4 (refusals naming the index, explain answered);
+ PBVectorIvfFlat check: (its defaults and order); every other branch of validate: tampered, and
+ totals compared with Python's ==; the retrain_growth refusals (deviation DV7 e) and the signalling-NaN
  refusals (DV7 b); elements whose key is not a vector kept aside; the node classes of the invalid
  tree (2.11 item 3); the two containers a store key adds to the depth limit (keyed.py
  check_member_key's outer). Each check gathers its mismatches and requires none, so one label
@@ -17,7 +19,7 @@ Import from: 'protobase'.
 Import from: '_check'.
 
 | c fails expect refused msg rec tup vi defs index elements entry key value store tampered legacy
-  invalids valids built grown text deep sNaN at over |
+  invalids valids built grown text deep sNaN at over values mk put members vkey prefix |
 c := Check new.
 expect := [:label :actual :expected |
   actual = expected ifFalse: [fails add: label , ': expected ' , expected printString , ', got ' , actual printString]].
@@ -65,7 +67,7 @@ expect value: 'a PBFrozenDict of params' value: (vi value: 2 value: 'l2' value: 
   [vi value: 2 value: 'cosine' value: 'hnsw' value: (defs value: { 'ef_construction' -> 0. 'ef_search' -> 0 })] -> 'PBValidationError: Vector index parameter ''ef_construction'' must be an int >= 1, not 0'.
   [vi value: 2 value: 'cosine' value: 'hnsw' value: (defs value: { 'zz' -> 1. 'aa' -> 2 })] -> 'PBValidationError: Unknown parameters [''aa'', ''zz''] for the ''hnsw'' vector backend; expected [''M'', ''ef_construction'', ''ef_search'', ''seed'']'.
   [vi value: 2 value: 'cosine' value: 'ivf_flat' value: (defs value: { 'nlist' -> 4. 'nprobe' -> 5 })] -> 'PBValidationError: nprobe (5) cannot exceed nlist (4)'.
-  [vi value: 2 value: 'cosine' value: 'exact' value: #(1 2)] -> 'PBValidationError: PBVectorIndex params must be nil, a Dictionary or a PBFrozenDict of parameter names to values, not #(1 2)'.
+  [vi value: 2 value: 'cosine' value: 'exact' value: #(1 2)] -> 'PBValidationError: PBVectorIndex params must be nil, a Dictionary or a PBFrozenDict of parameter names to values, not [1, 2]'.
   [vi value: 2 value: 'cosine' value: 'exact' value: (defs value: { 1 -> true })] -> 'PBValidationError: PBVectorIndex parameter names must be Strings, not 1'.
   [PBVectorIndex name: 'v' keySpec: 'vec' dim: 2] -> 'PBValidationError: key_spec must be a PBKeySpec, not a String'.
   [PBVectorIndex name: 'v' keySpec: (PBKeySpec path: 'vec')] -> 'PBValidationError: A vector index needs a dim: make it with PBVectorIndex name:keySpec:dim: or name:keySpec:dim:metric:backend:params:'.
@@ -73,12 +75,31 @@ expect value: 'a PBFrozenDict of params' value: (vi value: 2 value: 'l2' value: 
   doWithIndex: [:case :i | expect value: 'definition ' , i printString value: (msg value: case key) value: case value].
 expect value: 'PBVectorBackend named:' value: ({ 'exact'. 'ivf_flat'. 'hnsw' } collect: [:n | (PBVectorBackend named: n) kindName])
   value: #('VectorExact' 'VectorIvfFlat' 'VectorHnsw').
+"An ivf_flat index until V4: what needs a list number or the training refuses, naming the index
+ (build: always trains, as proto_db's does, so it always refuses); an element whose key is not a
+ vector is kept aside, validate: of an index without stored members, empty and explain answer (lists and
+ trained_size read from the index, IvfFlatBackend.explain, taken from proto_db at the tag)."
 index := vi value: 2 value: 'l2' value: 'ivf_flat' value: nil.
-{ [index withAdded: (rec value: (tup value: #(1.0 0.0)))]. [index build: #()]. [index explain] } doWithIndex: [:hook :i |
-  expect value: 'ivf_flat until V4 ' , i printString value: ((msg value: hook) beginsWith: 'PBNotSupportedError: PBVectorIvfFlat ')
-    value: true].
+{ [index withAdded: (rec value: (tup value: #(1.0 0.0)))] -> 'listFor:vector:'.
+  [index build: { rec value: (tup value: #(1.0 0.0)) }] -> 'train:vectors:'.
+  [index build: #()] -> 'train:vectors:' } do: [:case |
+  expect value: 'ivf_flat until V4: ' , case value value: (msg value: case key)
+    value: 'PBNotSupportedError: Index ''v'' (VectorIndex on vec) uses the ivf_flat backend, whose lists and training (PBVectorIvfFlat '
+      , case value , ') land in the vectors phase''s task V4'].
+elements := { rec value: nil. rec value: 'abc' }.
+built := (index withAdded: (elements at: 1)) withAdded: (elements at: 2).
+expect value: 'ivf_flat keeps invalid elements aside' value: { built invalidCount. built totalCount. (built validate: elements) == built.
+    ((built withRemoved: (elements at: 1)) withRemoved: (elements at: 2)) totalCount. built empty totalCount }
+  value: #(2 2 true 0 0).
+expect value: 'ivf_flat explain' value: (built explain associations copyFrom: 4 to: 13)
+  value: { 'dim' -> 2. 'metric' -> 'l2'. 'backend' -> 'ivf_flat'.
+    'params' -> (PBFrozenDict withAssociations: { 'nlist' -> 16. 'nprobe' -> 4. 'retrain_growth' -> 4.0. 'seed' -> 0. 'train_iters' -> 10 }).
+    'entries' -> 2. 'vectors' -> 0. 'members' -> 0. 'invalid' -> 2. 'lists' -> 0. 'trained_size' -> 0 }.
+expect value: 'ivf_flat explain of a trained index' value: ((index _with: { 'centroids' -> (tup value: { tup value: #(1.0 0.0). tup value: #(0.0 1.0) }). 'trained_size' -> 5 })
+    explain associations copyFrom: 12 to: 13)
+  value: { 'lists' -> 2. 'trained_size' -> 5 }.
 expect value: 'PBVectorBackend named: an unknown name' value: (msg value: [PBVectorBackend named: #('exact')])
-  value: 'PBValidationError: Unknown vector backend #(''exact''); expected one of [''exact'', ''ivf_flat'', ''hnsw'']'.
+  value: 'PBValidationError: Unknown vector backend [''exact'']; expected one of [''exact'', ''ivf_flat'', ''hnsw'']'.
 c that: 'the definition is validated in proto_db''s order, with its texts' is: fails asArray equals: #().
 
 "PBVectorIvfFlat check: (vector_backends.py:574-586): the defaults (nprobe min(4, nlist)), the
@@ -131,9 +152,12 @@ c that: 'retrain_growth is a finite number above 1, an overflowing Integer refus
  element whose key is not a vector, are PBValidationError."
 fails := OrderedCollection new.
 index := (PBVectorIndex name: 'v' keySpec: (PBKeySpec path: 'vec') dim: 2) build: { rec value: (tup value: #(1.0 0.0)) }.
-expect value: 'an absent record' value: (msg value: [index withRemoved: (rec value: (tup value: #(1.0 0.0)))])
-  value: 'PBValidationError: Index ''v'' (VectorIndex on vec) does not hold '
-    , (PBKeys _preview: (rec value: (tup value: #(1.0 0.0)))) , '; an index can only remove an element it holds'.
+entry := rec value: (tup value: #(1.0 0.0)).
+expect value: 'an absent record' value: (msg value: [index withRemoved: entry])
+  value: 'PBValidationError: Index ''v'' (VectorIndex on vec) does not hold <proto_db.core.dbobject.DBObject oid='
+    , (PBCodec _pyUuidText: entry oid) , '>; an index can only remove an element it holds'.
+expect value: 'an absent value' value: (msg value: [(PBVectorIndex name: 'v' keySpec: PBKeySpec element dim: 2) withRemoved: (tup value: #(1.0 0.5))])
+  value: 'PBValidationError: Index ''v'' (VectorIndex on <element>) does not hold (1.0, 0.5); an index can only remove an element it holds'.
 expect value: 'an absent invalid element' value: (refused value: [index withRemoved: (rec value: nil)]) value: PBValidationError.
 expect value: 'the receiver is unchanged' value: { index memberCount. index totalCount } value: #(1 1).
 c that: 'withRemoved: of an element the index does not hold is PBValidationError' is: fails asArray equals: #().
@@ -161,13 +185,85 @@ tampered doWithIndex: [:bad :i | expect value: 'tampered ' , i printString value
 expect value: 'the message names the index' value: (msg value: [(tampered at: 6) validate: elements])
   value: 'PBCorruptionError: Index ''v'' (VectorIndex on vec) is corrupt: total_count is 31 but 30 occurrences are stored'.
 expect value: 'another list' value: (msg value: [(tampered at: 5) validate: elements])
-  value: 'PBCorruptionError: Index ''v'' (VectorIndex on vec) is corrupt: element ' , (PBKeys _preview: (value at: 1))
+  value: 'PBCorruptionError: Index ''v'' (VectorIndex on vec) is corrupt: element ' , (PBCodec _pyRepr: (value at: 1))
     , ' is in list 1, its vector belongs to 0'.
 expect value: 'missing elements' value: (msg value: [index validate: (elements copyFrom: 2 to: 30)])
   value: 'PBCorruptionError: Index ''v'' (VectorIndex on vec) is corrupt: 1 stored occurrences no element accounts for, 0 element occurrences not stored'.
 expect value: 'centroids on an exact index' value: (msg value: [(index _with: { 'centroids' -> (tup value: { tup value: #(1.0 0.0 0.0) }). 'trained_size' -> 1 }) validate: elements])
   value: 'PBCorruptionError: Index ''v'' (VectorIndex on vec) is corrupt: a ''exact'' index holds IVF centroids'.
 c that: 'validate: catches tampering on an exact index' is: fails asArray equals: #().
+
+"The other branches of validate: (vector.py _check_centroids, _check_store and _check_invalid),
+ each tampered on an index over plain values (the element key spec), refused with proto_db's text,
+ the values it quotes rendered as Python's repr: a malformed invalid group, an invalid entry that
+ is not a pair, a count that is not an int (a Boolean, a Float, zero), a wrong member key, a valid
+ vector kept as invalid, a group total that does not add up; a malformed store key or entry, a
+ member under another member's key, another vector; a malformed training state. A total and a
+ stored vector compare as Python's == does: true is 1, 6.0 is 6, so a Boolean or Float total and a
+ Boolean component that equal the count are accepted. Every text was taken from proto_db at the
+ tag (vector.py:335-418, run on the same tampered values)."
+fails := OrderedCollection new.
+values := { tup value: #(1.0 0.0 0.0). tup value: #(0.0 1.0 0.0). tup value: #(1 2 3). nil. 'abc'. tup value: #(1.0 2.0) }.
+index := (PBVectorIndex name: 'v' keySpec: PBKeySpec element dim: 3 metric: 'l2') build: values.
+mk := [:v | PBMemberKeys memberKeyOf: v].
+put := [:tree :k :v | (PBAvl keyPut: tree key: k value: v nodeClass: PBKeyNode) at: 1].
+store := index store.
+members := index invalid at: 1.
+vkey := tup value: { 0. mk value: (values at: 1) }.
+entry := (index storeEntries detect: [:a | a key = vkey]) value.
+text := [:bad | msg value: [bad validate: values]].
+prefix := 'PBCorruptionError: Index ''v'' (VectorIndex on <element>) is corrupt: '.
+{ (index _with: { 'invalid' -> nil }) -> 'malformed invalid group None'.
+  (index _with: { 'invalid' -> (tup value: { nil. 0. 0 }) }) -> 'malformed invalid group (None, 0, 0)'.
+  (index _with: { 'invalid' -> (PBFrozenList withAll: { nil. 0 }) }) -> 'malformed invalid group [None, 0]'.
+  (index _with: { 'invalid' -> (tup value: { put value: members value: (mk value: 'abc') value: (tup value: #('abc')). 3 }) })
+    -> 'malformed invalid entry (''abc'',)'.
+  (index _with: { 'invalid' -> (tup value: { put value: members value: (mk value: 'abc') value: (tup value: { 'abc'. true }). 3 }) })
+    -> 'element ''abc'' has the count True'.
+  (index _with: { 'invalid' -> (tup value: { put value: members value: (mk value: 'abc') value: (tup value: #('abc' 0)). 3 }) })
+    -> 'element ''abc'' has the count 0'.
+  (index _with: { 'invalid' -> (tup value: { put value: ((PBAvl keyRemove: members key: (mk value: 'abc')) at: 1) value: (mk value: 'abd')
+      value: (tup value: #('abc' 1)). 3 }) })
+    -> 'element ''abc'' is kept under the wrong member key ((0, ''abd''), b''\xa3abd'')'.
+  (index _with: { 'invalid' -> (tup value: { put value: members value: (mk value: (values at: 1)) value: (tup value: { values at: 1. 1 }). 4 }).
+      'total_count' -> 7 })
+    -> 'element (1.0, 0.0, 0.0) has a valid vector but is kept as invalid'.
+  (index _with: { 'invalid' -> (tup value: { members. 5 }) }) -> 'the invalid group records 5 occurrences but holds 3'.
+  (index _with: { 'store' -> (put value: store value: 'x' value: entry) }) -> 'malformed store key ''x'''.
+  (index _with: { 'store' -> (put value: store value: (tup value: { true. vkey at: 2 }) value: entry) })
+    -> 'malformed store key (True, ((0, (1.0, 0.0, 0.0)), b''\x81\xa4@tup\x93\xcb?\xf0\x00\x00\x00\x00\x00\x00\xcb\x00\x00\x00\x00\x00\x00\x00\x00\xcb\x00\x00\x00\x00\x00\x00\x00\x00''))'.
+  (index _with: { 'store' -> (put value: store value: (tup value: { 0. vkey at: 2. 0 }) value: entry) })
+    -> 'malformed store key (0, ((0, (1.0, 0.0, 0.0)), b''\x81\xa4@tup\x93\xcb?\xf0\x00\x00\x00\x00\x00\x00\xcb\x00\x00\x00\x00\x00\x00\x00\x00\xcb\x00\x00\x00\x00\x00\x00\x00\x00''), 0)'.
+  (index _with: { 'store' -> (put value: store value: vkey value: (tup value: { entry at: 1. 1 })) })
+    -> 'malformed store entry ((1.0, 0.0, 0.0), 1)'.
+  (index _with: { 'store' -> (put value: store value: vkey value: (tup value: { entry at: 1. true. entry at: 3 })) })
+    -> 'element (1.0, 0.0, 0.0) has the count True'.
+  (index _with: { 'store' -> (put value: store value: vkey value: (tup value: { entry at: 1. 1.0. entry at: 3 })) })
+    -> 'element (1.0, 0.0, 0.0) has the count 1.0'.
+  (index _with: { 'store' -> (put value: store value: (tup value: { 0. mk value: (values at: 2) }) value: entry) })
+    -> 'element (1.0, 0.0, 0.0) is stored under the wrong member key ((0, (0.0, 1.0, 0.0)), b''\x81\xa4@tup\x93\xcb\x00\x00\x00\x00\x00\x00\x00\x00\xcb?\xf0\x00\x00\x00\x00\x00\x00\xcb\x00\x00\x00\x00\x00\x00\x00\x00'')'.
+  (index _with: { 'store' -> (put value: store value: vkey value: (tup value: { entry at: 1. 1. tup value: #(9.0 9.0 9.0) })) })
+    -> 'element (1.0, 0.0, 0.0) is stored with the vector (9.0, 9.0, 9.0), its key gives (1.0, 0.0, 0.0)'.
+  (index _with: { 'store' -> (put value: store value: vkey value: (tup value: { entry at: 1. 1. PBFrozenList withAll: #(1.0 0.0 0.0) })) })
+    -> 'element (1.0, 0.0, 0.0) is stored with the vector [1.0, 0.0, 0.0], its key gives (1.0, 0.0, 0.0)'.
+  (index _with: { 'store' -> (put value: store value: (tup value: { 0. mk value: 'abc' }) value: (tup value: { 'abc'. 1. nil })) })
+    -> 'element ''abc'' is stored with the vector None, its key gives None'.
+  (index _with: { 'trained_size' -> true }) -> 'malformed training state () / True'.
+  (index _with: { 'centroids' -> (PBFrozenList withAll: #()) }) -> 'malformed training state [] / 0' }
+  doWithIndex: [:case :i | expect value: 'tampered ' , i printString value: (text value: case key) value: prefix , case value].
+"Python's ==: a Boolean or Float total equal to the count, and a stored Boolean component equal to
+ the vector's, are accepted."
+built := (PBVectorIndex name: 'v' keySpec: PBKeySpec element dim: 3 metric: 'l2') build: { values at: 1 }.
+grown := (PBVectorIndex name: 'v' keySpec: PBKeySpec element dim: 3 metric: 'l2') build: #('abc').
+{ (built _with: { 'total_count' -> true }) -> { values at: 1 }.
+  (index _with: { 'total_count' -> 6.0 }) -> values.
+  (index _with: { 'total_count' -> (Decimal fromString: '6') }) -> values.
+  (grown _with: { 'invalid' -> (tup value: { grown invalid at: 1. true }) }) -> #('abc').
+  (index _with: { 'store' -> (put value: store value: vkey value: (tup value: { entry at: 1. 1. tup value: { true. 0. 0 } })) }) -> values }
+  doWithIndex: [:case :i | expect value: 'Python''s == ' , i printString value: (msg value: [case key validate: case value]) value: 'no error'].
+expect value: 'a false total is 0' value: (msg value: [(built _with: { 'total_count' -> false }) validate: { values at: 1 }])
+  value: prefix , 'total_count is False but 1 occurrences are stored'.
+c that: 'validate: refuses every other tampering with proto_db''s text and compares totals as Python' is: fails asArray equals: #().
 
 "Elements whose key is not a vector of dim finite numbers (absent, nil, another length, a String,
  a Boolean component, a NaN or an infinity, an Integer beyond the Float range, an overflowing

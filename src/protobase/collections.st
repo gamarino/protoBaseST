@@ -716,8 +716,9 @@ PBIndexedCollection >> _checkWritable: aSelector
   PBAvl keysAndValuesDo: [:name :index |
     (index isClassObject not and: [index isKindOf: PBVectorIndex]) ifTrue: [
       ^ PBNotSupportedError signal: self class name , ' ' , aSelector , ': the index ' , (PBCodec repr: name)
-        , ' is of the type ' , index class typeName , ', which protoBaseST maintains as an index but does not write '
-        , 'in a collection until the vectors phase''s V5: a collection holding it is read only'].
+        , ' is of the type ' , index class typeName , ', which protoBaseST maintains as an index (exact and hnsw; '
+        , 'ivf_flat from the vectors phase''s V4) but does not write in a collection until V5: a collection '
+        , 'holding it is read only'].
     (index isClassObject not and: [index isKindOf: PBIndex])
       ifFalse: [
         ^ PBNotSupportedError signal: self class name , ' ' , aSelector , ': the index ' , (PBCodec repr: name)
@@ -777,8 +778,9 @@ PBIndexedCollection >> _withIndexChanges: aChanges op: anOp
  (_checkPlacement: PBMisfiledError for an entry its own key does not place,
  PBCorruptionError for a broken tree), then every index against the elements
  (PBIndex >> validate:). An index of a kind protoBaseST does not know is
- PBNotSupportedError; a vector index validates as any other (vectors phase V3); an
- unregistered extractor is PBValidationError naming it. Loads every node: O(n log n).
+ PBNotSupportedError; a vector index validates as any other (vectors phase V3), except
+ an ivf_flat index with a stored member, PBNotSupportedError until its lists land (V4);
+ an unregistered extractor is PBValidationError naming it. Loads every node: O(n log n).
  Answers the receiver."
 PBIndexedCollection >> validate
   | set elements |

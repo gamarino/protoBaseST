@@ -1,4 +1,4 @@
-"EXPECT: database contents ok (database contents 19/19)"
+"EXPECT: database contents ok (database contents 20/20)"
 "The database section read as a database (README, 'Using the vectors', 7, second
  part), on a copy of vectors/database: following space.root -> SpaceRoot ->
  databases['db'] -> DatabaseRoot, PBNotation describeDatabase: of a snapshot of the
@@ -13,9 +13,12 @@
  against their collections, and their explain is proto_db's (vectors phase V3,
  Addendum V 5.2): the manifest does not record explain, so the expected entries are
  proto_db v2.0.0rc4's VectorIndex.explain() of these two indexes, read from this
- vector's database with numpy and hnswlib blocked and written here. The ids are
- 'database', 'databases', 'root names', 'root <name>', 'mutables', 'indexes',
- 'origin', 'ivf', 'vector index vectors' and 'vector index hnsw'."
+ vector's database with numpy and hnswlib blocked and written here. The explain of the
+ ivf_flat index of the 'ivf' root is proto_db's too, read the same way (its lists and
+ trained_size need no training; validating it needs its lists, the vectors phase's V4).
+ The ids are 'database', 'databases', 'root names', 'root <name>', 'mutables',
+ 'indexes', 'origin', 'ivf', 'ivf explain', 'vector index vectors' and 'vector index
+ hnsw'."
 Import from: 'protobase'.
 Import from: '_vectors'.
 | manifest contents dir space db snap run mismatch ids expectedWhole names ivf |
@@ -23,7 +26,7 @@ manifest := Vectors manifest.
 contents := (manifest at: 'database') at: 'contents'.
 names := (contents at: 'roots') collect: [:pair | pair at: 1].
 ids := { 'database'. 'databases'. 'root names' } , (names collect: [:n | 'root ' , n])
-  , #('mutables' 'indexes' 'origin' 'ivf' 'vector index vectors' 'vector index hnsw').
+  , #('mutables' 'indexes' 'origin' 'ivf' 'ivf explain' 'vector index vectors' 'vector index hnsw').
 run := VectorRun section: 'database_contents' ids: ids.
 mismatch := [:what :actual :expected |
   actual = expected ifTrue: [nil] ifFalse: [
@@ -76,6 +79,13 @@ run stage: 'describe' of: 'ivf' do: [
     { entry key at: 1. (entry value at: 3) asArray collect: [:x | PBNotation describe: x] }]).
   mismatch value: 'the ivf index' value: actual value: (contents at: 'ivf')].
 run end: 'ivf'.
+run begin.
+run stage: 'explain' of: 'ivf explain' do: [
+  mismatch value: 'explain of ivf' value: ((snap getRootObject: 'ivf') getIndex: 'ivf') explain associations
+    value: { 'index' -> 'ivf'. 'kind' -> 'VectorIndex'. 'key' -> 'emb'. 'dim' -> 2. 'metric' -> 'l2'. 'backend' -> 'ivf_flat'.
+      'params' -> (PBFrozenDict withAssociations: { 'nlist' -> 2. 'nprobe' -> 1. 'retrain_growth' -> 4.0. 'seed' -> 1. 'train_iters' -> 3 }).
+      'entries' -> 5. 'vectors' -> 4. 'members' -> 4. 'invalid' -> 1. 'lists' -> 2. 'trained_size' -> 2 }].
+run end: 'ivf explain'.
 { { 'vectors'. 'near'. {
       'index' -> 'near'. 'kind' -> 'VectorIndex'. 'key' -> 'emb'. 'dim' -> 2. 'metric' -> 'l2'. 'backend' -> 'exact'.
       'params' -> (PBFrozenDict withAssociations: { 'numpy' -> true }).

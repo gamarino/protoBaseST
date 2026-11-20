@@ -18,7 +18,9 @@ design (spec section 2) or a cut made while building, with its reason.
 - No cloud or tiered storage, no durability mode other than `fsync`, no Windows.
 - No vector-index training or vector search yet, and no writes to a collection holding a vector
   index: since the vectors phase's V3 a `PBVectorIndex` with the exact or hnsw backend is defined,
-  maintained by its hooks, validated and explained, node for node as `proto_db` does, but a
+  maintained by its hooks, validated and explained, node for node as `proto_db` does (an `ivf_flat`
+  one is defined and explained, and keeps elements whose key is not a vector, but refuses what
+  needs its lists or training until V4), but a
   collection holding one, or an index of a kind protoBaseST does not know, stays read only (until
   V5), and a query naming `near[]` is refused when it is planned (until V6 and V7).
   Equality and range indexes are maintained by every write and by merges onto indexed
