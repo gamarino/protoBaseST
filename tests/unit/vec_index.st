@@ -4,11 +4,13 @@
  vector_backends.py:305-333, 480-490, 566-586 and 751-770, keyed.py:190-215). The behaviours of
  tests/unit/test_vector_index.py's test_definition_type_names_and_validation and
  test_with_removed_of_an_absent_element_raises, the exact half of
- test_validate_detects_structural_corruption (its ivf half is V4's), and test_format_neutral.py's
- test_vector_removal_is_exact_too and test_validate_accepts_a_vector_index_with_format_3_tokens
- (mapped in tests/unit/queries_checklist.tsv); the first fault of a definition with two (2.3,
+ test_validate_detects_structural_corruption (its ivf half, and its row, are tests/unit/vec_ivf.st's,
+ V4), and test_format_neutral.py's test_vector_removal_is_exact_too and
+ test_validate_accepts_a_vector_index_with_format_3_tokens (mapped in
+ tests/unit/queries_checklist.tsv); the first fault of a definition with two (2.3,
  'Validation order'), every text taken from proto_db at the tag, the values in it rendered as
- Python's repr; an ivf_flat index until V4 (refusals naming the index, explain answered);
+ Python's repr; an ivf_flat index below nlist members (list -1, untrained, explain answered; its
+ training is tests/unit/vec_ivf.st's);
  PBVectorIvfFlat check: (its defaults and order); every other branch of validate: tampered, and
  totals compared with Python's ==; the retrain_growth refusals (deviation DV7 e) and the signalling-NaN
  refusals (DV7 b); elements whose key is not a vector kept aside; the node classes of the invalid
@@ -75,17 +77,16 @@ expect value: 'a PBFrozenDict of params' value: (vi value: 2 value: 'l2' value: 
   doWithIndex: [:case :i | expect value: 'definition ' , i printString value: (msg value: case key) value: case value].
 expect value: 'PBVectorBackend named:' value: ({ 'exact'. 'ivf_flat'. 'hnsw' } collect: [:n | (PBVectorBackend named: n) kindName])
   value: #('VectorExact' 'VectorIvfFlat' 'VectorHnsw').
-"An ivf_flat index until V4: what needs a list number or the training refuses, naming the index
- (build: always trains, as proto_db's does, so it always refuses); an element whose key is not a
- vector is kept aside, validate: of an index without stored members, empty and explain answer (lists and
- trained_size read from the index, IvfFlatBackend.explain, taken from proto_db at the tag)."
+"An ivf_flat index below nlist members: build: trains on nothing (fewer vectors than nlist, as
+ proto_db's train answers ()), and a member goes to list -1 (UNTRAINED); an element whose key is
+ not a vector is kept aside, validate:, empty and explain answer (lists and trained_size read from
+ the index, IvfFlatBackend.explain, taken from proto_db at the tag). Its training is
+ tests/unit/vec_ivf.st's."
 index := vi value: 2 value: 'l2' value: 'ivf_flat' value: nil.
-{ [index withAdded: (rec value: (tup value: #(1.0 0.0)))] -> 'listFor:vector:'.
-  [index build: { rec value: (tup value: #(1.0 0.0)) }] -> 'train:vectors:'.
-  [index build: #()] -> 'train:vectors:' } do: [:case |
-  expect value: 'ivf_flat until V4: ' , case value value: (msg value: case key)
-    value: 'PBNotSupportedError: Index ''v'' (VectorIndex on vec) uses the ivf_flat backend, whose lists and training (PBVectorIvfFlat '
-      , case value , ') land in the vectors phase''s task V4'].
+built := index build: { rec value: (tup value: #(1.0 0.0)) }.
+expect value: 'ivf_flat below nlist' value: { (index build: #()) centroids. built centroids. built trainedSize.
+    (built storeEntries first key) at: 1. ((index withAdded: (rec value: (tup value: #(0.0 1.0)))) storeEntries first key) at: 1 }
+  value: { tup value: #(). tup value: #(). 0. -1. -1 }.
 elements := { rec value: nil. rec value: 'abc' }.
 built := (index withAdded: (elements at: 1)) withAdded: (elements at: 2).
 expect value: 'ivf_flat keeps invalid elements aside' value: { built invalidCount. built totalCount. (built validate: elements) == built.

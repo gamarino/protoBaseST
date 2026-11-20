@@ -18,8 +18,8 @@
  normalized (normalized:), getrandbits (PBPythonRandom bits:count:seed:), sample
  (sampleRange:count:seed:), kmeans (kmeans:nlist:iterations:seed:, proto_db's pure-Python path)
  and list_for (the best-scoring centroid under the assignment metric, cosine for cosine and l2
- otherwise, lowest number on ties: IvfFlatBackend.list_for, which V4 ports; here it pins that the
- scores pick proto_db's list). It prints the generator's CPython, libc and numpy lines, the number
+ otherwise, lowest number on ties: IvfFlatBackend.list_for, which PBVectorIvfFlat listFor:vector:
+ ports; here it pins that the scores pick proto_db's list). It prints the generator's CPython, libc and numpy lines, the number
  of cases per group, then 'vector math vectors ok'."
 Import from: 'protobase'.
 

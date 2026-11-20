@@ -51,10 +51,11 @@ on them. PBNearQuery is the public value of a near[] term (terms.st).
     normalize: params backend: name normalize_params: the PBTuple of (name, value) PBTuples a
                                     vector index stores, sorted by name in code-point order
     listFor: index vector: v, needsTraining: index, train: index vectors: vs, explainOf: index
-                                    the list of a vector (0 for exact and hnsw), the retrain test,
-                                    the centroids, the backend's explain entries; ivf_flat's lists
-                                    and training are V4's (PBNotSupportedError naming the index
-                                    until then), its explain entries are answered now
+                                    the list of a vector (0 for exact and hnsw; for ivf_flat the
+                                    nearest centroid's number, -1 untrained), the retrain test,
+                                    the centroids (vectors phase V4), the backend's explain entries
+    PBVectorIvfFlat probeOrder: index query: q
+                                    _probe_order: -1, then the lists by descending centroid score
     Values quoted in refusals are rendered as Python's repr (PBCodec _pyRepr:).
     The index (PBVectorIndex, indexes.st) holds every value; the backends are stateless and this
     module never imports indexes.st.
@@ -647,7 +648,7 @@ PBVectorBackend subclass: #PBVectorExact.
 PBVectorExact comment: 'proto_db''s ExactBackend: every member in list 0, no training.'.
 
 PBVectorBackend subclass: #PBVectorIvfFlat.
-PBVectorIvfFlat comment: 'proto_db''s IvfFlatBackend: inverted lists around persisted centroids (its lists and training are the vectors phase''s task V4).'.
+PBVectorIvfFlat comment: 'proto_db''s IvfFlatBackend: inverted lists around persisted centroids, trained by the pure-Python k-means (deviation DV3); its search is the vectors phase''s task V6.'.
 
 PBVectorBackend subclass: #PBVectorHnsw.
 PBVectorHnsw comment: 'proto_db''s HnswBackend: maintained and validated like the exact backend (list 0, no training); its search is refused (ruling VQ1).'.
@@ -827,25 +828,77 @@ PBVectorIvfFlat class >> check: aDictionary
     'seed' -> seed.
     'retrain_growth' -> (self _growth: 'retrain_growth' value: (aDictionary at: 'retrain_growth' ifAbsent: [4.0])) }.
 
-"The lists and the training of the ivf_flat backend are the vectors phase's task V4 (Addendum V,
- 2.4 and 2.5). Until then an ivf_flat index can be defined, given or rid of an element whose key
- is not a vector (the invalid group needs no list), emptied, explained, and validated while it
- stores no member; every operation that needs a list number or the training refuses with
- PBNotSupportedError naming the index, rather than file a member under a list proto_db would not
- choose: withAdded: and withRemoved: of an element with a valid vector, build: (which always
- trains, as proto_db's does, even on no vectors), validate: of an index with a stored member."
-PBVectorIvfFlat class >> _untilV4: aSelector index: anIndex
-  ^ PBNotSupportedError signal: anIndex _subject , ' uses the ivf_flat backend, whose lists and training ('
-    , self name , ' ' , aSelector , ') land in the vectors phase''s task V4'.
+"The list number of the vectors of an untrained index (vector_backends.py UNTRAINED)."
+PBVectorIvfFlat class >> untrained
+  ^ -1.
 
+"_assign_metric (vector_backends.py:588-590): lists are assigned by cosine for a cosine index and
+ by l2 for the others (ip included)."
+PBVectorIvfFlat class >> _assignMetric: aMetric
+  ^ aMetric = 'cosine' ifTrue: ['cosine'] ifFalse: ['l2'].
+
+"list_for (vector_backends.py:606-634): the number (from 0) of the centroid of anIndex whose exact
+ score for aVector (PBVectorMath score:query:vector:, the vector as the query, the centroid as
+ the stored vector, as proto_db passes them) is the highest, the lowest number on ties (a strictly
+ higher score replaces the best); -1 when the index is untrained (no centroids). proto_db's numpy
+ screen only skips centroids that cannot win, so every centroid is scored here (Addendum V, 2.4)."
 PBVectorIvfFlat class >> listFor: anIndex vector: aVector
-  ^ self _untilV4: 'listFor:vector:' index: anIndex.
+  | centroids metric best bestScore |
+  centroids := anIndex centroids.
+  centroids isEmpty ifTrue: [^ self untrained].
+  metric := self _assignMetric: anIndex metric.
+  best := 0.
+  bestScore := nil.
+  1 to: centroids size do: [:j | | s |
+    s := PBVectorMath score: metric query: aVector vector: (centroids at: j).
+    (bestScore isNil or: [s > bestScore]) ifTrue: [best := j - 1. bestScore := s]].
+  ^ best.
 
+"needs_training (vector_backends.py:636-642): untrained, whether anIndex holds at least nlist
+ members; trained, whether its members reach retrain_growth times trained_size. Python compares
+ the int count with the Float product (retrain_growth is stored as a Float, the int trained_size
+ converted exactly): members asFloat and trainedSize asFloat are exact below 2^53, which every
+ count is, so this is Python's exact comparison, one IEEE rounding in the product (Addendum V,
+ 2.4). So 2.2 * 25 is 55.00000000000001: 55 members do not retrain, 56 do (tests/unit/vec_ivf.st)."
 PBVectorIvfFlat class >> needsTraining: anIndex
-  ^ self _untilV4: 'needsTraining:' index: anIndex.
+  | members |
+  members := anIndex memberCount.
+  anIndex centroids isEmpty ifTrue: [^ members >= (anIndex paramAt: 'nlist')].
+  ^ members asFloat >= ((anIndex paramAt: 'retrain_growth') * anIndex trainedSize asFloat).
 
+"train (vector_backends.py:644-661; Addendum V, 2.5): the centroids for aVectors (canonical
+ vectors of anIndex), the empty PBTuple below nlist vectors. The vectors are sorted by their
+ values (trainingOrderOf:, R128: never by the members' oids), normalised for a cosine index, given
+ to the pure-Python k-means (PBVectorMath kmeans:nlist:iterations:seed:, deviation DV3), and the
+ centroids normalised again for cosine; a PBTuple of nlist PBTuples of Floats. Equal sort keys are
+ equal bytes, so the order among them changes nothing."
 PBVectorIvfFlat class >> train: anIndex vectors: aVectors
-  ^ self _untilV4: 'train:vectors:' index: anIndex.
+  | nlist cosine data centroids |
+  nlist := anIndex paramAt: 'nlist'.
+  aVectors size < nlist ifTrue: [^ PBTuple withAll: #()].
+  cosine := anIndex metric = 'cosine'.
+  data := (aVectors asArray collect: [:v | { PBVectorMath trainingOrderOf: v. v }])
+    sort: [:a :b | (a at: 1) <= (b at: 1)].
+  data := data collect: [:pair | cosine ifTrue: [PBVectorMath normalized: (pair at: 2)] ifFalse: [pair at: 2]].
+  centroids := PBVectorMath kmeans: data nlist: nlist iterations: (anIndex paramAt: 'train_iters')
+    seed: (anIndex paramAt: 'seed').
+  cosine ifTrue: [centroids := centroids collect: [:c | PBVectorMath normalized: c]].
+  ^ PBTuple withAll: (centroids collect: [:c | PBTuple withAll: c asArray]).
+
+"_probe_order (vector_backends.py:663-669): the list numbers a search of aQuery probes, in order:
+ -1 (the untrained vectors) first, then, when anIndex is trained, every centroid's number by
+ descending exact score (the assignment metric, the query first), ties by ascending number, as
+ Python sorts the pairs (-score, number). An Array of Integers. Search itself is the vectors
+ phase's V6."
+PBVectorIvfFlat class >> probeOrder: anIndex query: aQuery
+  | centroids metric scored |
+  centroids := anIndex centroids.
+  centroids isEmpty ifTrue: [^ { self untrained }].
+  metric := self _assignMetric: anIndex metric.
+  scored := (1 to: centroids size) asArray collect: [:j |
+    { (PBVectorMath score: metric query: aQuery vector: (centroids at: j)) negated. j - 1 }].
+  scored := scored sort: [:a :b | (a at: 1) < (b at: 1) or: [(a at: 1) = (b at: 1) and: [(a at: 2) <= (b at: 2)]]].
+  ^ { self untrained } , (scored collect: [:pair | pair at: 2]).
 
 "lists (the number of centroids, 0 untrained) and trained_size (IvfFlatBackend.explain,
  vector_backends.py:732-734): read from the index, so they need no training of its own."

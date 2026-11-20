@@ -10,9 +10,9 @@ trees it builds are node-identical to proto_db's for the same operations
 tests/interop/index_build_identical.sh). The vector index is a port of vector.py
 (vectors phase V3, Addendum V 2.3): its definition, hooks, validate: and explain,
 node-identical to proto_db's for the exact and hnsw backends
-(tests/interop/vector_index_identical.sh); its backends are in vectors.st, the
-ivf_flat lists and training land in V4, vector search in V6, and a collection
-holding a vector index stays read only until V5.
+(tests/interop/vector_index_identical.sh), and so are the ivf_flat lists,
+training and retraining (V4); its backends are in vectors.st, vector search lands
+in V6, and a collection holding a vector index stays read only until V5.
 
   PBIndex           proto_db.indexing.Index (abstract): name, key_spec
   PBKeyGroupIndex   proto_db.indexing.keyed.KeyGroupIndex (abstract): groups,
@@ -875,7 +875,7 @@ A vector index files each element under the vector its key spec extracts (vector
                (element, count, vector): the member key is the exact one of keygroups.st (an
                element held twice is one member with count 2), the vector a PBTuple of Floats
                (PBVectorMath canonicalVector:dim:), the list number the backend's (0 for exact
-               and hnsw; the IVF list, -1 while untrained, for ivf_flat, V4)
+               and hnsw; the IVF list, -1 while untrained, for ivf_flat)
   invalid      the group (keygroups.st) of the elements whose key is not a vector of dim finite
                numbers: never returned by a search, counted by explain, checked by validate:
   total_count  every stored occurrence; centroids and trained_size the IVF training (the empty
@@ -1035,8 +1035,9 @@ PBVectorIndex class >> _storeOrderKey: aListNumber memberOrderKey: anOrderKey
 
 "The index after one more occurrence of anElement (vector.py with_added): an element whose key is
  not a vector goes to the invalid group; one with a vector is one more occurrence of its member in
- the store, under the list the backend gives it. A new member can trigger a retrain (an IVF index,
- V4). An element whose member key would nest too deep is PBValidationError naming the index."
+ the store, under the list the backend gives it. A new member can trigger a retrain (an IVF index:
+ PBVectorIvfFlat needsTraining:, then _retrained). An element whose member key would nest too deep
+ is PBValidationError naming the index."
 PBVectorIndex >> withAdded: anElement
   | vector pair member mokey backend listNo okey node old value grown |
   vector := self _vector: anElement.

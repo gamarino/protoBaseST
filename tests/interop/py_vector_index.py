@@ -1,12 +1,13 @@
-"""The vector indexes of protoBaseST and proto_db, node for node at the index level (vectors V3).
+"""The vector indexes of protoBaseST and proto_db, node for node at the index level (vectors V3, V4).
 
 Usage: python py_vector_index.py make <directory>    write the shared space
        python py_vector_index.py dump <directory>    print proto_db's index dumps
 
 numpy and hnswlib are blocked before proto_db is imported (sys.modules[...] = None, Addendum V,
 5.2), so proto_db runs its pure-Python paths whatever the venv can import; maintaining an exact or
-hnsw index never imports either, and the block makes that a guarantee. 'dump' writes the mode,
-the CPython version and the libc (the libm that IVF training will use, V4) to stderr.
+hnsw index never imports either, and the block makes that a guarantee; IVF training takes the
+pure-Python k-means, whose squares are the host libm's pow (Addendum V, 2.5 and DV3). 'dump' writes
+the mode, the CPython version and the libc (the libm of that pow) to stderr.
 
 'make' writes, with proto_db, one database 'vec' whose roots hold the elements both sides index,
 so that the records are the same atoms with the same oids on both sides:
@@ -29,11 +30,16 @@ so that the records are the same atoms with the same oids on both sides:
            the three invalid-tree histories of Addendum V 2.11 item 3: [build indices, removed
            indices, added index] of 'recs', built with invalid elements then given another, built
            without then given one, and built with invalid elements, all of them removed, then
-           given another
+           given another; and 'growth', per history of IVF_GROWTH, a seeded sequence of [op, i]
+           over its set (0 adds element i, 1 removes element i, always one the index holds; mostly
+           new elements, some added twice), from an empty index
 'dump' (and _st_vector_index.st on the same space) prints, for each index kind of KINDS and each
 (set, key spec) of SPECS, then for each kind of DIM_KINDS (dims 1 and 16, the three metrics), the
 index build makes over the set, then the index the ops derive from the build over the set's first
-half; then, per kind of KINDS, the three histories; then the refusal texts (refusals). Each index is printed as
+half; then, per kind of KINDS, the three histories; then, per history of IVF_GROWTH, the ivf_flat
+index after each operation that trained or retrained it (its trained_size changed) and at its end,
+from an empty index, so that every training is dumped: crossing nlist (the first training) and
+retrain_growth (each retrain); then the refusal texts (refusals). Each index is printed as
 'index <label>', then one line per atom reached from it, breadth first in the order the encoder
 meets the references: '<number> <type name> <hex of the msgpack of the encoded state>', a saved
 atom (an element) written as its own pointer, an unsaved one (a node) as the pointer (fixed
@@ -72,7 +78,9 @@ DIM_SPECS = [("d1", "element"), ("d16", "path vec")]
 KINDS = [("exact-l2", "l2", "exact", {}),
          ("exact-cosine-nonumpy", "cosine", "exact", {"numpy": False}),
          ("hnsw-ip", "ip", "hnsw", {"M": 8, "seed": 3}),
-         ("hnsw-cosine", "cosine", "hnsw", {})]
+         ("hnsw-cosine", "cosine", "hnsw", {}),
+         ("ivf-l2", "l2", "ivf_flat", {"nlist": 4, "nprobe": 2, "train_iters": 4, "seed": 11}),
+         ("ivf-cosine", "cosine", "ivf_flat", {"nlist": 6, "retrain_growth": 1.5})]
 #: (label, dim, metric, backend, params, set, key spec): dims 1 and 16, each over the three metrics.
 DIM_KINDS = [("d1-cosine-exact", 1, "cosine", "exact", {}, "d1", "element"),
              ("d1-l2-hnsw", 1, "l2", "hnsw", {"M": 2}, "d1", "element"),
@@ -80,6 +88,15 @@ DIM_KINDS = [("d1-cosine-exact", 1, "cosine", "exact", {}, "d1", "element"),
              ("d16-cosine-hnsw", 16, "cosine", "hnsw", {"M": 4, "seed": 9}, "d16", "path vec"),
              ("d16-l2-exact", 16, "l2", "exact", {}, "d16", "path vec"),
              ("d16-ip-hnsw", 16, "ip", "hnsw", {}, "d16", "path vec")]
+#: (label, dim, metric, params, set, key spec, operations): the ivf_flat growth histories, from an
+#: empty index, crossing nlist and retrain_growth (vectors V4); the ip metric assigns lists by l2.
+IVF_GROWTH = [("ivf-l2 growth big", 3, "l2", {"nlist": 4, "nprobe": 2, "train_iters": 3, "seed": 5,
+                                              "retrain_growth": 1.5}, "big", "path vec", 160),
+              ("ivf-cosine growth recs", 3, "cosine", {"nlist": 3, "seed": 2**40, "retrain_growth": 2},
+               "recs", "path vec", 90),
+              ("ivf-ip growth d16", 16, "ip", {"nlist": 5, "train_iters": 2, "seed": 7, "retrain_growth": 1.25},
+               "d16", "path vec", 110),
+              ("ivf-l2 growth vals", 3, "l2", {"nlist": 2, "retrain_growth": 3.0}, "vals", "element", 60)]
 #: The values the refusal cases tamper with (an index over them, the element key spec, dim 3).
 TAMPER_VALUES = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1, 2, 3), None, "abc", (1.0, 2.0)]
 #: The invalid-tree histories, named as 'ops' lists them.
@@ -169,6 +186,22 @@ def make(directory):
         invalid_at = [i for i, k in enumerate(kinds) if k == "invalid"]
         ops["histories"] = [[valid_at[:20] + invalid_at[:8], [], invalid_at[8]], [valid_at[:20], [], invalid_at[0]],
                             [valid_at[:20] + invalid_at[:8], invalid_at[:8], invalid_at[8]]]
+        for label, _, _, _, set_name, _, length in IVF_GROWTH:
+            n = len(sets[set_name])
+            held, seq = [], []
+            for _ in range(length):
+                r = rnd.random()
+                if held and r < 0.15:
+                    seq.append([1, held.pop(rnd.randrange(len(held)))])
+                elif held and r < 0.25:
+                    i = rnd.choice(held)
+                    seq.append([0, i])
+                    held.append(i)
+                else:
+                    i = rnd.randrange(n)
+                    seq.append([0, i])
+                    held.append(i)
+            ops[label] = seq
         for name, elements in sets.items():
             tx.set_root_object(name, elements)
         tx.set_root_object("ops", ops)
@@ -287,6 +320,27 @@ def refusals():
         elements = [values[0]] if label in ("total_count False", "total_count True") else (
             ["abc"] if label == "invalid total True" else values)
         refused(f"validate {label}", lambda: bad.validate(elements))
+    ivf = VectorIndex("vi", KeySpec.element(), 3, "l2", "ivf_flat", nlist=2, nprobe=1).build(values)
+    ivf_store = ivf.store
+    ikey, ientry = next(avl.key_iter(ivf_store))
+    c0, c1 = ivf.centroids
+    ivf_tampered = [
+        ("ivf", ivf),
+        ("ivf centroid removed", ivf._with(centroids=(c0,))),
+        ("ivf centroid added", ivf._with(centroids=(c0, c1, c1))),
+        ("ivf centroid list", ivf._with(centroids=(FrozenList(list(c0)), c1))),
+        ("ivf centroid ints", ivf._with(centroids=((1, 0, 0), c1))),
+        ("ivf centroid nan", ivf._with(centroids=((float("nan"), 0.0, 0.0), c1))),
+        ("ivf centroid short", ivf._with(centroids=((1.0, 0.0), c1))),
+        ("ivf centroid True", ivf._with(centroids=((True, 0.0, 0.0), c1))),
+        ("ivf trained_size 0", ivf._with(trained_size=0)),
+        ("ivf untrained with trained_size", ivf._with(centroids=(), trained_size=3)),
+        ("ivf untrained in list 0", ivf._with(centroids=(), trained_size=0)),
+        ("ivf in the other list", ivf._with(store=put(avl.key_remove(ivf_store, ikey)[0], (1 - ikey[0], ikey[1]), ientry))),
+        ("ivf in list -1", ivf._with(store=put(avl.key_remove(ivf_store, ikey)[0], (-1, ikey[1]), ientry))),
+        ("ivf swapped centroids", ivf._with(centroids=(c1, c0)))]
+    for label, bad in ivf_tampered:
+        refused(f"validate {label}", lambda: bad.validate(values))
 
 
 def run(directory):
@@ -323,6 +377,16 @@ def run(directory):
                 for i in removed:
                     index = index.with_removed(recs[i])
                 show(f"{kind} history {name}", index.with_added(recs[added]))
+        for label, dim, metric, params, set_name, spec_name, _ in IVF_GROWTH:
+            elements = sets[set_name]
+            spec = KeySpec.element() if spec_name == "element" else KeySpec.path("vec")
+            index = VectorIndex("vi", spec, dim, metric, "ivf_flat", **params)
+            for n, (op, i) in enumerate(ops[label], 1):
+                before = index.trained_size
+                index = index.with_added(elements[i]) if op == 0 else index.with_removed(elements[i])
+                if index.trained_size != before:
+                    show(f"{label} op {n} trained at {index.trained_size}", index)
+            show(f"{label} end", index)
         refusals()
         tx.abort()
     finally:

@@ -1,12 +1,13 @@
-"_st_vector_index.st: protoBaseST's side of tests/interop/vector_index_identical.sh (vectors phase
- V3). A helper: the runner never runs files whose name starts with _.
+"_st_vector_index.st: protoBaseST's side of tests/interop/vector_index_identical.sh (vectors phases
+ V3 and V4). A helper: the runner never runs files whose name starts with _.
 
  Usage: protost _st_vector_index.st <directory>
 
  Reads the space tests/interop/py_vector_index.py made (database 'vec': the element sets 'recs',
  'vals', 'big', 'd1' and 'd16', and the operation sequences and invalid-tree histories 'ops'),
  builds the same vector indexes, replays the same withAdded:, withRemoved: and withReplaced:with:
- sequences and the three histories, and prints them in the dump format py_vector_index.py
+ sequences, the three histories and the ivf_flat growth histories (the index after each operation
+ that trained or retrained it, and at its end), and prints them in the dump format py_vector_index.py
  documents: 'index <label>', then one line per atom reached from the index, breadth first in the
  order the encoder meets the references, '<number> <type name> <hex>', a saved atom written as its
  own pointer, an unsaved one as the pointer (fixed segment, its number). Then the refusals, as
@@ -33,7 +34,9 @@ params := [:assocs | | d | d := Dictionary new. assocs do: [:a | d at: a key put
 kinds := { { 'exact-l2'. 'l2'. 'exact'. params value: #() }.
   { 'exact-cosine-nonumpy'. 'cosine'. 'exact'. params value: { 'numpy' -> false } }.
   { 'hnsw-ip'. 'ip'. 'hnsw'. params value: { 'M' -> 8. 'seed' -> 3 } }.
-  { 'hnsw-cosine'. 'cosine'. 'hnsw'. params value: #() } }.
+  { 'hnsw-cosine'. 'cosine'. 'hnsw'. params value: #() }.
+  { 'ivf-l2'. 'l2'. 'ivf_flat'. params value: { 'nlist' -> 4. 'nprobe' -> 2. 'train_iters' -> 4. 'seed' -> 11 } }.
+  { 'ivf-cosine'. 'cosine'. 'ivf_flat'. params value: { 'nlist' -> 6. 'retrain_growth' -> 1.5 } } }.
 "numbers: identityHash -> the Associations atom -> number of the atoms with that hash (protoST
  has no IdentityDictionary)."
 dump := [:index | | numbers count queue numberOf |
@@ -98,6 +101,28 @@ kinds do: [:kind |
       params: (kind at: 4)) build: ((history at: 1) asArray collect: [:i | recs at: i + 1]).
     (history at: 2) do: [:i | index := index withRemoved: (recs at: i + 1)].
     show value: (kind at: 1) , ' history ' , name value: (index withAdded: (recs at: (history at: 3) + 1))]].
+"The ivf_flat growth histories, py_vector_index.py's IVF_GROWTH: { label. dim. metric. params. set.
+ key spec }, each from an empty index."
+{ { 'ivf-l2 growth big'. 3. 'l2'. params value: { 'nlist' -> 4. 'nprobe' -> 2. 'train_iters' -> 3. 'seed' -> 5. 'retrain_growth' -> 1.5 }.
+    'big'. 'path vec' }.
+  { 'ivf-cosine growth recs'. 3. 'cosine'. params value: { 'nlist' -> 3. 'seed' -> (2 raisedTo: 40). 'retrain_growth' -> 2 }.
+    'recs'. 'path vec' }.
+  { 'ivf-ip growth d16'. 16. 'ip'. params value: { 'nlist' -> 5. 'train_iters' -> 2. 'seed' -> 7. 'retrain_growth' -> 1.25 }.
+    'd16'. 'path vec' }.
+  { 'ivf-l2 growth vals'. 3. 'l2'. params value: { 'nlist' -> 2. 'retrain_growth' -> 3.0 }. 'vals'. 'element' } } do: [:growth |
+  | elements index |
+  elements := sets at: (growth at: 5).
+  index := PBVectorIndex name: 'vi'
+    keySpec: ((growth at: 6) = 'element' ifTrue: [PBKeySpec element] ifFalse: [PBKeySpec path: 'vec'])
+    dim: (growth at: 2) metric: (growth at: 3) backend: 'ivf_flat' params: (growth at: 4).
+  (ops at: (growth at: 1)) asArray doWithIndex: [:op :n | | before |
+    before := index trainedSize.
+    index := (op at: 1) = 0
+      ifTrue: [index withAdded: (elements at: (op at: 2) + 1)]
+      ifFalse: [index withRemoved: (elements at: (op at: 2) + 1)].
+    index trainedSize = before ifFalse: [
+      show value: (growth at: 1) , ' op ' , n printString , ' trained at ' , index trainedSize printString value: index]].
+  show value: (growth at: 1) , ' end' value: index].
 "The refusals, as py_vector_index.py refusals prints them."
 refused := [:label :block | | text |
   text := [block value. 'none'] on: PBDBError do: [:e |
@@ -169,5 +194,29 @@ abc := empty build: #('abc').
       ifTrue: [{ values at: 1 }]
       ifFalse: [case key = 'invalid total True' ifTrue: [#('abc')] ifFalse: [values]].
     refused value: 'validate ' , case key value: [case value validate: elements]].
+"The tampered ivf_flat index, as py_vector_index.py refusals tampers it."
+index := (PBVectorIndex name: 'vi' keySpec: PBKeySpec element dim: 3 metric: 'l2' backend: 'ivf_flat'
+  params: (params value: { 'nlist' -> 2. 'nprobe' -> 1 })) build: values.
+store := index store.
+entry := index storeEntries first.
+vkey := entry key.
+entry := entry value.
+{ 'ivf' -> index.
+  'ivf centroid removed' -> (index _with: { 'centroids' -> (tup value: { index centroids at: 1 }) }).
+  'ivf centroid added' -> (index _with: { 'centroids' -> (tup value: { index centroids at: 1. index centroids at: 2. index centroids at: 2 }) }).
+  'ivf centroid list' -> (index _with: { 'centroids' -> (tup value: { PBFrozenList withAll: (index centroids at: 1) asArray. index centroids at: 2 }) }).
+  'ivf centroid ints' -> (index _with: { 'centroids' -> (tup value: { tup value: #(1 0 0). index centroids at: 2 }) }).
+  'ivf centroid nan' -> (index _with: { 'centroids' -> (tup value: { tup value: { Float nan. 0.0. 0.0 }. index centroids at: 2 }) }).
+  'ivf centroid short' -> (index _with: { 'centroids' -> (tup value: { tup value: #(1.0 0.0). index centroids at: 2 }) }).
+  'ivf centroid True' -> (index _with: { 'centroids' -> (tup value: { tup value: { true. 0.0. 0.0 }. index centroids at: 2 }) }).
+  'ivf trained_size 0' -> (index _with: { 'trained_size' -> 0 }).
+  'ivf untrained with trained_size' -> (index _with: { 'centroids' -> (tup value: #()). 'trained_size' -> 3 }).
+  'ivf untrained in list 0' -> (index _with: { 'centroids' -> (tup value: #()). 'trained_size' -> 0 }).
+  'ivf in the other list' -> (index _with: { 'store' -> (put value: ((PBAvl keyRemove: store key: vkey) at: 1)
+    value: (tup value: { 1 - (vkey at: 1). vkey at: 2 }) value: entry) }).
+  'ivf in list -1' -> (index _with: { 'store' -> (put value: ((PBAvl keyRemove: store key: vkey) at: 1)
+    value: (tup value: { -1. vkey at: 2 }) value: entry) }).
+  'ivf swapped centroids' -> (index _with: { 'centroids' -> (tup value: { index centroids at: 2. index centroids at: 1 }) }) }
+  do: [:case | refused value: 'validate ' , case key value: [case value validate: values]].
 space close.
 'end' displayNl.

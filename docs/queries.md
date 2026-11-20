@@ -897,7 +897,9 @@ is a `KeyNode` tree when built in bulk and a `CountedKeyNode` tree when grown fr
 node always takes the class of the existing root, so the two histories give different bytes in
 `proto_db`, and must in protoBaseST. Both histories, `build:` and seeded hook sequences over
 records and plain values of every numeric form are compared atom by atom with `proto_db`'s by
-`tests/interop/vector_index_identical.sh` (V3: equal, for the exact and hnsw backends).
+`tests/interop/vector_index_identical.sh` (V3: equal, for the exact and hnsw backends; V4: equal for
+`'ivf_flat'` too, every training of four growth histories that cross `'nlist'` and
+`'retrain_growth'` included, `proto_db` running without numpy).
 
 ### Scores, and why a correctly rounded sum
 

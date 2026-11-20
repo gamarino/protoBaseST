@@ -252,7 +252,7 @@ test_vector_index.py::test_ivf_flat_trains_on_growth_and_stays_consistent	deferr
 test_vector_index.py::test_ivf_flat_partial_probe_has_good_recall_and_widens_for_k	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_ivf_flat_training_depends_on_the_data_and_seed_only	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_ivf_flat_round_trip_through_file_storage_keeps_centroids	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_validate_detects_structural_corruption	deferred	V4	It builds an ivf_flat index and removes a centroid, so it needs the IVF training of V4.
+test_vector_index.py::test_validate_detects_structural_corruption	ported	tests/unit/vec_ivf.st	validate: catches tampering on an ivf_flat index, a removed centroid included
 test_vector_index.py::test_near_k_and_predicate_returns_k_among_the_matching	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_near_k_with_threshold_and_predicate_and_threshold_only_post_filter	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
 test_vector_index.py::test_several_near_terms_and_disjunctions_keep_set_semantics	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).

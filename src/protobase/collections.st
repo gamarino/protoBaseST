@@ -704,7 +704,7 @@ PBIndexedCollection >> _elementsOf: aCollection for: aSelector
  kind protoBaseST does not know), is PBNotSupportedError naming it, since
  maintaining the other indexes and not that one would write a stale index. A
  vector index is maintained at the index level since the vectors phase's V3
- (exact and hnsw; ivf_flat in V4); its collections become writable in V5.
+ (exact and hnsw; ivf_flat since V4); its collections become writable in V5.
  Nothing is rebuilt or dropped. Every change sends it first, addIndex: and
  removeIndex: included. An extractor this process has not registered is not
  checked here: as in proto_db (keyspec.py 232), only a change that evaluates the
@@ -716,8 +716,8 @@ PBIndexedCollection >> _checkWritable: aSelector
   PBAvl keysAndValuesDo: [:name :index |
     (index isClassObject not and: [index isKindOf: PBVectorIndex]) ifTrue: [
       ^ PBNotSupportedError signal: self class name , ' ' , aSelector , ': the index ' , (PBCodec repr: name)
-        , ' is of the type ' , index class typeName , ', which protoBaseST maintains as an index (exact and hnsw; '
-        , 'ivf_flat from the vectors phase''s V4) but does not write in a collection until V5: a collection '
+        , ' is of the type ' , index class typeName , ', which protoBaseST maintains as an index (exact, hnsw '
+        , 'and ivf_flat) but does not write in a collection until V5: a collection '
         , 'holding it is read only'].
     (index isClassObject not and: [index isKindOf: PBIndex])
       ifFalse: [
@@ -778,8 +778,7 @@ PBIndexedCollection >> _withIndexChanges: aChanges op: anOp
  (_checkPlacement: PBMisfiledError for an entry its own key does not place,
  PBCorruptionError for a broken tree), then every index against the elements
  (PBIndex >> validate:). An index of a kind protoBaseST does not know is
- PBNotSupportedError; a vector index validates as any other (vectors phase V3), except
- an ivf_flat index with a stored member, PBNotSupportedError until its lists land (V4);
+ PBNotSupportedError; a vector index validates as any other (vectors phases V3 and V4);
  an unregistered extractor is PBValidationError naming it. Loads every node: O(n log n).
  Answers the receiver."
 PBIndexedCollection >> validate
