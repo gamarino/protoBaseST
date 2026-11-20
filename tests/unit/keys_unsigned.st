@@ -3,7 +3,7 @@
  unsigned big-endian Integer (the high bit is never a sign). Four sizes (0, 8, 16, 33 bytes), each
  with an all-zero, an all-16rFF, an oid-like and a mixed pattern, are checked against the Integer
  the bytes spell, computed here by the plain digit loop (the independent reference). The fifth check
- calls ByteArray >> unsignedIntegerFrom:to:bigEndian: (protoST 0.14.0, the floor: no fallback)
+ calls ByteArray >> unsignedIntegerFrom:to:bigEndian: (protoST 0.14.0, below the 0.14.1 floor: no fallback)
  directly on the same arrays, so the test fails on a protoST without the primitive, as _unsignedBigEndian:
  does after it adopts it."
 Import from: 'protobase'.

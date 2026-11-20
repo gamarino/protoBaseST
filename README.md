@@ -113,8 +113,9 @@ These are the minimum versions. The 0.4.0 suite and benchmarks run on exactly th
 Build protoST 0.14.1 against protoCore 3.6.1 and protoIO 0.7.0 (see its own README); it provides
 `lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S44,
 `BinaryFile >> linkCount` and `FileReference >> realPath` (the hard-link refusal and the lock
-naming of the cluster logs), the exact `Fraction` comparison and
-the ByteArray primitive that reads an unsigned Integer of any width from bytes (both from protoST 0.14.0), which this code relies on. The Python interop tests and the ERP demo also need a checkout of the
+naming of the cluster logs), the exact `Fraction` comparison and the ByteArray primitive that
+reads an unsigned Integer of any width from bytes (both from protoST 0.14.0), which this code
+relies on. The Python interop tests and the ERP demo also need a checkout of the
 [protoBase repository](https://github.com/gamarino/ProtoDB), at the tag `v2.0.0rc4` (`v2.0.0rc2`
 before the cluster branch), and Python 3.12 or newer (3.11 before it; tested with 3.14):
 

@@ -80,7 +80,7 @@ Chapter 11 also gains a section, "Indexes, from both sides" (`11_indexed_interop
 
 ## Running the programs
 
-You need protoST 0.10.0 or newer and this repository's `src/` on the module path (README,
+You need protoST 0.14.1 or newer and this repository's `src/` on the module path (README,
 "Requirements"):
 
 ```sh
