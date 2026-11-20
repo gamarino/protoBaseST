@@ -309,7 +309,7 @@ test_plans.py::test_index_plan_lookup_range_and_ordered_scan	ported	tests/unit/q
 test_plans.py::test_vector_search_wraps_the_index_plan	deferred	V6	PBVectorSearch and its explain and estimate are built with the vector plans in V6.
 test_plans.py::test_filter_matches_reference_and_estimates_selectivity	ported	tests/unit/qry_plans.st	Filter keeps half per term: And multiplies, Or is 1 - prod(1 - s), Not is 1 - s; BlockFilter is one term
 test_plans.py::test_filter_accepts_prefix_lists_and_rejects_near	deferred	V2	The PBFilter refusal of a near[] term is built with the terms in V2.
-test_plans.py::test_python_filter_is_explicit_and_never_swallows	ported	tests/unit/qry_query.st	errors raised by user code propagate from where:, collect: and orderBy: blocks, through every terminal
+test_plans.py::test_python_filter_is_explicit_and_never_swallows	ported	tests/unit/qry_plans.st	a BlockFilter is explicit and never swallows an error of its block
 test_plans.py::test_union_max_multiplicity_and_equal_but_distinct_values	ported	tests/unit/qry_plans.st	Union keeps the largest multiplicity and Intersect the smallest, by element identity
 test_plans.py::test_union_of_same_element_from_two_branches_yields_it_once	ported	tests/unit/qry_plans.st	Union keeps the largest multiplicity and Intersect the smallest, by element identity
 test_plans.py::test_intersect_min_multiplicity	ported	tests/unit/qry_plans.st	Union keeps the largest multiplicity and Intersect the smallest, by element identity
@@ -329,7 +329,7 @@ test_plans.py::test_plans_are_immutable	ported	tests/unit/qry_plans.st	plans are
 test_plans.py::test_composed_plan_explain_is_nested	ported	tests/unit/qry_plans.st	plans are immutable, and a composed plan explains as nested children
 test_plans.py::test_concurrent_execution_gives_identical_results	ported	tests/unit/qry_plans.st	one composed plan gives identical results on 8 actors at once
 test_plans.py::test_explain_computes_each_estimate_once	ported	tests/unit/qry_plans.st	one explain computes each estimate once
-test_plans.py::test_sort_and_group_by_label_each_callable	ported	tests/unit/qry_plans.st	Sort is stable and total, unorderable keys last; descending reverses the keys, ties in input order
+test_plans.py::test_sort_and_group_by_label_each_callable	ported	tests/unit/qry_plans.st	each sort key is labelled on its own: a path, a described block, or block (the GroupBy half is spec 3.2)
 test_plans.py::test_display_value_keeps_dict_keys_distinct	ported	tests/unit/qry_terms.st	describe and display values
 test_plans.py::test_join_kinds_exported	n/a	deferred: spec 3.2	The Join kinds are not ported: spec 3.2 defers Join.
 # test_plan_windows.py: rank access through the plan protocol (queries Tasks 6 and 8).

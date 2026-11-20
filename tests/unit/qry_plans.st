@@ -1,4 +1,4 @@
-"EXPECT: ok 22"
+"EXPECT: ok 24"
 "Indexed queries, plan Task 6: the plan operators (proto_db proto_db/query/plans.py at v2.0.0rc4,
  less ValuesScan, VectorSearch, GroupBy, Join and Unnest; spec 3.2). tests/unit/test_query_plans.py's
  four behaviours (the estimate, the abstract plan, the collection scan and its empty case), then
@@ -17,7 +17,9 @@
  fix round ports the tests/unit/test_plans.py and test_plan_windows.py behaviours no check held:
  unorderable elements in Union and Intersect, immutable nodes and a nested explain, one composed plan
  on 8 actors, one estimate per node per explain, a Limit served by rank that produces no row before
- its window, and no window over a collection whose class redefines do:. Mapped in
+ its window, and no window over a collection whose class redefines do:; its fix round 2, an empty
+ Limit window and the remaining bad bounds, Count of an empty source, a BlockFilter that never
+ swallows, and the Sort half of the per-key labels. Mapped in
  tests/unit/queries_checklist.tsv."
 Import from: 'protobase'.
 Import from: '_check'.
@@ -180,16 +182,24 @@ c that: 'Limit seeks its window by rank over an ordered scan, and skips rows oth
     (PBLimit source: scan limit: nil offset: 198) explain at: 'limit'.
     est value: (PBLimit source: scan limit: 10 offset: 195).
     [PBLimit source: scan limit: -1 offset: 0. nil] on: PBValidationError do: [:e | e return: #refused].
-    [PBLimit source: scan limit: 1 offset: true. nil] on: PBValidationError do: [:e | e return: #refused] }
-  equals: { true. true. #(5 3). { 5.0. (200 + byAge groupCount + 1) asFloat }. true. false. true. nil. #(5.0 200.0). #refused. #refused }.
+    [PBLimit source: scan limit: 1 offset: true. nil] on: PBValidationError do: [:e | e return: #refused].
+    "test_limit_offset_and_estimate: an empty window, an offset past the end, the other bad bounds"
+    (PBLimit source: scan limit: 0 offset: 0) execute. est value: (PBLimit source: scan limit: 10 offset: 250).
+    (PBLimit source: scan limit: 10 offset: 250) execute.
+    { { 1. -1 }. { true. 0 }. { 1.5. 0 }. { 1. 1.5 } } collect: [:bad |
+      [PBLimit source: scan limit: (bad at: 1) offset: (bad at: 2). nil] on: PBValidationError do: [:e | e return: #refused]] }
+  equals: { true. true. #(5 3). { 5.0. (200 + byAge groupCount + 1) asFloat }. true. false. true. nil. #(5.0 200.0). #refused. #refused.
+    #(). #(0.0 200.0). #(). #(#refused #refused #refused #refused) }.
 
 count := PBCountPlan source: (byCity plan: (city value: '==' value: 'Oslo')).
 u := PBCountPlan source: filter.
 c that: 'Count reads the count of an index plan by rank and counts any other source'
   is: { count execute. (count explain at: 'by_rank'). u execute. (u explain includesKey: 'by_rank'). est value: count. est value: u.
-    (PBCountPlan source: scan) execute. ((PBCountPlan source: scan) explain at: 'by_rank') }
+    (PBCountPlan source: scan) execute. ((PBCountPlan source: scan) explain at: 'by_rank').
+    (PBCountPlan source: (PBCollectionScan on: PBList new)) execute.
+    (PBCountPlan source: (PBFilter source: scan terms: { city value: '==' value: 'Nowhere' })) execute }
   equals: { { (QData scan: people where: [:e | (city value: '==' value: 'Oslo') matches: e]) inject: 0 into: [:s :n | s + n] }.
-    true. { filter execute size }. false. { 1.0. (byCity estimate: (city value: '==' value: 'Oslo')) cost }. #(1.0 400.0). #(200). true }.
+    true. { filter execute size }. false. { 1.0. (byCity estimate: (city value: '==' value: 'Oslo')) cost }. #(1.0 400.0). #(200). true. #(0). #(0) }.
 
 dist := PBDistinct source: (PBCollectionScan on: (PBList new extend: {
   1. 1.0. decimal1. true. 1. r1. r1. PBFrozenList withAll: #(1). PBFrozenList withAll: #(1). PBFrozenList withAll: { 1.0 } })).
@@ -369,5 +379,32 @@ c that: 'a collection whose class redefines do: offers no window'
   is: { odd byRank. odd exactRows. (odd windowFrom: 0 to: 2). (PBLimit source: odd limit: 2 offset: 1) execute.
     (PBList new extend: (0 to: 5) asArray) asQueryPlan byRank }
   equals: { false. nil. #(1 3). #(3 5). true }.
+
+"test_python_filter_is_explicit_and_never_swallows: a BlockFilter explains its description, an error
+ its block raises (here a number compared with a missing field's nil) propagates from execute,
+ never an empty answer, and a predicate that is not a
+ block of one argument with a non-empty description, or not a PBBlockPredicate, is refused."
+plan := PBBlockFilter source: scan predicate: (PBBlockPredicate block: [:p | (p at: 'name') last = $7] description: 'name ends with 7').
+r1 := PBBlockFilter source: scan predicate: (PBBlockPredicate block: [:p | (p at: 'no such field') > 1] description: 'boom').
+c that: 'a BlockFilter is explicit and never swallows an error of its block'
+  is: { plan explain at: 'plan'. plan explain at: 'description'.
+    (plan execute collect: [:p | p at: 'name']) = ((people select: [:p | (p at: 'name') last = $7]) collect: [:p | p at: 'name']).
+    [r1 execute. #swallowed] on: Error do: [:e | e return: #raised].
+    [PBBlockPredicate block: 'nope' description: 'x'. nil] on: PBValidationError do: [:e | e return: #refused].
+    [PBBlockPredicate block: [:p | true] description: ''. nil] on: PBValidationError do: [:e | e return: #refused].
+    [PBBlockFilter source: scan predicate: [:p | true]. nil] on: PBValidationError do: [:e | e return: #refused] }
+  equals: { 'BlockFilter'. 'name ends with 7'. true. #raised. #refused. #refused. #refused }.
+
+"test_sort_and_group_by_label_each_callable, its Sort half: every sort key carries its own label
+ (a path its path, a block 'block' or its description), so proto_db's 'exactly one callable'
+ ambiguity cannot arise. Its GroupBy half is not ported: spec 3.2 defers GroupBy."
+plan := PBSort source: scan keys: { PBSortKey key: [:p | p at: 'name'] descending: false.
+  PBSortKey key: [:p | (p hasDefinedAttr: 'city') ifTrue: [(p at: 'city') ifNil: ['']] ifFalse: ['']] descending: true description: 'city or empty'.
+  PBSortKey key: 'age' descending: true }.
+c that: 'each sort key is labelled on its own: a path, a described block, or block (the GroupBy half is spec 3.2)'
+  is: { ((plan explain at: 'keys') asArray collect: [:k | k at: 'key']) asArray.
+    ((plan explain at: 'keys') asArray collect: [:k | k at: 'descending']) asArray.
+    (plan execute collect: [:p | p at: 'name']) = ((people asSortedCollection: [:a :b | (a at: 'name') <= (b at: 'name')]) asArray collect: [:p | p at: 'name']) }
+  equals: { #('block' 'city or empty' 'age'). #(false true true). true }.
 
 c report displayNl.
