@@ -646,7 +646,12 @@ Every `proto_db` test of the in-scope parts is ported or justified in
 `test_vector_index.py` rows are no longer excluded; each is deferred to the vectors task that ports
 it, or n/a with its reason (Python import mechanics; hnsw search, DV1; the derived cache, DV4); and
 the vector tests of `test_plans.py` (2), `test_format_neutral.py` (2) and `test_structure_depth.py`
-(1) join the checklist: 306 rows.* The counts are of `def test_`
+(2, counting `test_an_index_added_over_existing_data_refuses_the_same_way`, which also adds a vector
+index) join the checklist: 307 rows. V0's review then found query-scope tests this list never named,
+and they join it too: the other 26 tests of `test_plans.py` (the plan operators of plan Task 6), the
+9 of `tests/unit/test_plan_windows.py` (rank access through plans, plan Tasks 6 and 8), and the
+key-group index tests of `test_format_neutral.py` (6: member tokens, format-3 indexes) and
+`test_structure_depth.py` (5: the member key's depth): 353 rows.* The counts are of `def test_`
 lines; parametrised cases are more. (The first version of this list omitted the key-spec, term,
 expression, property and concurrency files; corrected while writing the plan.)
 

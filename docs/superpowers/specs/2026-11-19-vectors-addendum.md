@@ -772,6 +772,16 @@ rows already `ported` whose `near[]` sub-cases were skipped (`tests/unit/test_ex
 `117-119`, `154`, `167`, `296`; `tests/unit/test_linq.py:195-197`, `716`) are reopened in V2 and V7
 and noted in the row text.
 
+*Applied by V0 (and its review's fix round 1): `test_structure_depth.py` has two vector tests, not
+one: `test_an_index_added_over_existing_data_refuses_the_same_way` (line 272) also adds a
+`VectorIndex` (line 282), so it is `deferred V5` and the list gains 6 rows (307). A ported row's
+fourth field must be a check label, so the reopened rows carry their note by becoming `deferred V2`
+(the five `test_expressions.py` rows) and `deferred V7` (the two `test_linq.py` rows), the reason
+naming the ported check and the skipped line; this also makes `CHECKLIST_FINAL` hold the reopening.
+The fix round also lists the query-scope tests the list never named (the other 26 of
+`test_plans.py`, the 9 of `test_plan_windows.py`, the key-group index tests of
+`test_format_neutral.py` and `test_structure_depth.py`), ported where no check held them: 353 rows.*
+
 ### 5.5 Benchmarks
 
 Runner: `bench/run_query.sh` gains workloads **VB0-VB5** (named apart from the tasks V0-V10; one

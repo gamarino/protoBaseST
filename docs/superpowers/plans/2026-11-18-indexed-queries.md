@@ -242,8 +242,10 @@ reviews, fixes and integrates.
   later task turns its deferred rows into `ported` rows. *(Addendum V, 5.4, applied by its task V0:
   the `n/a excluded: vector` rows became `deferred V1` to `deferred V7`, or `n/a` with the reasons
   `Python-only API`, `deviation: DV1` and `deviation: DV4`; the class `excluded: vector` is gone;
-  five vector tests of `test_plans.py`, `test_format_neutral.py` and `test_structure_depth.py` were
-  added: 306 rows.)*
+  six vector tests of `test_plans.py`, `test_format_neutral.py` and `test_structure_depth.py` were
+  added: 307 rows. V0's fix round added the query-scope tests the list never named, the rest of
+  `test_plans.py`, all of `test_plan_windows.py` and the key-group index tests of the other two
+  files, porting the ones no check held in `qry_plans.st` and `idx_depth_tokens.st`: 353 rows.)*
 
 - [ ] **Step 1: extract the shared helper, then write the check.** Move the cluster checklist's
   parsing and row rules into `tests/lib/checklist_rows.sh`, make `cluster_checklist.sh` call it,
@@ -560,7 +562,7 @@ Tests use `tests/unit/_check.st` (`Check new`, `that:is:equals:`, `that:isTrue:`
     rebuild; a concurrent `addIndex:` of the same name in both is `PBConflictError` containing the
     name; different names both survive; `removeIndex:` against a concurrent write keeps the write
     and drops the index; a merge onto a current that holds a vector index is
-    `PBNotSupportedError`. *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: a merge onto a vector-indexed current is maintained from V5; The task is done; this text records its history.)*
+    `PBNotSupportedError`. *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: a merge onto a vector-indexed current is maintained from V5. The task is done; this text records its history.)*
   - `idx_merge_extractor.st` (`"EXPECT: ok 4"`, ruling IQ1, Review Focus 1): extractor
     `'flaky'` raises for one marked element. (a) Standalone: the commit whose merge extracts it
     fails with the block's own exception (`ZeroDivide`), unchanged; the next commit succeeds. (b) `group commit: one extractor fails` (CR8): a
@@ -618,7 +620,7 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
   - `PBTerm class >> path: aStringOrNil op: anOperatorString value: aValue` and
     `path:op:` (the unary operators `'?N' '?!N' '?T' '?!T'`); operators exactly
     `'==' '!=' '<' '<=' '>' '>=' 'in' 'between[]' 'between()' 'between[)' 'between(]' '?N' '?!N'
-    'contains' '?T' '?!T'`; `'near[]'` signals `PBNotSupportedError` containing `'vector'` *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: `near[]` is accepted from V2; The task is done; this text records its history.)*;
+    'contains' '?T' '?!T'`; `'near[]'` signals `PBNotSupportedError` containing `'vector'` *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: `near[]` is accepted from V2. The task is done; this text records its history.)*;
     validation and canonical operands as `terms.py:152-213` (`in` over a set sorted by order key).
   - `PBTerm >> path`, `op`, `value`, `keySpecObject` (the `PBKeySpec` of its path; every selector
     answering a `PBKeySpec` is named `keySpecObject`, ruling 2026-11-19; `PBTerm` has no
@@ -637,7 +639,7 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
   behaviours that apply; `matches:` on `QData values:` equals `proto_db`'s answers recorded in
   `terms.msgpack` for every operator; `degenerate terms as proto_db` (Review Focus 4);
   `compile:` of every recorded list gives a term whose `asList` is the same list and whose
-  `describe` is `proto_db`'s text; `near[]` refused *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: `near[]` is accepted from V2; The task is done; this text records its history.)*; `& | not take expressions only` (CR5): a
+  `describe` is `proto_db`'s text; `near[]` refused *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: `near[]` is accepted from V2. The task is done; this text records its history.)*; `& | not take expressions only` (CR5): a
   block argument to `&` or `|` signals `PBValidationError`.
 - [ ] **Step 2:** write `py_term_cases.py`, vendor its output and regenerate the directory's
   `manifest.sha256`, run
@@ -690,7 +692,7 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
     Row identity for `Union` / `Intersect` / `Distinct` is `element_identity` (`base.py:22-53`).
   - On indexes: `supports: aTerm`, `estimate: aTerm` → `PBEstimate` (D30, `keyed.py:596-622`),
     `plan: aTerm` → `PBIndexPlan`, `supportsOrder: aKeySpec`, `orderedPlan: aKeySpec descending:
-    aBoolean`; `PBVectorIndex >> supports:` answers false.
+    aBoolean`; `PBVectorIndex >> supports:` answers false. *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: `supports:` answers `near[]` terms on the index's key from V6. The task is done; this text records its history.)*
   - On collections: `asQueryPlan` → `PBCollectionScan`; `_scanWindowFrom:to:` for `PBList`
     and `PBDictionary` (rank by position).
 
@@ -712,7 +714,7 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
 - [ ] **Step 2:** run `tests/run_tests.sh tests/unit/qry_plans.st tests/unit/qry_index_plans.st
   tests/unit/qry_rank.st`. Expected: FAIL.
 - [ ] **Step 3:** implement, porting `plans.py:75-880` (less `ValuesScan`, `VectorSearch`,
-  `GroupBy`, `Join`, `Unnest`) and `keyed.py:266-336`, `461-647`.
+  `GroupBy`, `Join`, `Unnest`) and `keyed.py:266-336`, `461-647`. *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: `VectorSearch` is ported as `PBVectorSearch` in V6. The task is done; this text records its history.)*
 - [ ] **Step 4:** run the three. Expected: PASS.
 - [ ] **Step 5:** guide section "Reading a plan": its worked plans come from
   `examples/queries/reading_plans.st`, which sends `PBPlanner` and `PBQuery` and so runs in Task 8
@@ -742,7 +744,7 @@ Runs after Task 3: its tests use `QData values:` from `tests/unit/_queries.st` (
   `PBPlanner class >> normalize: anExpression`. A pure function of its arguments: indexes in
   sorted name order, conjuncts deduplicated in order, candidates ranked by
   `{cost. scans. sorted index names}`, `Union` only when every branch is index-only, ordered
-  index scan against `Sort`; argument errors as `planner.py:278-343`; no `near[]` rules. *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: the `near[]` rules are ported in V7; The task is done; this text records its history.)*
+  index scan against `Sort`; argument errors as `planner.py:278-343`; no `near[]` rules. *(Superseded by Addendum V, `docs/superpowers/specs/2026-11-19-vectors-addendum.md`: the `near[]` rules are ported in V7. The task is done; this text records its history.)*
 
 - [ ] **Step 1: write the failing tests.**
   - `qry_planner.st` (`"EXPECT: ok 16"`): the 38 `test_planner.py` behaviours that apply

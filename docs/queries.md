@@ -914,9 +914,11 @@ the member key is the oid, so the order is the same in both implementations on t
 | `'hnsw'` | **Refused** (`PBNotSupportedError` at the first execution of its plan; ruling VQ1, DV1). `proto_db` searches an hnswlib graph rebuilt in each process, never stored, and refuses the same way when hnswlib is not installed. | The store (list 0). | `proto_db`'s graph is not. |
 
 The parameters are `proto_db`'s and are written as it writes them, a tuple of `(name, value)` pairs
-sorted by name: `'exact'` takes `'numpy'`; `'ivf_flat'` takes `'nlist'` (16), `'nprobe'`
-(`min(4, nlist)`), `'train_iters'` (10), `'seed'` (0) and `'retrain_growth'` (4.0);
-`'hnsw'` takes `'M'` (16), `'ef_construction'` (200), `'ef_search'` (64) and `'seed'` (0). They are
+sorted by name: `'exact'` takes `'numpy'` (true; `vector_backends.py:485-490`); `'ivf_flat'` takes
+`'nlist'` (16), `'nprobe'` (`min(4, nlist)`), `'train_iters'` (10), `'seed'` (0) and
+`'retrain_growth'` (4.0) (`vector_backends.py:571-586`); `'hnsw'` takes `'M'` (16),
+`'ef_construction'` (200), `'ef_search'` (64) and `'seed'` (0) (`vector_backends.py:757-770`). The
+defaults are those of each backend's check method, which also states them in its docstring. They are
 validated in `proto_db`'s order, so a definition with two faults reports the same one.
 
 ### Training and its determinism

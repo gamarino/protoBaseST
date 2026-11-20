@@ -214,8 +214,9 @@ rounded.
 The square of 130492547 needs 54 bits, so it lies exactly half-way between two floats; the product
 rounds it to one, pow to the other. Measured while designing this phase (CPython 3.14.0, glibc
 2.43): of 117,197 odd integers with such half-way squares, `x ** 2` differed from `x * x` on 55,729;
-of a million ordinary doubles, on 845 (Addendum V, section 2.5). A port that multiplies would pick
-another nearest centroid on a near tie, and the stored centroids would not be `proto_db`'s.
+of a million uniform doubles in [-1000, 1000], on 845 (Addendum V, section 2.5). A port that
+multiplies would pick another nearest centroid on a near tie, and the stored centroids would not be
+`proto_db`'s.
 
 So protoBaseST squares with protoST's `raisedTo: 2`, which calls the same pow function, and its tests pin
 half-way cases computed by CPython, so that a change in either fails loudly instead of moving a

@@ -1,4 +1,4 @@
-"EXPECT: ok 16"
+"EXPECT: ok 22"
 "Indexed queries, plan Task 6: the plan operators (proto_db proto_db/query/plans.py at v2.0.0rc4,
  less ValuesScan, VectorSearch, GroupBy, Join and Unnest; spec 3.2). tests/unit/test_query_plans.py's
  four behaviours (the estimate, the abstract plan, the collection scan and its empty case), then
@@ -13,15 +13,51 @@
  left out, so the field's key spec extracts PBMissing from the row), or a block's answer. The three
  plans of docs/queries.md (section Reading a plan), built node by node, give the guide's model estimates
  exactly (proto_db's figures, ruling CR10). explain has proto_db's keys in proto_db's order and is printable
- by PBNotation describe:; execute answers equal, distinct Arrays; do: is lazy. Mapped in
+ by PBNotation describe:; execute answers equal, distinct Arrays; do: is lazy. The vectors phase's V0
+ fix round ports the tests/unit/test_plans.py and test_plan_windows.py behaviours no check held:
+ unorderable elements in Union and Intersect, immutable nodes and a nested explain, one composed plan
+ on 8 actors, one estimate per node per explain, a Limit served by rank that produces no row before
+ its window, and no window over a collection whose class redefines do:. Mapped in
  tests/unit/queries_checklist.tsv."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_queries'.
 
+"An actor that runs a plan and answers the 'v' of its rows, in order (test_concurrent_execution_
+ gives_identical_results)."
+Object subclass: #PlansRunner.
+PlansRunner >> valuesOf: aPlan
+  ^ aPlan execute collect: [:e | e at: 'v'].
+
+"A leaf counting how often its estimate is computed (test_explain_computes_each_estimate_once)."
+PBQueryPlan subclass: #CountingPlan instanceVariableNames: 'items calls'.
+CountingPlan class >> items: anArray
+  ^ self basicNew setItems: anArray.
+CountingPlan >> setItems: anArray
+  items := anArray.
+  calls := 0.
+CountingPlan >> calls
+  ^ calls.
+CountingPlan >> do: aBlock
+  items do: aBlock.
+CountingPlan >> _estimateWith: aMemo
+  calls := calls + 1.
+  ^ PBEstimate rows: items size cost: items size.
+CountingPlan >> _explainWith: aMemo
+  ^ self _explain: 'Counting' params: #() children: #() memo: aMemo.
+
+"A List whose do: answers only its odd elements, so its scan is not windowed by position
+ (test_a_subclass_redefining_elements_is_not_windowed)."
+PBList subclass: #OddList.
+OddList class >> typeName
+  ^ 'tests.qry_plans.OddList'.
+OddList >> do: aBlock
+  super do: [:v | v odd ifTrue: [aBlock value: v]].
+
 | oidBytes c people list byCity byAge scan city age bag ids keysOf est plans rows r1 a b u i k sorted
   sortRows fails seen limit count dist proj missing decimal1 expected composite filter mapped
-  guide gCity gAge oslo range gFilter rejected fullScan r30 gSort gLimit |
+  guide gCity gAge oslo range gFilter rejected fullScan r30 gSort gLimit lists other nested names
+  big bigIndex futures got leaf counted bigRank produced inner part odd info plan |
 c := Check new.
 missing := PBMissing default.
 decimal1 := Decimal fromString: '1'.
@@ -250,5 +286,88 @@ c that: 'the three plans of the guide give its model estimates exactly'
     (est value: fullScan) at: 2. est value: gSort. est value: gLimit. gLimit explain at: 'by_rank'. gLimit execute size }
   equals: { { 150.0. 152.58496250072116 }. { 70.0. 82.95419631038688 }. { 35.0. 152.95419631038686 }. 20. 302.5849625007212.
     1200.0. { 60.0. 426.367632046898 }. { 5.0. 426.367632046898 }. true. 5 }.
+
+"=== Fix round 1 of the vectors phase's V0: the test_plans.py and test_plan_windows.py behaviours no
+ check above held (Addendum V, section 5.4; queries_checklist.tsv) ==="
+
+"test_union_intersect_with_unorderable_elements_and_atoms: lists, maps and NaN are elements too."
+lists := PBCollectionScan on: (PBList new extend: { PBFrozenList withAll: #(1 2). PBFrozenDict withAssociations: { 'a' -> 1 }.
+  PBFrozenList withAll: #(1 2). Float nan }).
+other := PBCollectionScan on: (PBList new extend: { PBFrozenList withAll: #(1 2). PBFrozenDict withAssociations: { 'a' -> 1 } }).
+c that: 'Union and Intersect keep unorderable elements: lists, maps and NaN'
+  is: { (PBUnion withAll: { lists. other }) execute size.
+    (PBIntersect withAll: { lists. other }) execute collect: [:e | PBKeys exactToken: e] }
+  equals: { 4. { PBFrozenList withAll: #(1 2). PBFrozenDict withAssociations: { 'a' -> 1 } } collect: [:e | PBKeys exactToken: e] }.
+
+"test_plans_are_immutable and test_composed_plan_explain_is_nested: a node has no setter, its
+ one-shot initializers refuse a second call, and a composed plan explains as nested children."
+nested := PBLimit source: (PBSort source: (PBFilter source: scan terms: { age value: 'in' value: #(25 30) })
+  keys: { PBSortKey key: 'name' descending: true }) limit: 1 offset: 0.
+names := OrderedCollection new.
+info := nested explain.
+[info isNil] whileFalse: [names add: (info at: 'plan').
+  info := (info at: 'children') isEmpty ifTrue: [nil] ifFalse: [(info at: 'children') asArray first]].
+c that: 'plans are immutable, and a composed plan explains as nested children'
+  is: { { #source:. #predicate:. #limit:. #offset: } anySatisfy: [:sel | (nested respondsTo: sel) or: [filter respondsTo: sel]].
+    [filter _setSource: scan. nil] on: PBUserError do: [:e | e return: #refused].
+    [filter _setPredicate: (city value: '==' value: 'Rome'). nil] on: PBUserError do: [:e | e return: #refused].
+    names asArray.
+    nested execute = ((PBSort source: (PBFilter source: scan terms: { age value: 'in' value: #(25 30) })
+      keys: { PBSortKey key: 'name' descending: true }) execute copyFrom: 1 to: 1) }
+  equals: { false. #refused. #refused. #('Limit' 'Sort' 'Filter' 'CollectionScan'). true }.
+
+"test_concurrent_execution_gives_identical_results: one composed plan run on 8 actors at once."
+big := (PBList new extend: ((0 to: 399) asArray collect: [:j | PBFrozenDict withAssociations: { 'k' -> (j \\ 17). 'v' -> j }]))
+  addIndex: (PBRangeIndex name: 'k' path: 'k').
+bigIndex := big getIndex: 'k'.
+plan := PBLimit source: (PBSort source: (PBUnion withAll: {
+    PBFilter source: big asQueryPlan terms: { PBTerm path: 'v' op: '<' value: 300 }.
+    bigIndex plan: (PBTerm path: 'k' op: '>=' value: 10) })
+  keys: { PBSortKey key: 'k' descending: true. PBSortKey key: 'v' descending: false }) limit: 250 offset: 0.
+expected := plan execute collect: [:e | e at: 'v'].
+futures := (1 to: 8) asArray collect: [:j | PlansRunner new asActor valuesOf: plan].
+got := futures collect: [:f | f waitWithin: 120000].
+c that: 'one composed plan gives identical results on 8 actors at once'
+  is: { expected size. got allSatisfy: [:each | each = expected] }
+  equals: { 250. true }.
+
+"test_explain_computes_each_estimate_once: one explain reads each node's estimate once; the memo
+ lives for one explain."
+leaf := CountingPlan items: #(1 2 3).
+counted := PBCountPlan source: (PBLimit source: (PBSort source: (PBFilter source: (PBProject source: leaf fields: [:x | x])
+  terms: { PBTerm path: nil op: '>' value: 0 }) keys: { PBSortKey key: nil descending: false }) limit: 2 offset: 0).
+r1 := OrderedCollection new.
+[PBNotation describe: counted explain] value.
+r1 add: leaf calls.
+counted explain.
+r1 add: leaf calls.
+counted estimate.
+r1 add: leaf calls.
+c that: 'one explain computes each estimate once'
+  is: { r1 asArray. counted execute }
+  equals: { #(1 2 3). #(2) }.
+
+"test_limit_over_a_window_does_not_run_the_producer: a Limit served by rank produces no row
+ before its window; without rank it produces them."
+bigIndex := (PBRangeIndex name: 'k' path: 'k') build: ((0 to: 999) asArray collect: [:j | PBFrozenDict withAssociations: { 'k' -> j }]).
+inner := bigIndex orderedPlan: (PBKeySpec path: 'k') descending: false.
+produced := OrderedCollection new.
+bigRank := [:aRank | PBLimit source: (PBIndexPlan index: bigIndex term: nil part: (PBIndexPart kind: 'IndexOrderedScan'
+    producer: [:each | inner do: [:e | produced add: e. each value: e]] estimate: inner estimate details: nil
+    rank: aRank sortedRank: nil)) limit: 3 offset: 900].
+part := (bigRank value: (PBRankAccess segments: [bigIndex _orderedSegments: false])) execute collect: [:e | e at: 'k'].
+r1 := { part. produced size }.
+part := (bigRank value: nil) execute collect: [:e | e at: 'k'].
+c that: 'a Limit served by rank produces no row before its window'
+  is: r1 , { part. produced size }
+  equals: { #(900 901 902). 0. #(900 901 902). 903 }.
+
+"test_a_subclass_redefining_elements_is_not_windowed (proto_db's window(0, 2) is None reads byRank
+ false here: windowFrom:to: answers the rows through do: when the plan cannot seek)."
+odd := (OddList new extend: (0 to: 5) asArray) asQueryPlan.
+c that: 'a collection whose class redefines do: offers no window'
+  is: { odd byRank. odd exactRows. (odd windowFrom: 0 to: 2). (PBLimit source: odd limit: 2 offset: 1) execute.
+    (PBList new extend: (0 to: 5) asArray) asQueryPlan byRank }
+  equals: { false. nil. #(1 3). #(3 5). true }.
 
 c report displayNl.

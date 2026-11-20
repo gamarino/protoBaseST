@@ -4,12 +4,13 @@
 # a marker "[measured in T<n>: <what is measured>]", where T<n> is the plan task (T0-T10) whose
 # benchmark will fill it (spec section 7.3), and the task that measures it replaces the marker with
 # the figure. The vectors phase (Addendum V, docs/superpowers/specs/2026-11-19-vectors-addendum.md)
-# writes its drafts the same way, naming its own tasks: "[measured in V<n>: <text>]" for V0-V10 and
-# "[measured in V-pin: <text>]" (the addendum's task names, section 7; the execution plan
-# docs/superpowers/plans/2026-11-20-vectors.md numbers them otherwise and keeps these names). This
-# guard lists every marker of docs/*.md, docs/tutorial/*.md and README.md and prints the count per
-# task. It fails on a malformed marker (anything that opens "[measured" and is not one of the two
-# forms) and on a task outside T0-T10, V0-V10 and V-pin. With MARKERS_FINAL=1 (the final task: T10
+# writes its drafts the same way, naming its own tasks: "[measured in V<n>: <text>]" for V1-V10 (the
+# addendum's task names, section 7; the execution plan docs/superpowers/plans/2026-11-20-vectors.md
+# numbers them otherwise and keeps these names). V-pin and V0 measure nothing (the pin and the
+# drafts), so a marker naming either is refused. This guard lists every marker of docs/*.md,
+# docs/tutorial/*.md and README.md and prints the count per task. It fails on a malformed marker
+# (anything that opens "[measured" and is not one of the two forms) and on a task outside T0-T10 and
+# V1-V10. With MARKERS_FINAL=1 (the final task: T10
 # for the queries, V9 for the vectors) any marker left is a failure.
 # Scope: fenced code blocks and inline code spans are skipped, so a document can name the
 # convention itself (`[measured in T<n>: ...]`); docs/superpowers (the specs and plans, which
@@ -40,7 +41,10 @@ for path in docs:
         task = found.group(1)
         number = found.group(2) or found.group(3)
         if number is not None and int(number) > 10:
-            bad.append("%s:%d: marker names %s, outside T0-T10 and V0-V10" % (rel, line, task))
+            bad.append("%s:%d: marker names %s, outside T0-T10 and V1-V10" % (rel, line, task))
+            continue
+        if task in ("V0", "V-pin"):
+            bad.append("%s:%d: marker names %s, a vectors task that measures nothing (V1-V10 do)" % (rel, line, task))
             continue
         counts[task] = counts.get(task, 0) + 1
         total += 1
@@ -48,10 +52,8 @@ for path in docs:
             bad.append("%s:%d: marker left for %s, and MARKERS_FINAL=1: %s"
                        % (rel, line, task, " ".join(found.group(0)[:80].split())))
 def task_order(task):
-    # T0-T10 first, then V-pin, then V0-V10, each in task order
-    if task.startswith("T"):
-        return (0, int(task[1:]))
-    return (1, -1) if task == "V-pin" else (1, int(task[1:]))
+    # T0-T10 first, then V1-V10, each in task order
+    return (0 if task.startswith("T") else 1, int(task[1:]))
 for task in sorted(counts, key=task_order):
     print("%s %d" % (task, counts[task]))
 if bad:

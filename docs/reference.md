@@ -1295,6 +1295,18 @@ protoBaseST describes it.
 The meaning of every node, field and estimate, with three worked plans, is
 [queries.md, Reading a plan](queries.md#reading-a-plan).
 
+#### PBVectorSearch (0.4.0, draft)
+
+**`PBVectorSearch`** (`src/protobase/plans.st`, task V6), `proto_db`'s `VectorSearch`, joins the
+nodes above. **Draft: not implemented yet**; it is the API of
+[Vector search (0.4.0, draft)](#vector-search-040-draft), and V6 makes it fact:
+
+| Message | Meaning |
+|---|---|
+| `PBVectorSearch index: aVectorIndex term: aNearTerm where: anExpressionOrNil` | The k nearest (or those within the threshold) answering the term, among the elements satisfying the condition when it is given; `proto_db`'s checks and texts. |
+| `do:`, `execute`, `estimate` | Those of its index plan: rows nearest first, ties by member key. |
+| `explain` | `'plan'` → `'VectorSearch'`, `'index'` (the index's `explain`), `'term'`, `'where'` when given (a block is `{ 'block' -> description }`, DV5), `'estimate'`, `'children'` (the index plan). |
+
 ### Pagers
 
 **`PBPager`** (`src/protobase/pager.st`, a port of `proto_db`'s `query/pager.py`, `Pager`) serves
@@ -1379,16 +1391,8 @@ and metric), each answering the `near[]` term. In a `PBQuery`, with exactly one 
 with k among the conditions of the leading `where:` steps, a block given to those steps joins the
 search's `'where'` (`proto_db`'s mixing rule, R27).
 
-### PBVectorSearch
-
-**`PBVectorSearch`** (`src/protobase/plans.st`, task V6), `proto_db`'s `VectorSearch`, joins the
-nodes of [Plans and explain](#plans-and-explain):
-
-| Message | Meaning |
-|---|---|
-| `PBVectorSearch index: aVectorIndex term: aNearTerm where: anExpressionOrNil` | The k nearest (or those within the threshold) answering the term, among the elements satisfying the condition when it is given; `proto_db`'s checks and texts. |
-| `do:`, `execute`, `estimate` | Those of its index plan: rows nearest first, ties by member key. |
-| `explain` | `'plan'` → `'VectorSearch'`, `'index'` (the index's `explain`), `'term'`, `'where'` when given (a block is `{ 'block' -> description }`, DV5), `'estimate'`, `'children'` (the index plan). |
+The plan node, `PBVectorSearch`, is listed with the other nodes, under
+[Plans and explain](#pbvectorsearch-040-draft).
 
 ### Internal: the vector kernel
 
