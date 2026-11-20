@@ -11,16 +11,20 @@
  cached-query half of proto_db's test is not ported: the query result cache is deferred (spec 3.2,
  ruling IQ3); tests/unit/queries_checklist.tsv notes it. The writers' draws come from QData random:
  (fixed seeds); the interleaving varies from run to run, and the property holds for every one.
- Mutable state shared by the actors is two Atoms: the commit count and the number of writers done."
+ Mutable state shared by the actors is four Atoms: the commit count, the number of writers done,
+ the readers' demand (the largest commit count a reader waits for) and the stop flag."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_queries'.
 
-"A writer: commits until the readers are done (aStop), aCount being only a safety cap on the
- commits of all the writers together (aProgress), as proto_db's MAX_COMMITS (CI-314: every row the
+"A writer: commits until the readers are done (aStop). aCount caps the commits of all the writers
+ together (aProgress) that no reader waits for, as proto_db's MAX_COMMITS (CI-314: every row the
  writers add lengthens each reader's next query, so unbounded writers on a slow machine grow the
- readers' work faster than they finish it): the writers outlive every reader, so commits land between the pages of
- every pager by construction, not by the relative speed of the actors. The three writers change
+ readers' work faster than they finish it); past it a writer commits only while a reader waits for
+ a commit (aDemand above aProgress), and otherwise waits a millisecond. The writers outlive every
+ reader and never leave one waiting, so commits land between the pages of every pager by
+ construction, not by the relative speed of the actors (with a plain cap, a slow reader's last
+ pager could see no commit: seen in plan Task 10). The three writers change
  one PBList root, which never merges, so every concurrent commit but one conflicts and is
  retried; a writer whose run: exhausts its retries (PBConflictError: the others kept winning)
  starts the same change again, until it commits or the readers are done. Losing a race is the
@@ -34,11 +38,12 @@ Object subclass: #PageWriter.
  and to aDone at the end. Answers { commits. insertions. removals }
  (the root never falls to 50 elements, so every removal drawn is made), or the class and text of
  the first error."
-PageWriter >> write: db seed: aSeed commits: aCount progress: aProgress done: aDone stop: aStop
+PageWriter >> write: db seed: aSeed commits: aCount progress: aProgress demand: aDemand done: aDone stop: aStop
   | rnd n inserted removed |
   rnd := QData random: aSeed.
   n := 0. inserted := 0. removed := 0.
-  ^ [[aProgress value < aCount and: [aStop value not]] whileTrue: [ | choice slot gone committed |
+  ^ [[aStop value] whileFalse: [
+     (aProgress value < aCount or: [aProgress value < aDemand value]) ifFalse: [(Future after: 1) wait] ifTrue: [ | choice slot gone committed |
        n := n + 1.
        choice := rnd next.
        slot := (rnd next * 400) truncated.
@@ -59,7 +64,7 @@ PageWriter >> write: db seed: aSeed commits: aCount progress: aProgress done: aD
            on: PBConflictError do: [:e | e return: nil]].
        committed ifTrue: [
          choice < 0.8 ifTrue: [inserted := inserted + 1] ifFalse: [removed := removed + 1].
-         aProgress swap: [:x | x + 1]]].
+         aProgress swap: [:x | x + 1]]]].
      aDone swap: [:x | x + 1].
      { inserted + removed. inserted. removed }]
     on: Error do: [:e | aDone swap: [:x | x + 1]. e class name , ': ' , e messageText].
@@ -67,21 +72,23 @@ PageWriter >> write: db seed: aSeed commits: aCount progress: aProgress done: aD
 "A reader: pages through four snapshots of db."
 Object subclass: #PageReader.
 
-"Waits until aProgress holds at least aTarget, or every writer is done."
-PageReader >> wait: aProgress for: aTarget done: aDone
+"Waits until aProgress holds at least aTarget, or every writer is done, raising aDemand to
+ aTarget first so that the writers commit past their cap."
+PageReader >> wait: aProgress for: aTarget demand: aDemand done: aDone
+  aDemand swap: [:x | x max: aTarget].
   [aProgress value < aTarget and: [aDone value < 3]] whileTrue: [(Future after: 1) wait].
 
 "Four snapshots, the k-th (k from 0) after at least 8 k commits; on each, the query aBlock answers
  for the snapshot's root, its asArray, and a pager of aSize over it, every page read with a commit
  waited for before each page after the first. Answers { problems. byRank values. commits seen
  between the first and the last page of the last pager }, or the class and text of an error."
-PageReader >> read: db query: aBlock size: aSize progress: aProgress done: aDone
+PageReader >> read: db query: aBlock size: aSize progress: aProgress demand: aDemand done: aDone
   | problems ranks landed |
   problems := OrderedCollection new.
   ranks := Set new.
   landed := 0.
   ^ [0 to: 3 do: [:k | | tx query expected pager seen first ids |
-       self wait: aProgress for: 8 * k done: aDone.
+       self wait: aProgress for: 8 * k demand: aDemand done: aDone.
        tx := db newTransaction.
        query := aBlock value: (PBQuery from: (tx getRootObject: 'items')).
        expected := query asArray.
@@ -90,7 +97,7 @@ PageReader >> read: db query: aBlock size: aSize progress: aProgress done: aDone
        seen := OrderedCollection new.
        first := aProgress value.
        0 to: pager pages do: [:p |
-         p > 0 ifTrue: [self wait: aProgress for: aProgress value + 1 done: aDone].
+         p > 0 ifTrue: [self wait: aProgress for: aProgress value + 1 demand: aDemand done: aDone].
          seen addAll: (pager page: p)].
        landed := aProgress value - first.
        ids := seen asArray collect: [:each | each at: 'id'].
@@ -101,7 +108,7 @@ PageReader >> read: db query: aBlock size: aSize progress: aProgress done: aDone
      { problems asArray. ranks asArray. landed }]
     on: Error do: [:e | e class name , ': ' , e messageText].
 
-| c dir space db progress done stop writers readers results ends report |
+| c dir space db progress demand done stop writers readers results ends report |
 c := Check new.
 dir := 'out/qry_pager_stability' asFileReference / ('run-' , Smalltalk pid printString , '-' , Time microsecondClockValue printString).
 dir ensureCreateDirectory.
@@ -110,16 +117,17 @@ db := space newDatabase: 'db'.
 db run: [:tx | tx setRootObject: 'items' value: ((tx newList addIndex: (PBRangeIndex name: 'k' path: 'k'))
   extend: ((0 to: 399) asArray collect: [:i | PBFrozenDict withAssociations: { 'id' -> i. 'k' -> (10 * i). 'v' -> i }]))].
 progress := Atom on: 0.
+demand := Atom on: 0.
 done := Atom on: 0.
 stop := Atom on: false.
 writers := (1 to: 3) asArray collect: [:s |
-  PageWriter new asActor write: db seed: s commits: 1500 progress: progress done: done stop: stop].
+  PageWriter new asActor write: db seed: s commits: 1500 progress: progress demand: demand done: done stop: stop].
 readers := {
-  PageReader new asActor read: db query: [:q | q orderBy: 'k'] size: 23 progress: progress done: done.
+  PageReader new asActor read: db query: [:q | q orderBy: 'k'] size: 23 progress: progress demand: demand done: done.
   PageReader new asActor read: db query: [:q | (q where: ((PBField path: 'k') >= 1000)) orderBy: 'k' descending: true]
-    size: 17 progress: progress done: done.
+    size: 17 progress: progress demand: demand done: done.
   PageReader new asActor read: db query: [:q | (q where: ((PBField path: 'v') < 300)) orderBy: 'k']
-    size: 31 progress: progress done: done }.
+    size: 31 progress: progress demand: demand done: done }.
 results := readers collect: [:f | f waitWithin: 600000].
 stop swap: [:x | true].
 ends := writers collect: [:f | f waitWithin: 600000].
