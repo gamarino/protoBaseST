@@ -47,7 +47,7 @@ code you read here runs. The prose is not checked by a machine.
 | 11 | [One directory, two languages](11-python-interop.md) | `11_python_interop.sh` |
 | 12 | [What is refused, and why](12-refusals.md) | `12_refusals.st` |
 
-### Cluster mode (0.2.0, unreleased)
+### Cluster mode (0.2.0)
 
 Several protoST processes sharing one database directory: a peer lease elects an owner, the owner
 issues write permissions, commits are acknowledged by a majority, faulty nodes are fenced, and a
@@ -61,6 +61,22 @@ chapters 14 to 16 runs. What a cluster costs, measured on one machine, is in cha
 | 14 | [A three-node cluster](14-a-three-node-cluster.md) | `14_three_nodes.st`, `14_three_nodes_tcp.st`, `14_cluster_commits.st` |
 | 15 | [Failures and recovery](15-failures-and-recovery.md) | `15_losing_members.st`, `15_wiped_disk.st`, `15_majority_loss.st` |
 | 16 | [Operating a cluster](16-operating-a-cluster.md) | `16_configuration.st` |
+
+### Indexed queries (0.3.0)
+
+> These chapters were written before the code, from the approved
+> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md), and made
+> runnable task by task. The programs of chapters 17, 18 and 19 run as tests, and every figure is
+> quoted from [deviations.md](../deviations.md#queries-and-indexes). The concepts are in
+> [queries.md](../queries.md).
+
+| # | Chapter | Program |
+|---|---|---|
+| 17 | [Indexes](17-indexes.md) | `17_indexes.st` |
+| 18 | [Queries and the planner](18-queries-and-plans.md) | `18_queries_and_plans.st` |
+| 19 | [Ordered reads and pages](19-ordered-reads-and-pages.md) | `19_ordered_reads_and_pages.st` |
+
+Chapter 11 also gains a section, "Indexes, from both sides" (`11_indexed_interop.sh`).
 
 ## Running the programs
 
@@ -91,7 +107,10 @@ Both are explained in chapter 2, and both surprise Smalltalk programmers:
 - [erp.md](erp.md): the guided build of a small ERP in one script, with the reasoning
   behind each design choice. These chapters split the same ground into small programs and add
   bytes, actors, crashes and the refusals; read either first.
-- [reference.md](../reference.md): every public class and message.
+- [reference.md](../reference.md): every public class and message, the indexed-query API
+  included.
+- [queries.md](../queries.md): indexed queries and the query planner, the conceptual guide
+  (0.3.0).
 - [deviations.md](../deviations.md): every difference from `proto_db`, every refusal, and the
   performance figures.
 - [decisions.md](../decisions.md): the choices, with what each costs if it is wrong.

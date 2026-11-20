@@ -216,7 +216,7 @@ Later entries supersede earlier ones; where they differ, the code, `docs/referen
   `tests/run_tests.sh` records `PROTOBASE_REPO_EXPLICIT` (whether the caller set
   `PROTOBASE_REPO`), and `tests/unit/cluster_checklist.sh` skips (exit 77) without a checkout at
   the default path when none was named, and fails for a named checkout that is missing or lacks
-  the tag. Deviations: [deviations.md](docs/deviations.md).
+  the tag. Deviations: [deviations.md](deviations.md).
 
 - The shared tier and the cluster storage mode (Task 21, `cluster/tier.st`, `proto_db`'s
   `PlainTier` and `_node_log`). `PBFileStorage clusterPath:` (and `clusterPath:segmentMaxBytes:`,
@@ -240,7 +240,7 @@ Later entries supersede earlier ones; where they differ, the code, `docs/referen
   (`PBValidationError`); `canRead:` signals `PBClosedError` on a closed storage. Test seam
   `PBAcceptorLog class >> _syncDirectory:`. Tests: `tests/unit/cluster_tier.st`,
   `tests/unit/store_cluster_refusal.st`; the 2 checklist rows deferred to Task 21 are ported.
-  Deviations: [deviations.md](docs/deviations.md#cluster-mode).
+  Deviations: [deviations.md](deviations.md#cluster-mode).
 
 - The coordinator shell (Task 20, `cluster/coordinator.st`, `proto_db`'s `ClusterCoordinator`):
   `PBClusterCoordinator nodeId:peers:options:` runs a cluster node on two high-band actors, a
@@ -269,7 +269,7 @@ Later entries supersede earlier ones; where they differ, the code, `docs/referen
   `tests/unit/cluster_coordinator_attach.st`, `tests/unit/cluster_coordinator_faults.st`,
   `tests/unit/cluster_detached_rules.st`,
   `tests/unit/cluster_rejoin_rules.st` check 24; the 22 checklist rows deferred to Task 20 are
-  ported (14) or `n/a` (8). Deviations: [deviations.md](docs/deviations.md#cluster-mode).
+  ported (14) or `n/a` (8). Deviations: [deviations.md](deviations.md#cluster-mode).
 
 - The cluster core follows `proto_db` `88ca21d` (post-rc3, gamarino/ProtoDB#1, rulings R149 and
   R149a; Task 19b): an owner whose renewal a majority refused no longer renews again once per
@@ -282,7 +282,7 @@ Later entries supersede earlier ones; where they differ, the code, `docs/referen
   timer audit grows to 19 rows, 3420 runs, its floors measured in Task 30),
   never past the lease. Tests: `tests/unit/cluster_renew_backoff_rules.st` (proto_db's
   `test_cluster_renew_backoff.py`); the rejoin families no longer cut the holder off nor lag
-  every link to survive the renewal storm. Deviations: [deviations.md](docs/deviations.md#cluster-mode).
+  every link to survive the renewal storm. Deviations: [deviations.md](deviations.md#cluster-mode).
 
 - The cluster's transports (Task 19, `cluster/transport.st`, `proto_db`'s `transport.py`):
   `PBInProcessNetwork` / `PBInProcessTransport` (every message framed and decoded with each
@@ -297,7 +297,7 @@ Later entries supersede earlier ones; where they differ, the code, `docs/referen
   `tests/unit/cluster_transport_inprocess.st`, `tests/unit/cluster_transport_tcp.st`; the 12
   checklist rows deferred to Task 19 are ported (the in-process delays by a new seeded check of
   `delay:reorder:` in `tests/unit/sim_harness.st`). `tests/unit/sim_harness.st`'s no-clock check
-  now covers the core files, not the transport shell, and checks that each exempt file exists. Deviations: [deviations.md](docs/deviations.md#cluster-mode).
+  now covers the core files, not the transport shell, and checks that each exempt file exists. Deviations: [deviations.md](deviations.md#cluster-mode).
 
 - The checklist of `proto_db`'s cluster tests (Task 18): `tests/unit/cluster_checklist.tsv`
   gives each of the 261 test functions of `tests/unit/test_cluster_*.py` at v2.0.0rc3 a row,

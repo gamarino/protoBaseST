@@ -3,7 +3,8 @@
     "The concurrency table of design spec 10.4, one entry per row (plan Task 21), plus row 7 with its",
     "roles swapped (set-remove-add, Task 21 fix round 1), the counted set blind adds (counted-set-",
     "blind-adds, plan Task 22: the counter-transform merge, D26) and 12 further counted set cases",
-    "(cs-*, Task 22 review: clamping, removes, replace, read-modify, mixed numbers). Every case runs two",
+    "(cs-*, Task 22 review: clamping, removes, replace, read-modify, mixed numbers), and the two concurrent",
+    "addIndex: cases of indexed queries plan Task 4b (index-add-*). Every case runs two",
     "transactions, A and B, interleaved as plan call C12 orders them: start A, start B, commit B,",
     "commit A. A side runs its steps when it starts and commits later; its outcome is 'committed' or",
     "the class of the error its steps or its commit signalled, with protoBaseST's names (PB...).",
@@ -14,6 +15,9 @@
     "                                       {'dict': {k: v}}, {'list': [v]}, {'set': [e]} or",
     "                                       {'counted set': [e]}",
     "  ['blind dict set root', r, k, v]     set r to a new Dictionary {k: v}, r unread (merges)",
+    "  ['blind dict add index', r, k, v, i] set r to a new Dictionary {k: v} with an EqualityIndex named",
+    "                                       i on the path 'v', r unread (merges: the index is added",
+    "                                       to the current value, PBConflictError when it has one)",
     "  ['replace', r, k, v]                 set r to a new Dictionary {k: v} with replace: true",
     "  ['list set', r, v]                   set r to a new List [v], r unread",
     "  ['set add', r, e], ['set remove', r, e]",
@@ -31,13 +35,13 @@
     "                                       Dictionary {k1: v1} (a blind write); then, in the",
     "                                       transaction, set r to that committed value with k2 -> v2",
     "expected holds ProtoBase's outcome (the reference) and the final contents of the roots and",
-    "cells listed in roots and mutables, in the dump notation of py_case.py and _case_ops.st:",
+    "cells listed in roots and mutables, and the index names of the roots listed in indexes (sorted,",
+    "comma-separated), in the dump notation of py_case.py and _case_ops.st:",
     "absent, 1, 'text', {'k': v} (sorted keys), [v], #{e} (sorted), #{e: n} for a CountedSet (element",
     "and count, sorted), <object> for a DBObject.",
-    "protobasest, allowed only on the case indexed-root and only with PBNotSupportedError in each",
-    "outcome (both runners check it), records protoBaseST's documented refusal (design spec 7.4):",
-    "the outcomes with protoST as A (st_as_a), with Python as A (py_as_a) and with two protoST actors",
-    "(actors); every other case must give the reference in all three."
+    "Every case must give the reference with protoST as A, with Python as A and with two protoST",
+    "actors: no case records a difference (the runners refuse a 'protobasest' entry; the last one,",
+    "indexed-root, was removed when plan Task 4b made merges onto indexed currents as ProtoBase's)."
   ],
   "cases": [
     {
@@ -280,17 +284,30 @@
       "setup": [["vector database"]],
       "a": [["blind dict set root", "people", "ka", "A"]],
       "b": [["blind dict set root", "people", "kb", "B"]],
-      "roots": ["people"], "mutables": [],
+      "roots": ["people"], "mutables": [], "indexes": ["people"],
       "expected": {"outcome": "A=committed B=committed",
-                   "dump": ["root people = {'ann': <object>, 'bob': <object>, 'cid': <object>, 'ka': 'A', 'kb': 'B'}"]},
-      "protobasest": {
-        "st_as_a": {"outcome": "A=PBNotSupportedError B=committed",
-                    "dump": ["root people = {'ann': <object>, 'bob': <object>, 'cid': <object>, 'kb': 'B'}"]},
-        "py_as_a": {"outcome": "A=committed B=PBNotSupportedError",
-                    "dump": ["root people = {'ann': <object>, 'bob': <object>, 'cid': <object>, 'ka': 'A'}"]},
-        "actors": {"outcome": "A=PBNotSupportedError B=PBNotSupportedError",
-                   "dump": ["root people = {'ann': <object>, 'bob': <object>, 'cid': <object>}"]}
-      }
+                   "dump": ["root people = {'ann': <object>, 'bob': <object>, 'cid': <object>, 'ka': 'A', 'kb': 'B'}",
+                            "indexes people = by_age,by_city"]}
+    },
+    {
+      "id": "index-add-same-name",
+      "row": "Blind writes that both add an index of the same name to one Dictionary root",
+      "setup": [["set root", "d", {"dict": {"s": 0}}]],
+      "a": [["blind dict add index", "d", "ka", 1, "by_v"]],
+      "b": [["blind dict add index", "d", "kb", 2, "by_v"]],
+      "roots": ["d"], "mutables": [], "indexes": ["d"],
+      "expected": {"outcome": "A=PBConflictError B=committed",
+                   "dump": ["root d = {'kb': 2, 's': 0}", "indexes d = by_v"]}
+    },
+    {
+      "id": "index-add-different-names",
+      "row": "Blind writes that add indexes of different names to one Dictionary root",
+      "setup": [["set root", "d", {"dict": {"s": 0}}]],
+      "a": [["blind dict add index", "d", "ka", 1, "by_a"]],
+      "b": [["blind dict add index", "d", "kb", 2, "by_b"]],
+      "roots": ["d"], "mutables": [], "indexes": ["d"],
+      "expected": {"outcome": "A=committed B=committed",
+                   "dump": ["root d = {'ka': 1, 'kb': 2, 's': 0}", "indexes d = by_a,by_b"]}
     }
   ]
 }

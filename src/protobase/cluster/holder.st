@@ -1455,31 +1455,44 @@ PBBuildConflict >> roundWith: aCore in: aRoundState now: t
 PBBuildConflict >> printOn: aStream
   aStream nextPutAll: 'PBBuildConflict('; nextPutAll: (PBCoreValue textOf: entry); nextPut: $).
 
-PBRoundEvent subclass: #PBBuildFailed instanceVariableNames: 'entry error tierFailed'.
+PBRoundEvent subclass: #PBBuildFailed instanceVariableNames: 'entry error tierFailed micros'.
 
 "The build of anEntry (nil: of the unchanged root of a base that needs a commit first) failed
  with anError (an Exception, not signalled, other than a conflict of an entry); isTierFailed (a
  Boolean): whether the commit's tier has failed, a write having poisoned it (proto_db
- tier.failure is not None, R231; the shell passes PBFileStorage isFailed, Task 23). There is no
- shorter constructor: a shell always says whether its tier failed, since a failed tier keeps its
- own error where a failed read under an expired permission becomes a retryable conflict
- (roundBuildFailed:in:now:)."
+ tier.failure is not None, R231; the shell passes PBFileStorage isFailed, Task 23). A shell always
+ says whether its tier failed, since a failed tier keeps its own error where a failed read under
+ an expired permission becomes a retryable conflict (roundBuildFailed:in:now:). This constructor
+ records no build time (micros 0); the shell uses entry:error:tierFailed:micros:."
 PBBuildFailed class >> entry: anEntryOrNil error: anError tierFailed: isTierFailed
+  ^ self entry: anEntryOrNil error: anError tierFailed: isTierFailed micros: 0.
+
+"As entry:error:tierFailed:, the failed build having run someMicros (an Integer >= 0, as
+ PBBuilt's): a slow failing build counts in the round's longest build, which the group bound
+ (CC11) and the reserve refusal's text (CC18) use, as a slow successful one does."
+PBBuildFailed class >> entry: anEntryOrNil error: anError tierFailed: isTierFailed micros: someMicros
   (anEntryOrNil isNil or: [anEntryOrNil isKindOf: PBRoundEntry]) ifFalse: [
     ^ PBValidationError signal: 'PBBuildFailed: an entry is a PBRoundEntry or nil, not ' , anEntryOrNil printString].
   (anError isKindOf: Exception) ifFalse: [
     ^ PBValidationError signal: 'PBBuildFailed: an error is an Exception, not ' , anError printString].
   (isTierFailed == true or: [isTierFailed == false]) ifFalse: [
     ^ PBValidationError signal: 'PBBuildFailed: tierFailed is a Boolean, not ' , isTierFailed printString].
-  ^ self basicNew _setEntry: anEntryOrNil error: anError tierFailed: isTierFailed.
+  (someMicros isInteger and: [someMicros >= 0]) ifFalse: [
+    ^ PBValidationError signal: 'PBBuildFailed: micros is an Integer >= 0, not ' , someMicros printString].
+  ^ self basicNew _setEntry: anEntryOrNil error: anError tierFailed: isTierFailed micros: someMicros.
 
-PBBuildFailed >> _setEntry: anEntryOrNil error: anError tierFailed: isTierFailed
+PBBuildFailed >> _setEntry: anEntryOrNil error: anError tierFailed: isTierFailed micros: someMicros
   "Runs once, on a fresh instance."
   error isNil ifFalse: [^ PBUserError signal: 'PBBuildFailed is immutable'].
   entry := anEntryOrNil.
   error := anError.
   tierFailed := isTierFailed.
+  micros := someMicros.
   ^ self.
+
+"The time the failed build ran, microseconds (0 when not measured)."
+PBBuildFailed >> micros
+  ^ micros.
 
 PBBuildFailed >> entry
   ^ entry.
@@ -1999,9 +2012,15 @@ PBCoordinatorCore >> roundBuildConflict: anEvent in: s now: t
  sends nothing a voter may accept, so nothing was sent. A base read that failed with exactly
  PBUnexpectedError once the permission is no longer valid, the tier not failed, is a retryable
  conflict (_expiredRead:in:now:, R212, R231): an entry's is its own conflict, as from its build;
- the re-commit's ends the round with it. Otherwise an entry's PBDBError fails it alone and any
- other error ends the round with it; the re-commit's ends the round with its error
- (_recommitFailed:in:now:effects:)."
+ the re-commit's ends the round with it. Otherwise an entry's error, of any class, fails it alone
+ and the round builds the next entry; the re-commit's ends the round with its error
+ (_recommitFailed:in:now:effects:). An entry's build runs application code, an extractor in a
+ merge onto an indexed current, whose exception passes through unwrapped and must fail only
+ that commit (indexed queries ruling IQ1, the maintainer's decision of 2026-11-19; the
+ standalone round's rule, proto_db _standalone_round, review M2). proto_db rc4's _permit_round
+ fails the whole round on an entry's error that is not a ProtoDBError: a deviation
+ (docs/deviations.md, cluster mode). A failed entry's build time counts in the round's longest
+ build (CC11, CC18), as a built one's."
 PBCoordinatorCore >> roundBuildFailed: anEvent in: s now: t
   ^ self _step: [:fx | | expired |
     anEvent entry isNil
@@ -2012,14 +2031,12 @@ PBCoordinatorCore >> roundBuildFailed: anEvent in: s now: t
         expired := self _expiredRead: anEvent in: s now: t.
         expired notNil
           ifTrue: [
-            self _buildNext: (s with: { #building -> nil. #conflicted -> ((s conflicted) copyWith: { anEvent entry. expired }) })
+            self _buildNext: (s with: { #building -> nil. #longest -> (s longest max: anEvent micros).
+                #conflicted -> ((s conflicted) copyWith: { anEvent entry. expired }) })
               now: t effects: fx]
           ifFalse: [
-            (anEvent error isKindOf: PBDBError)
-              ifTrue: [
-                fx add: (PBSettle waiter: anEvent entry token outcome: anEvent error).
-                self _buildNext: (s with: { #building -> nil }) now: t effects: fx]
-              ifFalse: [self _failRound: s with: anEvent error sent: false now: t effects: fx]]]].
+            fx add: (PBSettle waiter: anEvent entry token outcome: anEvent error).
+            self _buildNext: (s with: { #building -> nil. #longest -> (s longest max: anEvent micros) }) now: t effects: fx]]].
 
 "R233 (proto_db _commit_base's sending(), called just before its replicate): the re-commit's
  build, the read of the base's records and space and the save of its unchanged root, comes

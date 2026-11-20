@@ -66,9 +66,14 @@ effect, proto_db _run_round's except BaseException): every commit of the round i
 PBUnexpectedError when nothing of it was built, PBOutcomeUnknownError otherwise, and a
 permission held is ended #unknown.
 
-Every PBCommitEntry's transaction is built with its own validation and merge: the round runs no
-application code. A cluster commit never writes space.root: the persisted root is the
-persister's (Task 25).
+Every PBCommitEntry's transaction is built with its own validation and merge. The one application
+code a build runs is an extractor, when a merge onto an indexed current evaluates it (indexed
+queries ruling IQ1): its exception reaches the core as that entry's PBBuildFailed, and the core
+fails that commit alone (PBCoordinatorCore >> roundBuildFailed:in:now:); the others of the round
+are built and replicated, as standalone and in a group commit. proto_db rc4's _permit_round fails
+the whole round on an error that is not a PBDBError: a deviation, by the maintainer's decision of
+2026-11-19 (docs/deviations.md). A cluster
+commit never writes space.root: the persisted root is the persister's (Task 25).
 
 This module is a shell: it reads the monotonic clock (Time microsecondClockValue for the build
 and replication durations; the node's clock, the coordinator's _now, for the core) and uses
@@ -258,7 +263,8 @@ PBClusterRound >> applyBuild: aBuild
     on: Error do: [:e |
       e return: ((e isKindOf: PBConflictError)
         ifTrue: [PBBuildConflict entry: aBuild entry error: e]
-        ifFalse: [PBBuildFailed entry: aBuild entry error: e tierFailed: self _tierFailed])].
+        ifFalse: [PBBuildFailed entry: aBuild entry error: e tierFailed: self _tierFailed
+          micros: Time microsecondClockValue - t0])].
   self _handle: event.
 
 PBClusterRound >> applyReplicate: aReplicate

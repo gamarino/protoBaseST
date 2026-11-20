@@ -23,6 +23,7 @@ Contents:
 [Conformance vectors](#conformance-vectors) |
 [Cluster wire messages](#cluster-wire-messages) |
 [Cluster mode](#cluster-mode) |
+[Indexed queries](#indexed-queries) |
 [Errors and messages](#errors-and-messages) |
 [Performance](#performance) |
 [Known protoST limits](#known-protost-limits)
@@ -99,21 +100,33 @@ explicit.
 
 ## Collections and records
 
-- **Indexed collections are not written or merged.** A collection that has an index (a
-  `PBEqualityIndex`, `PBRangeIndex` or `PBVectorIndex`) refuses every change with
-  `PBNotSupportedError` naming its indexes, and so does a merge onto one (design spec 7.4).
-  `proto_db` updates the indexes in the same step and merges blind writes onto them; protoBaseST
-  cannot do either, so it does not do a lesser version. Index *queries* are not provided either:
-  indexes are decoded and kept. `extend:` of nothing still answers the receiver, as `proto_db`'s.
-  *Cost:* a database that uses indexes can be read and its non-indexed parts changed; the indexed
-  collections cannot be changed from protoST.
+- **Indexed collections are written, merged, queried and paged** (0.3.0, plan Tasks 4a to
+  9). Every mutator maintains the collection's `PBEqualityIndex` and
+  `PBRangeIndex` indexes in the same step, with the hook order of `proto_db`'s mutator, so one
+  sequence of operations gives the same index nodes in both implementations
+  (`tests/interop/index_ops_identical.sh`); a format-3 index is rebuilt before the first change;
+  `addIndex:`, `removeIndex:` and `validate` are provided, and the index definitions are logged
+  (`('@index_add' name index)`, `('@index_remove' name)`, never on `PBList`), so a blind write
+  onto an indexed current merges as in `proto_db` (`tests/unit/idx_merge.st`,
+  `tests/interop/index_both_directions.sh`, row 13 of `tests/interop/concurrency.sh`). What stays
+  refused: a collection holding a `PBVectorIndex` or an index of a kind protoBaseST does not know
+  is read only, a merge onto one included (`PBNotSupportedError` naming it; see the table below).
+  `extend:` of nothing still answers the receiver, as `proto_db`'s. *Cost:* a merge onto an
+  indexed current runs the index work and the extractors in the commit's build, at protoBaseST's
+  index speed (bench M3 below). The term and expression language is provided (plan Task 5:
+  `PBTerm`, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate`, `PBExpression compile:`): a condition
+  is built, described and evaluated on one element. The planner (Task 7) and the query front end
+  (Task 8: `PBField`, `PBQuery`) answer conditions with the collection's indexes, and pagers
+  (Task 9: `pagerSize:`, `PBPager`) serve pages of one plan, by rank when it offers rank access.
 - **`PBRepeatedKeysDictionary` is read only.** Its writes and merges are a non-goal. A new empty
   one is mergeable and its rebase answers `current` unchanged, as `proto_db`'s.
 - **Immutability is by convention** (decision 3). No instance is frozen at run time: a method
   that assigns an instance variable after construction would compile. A test
-  (`tests/unit/values_immutable.st`) scans for it. Two runtime-only fields are exceptions, both
-  `Atom` cells and neither persisted: the memo of a lazy load and the consumed mark of an
-  operation log.
+  (`tests/unit/values_immutable.st`) scans for it. The runtime-only fields are the exceptions,
+  none persisted: what a lazy load fills (the oid, the slots and the memo), the saved place, a
+  keyed node's order key, an index's parsed key spec, each written once by a compare-and-swap
+  from nil on its instance variable (plan Tasks 11 and 12), and the consumed mark of an
+  operation log, an `Atom`.
 - **Application records.** Accessors only answer the stored value (decision A4). A behaviour name
   that is also a stored attribute, in any implementation, is a defect: a record holding a
   reserved name is refused when loaded (`PBCorruptionError`). There are no generated setters.
@@ -172,7 +185,12 @@ explicit.
   durable with one flush and one publish; a failure of the lock, the root read, the flush or the
   publish reaches every built commit (each `wait` re-signals its own copy of the error, as
   `proto_db` raises a copy in each thread), and the step-8 outcome of a failed publish is the
-  round's. A commit alone in the queue runs exactly the single-commit protocol (the bytes of
+  round's. A commit's own error, a build error included (an extractor's exception in a merge),
+  also reaches its caller as a copy (`shallowCopy`: the same class, text and fields, not the same
+  object, since a Future's `wait` re-signals a copy), where `proto_db` raises the object itself
+  (`transactions.py:1121`). *Cost:* a caller that compares the exception it caught with `==`
+  against one it kept (an extractor that records what it raised) finds them different; compare
+  class and text. A commit alone in the queue runs exactly the single-commit protocol (the bytes of
   `tests/unit/bytes_pinned.st` are unchanged). The round is a message of the runner actor, so a
   group is what was queued while the previous round ran; `proto_db`'s group is what was queued
   while the previous runner held the group. The R148 change to `transactions.py` (`88ca21d`,
@@ -198,15 +216,15 @@ explicit.
 The round-trip tests (design spec 10.2) write a space from protoST and have `proto_db`'s verifier
 accept it. The space cannot contain what protoBaseST cannot write:
 
-- an indexed collection (index maintenance is out of scope, design spec 7.4);
+- a collection holding a vector index or an index of an unknown kind (read only, ruling IQ5);
 - `PBRepeatedKeysDictionary` writes (a non-goal);
 - Python-only types such as `demo.erp.AuditNote`, which protoST reads as opaque atoms and never
   re-writes.
 
 Hence the interop round trip compares dumps with `compare_dumps.py --exact` (no normalisation of
 the opaque type), and `tests/interop/concurrency.sh` row 13 (a blind write onto an indexed root)
-uses a copy of the conformance database in all four runs and asserts protoBaseST's
-`PBNotSupportedError` in place of `proto_db`'s merge. Likewise `st_random_ops` covers the four
+uses a copy of the conformance database in all four runs; since plan Task 4b it expects
+`proto_db`'s merge from protoBaseST too. Likewise `st_random_ops` covers the four
 collections with writes, and `PBCountedSet` since Task 22.
 
 ## Reading
@@ -215,10 +233,15 @@ collections with writes, and `PBCountedSet` since Task 22.
   answers `typeName`, `tag`, `at:` and `attributeNames`; every other message is
   `PBNotSupportedError` naming the type. A reference to it is written back byte for byte at the
   original pointer; no record of its type is written.
-- **Indexes** are decoded and kept (`name`, `keySpec`, `hasMemberTokens`...). Not queried.
-- **Format-3 collections** are read; their indexes are not rebuilt, and `validate()` and
-  `rebuilt()` of misfiled format-3 collections are not provided.
-- **`snapshot_ref` byte references, pagers and residency** are not provided.
+- **Indexes** are decoded and kept (`name`, `keySpec`, `hasMemberTokens`...). Not queried yet.
+- **Format-3 collections** are read; a format-3 key-group index is rebuilt with format-4 tokens
+  before the collection's first change (a read or a blind write keeps it), and `validate` reports
+  a misfiled entry with `PBMisfiledError`, as `proto_db`'s. `rebuilt()` (the repair) is not
+  provided. A stale index that must order format-3 zone datetimes (IANA zones, which have no order
+  key here) makes the collection unwritable: its first change is `PBNotSupportedError` naming the
+  zone.
+- **`snapshot_ref` byte references, portable pager tokens and residency** are not provided (in-process
+  pagers are, plan Task 9).
 - **Format 5 is refused** (`proto_db` 2.0.0rc4, the runtime registry D62: the features `parents`,
   envelope key `p`, and `registry`, the types `ModuleList` and `Catalog`, aliases 22 and 23).
   protoBaseST reads formats 2 to 4 and writes 4, as `proto_db` writes for data without a
@@ -747,6 +770,23 @@ The detail:
   - A replicate that fails with an error (`PBReplicateFailed`) is decided by the error's class,
     as `proto_db`'s `nothing_sent`: a conflict, validation (`PBClosedError` included) or user
     error sent nothing; any other error, a failed flush included, leaves the outcome unknown.
+  - **An entry's build error in a cluster round fails only that commit** (indexed queries
+    ruling IQ1; the maintainer's decision of 2026-11-19). An error that one entry's build raises,
+    of any class, even one that is not a `PBDBError` (an extractor's exception in a merge onto an
+    indexed current), fails that commit alone, and the round builds the next entry
+    (`PBCoordinatorCore >> roundBuildFailed:in:now:`). `proto_db` rc4's `_permit_round`
+    (`transactions.py:1660-1717`) catches only `ProtoConflictError` and `ProtoDBError` per entry
+    and fails the whole round on any other error. *Why:* the maintainer's decision, for one rule in
+    every mode: rc4's standalone and group-commit round already fails only the commit whose build
+    raised (`_standalone_round`, `transactions.py:1149-1157`, review M2), and the same program
+    should not fail its neighbours' commits in a cluster only. It is safe: nothing of the round's own root is sent before its builds end; a re-commit, if any, has already committed
+    (every entry's build comes before the round's replicate), so failing one entry sends nothing of
+    it.
+    Unchanged: a base read that failed with `PBUnexpectedError` after the permission expired is
+    still a retryable conflict (R212), and the re-commit's error still ends the round. *Cost:* a
+    commit whose round-mate's build failed with, say, a `ZeroDivide` commits here where `proto_db`
+    rc4 would fail it with that error (`tests/unit/idx_merge_extractor.st` case (c),
+    `tests/unit/cluster_round_rules.st` case 30).
   - A permission that arrives after the round closed is ended `#none` at once; `proto_db`'s
     closing thread never asked for one.
   - rc4's R148 texts ('its kept permission is still being ended', '... s of it spent waiting
@@ -895,16 +935,77 @@ The detail:
     and reloads the log; protoST cannot simulate a power loss. The `tiered` kind is not ported
     (DEPTH = 0).
 
+## Indexed queries
+
+> **0.3.0.** These are the differences from `proto_db` of the
+> [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md), as shipped; the
+> chapters ([17](tutorial/17-indexes.md), [18](tutorial/18-queries-and-plans.md),
+> [19](tutorial/19-ordered-reads-and-pages.md)) and the guide ([queries.md](queries.md)) link
+> here. The entry "Indexed collections are written, merged, queried and paged" above says what
+> the collections do. Every row is in force.
+
+| What | Difference from `proto_db` | Why | Cost |
+|---|---|---|---|
+| Opaque predicates in `explain` | A block condition is the node `BlockFilter` with `description`, where `proto_db` has `PythonFilter` (call IC6). | The node runs a protoST block; naming it after Python would mislead. | A one-name difference in `explain`; the query vectors hold no opaque predicate. |
+| Equality on the field builder | `eq:` and `ne:` build `==` and `!=`; `=` is not overridden on `PBField` (IC4, ruling IQ2). | `=` must stay an equality for collections and tests. | Less like Python's `F.city == "Oslo"`; `aField = v` answers a Boolean, which `where:` refuses. |
+| Index constructors | `name:keySpec:` takes a `PBKeySpec` only (a String is `PBValidationError`); one path is `name:path:` (controller ruling CR3). `proto_db`'s `KeyGroupIndex(name, key_spec)` accepts a `KeySpec` or a str path. | One argument, one type: a keyword selector names the convenience instead of overloading the argument. | A path is written `name: 'by_city' path: 'city'`, not `name: 'by_city' keySpec: 'city'`. |
+| Extractor blocks | `registerExtractor:block:version:` takes a `BlockClosure` only (anything else is `PBValidationError`); `proto_db`'s `register_extractor` takes any callable. | An extractor is `[:element \| key]`; one type keeps the identity test (`==`, `proto_db`'s `is`) and the purity contract simple. | An object that answers `value:` must be wrapped in a block. |
+| `isExtractorRegistered:` | A protoBaseST addition: `proto_db` has no such function (its programs call `extractor_version` and catch the error). | Asking needs no exception handler. | None: one more message. |
+| Projection | `project:` and `collect:`; `PBQuery` has **no** `select:` (ruling IQ2). | Smalltalk's `select:` filters; `proto_db`'s `select` projects, and would read backwards. | A name to learn. |
+| Selection blocks | Not in the first release (ruling IQ2): a block condition is opaque and never uses an index. | Translating a block by running it on a recording object fails silently (`30 < (p at: 'age')`, inlined `ifTrue:` and `==`, methods of the element). | Index-using conditions are written with `PBField`. |
+| Plan choice on near ties (R2) | The descent term `log2 (G + 2)` and a sort's `n log2 n` are computed by `PBCost class >> log2:` (`src/protobase/plans.st`, the one place a logarithm is computed, plan call IP7) as `ln x / ln 2` (protoST has no `log2`; ruling IQ4: protoST is not changed), which can differ from C's `log2` in the last bit. Two candidates whose costs are within a relative 1e-12 may be ranked differently: the same answer by another plan. | No protoST change for plan parity (IQ4). | The query vectors (`tests/conformance/queries.st`) report such a plan difference by name and do not fail on it; it counts as a near tie only when the choice differs (the node and index names) and the root costs agree within plan call IP8; any other plan difference, and every result difference, fails. Measured at Task 7: 0 near ties in the 314 recorded queries, every plan node for node and cost for cost `proto_db`'s. |
+| Vector and unknown index kinds (Task 4a) | A collection holding a `PBVectorIndex`, or an index of a kind protoBaseST does not know, stays read only: every change and every merge onto it is `PBNotSupportedError` naming it (IC2, ruling IQ5). | Vector search is out of scope; maintaining the other indexes but not that one would write a stale index. | Such a collection is changed from Python only. |
+| `near[]` terms (Task 5) | `PBTerm path:op:value:` with `'near[]'`, and the list syntax naming it, signal `PBNotSupportedError` when the term is made; `proto_db` builds the term (a `NearQuery`) and refuses it only when it is evaluated by a scan, answering it with a vector plan otherwise. | Vector search is out of scope (spec 3.3); a term no plan of this port can answer is refused where it is written, never later. | A query naming `near[]` fails at once, as every vector feature does. |
+| Atoms and instant-form IANA datetimes in `describe` (Task 5) | `describe` (so `explain`) renders an atom as `<type name oid=...>` and an instant-form datetime in an IANA zone by its `printString`; `proto_db`'s `display_value` prints Python's `repr`: a record's fields (`DBObject(r=1)`), a collection's count, a stub's storage pointer (`<type stub at ...>`), a zone datetime's wall clock. Every other value is rendered as Python renders it, checked by `tests/unit/qry_terms.st`: against `proto_db` for the case operands (numbers, `Decimal('1.50')`, `inf`, strings, `b'\x00'`, dates, naive and fixed-offset datetimes, times, timedeltas, UUIDs, tuples), and against CPython's text for the rest (`Decimal('Infinity')`, `Decimal('NaN')` and the other specials, named offsets, `fold=1`, a time or a format-3 datetime in an IANA zone, `zoneinfo.ZoneInfo(key='Europe/Rome')`, `MutableObject('cell')`, maps as `{'@dict': ...}`). | Python's `repr` of a record walks its fields with Python's rules; an instant-form datetime holds only its UTC instant, and its wall clock in the zone needs a time-zone database (design 4.3). A time and a format-3 datetime keep their wall clock, so they are rendered. | The `explain` of a term whose operand is an atom, or of a key that is an instant-form zone datetime, differs in that one value; results do not. |
+| `in` over a `Set` (Task 5) | A protoST `Set` keeps `true` and `1` as two operands; a Python `set` holds one of them, since `True == 1` there. Both sort their operands by order key. | The difference is the host's set, not the term: `PBTerm` keeps what it is given, as `proto_db`'s `Term` does. | `in: (Set withAll: { true. 1 })` also matches 1, where `{True, 1}` in Python matches only `True`; a sequence (an `Array`) is the same in both. |
+| Block predicates (Task 5) | `PBBlockPredicate` (`proto_db`'s `PythonPredicate`) describes itself as `{ 'block' -> description }`, where `proto_db` writes `{'python': description}`; it takes a block of one argument (`proto_db`: any callable). | Named after the language that runs it, as `BlockFilter` (call IC6). | A one-key difference in the description of a condition holding a block; the query vectors hold none. |
+| The 0.1 list syntax (Task 5) | `PBExpression compile:` takes an `Array`, an `OrderedCollection` or a `PBFrozenList` as a list (`proto_db`: a Python `list`); a `PBTuple` is refused, as a Python tuple is. | A list in protoST is any of the three, and a decoded MessagePack list is a `PBFrozenList`. | None. |
+| Lists in `explain` (Task 6) | Every list in an `explain` (`'indexes'`, `'children'`, `'keys'`, the operands of a term) is a `PBFrozenList`, where `proto_db` answers Python lists and tuples. | A decoded MessagePack list is a `PBFrozenList`, so an `explain` compares with `proto_db`'s as decoded, and `PBNotation describe:` prints it (it cannot print an `Array`). | `at:` and `do:` work; `first` is spelled `asArray first`. |
+| Blocks in `explain` (Task 6) | A `PBSortKey` or `PBProject` block is described by its description, `'block'` by default (`key:descending:description:`, `source:fields:description:`); `proto_db` describes a callable by its `__qualname__`. | A protoST block has no qualified name; the caller names it. | The `'key'` or `'function'` of a block differs; no vector holds one. |
+| Atom operands in an index plan's `explain` (Task 6) | The `'term'` of an index plan whose operand is an atom is rendered by `describe` (the Task 5 row above); everything else of that `explain`, and its estimate, equals `proto_db`'s (checked for every single-term case of the conformance vector by `tests/unit/qry_index_plans.st`). | As the Task 5 row. | As the Task 5 row. |
+| Ordered index plans (Task 6; key check order, Task 7) | `orderedPlan: aKey descending: aBoolean` takes the key to order by and checks it as `plans.py`'s `ordered_index_scan` does, in its order: the key (a `PBKeySpec`, or a term path through `PBKeySpec forTermPath:`, `PBValidationError` for anything else), then the direction (`PBValidationError` unless a Boolean), then `supportsOrder:` (`PBNotSupportedError` for another key); `proto_db`'s `ordered_plan(descending)` takes the direction only, and `ordered_index_scan` checks the key. | One message carries both checks of `proto_db`'s pair, so no caller can ask an index for an order it does not have. | One argument more; its refusal is `ordered_index_scan`'s sentence ("Index 'n' cannot iterate in the order of k") for every kind, `base.py`'s "does not provide ordered iteration" having no entry point here. |
+| `windowFrom:to:` (Task 6) | Always answers an `Array`: by rank when the plan offers rank access, otherwise read through `do:` and stopped after the window. `proto_db`'s `window(start, stop)` answers `None` without rank access; `byRank` answers whether it does here. | A caller asking for rows wants rows; whether they were sought is a separate question. | None for results; a caller that needs the cost bound asks `byRank`. |
+| The count node (Task 6) | `Count` is built by `PBCountPlan source:`; the class `PBCount` is the cluster coordinator's counter effect (0.2.0). | protoST classes share one namespace. | A name to learn: `explain` still says `'Count'`. |
+| Pagers (Task 9) | In-process only: no portable token, no `resumePager:` (ruling IQ3). The pager's `explain` has no `'portable'` key, which `proto_db`'s `Pager.explain` has (`pager.py:221-224`); a pager here is never portable (ruling CR7). | The token's plan digest is over Python's `repr` of the plan, which protoST cannot reproduce byte for byte (spec 3.2; a portable digest is proposal IQ7, not sent). | A page sequence cannot be resumed by another process or language. |
+| A pager's materialised result (Task 9) | A pager whose plan has no rank access runs the plan when a page or `rows` first needs it and keeps the result in an `Atom` set once from nil; two actors asking at the same moment may both run the plan, and every page is then served from the one result installed. `proto_db`'s `Pager._materialized` takes a `threading.Lock`, so it runs the plan once; it also accepts a `cache=` (the query result cache), deferred here (row "Deferred"). | No lock is held across allocation (Global Constraints); the plan reads immutable versions, so both runs answer the same rows. | Under a race on the first page, the plan's work is done twice, once wasted; the pages are the same. |
+| `pagerSize:` (Task 9) | `aQuery pagerSize: n` is `proto_db`'s `Queryable.pager(n)`; `PBPager on: aSource pageSize: n` its `Pager(source, n)`, with the same sources (a plan, a query, a collection) and the same refusals (a page size an Integer ≥ 1, a page number an Integer ≥ 0, `PBValidationError` for `ProtoValidationError`). | A keyword selector names its argument. | None. |
+| `where:` and the list syntax (Task 8) | `where:` takes a `PBExpression` or a one-argument block only (ruling CR6); the 0.1 list syntax is `PBExpression compile:`'s (and `PBPlanner`'s), so `q where: #('city' '==' 'Oslo')` is `PBValidationError` with the text `where: expects a PBExpression or a one-argument block, got a Array`. `proto_db`'s `Queryable.where` accepts a list too (`test_where_accepts_expressions_and_the_list_syntax`). | An Array is also a Smalltalk collection value: one way in keeps the refusal of a Boolean (`aField = v`) exact, and the list syntax stays one message away. | `where: (PBExpression compile: aList)`. |
+| Single-value projection (Task 8) | `project:` always answers maps (a `PBFrozenDict` per row), from an Array of paths or `PBField`s or a map of output names; `proto_db`'s `select("name")` answers the bare values. A single value is `collect: [:e \| e at: 'name']`. | `project:` has one result shape; a block names a computed answer. | One message more for a bare value. |
+| Query sources (Task 8) | `PBQuery from:` takes a `PBIndexedCollection`, a `PBQueryPlan` or a `PBQuery` (answered as is); a protoST collection (an `Array`, an `OrderedCollection`) is `PBValidationError`. `proto_db`'s `from_collection` also takes any iterable, through `ValuesScan` (deferred, row below). | `ValuesScan` is deferred (ruling IQ3). | Host collections are filtered with Smalltalk's own `select:`. |
+| First of nothing (Task 8) | `first` of an empty query is `PBUserError` ("first of an empty query; use firstOrNil when no row is expected"); `proto_db` raises `ProtoUserError` too, with its own text. | The hierarchy maps one to one; the text names the protoST message. | None. |
+| Benchmark sizes (Task 8) | Bench Q1 measures 10^2 to 10^4 records by default, not the spec's 10^2 to 10^5 (spec 7.3); Q5 (Task 9) measures 2000 and 10^4. | At Task 8 a 10^5 process with only the one index Q1 uses took 336 s and peaked at 5.4 GB in protoST (the budget is about 5 GB), and a run needs ten per size ([Q1-Q4](#q1-q4-queries-indexed-against-a-forced-scan)). Since the atom weight work (Tasks 11 and 12) one run at 10^5 is feasible: at Task 10 both implementations' index and scan units together took 6 minutes and verified ([the final comparison](#the-final-comparison-plan-task-10)); five interleaved runs would add about half an hour to Q1. | The default largest size is 10^4; `QUERY_Q1_SIZES` adds 10^5, measured once at Task 10. |
+| Deferred | No query result cache, and so no `extractor_generation` (the registration generation that keys it); no `GroupBy`, `Agg`, `Join`, `Unnest` (`select_many`) or `ValuesScan`; no computed values, `startswith` / `endswith` or field-to-field comparisons; no collection `rebuilt` (misfiled format-3 repair) (ruling IQ3, spec 3.2). | Each is either not portable today or not an optimisation; a block condition covers computed values meanwhile. | Programs that need them wait, or use a block. |
+
+Worth knowing: an extractor runs inside the commit when a blind write is merged onto a collection
+with an extractor index, and an exception it raises passes through unwrapped and fails only that
+commit, standalone, in a group commit and in a cluster round (ruling IQ1; plan call IP2). That is
+`proto_db`'s rule standalone and in a group commit; in a cluster round it is a deviation by the
+maintainer's decision of 2026-11-19 (see "Cluster mode": rc4 fails the whole round), and the
+exception reaches the caller as a copy (see "Group commit" above).
+Purity is a documented contract ([queries.md](queries.md#extractors-and-their-purity-contract)).
+
 ## Errors and messages
 
 - The error classes mirror `proto_db/errors.py` with `PB` for `Proto`. `proto_db`'s extra classes
-  that a prototype of this size never raises (`StalePager`, `Misfiled`, `NotAuthorized`,
-  `BacklogFull`, `WriteRefused`) are omitted. `PBDBError` has no `code` API yet. `PBReferenceError`
+  that a prototype of this size never raises (`StalePager`, `NotAuthorized`, `BacklogFull`,
+  `WriteRefused`) are omitted; `PBMisfiledError` exists (indexed queries, 0.3.0). `PBDBError` has no `code` API yet. `PBReferenceError`
   exists.
 - Error texts quote names as Python's `repr` does (`PBCodec repr:`). One known imperfection:
   `repr:` leaves non-printable code points at or above U+0100 unescaped, where Python escapes
   them. It affects error text only.
 - `PBTimeoutError` is not protoST's `TimeoutError`.
+- Key specs and the extractor registry (`PBKeySpec`) speak protoST's nouns where `proto_db`'s
+  messages speak Python's: "String" for str, "nil" for None, "a block" for a function, "PBKeySpec
+  element takes no argument" for "KeySpec.element() takes no argument". The text for an
+  unregistered extractor names protoBaseST's remedy, "call PBKeySpec registerExtractor: 'x' block:
+  aBlock version: aStringOrNil", where `proto_db` says `register_extractor('x', fn)`. A path or
+  extractor name holding a lone surrogate is refused with the codec's own text (`PBCodec`, "a String
+  holding the lone surrogate U+... cannot be stored"), not with `check_text`'s sentence.
+- Terms and expressions (`PBTerm`, `PBExpression compile:`) keep `proto_db`'s sentences and positions
+  (counted from 0) with protoST's names: "PBAnd operands must be PBExpression instances ... use
+  PBExpression compile: for the list syntax", an `in` operand "needs a list, tuple or set of values
+  (an Array, an OrderedCollection, a PBFrozenList, a PBTuple or a Set)". The list of operators in
+  "Unknown operator" leaves out `'near[]'`, which is refused (above).
 
 ## Performance
 
@@ -1037,6 +1138,772 @@ What the figures say, and what they do not:
 - **No `proto_db` figure is shown**: `proto_db`'s cluster was not run on this workload shape, so
   no ratio to it is claimed. Memory was not measured.
 
+### Queries and indexes
+
+0.3.0 (spec section 7.3, `bench/run_query.sh`, `bench/run_atom_weight.sh`). The headline is
+[the final comparison](#the-final-comparison-plan-task-10) of plan Task 10, every workload on one
+quiet machine from one clean commit; the sections after it are the runs of the tasks that built
+each part (Q1-Q4 at Task 8, Q5 at Task 9, M1 at Task 4a, M3 at Task 4b, P1-P3 at Task 7, M2 at
+Task 3, the atom weight at Tasks 11 and 12), kept as dated history.
+
+#### The final comparison (plan Task 10)
+
+**The headline figures for 0.3.0.** Every workload of spec 7.3, run once more on one quiet
+machine from one committed, clean tree, one workload after another. The sections after this one
+are the earlier runs of plan Tasks 3 to 12, kept as dated history; where they differ, this run
+holds.
+
+- **Date and machine**: 2026-11-20, 05:37 to 07:24 UTC; AMD Ryzen 5 5500U (6 cores, 12 threads),
+  62 GB, Linux 7.0.0-43, DEV12. No other benchmark or build ran (the desktop only); the 1-minute
+  load average was checked below 3 before each workload.
+- **Commits**: protoBaseST `0fbed55`, clean (`git status` of `src` and `bench` empty; every
+  provenance line reads `protoBaseST 0fbed55; protoST 0.12.0`, none "modified"); `proto_db`
+  v2.0.0rc4 (`8e6127f`) in the interop venv, CPython 3.14.0.
+- **Binaries**: the `pinned-360` release builds, protoST 0.12.0 (`b7e206a`) at
+  `worktrees/pinned-360/protoST/build_release/protost` on protoCore 3.6.0 (`799d7615`); `ldd`
+  resolves `libprotoCore.so.5` to `worktrees/pinned-360/protoCore/build_release/libprotoCore.so.5`.
+- **Protocol** (unchanged from the earlier runs): `RUNS=5 bench/run_query.sh <workload>` for each
+  of M1 M2 M3 P1 P2 P3 Q1 Q2 Q3 Q4 Q5, then `bench/run_atom_weight.sh`; default sizes; one
+  process per unit, five rounds interleaved with `proto_db`; heap budget
+  `PROTOCORE_HEAP_LIMIT_CELLS=80000000` (cluster members 32000000). Every workload printed
+  `verified`: all ten runs of every unit reported `proto_db`'s first run's work (rows, queries,
+  plan, checksum, and for P2 and P3 the model costs). Nothing is asserted about time; differences
+  under about 15 % are noise.
+
+| Workload | load before | load after | wall time |
+|---|---|---|---|
+| M1 | 2.32 | 2.18 | 6 min |
+| M2 | 2.18 | 2.73 | 24 min |
+| M3 | 2.73 | 2.82 | 13 min |
+| P1 | 2.82 | 2.55 | 4 min |
+| P2 | 2.55 | 1.61 | 9 min |
+| P3 | 1.61 | 1.60 | 1 min |
+| Q1 | 1.60 | 1.84 | 3 min |
+| Q2 | 1.84 | 1.83 | 6 min |
+| Q3 | 1.83 | 3.18 | 4 min |
+| Q4 | 2.18 | 2.24 | 2 min |
+| Q5 | 2.24 | 2.13 | 17 min |
+| atom weight | 2.13 | 2.13 | 17 min |
+
+Times are microseconds for the whole unit, minimum / median of five; the ratio is protoBaseST's
+minimum over `proto_db`'s; peak RSS is the largest over a unit's runs. protoBaseST's peak RSS is
+the heap budget being used, not the live set: protoCore keeps memory until it needs it. The units
+are those of the sections below (M1 and M3: 200 and 120 commits on 600 records; M2: the build and
+the fold of n elements; P1: 200 plans; P2: five executions per forced plan; Q1-Q4: 20 queries;
+Q5: every page of 50, or 20 counts). M3's `-c3` units are the three-member cluster, which has no
+`proto_db` run.
+
+| Workload | size | plan | `proto_db` µs min / median | protoBaseST µs min / median | ratio (min) | peak RSS MB `proto_db` / protoBaseST |
+|---|---|---|---|---|---|---|
+| M1 | 600 | idx0 | 1361419 / 1389430 | 4760302 / 4795291 | 3.5x | 29 / 1368 |
+| M1 | 600 | idx1 | 1752649 / 1758518 | 13782804 / 13906999 | 7.9x | 35 / 5090 |
+| M1 | 600 | idx3 | 2534663 / 2542191 | 31722795 / 32289038 | 12.5x | 47 / 5114 |
+| M2 | 100 | build | 2479 / 2509 | 39912 / 41045 | 16.1x | 25 / 113 |
+| M2 | 100 | fold | 6525 / 6751 | 46614 / 48189 | 7.1x | 25 / 113 |
+| M2 | 1000 | build | 23459 / 23747 | 463499 / 475349 | 19.8x | 26 / 328 |
+| M2 | 1000 | fold | 83882 / 86473 | 689131 / 697204 | 8.2x | 26 / 312 |
+| M2 | 10000 | build | 266201 / 275133 | 5612292 / 5672401 | 21.1x | 40 / 2942 |
+| M2 | 10000 | fold | 1052880 / 1075352 | 9908198 / 9989066 | 9.4x | 37 / 2938 |
+| M2 | 100000 | build | 3335620 / 3348963 | 63844880 / 64245469 | 19.1x | 173 / 5282 |
+| M2 | 100000 | fold | 13772465 / 14023286 | 129458655 / 130095804 | 9.4x | 145 / 5276 |
+| M3 | 600 | idx0 | 854501 / 874127 | 3091701 / 3128468 | 3.6x | 28 / 1072 |
+| M3 | 600 | idx1 | 1082173 / 1096577 | 8485569 / 8491757 | 7.8x | 33 / 3628 |
+| M3 | 600 | idx3 | 1480988 / 1541217 | 20030802 / 20349629 | 13.5x | 41 / 5126 |
+| M3 | 600 | idx0-c3 | - | 6166511 / 6219983 | - | - / 1426 (largest member) |
+| M3 | 600 | idx1-c3 | - | 14944095 / 15158879 | - | - / 2073 (largest member) |
+| M3 | 600 | idx3-c3 | - | 42853972 / 47126251 | - | - / 2083 (largest member) |
+| P1 | 1 | idx0 | 7467 / 7615 | 135510 / 138534 | 18.1x | 26 / 489 |
+| P1 | 1 | idx2 | 15005 / 15197 | 332864 / 350358 | 22.2x | 27 / 944 |
+| P1 | 1 | idx8 | 17628 / 18427 | 438140 / 453995 | 24.9x | 32 / 2182 |
+| P1 | 8 | idx0 | 20601 / 21533 | 466262 / 481526 | 22.6x | 26 / 729 |
+| P1 | 8 | idx2 | 50478 / 52914 | 895232 / 919840 | 17.7x | 28 / 1249 |
+| P1 | 8 | idx8 | 127856 / 130143 | 1897269 / 1942618 | 14.8x | 33 / 2722 |
+| P1 | 32 | idx0 | 58070 / 58980 | 1707790 / 1718854 | 29.4x | 29 / 1526 |
+| P1 | 32 | idx2 | 248709 / 261183 | 3236054 / 3267989 | 13.0x | 31 / 2398 |
+| P1 | 32 | idx8 | 825239 / 843934 | 7683493 / 7766873 | 9.3x | 35 / 4924 |
+| P2 | 2000 | r0001-index | 69 / 72 | 1408 / 1423 | 20.4x | 33 / 1764 |
+| P2 | 2000 | r0001-scan | 24403 / 26659 | 503909 / 522335 | 20.6x | 33 / 1932 |
+| P2 | 2000 | r0010-index | 220 / 232 | 5339 / 7922 | 24.3x | 33 / 1768 |
+| P2 | 2000 | r0010-scan | 25558 / 26195 | 506797 / 519046 | 19.8x | 33 / 1932 |
+| P2 | 2000 | r0100-index | 1687 / 1712 | 58269 / 59033 | 34.5x | 33 / 1796 |
+| P2 | 2000 | r0100-scan | 24599 / 26170 | 483620 / 507511 | 19.7x | 33 / 1933 |
+| P2 | 2000 | r0500-index | 8312 / 8675 | 281191 / 286937 | 33.8x | 33 / 1860 |
+| P2 | 2000 | r0500-scan | 25144 / 25722 | 492224 / 537609 | 19.6x | 33 / 1929 |
+| P2 | 2000 | r0900-index | 14915 / 15364 | 522426 / 529533 | 35.0x | 33 / 1933 |
+| P2 | 2000 | r0900-scan | 25569 / 26178 | 524057 / 527785 | 20.5x | 33 / 1945 |
+| P2 | 2000 | r0990-index | 16223 / 17025 | 569247 / 577303 | 35.1x | 33 / 1960 |
+| P2 | 2000 | r0990-scan | 25660 / 26001 | 517984 / 529938 | 20.2x | 33 / 1936 |
+| P2 | 2000 | r1000-index | 16627 / 16978 | 564385 / 577525 | 33.9x | 33 / 1956 |
+| P2 | 2000 | r1000-scan | 26201 / 26518 | 523437 / 533829 | 20.0x | 33 / 1936 |
+| P2 | 2000 | ne-few-index | 3243 / 3296 | 94251 / 95608 | 29.1x | 33 / 1800 |
+| P2 | 2000 | ne-few-scan | 25771 / 26114 | 449805 / 461988 | 17.5x | 33 / 1916 |
+| P2 | 2000 | ne-many-index | 19380 / 20278 | 357185 / 364190 | 18.4x | 33 / 1892 |
+| P2 | 2000 | ne-many-scan | 24666 / 25443 | 458427 / 466040 | 18.6x | 33 / 1909 |
+| P3 | 2000 | intersect | 10302 / 10685 | 59400 / 60666 | 5.8x | 29 / 1584 |
+| P3 | 2000 | filter | 2804 / 2882 | 54216 / 55097 | 19.3x | 29 / 1571 |
+| Q1 | 100 | index | 1729 / 1774 | 13202 / 14582 | 7.6x | 25 / 133 |
+| Q1 | 100 | scan | 5938 / 6077 | 78773 / 81026 | 13.3x | 25 / 136 |
+| Q1 | 1000 | index | 1949 / 2018 | 15807 / 17640 | 8.1x | 26 / 488 |
+| Q1 | 1000 | scan | 51928 / 52279 | 815972 / 827975 | 15.7x | 25 / 544 |
+| Q1 | 10000 | index | 2072 / 2126 | 17009 / 19128 | 8.2x | 39 / 4780 |
+| Q1 | 10000 | scan | 513312 / 525933 | 9653716 / 9916435 | 18.8x | 29 / 5063 |
+| Q2 | 2000 | in1-index | 2317 / 2345 | 23533 / 25039 | 10.2x | 32 / 1768 |
+| Q2 | 2000 | in1-scan | 118240 / 120928 | 1751588 / 1768493 | 14.8x | 26 / 1065 |
+| Q2 | 2000 | in10-index | 4566 / 4633 | 77740 / 82060 | 17.0x | 31 / 1788 |
+| Q2 | 2000 | in10-scan | 272352 / 275811 | 2398401 / 2442435 | 8.8x | 26 / 1073 |
+| Q2 | 2000 | in100-index | 24865 / 25948 | 576064 / 577847 | 23.2x | 31 / 1964 |
+| Q2 | 2000 | in100-scan | 1394862 / 1438012 | 6804113 / 6877480 | 4.9x | 26 / 1133 |
+| Q2 | 2000 | r0001-index | 2346 / 2369 | 22042 / 24124 | 9.4x | 31 / 1764 |
+| Q2 | 2000 | r0001-scan | 122873 / 128973 | 2086058 / 2107700 | 17.0x | 26 / 1157 |
+| Q2 | 2000 | r0010-index | 3026 / 3066 | 40250 / 41839 | 13.3x | 31 / 1780 |
+| Q2 | 2000 | r0010-scan | 126039 / 128473 | 2080236 / 2093710 | 16.5x | 26 / 1161 |
+| Q2 | 2000 | r0100-index | 8832 / 9238 | 187780 / 197136 | 21.3x | 31 / 1820 |
+| Q2 | 2000 | r0100-scan | 122676 / 125527 | 2102076 / 2124809 | 17.1x | 26 / 1165 |
+| Q2 | 2000 | r0500-index | 36048 / 38196 | 831151 / 855426 | 23.1x | 32 / 2045 |
+| Q2 | 2000 | r0500-scan | 123605 / 126814 | 2096585 / 2126679 | 17.0x | 26 / 1197 |
+| Q3 | 2000 | and-index | 3879 / 3935 | 39644 / 40170 | 10.2x | 32 / 1772 |
+| Q3 | 2000 | and-scan | 128047 / 129326 | 2362938 / 2398895 | 18.5x | 25 / 1117 |
+| Q3 | 2000 | or2-index | 51645 / 54558 | 353553 / 364397 | 6.8x | 31 / 1928 |
+| Q3 | 2000 | or2-scan | 229365 / 236688 | 3310989 / 3321893 | 14.4x | 26 / 1570 |
+| Q3 | 2000 | ormix-index | 233970 / 238591 | 3281410 / 3361715 | 14.0x | 31 / 2817 |
+| Q3 | 2000 | ormix-scan | 231262 / 233746 | 3193386 / 3211591 | 13.8x | 26 / 1561 |
+| Q3 | 2000 | not-index | 137646 / 138575 | 1838130 / 1881847 | 13.4x | 32 / 2361 |
+| Q3 | 2000 | not-scan | 134358 / 136171 | 1747321 / 1803522 | 13.0x | 26 / 1105 |
+| Q4 | 2000 | all-index | 2056 / 2090 | 16138 / 17070 | 7.8x | 31 / 1764 |
+| Q4 | 2000 | all-scan | 84025 / 90272 | 2602089 / 2652995 | 31.0x | 26 / 1178 |
+| Q4 | 2000 | sel-index | 4153 / 4333 | 42767 / 44532 | 10.3x | 31 / 1773 |
+| Q4 | 2000 | sel-scan | 103118 / 107250 | 1696583 / 1725388 | 16.5x | 26 / 1045 |
+| Q4 | 2000 | unsel-index | 30332 / 32074 | 892045 / 903837 | 29.4x | 32 / 1952 |
+| Q4 | 2000 | unsel-scan | 123607 / 125280 | 2217912 / 2252461 | 17.9x | 26 / 1189 |
+| Q5 | 2000 | page-rank | 5198 / 5398 | 76170 / 77834 | 14.7x | 31 / 1784 |
+| Q5 | 2000 | page-mat | 5176 / 5493 | 144722 / 151420 | 28.0x | 26 / 589 |
+| Q5 | 2000 | page-skip | 52839 / 53496 | 1401843 / 1412060 | 26.5x | 32 / 2289 |
+| Q5 | 2000 | count-index | 1988 / 2046 | 32662 / 35970 | 16.4x | 31 / 3628 |
+| Q5 | 2000 | count-scan | 115372 / 121872 | 2084085 / 2160619 | 18.1x | 26 / 1690 |
+| Q5 | 10000 | page-rank | 24399 / 24788 | 321440 / 326633 | 13.2x | 59 / 5099 |
+| Q5 | 10000 | page-mat | 30883 / 32100 | 866604 / 883393 | 28.1x | 32 / 2915 |
+| Q5 | 10000 | page-skip | 1416701 / 1464857 | 29488169 / 29523500 | 20.8x | 59 / 5099 |
+| Q5 | 10000 | count-index | 1988 / 2032 | 44563 / 46973 | 22.4x | 59 / 5113 |
+| Q5 | 10000 | count-scan | 571553 / 587083 | 8776353 / 8891148 | 15.4x | 29 / 5087 |
+
+**Atom weight** (`bench/run_atom_weight.sh`, `src` at `0fbed55` clean, n = 10^5 kept, 200
+allocated, empty run's interquartile range 1.77 cells per object), cells per object: retained
+(median) / allocated. `tuple2` 13.2 / 54.9; `tupletrusted` 9.4 / 30.9; `atomshell` 3.0 / 12.0;
+`nodeshell` 13.4 / 51.9; `nodeown` 33.6 / 136.4; `nodeoid` 15.4 / 82.2; `build` 41.7 / 110.5;
+`oiddraw` 1.2 / 30.8; `loaded` 48.3 / 1397.5; `loadedcache` 51.6 / 307.1. The retained figures
+equal stage 2's "after" ([below](#atom-weight-stage-2-shaped-atoms-keep-only-their-slots)) within
+their interquartile ranges; the allocations differ from it by 0.5 to 15 cells per object (up 2.4
+for `nodeown` and 14.7 for `loaded`, down 7.2 for `loadedcache`), not analysed.
+
+**Q1 at 10^5, one run** (`QUERY_Q1_SIZES=100000 RUNS=1 bench/run_query.sh Q1`, right after,
+07:24 to 07:31 UTC, load 1.66 before and 2.87 after, same commit and binaries, `verified`): the
+20 lookups by index took 2.0 ms in `proto_db` and 40.4 ms in protoBaseST (20.2x); the 20 scans
+5.48 s and 105.4 s (19.2x); peak RSS 166 / 5220 MB (index) and 71 / 5100 MB (scan). A single run
+is not a minimum of five, and it did not run in the five-round interleaving.
+
+What it shows.
+
+- **protoBaseST is 3.5 to 35 times slower than `proto_db`**, minimum against minimum, on every
+  unit: commits 3.5x to 13.5x (M1, M3), index builds 7x to 21x (M2), planning 9x to 29x (P1),
+  queries 5x to 35x (P2, P3, Q1-Q5). No speed claim is made.
+- **R1, whether indexed writes dominate a commit: they do, in protoBaseST.** One element per
+  commit on 600 records: 42.0, 14.5 and 6.3 commits/s with 0, 1 and 3 indexes (23.8, 68.9 and
+  158.6 ms per commit), against `proto_db`'s 147, 114 and 79 (6.8, 8.8 and 12.7 ms). Each index
+  costs about 45 ms per commit here and 2.0 ms in `proto_db`, so index work is 65 % of an
+  indexed commit's time with one index and 85 % with three (`proto_db`: 22 % and 46 %). At Task
+  4a it was 55 to 58 ms per index (38, 11.9 and 5.2 commits/s); the atom weight work (Tasks 11
+  and 12) cut it by about a fifth.
+- **A merged blind write still costs what a read-modify-write costs** (M3 standalone: 38.8,
+  14.1 and 6.0 commits/s, M1's within noise). In the three-member cluster: 19.5, 8.0 and 2.8
+  commits/s, 2.0x, 1.8x and 2.1x slower than standalone; at Task 4b the three-index cluster
+  committed 1.1 times per second, 4.4x slower than standalone. Its builds are shorter now, so
+  fewer rounds are refused for lack of permission time: 119 to 151 retries per run of 120
+  commits (309 to 450 at Task 4b), 30 to 35 with one index, 0 or 1 with none.
+- **The bulk build is 1.2x (10^2) to 2.0x (10^5) faster than the fold** in protoBaseST, 2.6x to
+  4.1x in `proto_db`. protoBaseST's build is 16x to 21x `proto_db`'s time and its fold 7x to 9x;
+  at Task 3 the gap grew with n to 38x, it no longer does (10^4 build 5.6 s, fold 9.9 s, against
+  10.0 s and 30.6 s at Task 3).
+- **Planning costs grow with conjuncts times indexes** (P1): 0.68 ms to 38 ms per query in
+  protoBaseST, 0.04 to 4.1 ms in `proto_db`.
+- **The cost model against timings** (P2; both implementations computed the same model costs at
+  every point). In `proto_db` the model switches early at both switch points: the forced index
+  plan is still 37 % faster at `r < 2000` and 21 % at `many != 0`. In protoBaseST the range plans
+  cross between 90 % and 99 % (index against scan 1.00x at 90 %, 1.10x at 99 %, 1.08x at 100 %),
+  so the model, which switches between 99 % and 100 %, is late by under 10 %, within noise; on
+  `many != 0` the complement is 22 % faster than the scan the model chooses, early as in
+  `proto_db`. On `few != 0` the complement is 4.8x faster than the scan (`proto_db` 7.9x).
+- **The intersection** (P3): 3.7x the filter plan's time in `proto_db`, so the model's claim
+  holds there; 1.10x in protoBaseST (59.4 against 54.2 ms), within noise, so inconclusive at
+  protoST's speed. Both planners choose the filter.
+- **A point lookup by an index does not grow with the collection** (Q1): 0.66, 0.79 and 0.85 ms
+  per query at 10^2, 10^3 and 10^4 records (`proto_db` 0.09 to 0.10 ms), against 3.9, 41 and
+  483 ms for the scan (`proto_db` 0.30, 2.6 and 26 ms); at 10^4 the index answers 568 times
+  faster than the scan. The single 10^5 run gave 2.0 ms per indexed query and 5.3 s per scan.
+- **Q2-Q4, per query** (2000 records, protoBaseST; `proto_db` in parentheses): `in:` 1, 10, 100
+  values 1.2, 3.9, 29 ms by index against 88, 120, 340 ms scanned (0.12, 0.23, 1.2 against 5.9,
+  14, 70); ranges of 0.1 %, 1 %, 10 %, 50 % 1.1, 2.0, 9.4, 42 ms against about 104 ms (0.12, 0.15,
+  0.44, 1.8 against about 6.2); AND 2.0 against 118 ms (0.19 against 6.4); the Union of two
+  lookups 18 against 166 ms (2.6 against 11.5); an OR with an unindexed branch and a NOT are
+  scans either way (about 160 and 90 ms; 11.6 and 6.8); an ordered index scan with `take: 5`
+  0.81 ms against 130 ms for a sort of the scan (0.10 against 4.2); the selective and unselective
+  sorts over a lookup 2.1 and 45 ms against 85 and 111 ms (0.21 and 1.5 against 5.2 and 6.2).
+- **A page by rank costs the same at every size** (Q5): 1.9 ms per page of 50 at 2000 records and
+  1.6 ms at 10^4 (`proto_db` 0.13 and 0.12). Skipping costs 35 and 147 ms per page on average, so
+  reading every page by skipping costs 18x and 92x the pager's time (`proto_db` 10x and 58x).
+  Materialising once costs 1.9x and 2.7x the pager by rank (`proto_db` 1.0x and 1.3x). A count by
+  rank takes 1.6 and 2.2 ms against 104 and 439 ms for counting a filtered scan, 64x and 197x
+  (`proto_db` 0.10 ms against 5.8 and 29 ms, 58x and 288x).
+- **The Task 12 residual** (stage 2 below: steady Q1 queries about 1.5 times slower after
+  `69e6888` in two of three driver pairs, possibly the load). Q1 at 10^4 by index now takes
+  17,009 / 19,128 µs (minimum / median) at load 1.6 to 1.8: 8.7 % above the pre-Task-12 minimum
+  (15,653 at `f95b09f`, load 3.0) and 6.7 % below the post-Task-12 one (18,236 at `69e6888`), both
+  within the 15 % noise, and 0.9 % above Task 8's (16,854 at `90bad75`). So on a quiet machine
+  the bench shows no Q1 index regression from Task 12; a per-row regression smaller than the
+  noise is not excluded, since this run has no before side. The scan at 10^4 (9.65 s) is faster
+  than every earlier run (11.1 s at Task 8; 11.5 s and 13.1 s in stage 2). Settled as noise
+  unless a quiet, alternating A/B run shows otherwise.
+
+#### Q1-Q4: queries, indexed against a forced scan
+
+`RUNS=5 bench/run_query.sh Q1 Q2 Q3 Q4 P3`, plan Task 8, re-run after its fix round 1 on a clean,
+committed tree. The runner's provenance line, unmodified:
+`2026-11-19T15:38Z; protoBaseST 90bad75; protoST 0.12.0`. The run took 23 minutes; load average
+2.07 before and 2.77 after, with no other heavy process, on the machine of M1 to M3 (AMD Ryzen 5
+5500U, 6 cores, 12 threads, Linux 7.0.0-43, DEV12); the `pinned-360` build (protoST 0.12.0 on
+protoCore 3.6.0); `proto_db` v2.0.0rc4 on CPython 3.14.0. One process per unit, five rounds
+interleaved, heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`. The data and the units are
+`bench/_query_bench.st` (`QueryUnits`) and `bench/py_query_workload.py`: records with `g` (ten
+records per value), `r` (unique), `few` (four values) and `x` (ten values, never indexed). Plan
+`-index` queries them with an equality index on `g` (Q1: that index only) and, for Q2-Q4, an
+equality index on `few` and a range index on `r`, and the planner chooses; plan `-scan` queries the
+same records without indexes. Each unit times 20 queries, each built, planned and run to an
+`Array` through the query front end (`PBQuery`, `from_collection`). Every run self-reports its rows,
+queries, checksum and the plan's node names; all ten runs of every unit agreed with `proto_db`'s
+first (the runner printed `verified`), so both planners chose the same plan everywhere, and each
+`-index` unit answered the rows of its `-scan`. Times are microseconds for the 20 queries, minimum
+/ median of five; peak RSS is the largest over a unit's runs, in MB, `proto_db` / protoBaseST.
+Q4's point `all` (no condition) is an addition to spec 7.3: with a condition both implementations
+sort over a lookup, so `all` is the only Q4 point where the planner streams an ordered index.
+
+| Unit | Plan chosen (`-index`) | `proto_db` index | protoBaseST index | `proto_db` scan | protoBaseST scan | Peak RSS index; scan |
+|---|---|---|---|---|---|---|
+| Q1, 10^2 records, `g == v` | `IndexLookup` | 1785 / 1931 | 14329 / 15158 | 6345 / 6504 | 117643 / 120145 | 25 / 148; 24 / 152 |
+| Q1, 10^3 | `IndexLookup` | 2065 / 2214 | 16614 / 17862 | 55044 / 56536 | 1253409 / 1297072 | 26 / 744; 25 / 832 |
+| Q1, 10^4 | `IndexLookup` | 2147 / 2204 | 16854 / 18694 | 545171 / 550601 | 11073528 / 11757011 | 39 / 5088; 29 / 5088 |
+| Q2, `in:` 1 value (2000 records) | `IndexLookup` | 2555 / 2598 | 29200 / 29713 | 132556 / 135944 | 2496193 / 2644884 | 31 / 2626; 25 / 1701 |
+| Q2, `in:` 10 values | `IndexLookup` | 4889 / 4983 | 87886 / 91332 | 303499 / 307919 | 3232368 / 3372979 | 31 / 2654; 25 / 1705 |
+| Q2, `in:` 100 values | `IndexLookup` | 27768 / 28914 | 642911 / 655602 | 1541370 / 1650731 | 8026655 / 8254401 | 31 / 2822; 25 / 1773 |
+| Q2, range 0.1 % | `IndexRange` | 2475 / 2621 | 24743 / 26337 | 132992 / 138976 | 2886970 / 2893763 | 31 / 2626; 25 / 1785 |
+| Q2, range 1 % | `IndexRange` | 3177 / 3258 | 45674 / 48758 | 133402 / 144826 | 2896411 / 2908670 | 31 / 2634; 25 / 1785 |
+| Q2, range 10 % | `IndexRange` | 9543 / 9600 | 213744 / 218714 | 137104 / 143286 | 2848140 / 2968641 | 31 / 2674; 25 / 1801 |
+| Q2, range 50 % | `IndexRange` | 39988 / 43190 | 973328 / 991265 | 136358 / 141660 | 2896923 / 2985878 | 31 / 2910; 25 / 1837 |
+| Q3, AND (`g == v & x < 5`) | `Filter <- IndexLookup` | 4103 / 4197 | 47227 / 49104 | 139702 / 147769 | 3222087 / 3323021 | 31 / 2630; 25 / 1757 |
+| Q3, OR of two indexed branches | `Union` of two `IndexLookup` | 54714 / 57769 | 382118 / 386269 | 252187 / 253677 | 4693198 / 4795787 | 31 / 2786; 25 / 2406 |
+| Q3, OR with an unindexed branch | `Filter <- CollectionScan` | 250269 / 260422 | 4681005 / 4757859 | 247941 / 259061 | 4583162 / 4739753 | 31 / 4091; 25 / 2398 |
+| Q3, NOT (`not (few == v)`) | `Filter <- CollectionScan` | 147109 / 147684 | 2599471 / 2730049 | 150480 / 152606 | 2554866 / 2693507 | 31 / 3407; 25 / 1745 |
+| Q4, `orderBy: r` `take: 5`, no condition | `Limit <- IndexOrderedScan` | 2300 / 2462 | 19977 / 20685 | 98970 / 99285 | 3442564 / 3571788 | 31 / 2626; 26 / 1806 |
+| Q4, selective (`g == v`, ten rows) | `Limit <- Sort <- IndexLookup` | 4568 / 4896 | 51278 / 52218 | 115025 / 117884 | 2499579 / 2635541 | 31 / 2630; 25 / 1693 |
+| Q4, unselective (`few == v`, 500 rows) | `Limit <- Sort <- IndexLookup` | 36205 / 38321 | 1136992 / 1158193 | 129762 / 137303 | 3236612 / 3262506 | 31 / 2862; 26 / 1877 |
+
+What it shows.
+
+- **A point lookup by an index does not grow with the collection.** In protoBaseST it takes about
+  0.8 ms per query from 10^2 to 10^4 records, and `proto_db` about 0.1 ms. The scan grows with the
+  collection: 5.9 ms to 554 ms per query in protoBaseST, 0.3 to 27 ms in `proto_db`. At 10^4 records
+  protoBaseST's index answers about 650 times faster than its scan.
+- **protoBaseST is 5 to 35 times slower than `proto_db`** on every unit (minimum against minimum),
+  by kind:
+  - point lookups and ordered streams: 8x to 12x (Q1 index, Q2 `in:` 1 value, Q3 AND, Q4 `all`
+    and selective);
+  - the Union of two lookups: 7x;
+  - index plans that answer many rows: 14x to 24x (Q2 `in:` 10 and 100 values, ranges of 1 % to
+    50 %), and 31x for the unselective Q4 (a sort of 500 rows);
+  - the 0.1 % range: 10x;
+  - scans, forced or chosen: 17x to 25x, and 35x for Q4's sort over the whole scan;
+  - the `in:` scans of 10 and 100 values: 11x and 5x, because `proto_db` tests a long `in` slowly
+    on a scan.
+- **The Union is now cheap.** The first run of Task 8 measured the Union of two lookups at 107x
+  `proto_db`'s time, slower than its own scan. The cause was the identity key of `PBUnion`,
+  `PBIntersect` and `PBDistinct`: a constant cost of about 430 µs per row, from a member tuple built
+  and dropped, a nested tuple order key, and four dictionary operations each recomputing that key's
+  uncached hash. Fix round 1 keys an atom by its oid's bytes, builds no member tuple, and looks each
+  row up once. The Union is now 7.0x `proto_db`, and 12x faster than its own scan; `proto_db`'s is
+  4.6x faster than its scan.
+- **The planner's choices are `proto_db`'s.** Both implementations sort the unselective Q4 over a
+  lookup rather than filter an ordered scan, as the model says.
+
+**Sizes.** Q1 stops at 10^4 records, not at the spec's 10^5. With every index, a 10^5 probe was
+stopped after more than 5 CPU minutes and 5 GB, before its first query. With only the `by_g` index
+the index plan uses, one 10^5 process took 336 s and peaked at 5.4 GB (the budget is about 5 GB),
+and answered its 20 lookups in 32.5 ms against `proto_db`'s 2.0 ms. Outputs are in
+`bench/out/q1-probe/`, which git ignores. Q1 needs ten such processes per size, so 10^5 is not run
+by default (`QUERY_Q1_SIZES` sets the sizes); see "Benchmark sizes" in the table of indexed-query
+deviations. Peak resident sets of protost (up to 5 GB) are not a figure of the work: protoCore
+keeps memory until it needs it.
+
+#### Q5: pages by rank, materialised and by skipping; counts by rank
+
+`RUNS=5 bench/run_query.sh Q5`, plan Task 9, on a clean, committed tree with no other heavy
+process. The runner's provenance line, unmodified:
+`2026-11-19T16:59Z; protoBaseST f7d3da7; protoST 0.12.0`. The run took 24 minutes; load average
+3.08 before and 2.64 after (the desktop only), on the machine of M1 to M3 (AMD Ryzen 5 5500U, 6
+cores, 12 threads, Linux 7.0.0-43, DEV12); the `pinned-360` build (protoST 0.12.0 on protoCore
+3.6.0); `proto_db` v2.0.0rc4 on CPython 3.14.0. One process per unit, five rounds interleaved,
+heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`. The records are Q1-Q4's (`QueryUnits` in
+`bench/_query_bench.st`, `bench/py_query_workload.py`), at 2000 and 10^4. Every page of 50 of the
+records ordered by `r` is read, from page 0 to the last (40 and 200 pages): `page-rank` by a pager
+over the indexed records (an `IndexOrderedScan`, by rank); `page-mat` by a pager over the same
+records without indexes (a `Sort` over the scan, run once and sliced); `page-skip` the obvious way,
+each page read from the indexed query by producing and dropping the rows before it and stopping
+after it. `count-index` and `count-scan` time 20 counts of `r >= n (q + 1) // 21`, by rank over
+the indexes and by walking a filtered scan without them. Each unit checks before timing that its
+pager or every count is by rank (or is not) and fails otherwise; every run self-reported its rows,
+pages, plan and checksum, all ten runs of every unit agreed with `proto_db`'s first, and the three
+page units of a size, and the two count units, reported the same rows and checksum (the runner
+printed `verified`). Times are microseconds for the whole unit, minimum / median of five; per page
+and per count are the minimum divided by the pages or the counts. Peak RSS is the largest over a
+unit's runs, in MB, `proto_db` / protoBaseST; protoBaseST's (up to 5 GB, the heap budget) is not a
+figure of the work: protoCore keeps memory until it needs it.
+
+| Unit | `proto_db` | protoBaseST | Per page or count, `proto_db`; protoBaseST | Ratio st/py | Peak RSS |
+|---|---|---|---|---|---|
+| 2000, `page-rank` (40 pages) | 5450 / 5662 | 85097 / 97592 | 0.14; 2.1 ms | 15.6x | 31 / 2646 |
+| 2000, `page-mat` | 5596 / 6029 | 188960 / 205331 | 0.14; 4.7 ms | 33.8x | 26 / 1033 |
+| 2000, `page-skip` | 56258 / 60756 | 1554057 / 1652503 | 1.4; 38.9 ms | 27.6x | 31 / 3151 |
+| 2000, `count-index` (20 counts) | 2067 / 2197 | 34440 / 39398 | 0.10; 1.7 ms | 16.7x | 31 / 5067 |
+| 2000, `count-scan` | 123359 / 126130 | 2850606 / 2862384 | 6.2; 143 ms | 23.1x | 26 / 2818 |
+| 10^4, `page-rank` (200 pages) | 25956 / 27426 | 385390 / 420313 | 0.13; 1.9 ms | 14.8x | 59 / 5088 |
+| 10^4, `page-mat` | 32289 / 34284 | 910807 / 1041215 | 0.16; 4.6 ms | 28.2x | 32 / 5088 |
+| 10^4, `page-skip` | 1467964 / 1502836 | 39002927 / 39571531 | 7.3; 195 ms | 26.6x | 59 / 5088 |
+| 10^4, `count-index` | 2094 / 2173 | 43907 / 48654 | 0.10; 2.2 ms | 21.0x | 58 / 5126 |
+| 10^4, `count-scan` | 618763 / 629753 | 13082681 / 13310845 | 31; 654 ms | 21.1x | 29 / 5088 |
+
+What it shows.
+
+- **A page by rank costs the same at every size.** About 2 ms per page of 50 in protoBaseST at
+  2000 and at 10^4 records (0.13 ms in `proto_db`): one descent of the weighted index, then the
+  page. Skipping grows with the page number: on average 39 ms per page at 2000 and 195 ms at 10^4,
+  so reading every page by skipping costs 18x the pager's time at 2000 and 101x at 10^4
+  (`proto_db`: 10x and 57x). The gap grows with n, as O(n² / s) against O(n + (n / s) log n) says.
+- **Materialising once is close to rank.** A pager over a plan without rank access runs its sort
+  once and slices it: 2.2x to 2.4x the pager by rank in protoBaseST, over every page
+  (`proto_db`: 1.0x to 1.2x). Its cost is the plan's, paid once, not per page.
+- **A count by rank does not grow with the collection.** 1.7 and 2.2 ms per count at 2000 and
+  10^4 (`proto_db` 0.10 ms at both, which includes building and planning each query), against
+  143 and 654 ms for counting a filtered scan: 83x and 298x (`proto_db`: 60x and 295x).
+- **protoBaseST is 15x to 34x slower than `proto_db`** (minimum against minimum): 15x to 21x for
+  the rank units, 21x to 28x for the walks, and 28x to 34x for the materialised pager, whose
+  `Sort` dominates (Q4 measured a sort over a scan at 35x).
+
+The first run of Q5 (at `d7e5a25`, also `verified`) counted `r >= n q // 20`. For q = 0 that bound
+covers every row, and both planners answer it by a scan, so `count-index` was not all by rank and
+grew with n (98 % of `proto_db`'s 10^4 unit was that one walk, by profile). The bounds were changed
+and each count unit now checks its plans before timing (`f7d3da7`); the table is the second run.
+Sizes: Q5 runs 2000 and 10^4 records, not 10^5, for the reason given for Q1 ("Benchmark sizes" in
+the table of indexed-query deviations); `QUERY_Q5_SIZES` sets them.
+
+#### M1: commits per second with 0, 1 and 3 indexes
+
+`RUNS=5 bench/run_query.sh M1`. **Indicative only.** Measured 2026-11-19 (05:05-05:13 local) on
+the same machine as M2 below (AMD Ryzen 5 5500U, 6 cores, 12 threads, Linux 7.0.0, DEV12), load
+average 3.0 before and 3.1 after (other desktop sessions open, not controlled); protoBaseST at the
+Task 4a commit `82572e9` (on `b9ec393`; the
+benchmark ran on that working tree), protoST 0.12.0 (`b7e206a`) on protoCore 3.6.0 (`799d7615`),
+the `pinned-360` release build; `proto_db` v2.0.0rc4 (`8e6127f`) on CPython 3.14.0. Each unit (a
+plan) ran in a process of its own, five rounds interleaved, every protost process with the heap
+budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000` (about 5 GB). The workload: a `PBDictionary` of 600
+records committed once, then 200 transactions, timed together, each reading the dictionary and
+committing it with one record replaced (one replace event per index), on a file space under
+`bench/out`. Plans: no index (idx0); a `PBEqualityIndex` on `city` (idx1); that one, a
+`PBRangeIndex` on `age` and a `PBRangeIndex` on an extractor (the name's length) (idx3). Every run
+self-reports the count read back and an ordered checksum over the values and every index; the
+read-back version must pass `validate`; all ten runs of each plan agreed with `proto_db`'s first.
+
+| Indexes | `proto_db` commits/s | protoBaseST commits/s | protoBaseST / `proto_db` time (min) | peak RSS MB `proto_db` / protoBaseST |
+|---|---|---|---|---|
+| 0 | 150 (6.7 ms per commit) | 38 (26.3 ms) | 3.9x | 27 / 1902 |
+| 1 | 115 (8.7 ms) | 11.9 (84.1 ms) | 9.7x | 33 / 5077 |
+| 3 | 83 (12.1 ms) | 5.2 (192.3 ms) | 15.9x | 45 / 5078 |
+
+Commits per second from the minimum of five runs of 200 commits (medians within 7 %: protoBaseST
+5.28 s, 18.0 s, 39.6 s; `proto_db` 1.34 s, 1.76 s, 2.48 s).
+
+- **The extra cost per index**: about 2.0 ms per commit for the first index and 1.8 ms each on
+  average over three in `proto_db`; about 58 ms for the first and 55 ms each over three in
+  protoBaseST. A commit without an index is 3.9x slower than `proto_db`'s; each index is about
+  30x slower than `proto_db`'s, which is what the per-element costs of the key-group trees
+  measured in M2 predict (member key, order key, depth check), not a cost of the maintenance
+  order itself.
+- **Peak RSS is the heap budget, not the live set**: protoCore keeps memory until it reaches its
+  budget, so 5 GB is the budget being used, and 1.9 GB for idx0 is where that run stopped growing.
+  `proto_db` stays under 50 MB. Not a measure of what the workload needs.
+- Not measured: commits per second under contention (M3 below measures merges onto indexed
+  roots), and sizes other than 600.
+
+#### M3: a blind write merged onto an indexed current, standalone and in a cluster
+
+`RUNS=5 bench/run_query.sh M3`. **Indicative only.** Measured 2026-11-19 (09:20-09:49 UTC) on the
+machine of M1 and M2 (AMD Ryzen 5 5500U, 6 cores, 12 threads, Linux 7.0.0, DEV12), load average
+2.5 before and 4.6 after (other desktop sessions open, not controlled); protoBaseST at `6437d90`
+with the Task 4b working tree (committed as the Task 4b commit), the `pinned-360` build of M1
+(protoST 0.12.0 on protoCore 3.6.0); `proto_db` v2.0.0rc4 (`8e6127f`) on CPython 3.14.0. The
+workload: M1's dictionary of 600 records and plans (0, 1 and 3 indexes, one of them on an
+extractor), then 120 transactions, timed together, each committing **a new dictionary holding one
+record and never reading the root**, so every commit rebases it onto the current version, whose
+mutators maintain its indexes (`rebaseOnto:`, plan Task 4b). The 120 keys are distinct, so the
+final content does not depend on the order of the commits. Standalone: one process per unit, five
+rounds interleaved with `proto_db`, protost heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`.
+Cluster: `bench/run_cluster.sh`'s profile (three protost member processes on 127.0.0.1 over one
+shared directory on ZFS, `proto_db`'s default options: a 2000 ms lease), one writer per member,
+40 commits each, `run:retries: 1000`; every member with the budget 32000000 cells (about 2 GB).
+Every run self-reports the rows read back, the commits and M1's ordered checksum over the values
+and every index, and the read-back version must pass `validate`; all five standalone runs of
+each implementation and all five cluster runs agreed with `proto_db`'s standalone run of the same
+plan (there is no `proto_db` cluster run of this workload: its cluster is not driven here).
+
+| Indexes | `proto_db` commits/s | protoBaseST commits/s | protoBaseST / `proto_db` time (min) | protoBaseST, 3-member cluster, commits/s | peak RSS MB `proto_db` / protoBaseST / largest member |
+|---|---|---|---|---|---|
+| 0 | 141 (7.1 ms per commit) | 34.2 (29.3 ms) | 4.1x | 17.4 (57.6 ms) | 27 / 1481 / 1743 |
+| 1 | 110 (9.1 ms) | 11.9 (84.2 ms) | 9.2x | 6.8 (146 ms) | 31 / 4613 / 2060 |
+| 3 | 81 (12.4 ms) | 5.1 (197.6 ms) | 16.0x | 1.1 (879 ms) | 39 / 5077 / 2067 |
+
+Commits per second from the minimum of five runs (medians: standalone within 5 %; cluster 17.0,
+6.1 and 0.96 commits/s).
+
+- **A merged blind write costs what a read-modify-write costs**: the standalone figures are M1's
+  within a few per cent (34.2 against 38, 11.9 against 11.9, 5.1 against 5.2 commits/s). The
+  merge replays one `setAt:value:` through the current version's mutator, which does the same
+  index work as the writer's own `setAt:value:` in M1; it moves that work into the commit's
+  build, it does not add to it. The same holds in `proto_db` (141, 110, 81 against 150, 115, 83).
+- **In the cluster the build runs under the write permission, and with three indexes it no
+  longer fits.** The median build per commit was 34, 91 and 189 ms for 0, 1 and 3 indexes
+  (replication about 11 ms in every plan). A permission lasts at most 667 ms here (the 2000 ms
+  lease less the drift margin) and a send needs 167 ms of it (sendReserve); a group commit builds
+  a second entry only while sendReserve plus the longest build is left (CC11), and a round whose
+  builds leave less than sendReserve is refused and retried (R121). With 189 ms builds that
+  happened 135 to 210 times per run of 120 commits, and the block ran 309 to 450 times more than
+  once per commit, so the three-index cluster commits 1.1 times per second, 4.4 times slower
+  than standalone; with 0 and 1 index it is 2.0x and 1.7x slower (0 to 5 and 28 to 82 retries
+  per run). This is the cost queries.md names: an indexed root lengthens the build, which runs
+  under the cluster-wide permission. A longer `leaseDuration` raises the ceiling (not measured).
+- **Two limits follow, in cluster mode only.** A single build longer than the permission less
+  sendReserve (about 500 ms at the default 2000 ms lease: 667 ms less 167 ms) never commits: every
+  attempt is refused before its send (CC18 says so in the conflict's text), so a merge onto a
+  large or heavily indexed current can be impossible at the default lease. And retries this heavy
+  can exhaust the default `run:` retry budget (10), where M3 passed `run:retries: 1000`. The remedy is a
+  longer `leaseDuration` (with its drift margin), not more retries.
+- **Peak RSS is the heap budget, not the live set** (as M1): the standalone protost processes
+  grow to their 5 GB budget, the cluster members to their 2 GB one. Not a measure of what the
+  workload needs.
+- Not measured: `proto_db`'s cluster on this workload, a longer lease, more writers per member,
+  sizes other than 600.
+
+#### P1, P2, P3: the planner's overhead, the cost model against timings, the intersection
+
+`RUNS=5 bench/run_query.sh P1 P2 P3`. **Indicative only, and noisy**: measured on a committed tree
+under a heavy desktop load. The runner's provenance line, unmodified:
+`2026-11-19T13:31Z; protoBaseST b68bec7; protoST 0.12.0` (the run ended then; it took about 20
+minutes). Machine of M1 to M3 (AMD Ryzen 5 5500U, 6 cores, 12 threads, Linux 7.0.0-43, DEV12); load
+average 5.5 before and 8.9 after (other sessions running, not controlled); the `pinned-360` build
+(protoST 0.12.0 on protoCore 3.6.0); `proto_db` v2.0.0rc4 (`8e6127f`) on CPython 3.14.0. One process
+per unit, five rounds interleaved, protost heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`. The
+data and work are `bench/_query_bench.st` (`PlannerBench`) and `bench/py_query_workload.py`. Every
+run self-reports its rows, queries, checksum and `model=`, the node names of the plan the planner
+chooses, and P2 and P3 runs a MODEL line with the model costs of the plans compared; all ten runs of
+every unit agreed with `proto_db`'s first run on both (the runner compares them), so on every unit
+the two planners chose the same plan at the same model costs; the two forced plans of a P2 point,
+and P3's two plans, answered the same rows and checksum. Times are the minimum of five; the medians
+are up to 50 % above it in this run (load), so differences under about 15 % are noise.
+
+**Sizes.** The workloads use 1000 records (P1) and 2000 (P2, P3), not the 10^4 first drafted:
+building a 10^4-record `PBList` with three indexes took about 30 s per process in protoST (untimed
+setup, paid by every one of the 330 processes of a run). Size is not the variable of P2 (ruling CR2);
+P3 is measured at one size and one selectivity only.
+
+**P1, planner overhead**: `plan` and `explain` of 200 conditions, no execution, on a `PBList` of
+1000 records with 0, 2 or 8 indexes (alternately range and equality on eight fields).
+
+| Conjuncts | Indexes | `proto_db` ms per query | protoBaseST ms per query | ratio |
+|---|---|---|---|---|
+| 1 | 0 | 0.04 | 0.71 | 16.8x |
+| 1 | 2 | 0.08 | 1.94 | 24.0x |
+| 1 | 8 | 0.09 | 2.53 | 27.3x |
+| 8 | 0 | 0.11 | 2.70 | 23.8x |
+| 8 | 2 | 0.27 | 4.95 | 18.1x |
+| 8 | 8 | 0.71 | 11.0 | 15.5x |
+| 32 | 0 | 0.33 | 9.11 | 27.4x |
+| 32 | 2 | 1.41 | 18.2 | 12.9x |
+| 32 | 8 | 4.52 | 47.0 | 10.4x |
+
+The cost grows with conjuncts times indexes, as `planner.py`'s design says (one candidate per
+supported conjunct, each estimated): 32 conjuncts over 8 indexes cost protoBaseST 47 ms a query,
+`proto_db` 4.5 ms.
+
+**P2, the cost model against timings**: 2000 records; a `PBRangeIndex` on a unique key `r`,
+`PBEqualityIndex`es on `few` (4 key groups) and `many` (2000 groups). Each point runs the index's
+own plan and a `Filter` over the scan, both forced, five executions timed together. The model costs
+are compared by the runner: `proto_db`'s and protoBaseST's are equal (in thousandths).
+
+| Term | rows | model: index / scan cost | planner chooses | `proto_db` ms index / scan | protoBaseST ms index / scan |
+|---|---|---|---|---|---|
+| `r < 2` | 2 | 15.0 / 4000 | IndexRange | 0.08 / 28.7 | 1.5 / 693 |
+| `r < 20` | 20 | 51.0 / 4000 | IndexRange | 0.24 / 28.5 | 6.8 / 767 |
+| `r < 200` | 200 | 411 / 4000 | IndexRange | 1.9 / 27.1 | 73 / 782 |
+| `r < 1000` | 1000 | 2011 / 4000 | IndexRange | 9.5 / 27.9 | 341 / 817 |
+| `r < 1800` | 1800 | 3611 / 4000 | IndexRange | 19.5 / 29.6 | 693 / 761 |
+| `r < 1980` | 1980 | 3971 / 4000 | IndexRange | 18.7 / 31.8 | 850 / 728 |
+| `r < 2000` | 2000 | 4011 / 4000 | scan + Filter | 21.4 / 30.8 | 883 / 800 |
+| `few != 0` (4 groups) | 1500 | 2005 / 4000 | IndexComplement | 4.2 / 30.5 | 111 / 760 |
+| `many != 0` (2000 groups) | 1999 | 4001 / 4000 | scan + Filter | 26.2 / 32.3 | 492 / 708 |
+
+- **The model switches** to the scan between 99 % and 100 % selectivity on the unique range
+  index, and for `!=` when the index has n groups (CR1: the complement wins below n − 1 groups).
+- **In `proto_db` the model switches early**: at both switch points it chooses the scan while the
+  forced index plan is still faster, by 31 % (range, `r < 2000`) and 19 % (`!=` on n groups).
+- **In protoBaseST the range point converges and is within noise**: near the switch the two plans
+  take about the same time (index against scan 0.91x at 90 %, 1.17x at 99 %, 1.10x at 100 % in
+  this run; 0.83x, 0.96x and 0.96x in an earlier run on an uncommitted tree under lighter load), so
+  no crossing is resolved there. For `!=` on n groups the model switches early in protoBaseST too:
+  the complement is 30 % faster than the scan it rejects (and was in the earlier run).
+- Below the switch the index wins in proportion to the rows (about 460x at 2 rows in protoBaseST).
+  Why a full index pass beats a scan with a filter that the model prices 0.3 % cheaper in
+  `proto_db` was not measured; the model charges a scanned element 2 units (read, test) and an
+  index row 1 plus its group's share.
+- Ruling CR2, verbatim: "P2 measures whether real timings cross where the cost model says; the model's crossover for a tiny collection is only one or two elements." So collection size is
+  not the variable swept.
+
+**P3, intersect** (one size, one selectivity): 2000 records, `x == 3` on a `PBEqualityIndex`
+(200 rows) and `y == 2` on a `PBRangeIndex` (286 rows); 29 rows answer. The hand-built
+`PBIntersect` of both index plans costs 978.8 in the model, the planner's plan
+(`Filter <- IndexLookup` of `x`) 403.6.
+
+| Plan | `proto_db` ms (5 runs) | protoBaseST ms (5 runs), Task 7 | protoBaseST ms (5 runs), Task 8 fix round 1 |
+|---|---|---|---|
+| `Intersect (IndexLookup x, IndexRange y)` | 12.2 (re-run: 11.1 / 12.0) | 1139 | 65.5 / 67.7 |
+| `Filter <- IndexLookup` (planner) | 3.1 (re-run: 3.0 / 3.1) | 86 | 71.9 / 74.5 |
+
+At Task 7 the model's claim held at both speeds on this data. The intersection was 3.9x slower
+than the filter in `proto_db` and 13.2x in protoBaseST (model: 2.4x).
+
+Task 8's fix round 1 made the intersection's identity keys cheap, and P3 was re-run in the Q1-Q4
+run above (provenance `90bad75`, all runs verified; the re-run cells are minimum / median of five,
+ms). In `proto_db` the intersection is still 3.7x slower than the filter plan. **In protoBaseST
+the two plans are now within noise of each other** (65.5 / 67.7 against 71.9 / 74.5 ms, a 9 %
+difference, under the about 15 % this section counts as noise): the run is inconclusive on the
+model's claim at protoST's speed. The filter evaluates `y == 2` on each of the 200 rows of the
+lookup, and a term evaluation in protoST costs about as much per row as an identity key now does.
+
+The planner still chooses the filter plan, as `proto_db`'s does: plans are ported, not retuned
+(spec 5.6). Other sizes and selectivities were not measured.
+
+**Peak RSS** (0.7 to 5 GB for protoBaseST against about 30 MB) is the heap budget being used, not
+the live set (see M1).
+
+#### M2: the bulk build against the fold of single additions
+
+`QUERY_M2_SIZES="100 1000 10000" RUNS=3 bench/run_query.sh M2`. **Indicative only.** Measured
+2026-11-19 (03:55-03:58 local) on an AMD Ryzen 5 5500U (6 cores, 12 threads, Linux 7.0.0, DEV12),
+load average 2.6 before and 2.9 after (other desktop sessions open; their load was not controlled); protoBaseST at
+`e52b691` (the Task 3 commit; the fix round changed no code the benchmark runs), protoST 0.12.0
+(`b7e206a`, tag v0.12.0) on protoCore 3.6.0 (`799d7615`, tag v3.6.0), the `pinned-360` release
+builds (`build_release/protost`, as built; their sources match the tags file for file);
+`proto_db` v2.0.0rc4 (`8e6127f`) in the interop venv on CPython 3.14.0. The workload is an `EqualityIndex` on the path `age` over n records (about a quarter as many
+distinct ages as records, Integers and Floats, some absent, some nil), built by `build:` and by the
+fold of `withAdded:` from `empty`. Every run self-reports its rows and an ordered checksum over the
+stored occurrences; the runner refuses any run whose work differs from `proto_db`'s first run, and
+all six runs (three each, interleaved) agreed. Times in microseconds, minimum / median of 3:
+
+| n | plan | `proto_db` | protoBaseST | protoBaseST / `proto_db` (min) |
+|---|---|---|---|---|
+| 100 | build | 3884 / 4189 | 64771 / 73068 | 16.7x |
+| 100 | fold | 5695 / 6141 | 105419 / 146660 | 18.5x |
+| 1000 | build | 23831 / 24365 | 691942 / 709918 | 29.0x |
+| 1000 | fold | 76950 / 78559 | 1807449 / 1838218 | 23.5x |
+| 10000 | build | 261664 / 275029 | 10011607 / 10200266 | 38.3x |
+| 10000 | fold | 1007979 / 1051734 | 30599201 / 30720372 | 30.4x |
+
+- The bulk build is 3.1x faster than the fold at 10^4 in protoBaseST (1.6x at 10^2) and 3.9x in
+  `proto_db`: the build is what `rebuiltStale:` and a first change to a stale collection pay.
+- protoBaseST is 17x to 38x slower than `proto_db` here, and the gap grows with n. Not analysed
+  in Task 3 beyond a probe on 4000 records: each element costs about 0.17 ms for its member key
+  (`memberKeyOf:`), 0.11 ms for the order key of that member key, 0.07 ms per hash of it (not
+  cached; a `Dictionary` rehash recomputes it) and 0.24 ms for the depth check (`checkDepth:`), all
+  of which `proto_db` does in C-backed MessagePack and tuples. These are the first candidates.
+- **n = 10^5, measured in Task 4a** with the runner's new isolation: each plan in a process of
+  its own with the heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000` (about 5 GB),
+  `QUERY_M2_SIZES=100000 RUNS=1 bench/run_query.sh M2`, 2026-11-19 05:13-05:24 local, same
+  machine and binaries as M1 above, load average 2.8 before (13 GB of 62 free). One run each,
+  verified (same rows and checksum in both implementations and both plans): build 3.53 s
+  (`proto_db`) against 95.6 s (protoBaseST), 27.1x; fold 15.4 s against 470.4 s, 30.5x. The build
+  is 4.9x faster than the fold in protoBaseST, 4.4x in `proto_db`. Peak RSS: `proto_db` 172 MB
+  (build) and 143 MB (fold); protoBaseST 5301 MB and 5307 MB, that is, the budget (protoCore keeps
+  memory until it reaches it; the earlier attempt without a budget, in Task 3, was stopped by the
+  machine's out-of-memory guard at 14 GB, during the 10^5 step, with every size in one process). The
+  ratio does not keep growing past 10^4 (38.3x there, 27.1x here, single runs on a busy machine).
+
+#### Atom weight, stage 1: construction cleanup, write-once fields by compare-and-swap
+
+Plan Task 11 (the maintainer's question of 2026-11-19, "why so many cells?", answered without
+breaking immutability; [decisions.md](decisions.md), row Queries 11). An atom's runtime-only
+fields (oid, saved place, load memo, a keyed node's order key, an index's parsed key spec) were
+one `Atom` each; they are now instance variables written once by a compare-and-swap from nil, and
+a constructor writes its fields in one write group without writing nil. A counted node builds its
+slots with one brace instead of `copyWith:`, the built-in node classes read their record shape
+from a class variable, and `PBTuple _trustedOn:` keeps a fresh brace Array instead of copying it.
+Bytes on disk and tree node identity with `proto_db` are unchanged
+(`tests/interop/*identical*.sh` pass).
+
+**Cells**, `bench/run_atom_weight.sh` (protoCore's cell allocator counted under gdb; live cells
+from `PROTOCORE_HEAP_TRACE` after a churn, 10^5 objects kept, minus an empty run, heap budget
+`PROTOCORE_HEAP_LIMIT_CELLS=32000000`), 2026-11-19, same machine and binary as below, load
+average 2.8 to 3.6 (the bench's own processes included); before at `138730d`, after at `70a4969`,
+both clean. Retained is the object run's median live count minus the empty run's median, per
+object; the interquartile range of a run's live counts is 0.5 to 2.3 cells per object (the empty
+run's 1.6), re-derived from the recorded raw outputs;
+allocated is the cells allocated per object built:
+
+| object | retained before | retained after | allocated before | allocated after |
+|---|---|---|---|---|
+| a `PBCountedKeyNode`, own key and value tuple (`key:orderKey:value:left:right:`) | 80.1 | 51.6 | 518.6 | 200.7 |
+| the same node, key, order key and value shared (the node's own cells) | 58.4 | 31.2 | 406.9 | 111.2 |
+| a node of a 10^5-node tree built by `PBAvl keyFromSorted:` (per node) | 88.3 | 59.9 | 481.6 | 173.2 |
+| a blank atom after `_setOid: nil pointer: nil storage: nil` | 33.3 | 3.8 | 121.4 | 13.0 |
+| a `PBTuple` of 2, `withAll:` (copies) / `_trustedOn:` (new) | 13.2 | 13.5 / 10.0 | 53.4 | 54.0 / 30.0 |
+
+Drawing a node's oid still allocates about 315 cells (the oid pool's slice and the
+publication); it retains about 2.
+
+**Wall time and memory**, `QUERY_M2_SIZES="2000 10000" QUERY_Q1_SIZES=10000 RUNS=3
+bench/run_query.sh M2 Q1`, before (`138730d`, from a clean worktree of that commit) then after
+(`70a4969`), one after the other on the machine of M1 to M3 (AMD Ryzen 5 5500U, Linux 7.0.0-43,
+DEV12), the `pinned-360` build (protoST 0.12.0 on protoCore 3.6.0), `proto_db` v2.0.0rc4 on
+CPython 3.14.0, heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`. Runner provenance lines,
+unmodified: `2026-11-19T17:59Z; protoBaseST 138730d; protoST 0.12.0` and
+`2026-11-19T18:03Z; protoBaseST 70a4969; protoST 0.12.0`. Load average 3.6 before and 4.2 after
+the first run, 3.2 and 3.6 for the second (desktop sessions open, not controlled). Every run was
+verified (same rows, queries, plan and checksum as `proto_db`'s). Microseconds, minimum / median
+of 3; peak RSS in MB (the largest over the runs):
+
+| unit | protoBaseST before | protoBaseST after | change (min) | peak RSS before / after | `proto_db` (after run) |
+|---|---|---|---|---|---|
+| M2, 2000, build | 1292462 / 1399337 | 1074495 / 1171899 | -17% | 765 / 665 | 51765 / 52791 |
+| M2, 2000, fold | 3513430 / 3933494 | 1827802 / 2145897 | -48% | 1393 / 749 | 185683 / 201873 |
+| M2, 10^4, build | 7343821 / 7446686 | 6043123 / 6266610 | -18% | 3928 / 3368 | 279660 / 282305 |
+| M2, 10^4, fold | 19711389 / 20012678 | 12322533 / 12649148 | -37% | 5070 / 4141 | 1083321 / 1083536 |
+| Q1, 10^4, index | 17606 / 17693 | 15616 / 16167 | -11% | 5087 / 5086 | 2127 / 2169 |
+| Q1, 10^4, scan | 10731204 / 12457996 | 11392206 / 11475968 | +6% | 5088 / 5086 | 542515 / 558608 |
+
+- The fold of single additions gains most (about a third to a half): every addition copies a
+  path of nodes, and each node cost four `Atom` creations and several publications before.
+  The build gains about a sixth. Differences under about 15% (Q1) are noise on this machine.
+- Q1's processes peak at the heap budget either way (protoCore keeps memory until it reaches
+  it), so their RSS says nothing about the live set; the M2 peaks below the budget dropped by
+  13% to 46%.
+- Stage 2 (plan Task 12: no envelope or state dictionary for a shaped atom, a decode fast path,
+  a cheaper oid draw) follows.
+
+#### Atom weight, stage 2: shaped atoms keep only their slots
+
+Plan Task 12 ([decisions.md](decisions.md), row Queries 12). An atom whose class has a record
+shape whose slots are its persisted fields, in order, and whose record holds exactly those
+fields, keeps its slots and its oid; its memo is the class's shape, shared, and `state` builds a
+`PBFrozenDict` over the slots on each call (equal, never identical, to the dictionary it was
+built or decoded from). Every other atom keeps the envelope as before: `PBObject` (no shape),
+a record whose fields are in another order or with a field absent, a subclass that reorders its
+slot fields, an opaque atom. The atom cache keeps the oid and values Array of a shaped record,
+else the envelope. The decoder reads the payload keys in one pass, reads a record whose names
+equal its shape's persisted fields straight into one values Array (`persistedNamesValid` keeps
+classes declaring an invalid name on the checked path, with their errors), and decodes a list or
+a `@tup` of scalars on the wire Array itself. The oid pool keeps the unused rest of its batch as
+one immutable ByteArray and marks a batch by concatenating slices: the old batch built an
+Array of 1024 oids by `at:put:`, about 276 of the ~303 cells of a draw. Bytes on disk, tree node
+identity with `proto_db` and every error text are unchanged.
+
+**Cells**, `bench/run_atom_weight.sh` as in stage 1, 2026-11-19, load average 2.4 to 3.1; before
+at `f95b09f`, after at `69e6888`, both clean (`515cd86`, a key path fix, does not touch these
+kinds). The loaded kinds read a stored tree of n nodes written by a process of their own:
+retained is per loaded node, allocated is per record load (the decode included; with the cache,
+a load the cache serves). Interquartile ranges 0.3 to 2.0 cells per object (empty runs 1.9 and
+1.7):
+
+| object | retained before | retained after | allocated before | allocated after |
+|---|---|---|---|---|
+| a `PBCountedKeyNode`, own key and value tuple | 51.2 | 33.7 | 200.1 | 134.0 |
+| the same node, key, order key and value shared | 30.7 | 13.4 | 111.2 | 49.5 |
+| the same, its oid drawn | 32.6 | 15.1 | 426.3 | 80.3 |
+| a node of a 10^5-node tree built by `PBAvl keyFromSorted:` | 60.2 | 41.6 | 173.3 | 110.0 |
+| a node loaded from storage, atom cache off | 69.6 | 48.2 | 2338.6 | 1382.8 |
+| a node loaded from storage, atom cache on (entry included) | 75.8 | 51.4 | 384.6 | 314.3 |
+| one oid drawn (`_PBOidPool next`) | 1.0 | 1.0 | 296.6 | 31.8 |
+
+A diagnostic split of a record load (200 records of such a tree, after the change): reading the
+record 302 cells, msgpack 587, the envelope decode 908 (1,620 before), the class's check and
+publication 106.
+
+**Wall time and memory**, as in stage 1 (`QUERY_M2_SIZES="2000 10000" QUERY_Q1_SIZES=10000
+RUNS=3 bench/run_query.sh M2 Q1`, heap budget `PROTOCORE_HEAP_LIMIT_CELLS=80000000`), before
+(`f95b09f`, a clean worktree of it) then after (`69e6888`). Runner provenance lines, unmodified:
+`2026-11-19T19:53Z; protoBaseST f95b09f; protoST 0.12.0` and
+`2026-11-19T19:56Z; protoBaseST 69e6888; protoST 0.12.0`. Load average 3.0 before and 2.3
+after the first run, 2.3 and 3.9 for the second. Every run verified. Microseconds, minimum /
+median of 3; peak RSS in MB:
+
+| unit | protoBaseST before | protoBaseST after | change (min) | peak RSS before / after | `proto_db` (after run) |
+|---|---|---|---|---|---|
+| M2, 2000, build | 1090222 / 1118948 | 1003718 / 1030832 | -8% | 665 / 611 | 50058 / 52619 |
+| M2, 2000, fold | 1909006 / 1963684 | 1526953 / 1599246 | -20% | 749 / 583 | 192044 / 205883 |
+| M2, 10^4, build | 6234040 / 6547333 | 5816012 / 5982705 | -7% | 3352 / 3038 | 273432 / 274016 |
+| M2, 10^4, fold | 12474643 / 12511415 | 10318996 / 11059922 | -17% | 4141 / 3034 | 1043149 / 1080007 |
+| Q1, 10^4, index | 15653 / 15656 | 18236 / 18316 | +17% | 5086 / 4952 | 2123 / 2195 |
+| Q1, 10^4, scan | 11535203 / 11586151 | 13090513 / 13539523 | +13% | 5086 / 5082 | 507110 / 530351 |
+
+- M2's fold gains about a fifth and its peak RSS drops by a fifth to a quarter; the build gains
+  under 10% (noise level).
+- **Q1's index gap: a fresh-page fault mechanism is shown; a smaller per-row regression is not
+  excluded** (review fix rounds 1 and 2). Two alternating pairs of Q1 alone (before `f95b09f`,
+  after `515cd86`, load 2.4 to 3.8) had given index 17614 and 15935 before against 18568 and 19621
+  after (minimums). A driver runs the 20 queries as the bench does and times each, and reads the heap
+  trace (`PROTOCORE_HEAP_TRACE=1`) and the process's minor faults (`/proc/self/stat`) around each
+  one, at the bench's heap budget, `f95b09f` against `a89cbae`, both clean, one process per run,
+  alternating, 2026-11-19T21:06Z to about 21:30Z, load 2.5 to 4.8. Its window totals include the
+  `/proc` reads and the marker writes, so only its per-query times compare with the bench; it
+  verifies the rows (200), not the bench's checksum.
+  - No collection lands in the index window on either side (after: no cycle in the whole
+    process; before: one, finished before the window). On the after side one or two of the 20
+    queries per run take 2.7 to 4.6 ms, each with 1,025 to 1,029 minor faults (one 4 MB chunk of
+    fresh pages); the whole before window has 64 to 73 faults. The after side builds Q1 with
+    fewer cells, reaches the timer before its first collection and allocates into memory the
+    kernel has not mapped yet; the before side reuses cells its first collection swept. One
+    faulting query of an earlier run was not slow (1,190 us with 1,027 faults).
+  - The queries that do not fault are level only in the first of the three pairs; in the other
+    two the after side's are about 1.5 times slower, unexplained (possibly the load; steady is
+    every query but the first, which takes 1.3 to 2.7 ms on both sides):
+
+    | pair | before: window / steady queries | after: window / steady queries | after: faulting queries |
+    |---|---|---|---|
+    | 1 | 19.5 ms / 0.75 to 0.88 ms | 22.3 ms / 0.76 to 1.04 ms | 1 (2.76 ms) |
+    | 2 | 21.4 ms / 0.80 to 1.03 ms | 36.4 ms / 1.31 to 1.56 ms | 1 (3.69 ms) |
+    | 3 | 31.1 ms / 1.13 to 1.38 ms | 50.1 ms / 1.72 to 1.96 ms | 2 (4.50, 4.57 ms) |
+
+  - The control: 2 x 10^7 short-lived Arrays made after the build and before the timer (both
+    sides then run 20 to 22 collections first) take the after side's window faults to 3 to 5 and
+    its faulting queries go; six pairs then give windows of 27 to 48 ms on both sides (minimum
+    27.3 ms before, 27.6 ms after; median about 35 and 31 ms), with queries over 2 ms and no
+    faults on both sides as the load rose to 4.
+  - So the fault mechanism is shown (the fault and collection counts do not depend on the load)
+    and accounts for a gap of the bench's size (about 2.6 ms); the control is too noisy to
+    exclude a per-row regression smaller than that. The final comparison of plan Task 10 (quiet, five
+    interleaved runs) shows no Q1 index regression beyond noise
+    ([above](#the-final-comparison-plan-task-10)). Where the heap stands when the timer starts depends on how many
+    cells the build allocates (protoCore's heap policy), so Q1's index figures move whenever the
+    build's cells change.
+  - The scan: the table's +13% comes from a pass that ran every before unit, then every after
+    unit (not alternating), so drift is the likely cause; the alternating driver pairs give
+    11.60 and 12.10 s before against 11.18 and 10.56 s after (one collection in each window,
+    pauses under 0.1 ms), and with the control 16.3 s against 12.9 s (one pair, load 4.8).
+  - The driver, its runner and the raw outputs are in the task's working notes (`.superpowers/`,
+    not in the repository).
+
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded
@@ -1073,6 +1940,11 @@ requires; one question is still open and one observation was not a bug:
   caller that gets there late waits on a settled Future and cannot show the defect. 40 runs (10 of
   them with one worker) never raised `deadlock:`: an absence of observed failure, not a proof.
   The question stays open, for this pattern too and for the pattern that first raised it.
+- **protoST 0.12.0, not yet filed:** `asSortedCollection:` of an empty collection signals "sort:
+  needs an Array or an OrderedCollection (use sorted)" (`SortedCollection >> addAll:` sorts the
+  receiver, which `sort:` refuses), and `Array new collect:` recurses. protoBaseST sorts with
+  `sorted:` and builds with `Array new: n`; the property soak of plan Task 10 found the first, in
+  an `in` with no operand ordered by an index key.
 - **Module resolution is documented protoST behaviour, not a bug.** The working directory is
   searched before the library, as in Python, so a stray `calendar.st` in the current directory
   shadows the library's calendar module. **Security note:** an untrusted working directory's

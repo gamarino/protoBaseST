@@ -1,4 +1,4 @@
-"EXPECT: ok 150"
+"EXPECT: ok 154"
 "Plan Task 16b (ruling R15, fix round 1): every atom class has a record shape
  (_PBRecordShape), and each record carries a slots Array, the values of its fields in slot
  order, built once per record and published once by compare-and-swap. A class that declares
@@ -117,11 +117,11 @@ c that: 'a loaded record equals the atom saved' isTrue: stub = reversed.
 "Built once: the same Array on every read, the installed envelope's."
 node := (PBAvl keyPut: nil key: 1 value: 'one' nodeClass: PBKeyNode) first.
 c that: 'a built node: one slots Array' isTrue: node _slots == node _slots.
-c that: 'a built node: the envelope''s' isTrue: node _slots == node _envelope slots.
+c that: 'a built node: its state is over them' isTrue: node _slots == (node state _valuesIfKeys: PBKeyNode persistedFields).
 stub := saveLoad value: node.
 c that: 'a stub has no slots before it is loaded' isTrue: stub isLoaded not.
 c that: 'a stub reads its key' is: stub key equals: 1.
-c that: 'a loaded stub: the envelope''s' isTrue: stub _slots == stub _envelope slots.
+c that: 'a loaded stub: its state is over them' isTrue: stub _slots == (stub state _valuesIfKeys: PBKeyNode persistedFields).
 c that: 'the slots take no part in =' isTrue: stub = node.
 c that: 'nor in hash' is: stub hash equals: node hash.
 
@@ -155,7 +155,16 @@ stub := node unloadedCopy.
 racing racer: stub.
 c that: 'the loser reads the field' is: stub storedValue equals: 'x'.
 c that: 'the record was decoded twice' is: racing loads equals: 2.
-c that: 'the loser holds the installed envelope''s slots' isTrue: stub _slots == stub _envelope slots.
+c that: 'the loser holds the installed slots' isTrue: stub _slots == (stub state _valuesIfKeys: PBPosNode persistedFields).
+c that: 'and the shared shape' isTrue: stub _loaded == PBPosNode _recordShape.
+"The same race on a record the atom keeps as its envelope (attributes reversed)."
+node := build value: PBKeyNode value: PBKeyNode persistedFields reversed.
+node _saveInto: racing.
+stub := node unloadedCopy.
+racing racer: stub.
+c that: 'the loser of an envelope race reads the field' is: stub key equals: (markers at: 'key').
+c that: 'that record was decoded twice' is: racing loads equals: 2.
+c that: 'the loser holds the installed envelope''s slots' isTrue: stub _slots == stub _loaded slots.
 sink close.
 bad close.
 racing close.

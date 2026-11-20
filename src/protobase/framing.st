@@ -337,14 +337,11 @@ PBAtomEnvelope class >> tag: aTag oid: anOid state: aState
 PBAtomEnvelope class >> _ofAtomTag: aTag oid: aByteArray state: aPBFrozenDict
   ^ self basicNew _setTag: (PBTypeRegistry writerTag: aTag) oid: aByteArray state: aPBFrozenDict.
 
-"Why aName cannot be a persisted attribute name, or nil."
+"Why aName cannot be a persisted attribute name, or nil (the rule is the
+ record shapes', which check their persisted names with it: _PBRecordShape
+ nameProblem:)."
 PBAtomEnvelope class >> _nameProblem: aName
-  ((aName isString and: [aName isSymbol not]) and: [aName notEmpty]) ifFalse: [
-    ^ 'an attribute name is a non-empty string, not ' , aName printString].
-  aName first = $_ ifTrue: [^ 'the attribute name ' , aName printString , ' starts with _'].
-  (#('oid' 'atom_pointer' 'context') includes: aName) ifTrue: [
-    ^ 'the attribute name ' , aName printString , ' is reserved'].
-  ^ nil.
+  ^ _PBRecordShape nameProblem: aName.
 
 "The envelope of an ATOM payload, loaded through a reference tagged aTypeTag;
  references in the state decode to PBUnresolvedRef."
@@ -365,43 +362,61 @@ PBAtomEnvelope class >> decode: aByteArray expecting: aTypeTag resolver: aResolv
  refused naming the record as ProtoBase does, 'Undecodable atom at
  AtomPointer(...): it nests deeper than 1024 MessagePack containers, ...'."
 PBAtomEnvelope class >> decode: aByteArray at: aPointer expecting: aTypeTag resolver: aResolver
-  | map t oid s keys names pairs values shape shared fieldNames |
+  | map t oid s keys names pairs values shape fieldNames found |
   (aByteArray isKindOf: ByteArray) ifFalse: [
     ^ PBValidationError signal: 'PBAtomEnvelope decode: a ByteArray was expected, not ' , aByteArray class name].
   map := _PBFrame decodeMsgpack: aByteArray
     what: (aPointer isNil ifTrue: ['PBAtomEnvelope'] ifFalse: ['Undecodable atom at ' , aPointer pythonText]).
   (map isKindOf: MessagePackMap) ifFalse: [^ self _corrupt: 'the payload is not a map'].
-  keys := map associations collect: [:each | each key].
-  (keys size = 3 and: [#('t' 'oid' 's') allSatisfy: [:k | keys includes: k]]) ifFalse: [
+  "Exactly the keys t, oid and s, each once, in any order (plan Task 12: read in
+   one pass; the keys are listed only for the refusal)."
+  pairs := map associations.
+  found := 0.
+  pairs size = 3 ifTrue: [
+    1 to: 3 do: [:i |
+      | k |
+      k := (pairs at: i) key.
+      k = 't' ifTrue: [t := (pairs at: i) value. found := found bitOr: 1].
+      k = 'oid' ifTrue: [oid := (pairs at: i) value. found := found bitOr: 2].
+      k = 's' ifTrue: [s := (pairs at: i) value. found := found bitOr: 4]]].
+  found = 7 ifFalse: [
+    keys := pairs collect: [:each | each key].
     ^ self _corrupt: 'the payload has the keys ' , keys printString , ', not exactly t, oid and s'].
-  t := map at: 't' ifAbsent: [nil].
-  oid := map at: 'oid' ifAbsent: [nil].
-  s := map at: 's' ifAbsent: [nil].
   self _checkTag: t expecting: aTypeTag.
   ((oid isKindOf: ByteArray) and: [oid size = 16]) ifFalse: [
     ^ self _corrupt: 'the oid is not 16 bytes: ' , oid printString].
   (s isKindOf: MessagePackMap) ifFalse: [^ self _corrupt: 'the state is not a map'].
   pairs := s associations.
-  fieldNames := pairs collect: [:each | each key].
   "A record in the persisted order of its class (ProtoBase writes the attributes
    in constructor order) shares the class's keys and index (_PBRecordShape): its
-   names are distinct, and it needs no index of its own."
+   names are distinct and, when the shape's names are all valid attribute names,
+   need no check one by one; its values are decoded into one Array (plan Task 12).
+   Any other record takes the checked path below, with its errors."
   shape := PBTypeRegistry recordShapeForTag: t.
-  shared := shape notNil and: [fieldNames = shape persisted].
-  names := shared ifTrue: [nil] ifFalse: [Set new].
+  (shape notNil and: [shape persistedNamesValid and: [self _pairs: pairs haveNames: shape persisted]]) ifTrue: [
+    values := pairs collect: [:each | PBCodec fromWireValue: each value resolver: aResolver].
+    ^ self basicNew _setTag: t oid: oid state: (PBFrozenDict _keys: shape persisted index: shape persistedIndex values: values)
+      slots: nil size: aByteArray size].
+  "(A record whose names equal a shape's persisted names takes this path only
+   when one of them is not a valid name, which is refused below.)"
+  fieldNames := pairs collect: [:each | each key].
+  names := Set new.
   values := pairs collect: [:each |
     | why |
     why := self _nameProblem: each key.
     why isNil ifFalse: [^ self _corrupt: why].
-    names isNil ifFalse: [
-      (names includes: each key) ifTrue: [^ self _corrupt: 'the attribute ' , each key printString , ' appears twice'].
-      names add: each key].
+    (names includes: each key) ifTrue: [^ self _corrupt: 'the attribute ' , each key printString , ' appears twice'].
+    names add: each key.
     PBCodec fromWireValue: each value resolver: aResolver].
-  shared ifTrue: [
-    ^ self basicNew _setTag: t oid: oid state: (PBFrozenDict _keys: shape persisted index: shape persistedIndex values: values)
-      slots: nil size: aByteArray size].
   ^ self basicNew _setTag: t oid: oid state: (PBFrozenDict withAssociations:
     ((1 to: fieldNames size) asArray collect: [:i | (fieldNames at: i) -> (values at: i)])) slots: nil size: aByteArray size.
+
+"Whether the keys of the Associations aPairs are aNameArray's elements, in
+ order (equal Strings), without building an Array of them."
+PBAtomEnvelope class >> _pairs: aPairs haveNames: aNameArray
+  aPairs size = aNameArray size ifFalse: [^ false].
+  1 to: aPairs size do: [:i | (aPairs at: i) key = (aNameArray at: i) ifFalse: [^ false]].
+  ^ true.
 
 PBAtomEnvelope class >> _corrupt: aString
   ^ PBCorruptionError signal: 'PBAtomEnvelope: ' , aString.
@@ -470,6 +485,17 @@ PBAtomEnvelope >> state
  or nil. Runtime-only: never encoded."
 PBAtomEnvelope >> slots
   ^ slots.
+
+"The memo protocol of PBAtom (shared with _PBRecordShape): an atom whose memo
+ is an envelope reads its state, whatever its slots."
+PBAtomEnvelope >> _pbStateOver: aSlotArray
+  ^ state.
+
+PBAtomEnvelope >> _pbIndexOfField: aName
+  ^ state _indexOfKey: aName.
+
+PBAtomEnvelope >> _pbFieldAt: anIndex over: aSlotArray
+  ^ state _valueAt: anIndex.
 
 "The ATOM payload: the msgpack map t, oid, s, in that order; t is written in
  canonical form, references as their pointers, every value two containers

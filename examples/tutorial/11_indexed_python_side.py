@@ -1,0 +1,46 @@
+"""Lesson 11, indexed part, Python's two steps (see 11_indexed_interop.sh).
+
+Usage: python 11_indexed_python_side.py write|check <directory>
+
+Every read is asserted, so a wrong value stops the script with an AssertionError and a non-zero
+exit.
+"""
+import sys
+
+from proto_db import EqualityIndex, F, FileStorage, ObjectSpace, RangeIndex, from_collection
+
+CITIES = ["Lima", "Oslo", "Paris", "Rome"]
+
+
+def write(space):
+    """Forty people with two indexes, written by proto_db."""
+    db = space.new_database("people")
+    with db.new_transaction() as tr:
+        people = tr.new_dictionary()
+        for i in range(40):
+            people = people.set_at(i, tr.new_object(name=f"person{i}", city=CITIES[i % 4], age=18 + i))
+        people = people.add_index(EqualityIndex("by_city", "city")).add_index(RangeIndex("by_age", "age"))
+        tr.set_root_object("people", people)
+    print("python wrote 40 people with the indexes by_age and by_city")
+
+
+def check(space):
+    """What protoST changed, checked by proto_db: every index against a scan, and a planned query."""
+    db = space.open_database("people")
+    tr = db.new_transaction()
+    people = tr.get_root_object("people")
+    people.validate()
+    assert people.index_names() == ["by_age", "by_city"], people.index_names()
+    oslo = from_collection(people).where(F.city == "Oslo")
+    assert oslo.explain()["plan"] == "IndexLookup", oslo.explain()
+    assert oslo.count() == 12, oslo.count()
+    assert len(people) == 41, len(people)
+    tr.abort()
+    print("python validated protoST's changes: every index equals a scan, Oslo has 12 people")
+
+
+space = ObjectSpace(FileStorage(sys.argv[2]))
+try:
+    {"write": write, "check": check}[sys.argv[1]](space)
+finally:
+    space.close()

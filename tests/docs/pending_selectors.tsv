@@ -1,0 +1,10 @@
+# Selectors the documentation cites before they exist (plan call IP5), and the plan task whose
+# Interfaces block produces each. Read by tests/docs/reference_selectors.sh; each task removes its
+# own lines when it defines them; the list is empty at release (PENDING_FINAL=1, Task 10).
+# Columns: selector<TAB>task
+# Task 2: key specs and the extractor registry
+# Task 3: key-group indexes
+# Task 4a: collections maintain their indexes (4a and 4b share the spec's T4)
+# Task 5: terms and expressions
+# Task 7: the planner
+# Task 9: PBPager

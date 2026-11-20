@@ -870,6 +870,37 @@ RoundFamilies class >> baseRead: aRules seed: n kind: aKind error: anError tierF
     under isNil ifTrue: [nil] ifFalse: [(sim replicates select: [:r | (r at: 2) == under]) size].
     report isNil ifTrue: [nil] ifFalse: [report at: 3] }.
 
+"--- 8b. an entry's build error that is not a PBDBError fails it alone (IQ1, maintainer 2026-11-19) ---"
+
+"{ the outcomes of the two commits, sorted. attempts of the failed one. its first error's class.
+ it is anError itself. the other one saw anError. attempts of the other one. PBReplicates sent
+ under the permission whose build failed }: n0's commits a and b (3 retries each) queue
+ together, so one round builds them, in an order the seed decides; the first entry build fails
+ with anError (not a PBDBError: an extractor's exception in a merge, plan Task 4b), with isLate
+ after the permission expired. That commit fails alone with anError, never turned into a conflict
+ (only exactly PBUnexpectedError is, R212); the other is not failed with it: it commits, in that
+ round or, when the permission expired, in a later round. proto_db rc4's
+ _permit_round would fail the other too (a documented deviation). The last two facts pin that
+ the two entries share the failed round: with a valid permission the other commits at its first
+ attempt by the one PBReplicate of that permission; when the permission expired, nothing is sent
+ under it and the other, still at its first attempt, commits in a later round."
+RoundFamilies class >> buildErrorAlone: aRules seed: n error: anError late: isLate
+  | sim failed other first |
+  sim := self sim: aRules seed: n committed: true options: Dictionary new.
+  sim failNextBuild: #entry at: 'n0' with: anError tierFailed: false late: isLate.
+  sim run: 'a' at: 'n0' hot: false builds: #(1000) retries: 3.
+  sim run: 'b' at: 'n0' hot: false builds: #(1000) retries: 3.
+  self resolve: #('a' 'b') in: sim.
+  failed := #('a' 'b') detect: [:k | (sim errorsOf: k) anySatisfy: [:x | x == anError]] ifNone: ['a'].
+  other := failed = 'a' ifTrue: ['b'] ifFalse: ['a'].
+  first := (sim errorsOf: failed) isEmpty ifTrue: [nil] ifFalse: [(sim errorsOf: failed) first].
+  sim converge: 2000000.
+  ^ { (#('a' 'b') collect: [:k | (sim outcomeOf: k) asString]) asSortedCollection asArray.
+    sim attemptsOf: failed. first class. first == anError.
+    (sim errorsOf: other) anySatisfy: [:x | x == anError or: [x class == anError class]].
+    sim attemptsOf: other.
+    (sim replicates select: [:r | (r at: 2) == sim failedUnder]) size }.
+
 "{ outcome of a. a's errors are one PBOutcomeUnknownError, no conflict. the re-commit's
  replication outcome. the report of the permission it was sent under. its replication answered
  after that permission ended }: proto_db

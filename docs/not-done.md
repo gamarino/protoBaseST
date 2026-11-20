@@ -10,22 +10,28 @@ design (spec section 2) or a cut made while building, with its reason.
 - Not a product, not production ready, and not fast.
 - What is shown: one directory, opened by Python and by protoST, gives the same answers in the
   scenarios tested (below). Nothing outside those scenarios is claimed.
-- Cluster mode (0.2.0, unreleased) runs over **one shared directory** only: no tiered storage
+- Cluster mode (0.2.0) runs over **one shared directory** only: no tiered storage
   (Phase D), no pipelined permits (DEPTH 1), no mixed clusters with `proto_db` nodes (a
   non-goal), no TLS (frames are plaintext; an optional HMAC authenticates them), no read-only
   barrier, no notify. A three-member cluster commits about half as many small transactions per
   second as one standalone process on disjoint roots, and a third as many on one hot key ([deviations.md](deviations.md#cluster-mode-commits-per-second)).
 - No cloud or tiered storage, no durability mode other than `fsync`, no Windows.
-- No writes to indexed collections, no merges onto them, no index queries, no vector-index
-  writes or training.
+- No vector-index writes, training or vector search: a collection holding a vector index, or an
+  index of a kind protoBaseST does not know, stays read only, and a `near[]` term is refused.
+  Equality and range indexes are maintained by every write and by merges onto indexed
+  collections, queried through `PBQuery` and a cost-based planner, and paged in process (0.3.0;
+  [chapters 17-19](tutorial/17-indexes.md), [queries.md](queries.md)).
 - No writes to `RepeatedKeysDictionary`.
 - No IANA time zones: no wall-clock conversion; a fixed pinned list of zone keys.
 - No runtime registry and no symbol kind (`@sym`): format 5 (`proto_db` 2.0.0rc4, D62) is
   known, not adopted, and refused.
-- No query planner or LINQ, no pagers, no `snapshot_ref` byte references, no
-  residency.
-- No rebuilding of format-3 indexes, no `validate()` or `rebuilt()` of misfiled format-3
-  collections.
+- No portable pager tokens, no `resumePager:`, no `snapshot_ref` byte references, no residency: a
+  pager lives in one process ([chapter 19](tutorial/19-ordered-reads-and-pages.md)). No query
+  result cache, no `GroupBy` / `Agg`, `Join`, `Unnest` or `ValuesScan`, no computed values,
+  `startswith` / `endswith` or field-to-field terms (a block predicate does that job). Deferred by
+  ruling IQ3; see [the cuts](#the-cuts).
+- No `rebuilt()` of misfiled format-3 collections: `validate` reports them (`PBMisfiledError`),
+  nothing repairs them (deferred, spec 3.2).
 - No frozen instances: immutability is a convention, checked by a test, not enforced at run time.
 - No business rules in the core: no constraints, schema checks or `ondelete` rules. Application
   classes keep them (the Odoo lesson).
@@ -47,7 +53,13 @@ cluster branch):
   table driven by two protoST actors, with `proto_db`'s recorded outcomes;
 - crash states a writer can leave on disk, read by both languages, and the root lock excluded in
   both directions;
-- the ERP demo, a clean-clone run included.
+- the ERP demo, a clean-clone run included;
+- indexed queries (0.3.0), against `proto_db` `v2.0.0rc4`: the plans of 314 recorded queries,
+  node for node and cost for cost, with 0 near ties; index trees node by node, byte for byte; the
+  index contract over 200 seeds and the planned-equals-scan property over 5000 seeds (250,000
+  queries over every collection kind, saved, reloaded and read by concurrent actors); `proto_db`'s
+  query, index and planner tests, 301 in all: 202 ported, 99 not applicable, 0 deferred
+  (`tests/unit/queries_checklist.tsv`).
 
 Not tested, or not proven:
 
@@ -63,8 +75,11 @@ Not tested, or not proven:
   R234L-R245L) are not ported; the port ignores `fetched` and `commit_info` at DEPTH = 0. Nor
   are the local-records tier's rules: `await_records`, and `_BaseUnreachable` (I1, R133: a base
   whose records are on no reachable peer abandons the term).
-- **Speed.** The AVL workload is many times slower than `proto_db`'s. The dated figures, and how
-  they were measured, are in [deviations.md](deviations.md#performance); they are indicative only.
+- **Speed.** The AVL workload is many times slower than `proto_db`'s, and the indexed-query
+  workloads are 3.5 to 35 times slower on every unit, an indexed commit spending most of its time
+  on index work ([the final comparison](deviations.md#the-final-comparison-plan-task-10)). The
+  dated figures, and how they were measured, are in [deviations.md](deviations.md#performance);
+  they are indicative only.
 - **Memory and long runs.** A segment rolls over at 256 MiB as `proto_db`'s does; nothing was run
   near that size.
 - **Heavy contention.** The lock backoff no longer blocks the caller's worker (CC10); the
@@ -110,14 +125,22 @@ Not tested, or not proven:
 | Notify | Not done | `proto_db`'s notify is not ported. | Readers learn new commits by reading. |
 | The persister's timers at a tenth and ten times (final review M7) | Not done | The timer audit's persist row (`tests/audit/sim_timer_audit_persist_*`) scales `persistInterval` and `persistLag`, but the simulator reads neither, so those runs cannot exercise the persister's timers. The persister's liveness at those values is unaudited: its refresh period, and the lag write by a member that did not commit the root. | What would close it: count the persist parts out of the audit's run total (or drop them from the audit), and add a `tests/unit/cluster_persister.st` case at a tenth and at ten times the defaults that asserts `sync:` returns and that a non-committer persists a root once `persistLag` has passed. |
 | A real-process pause test (final review M8) | Not done | `tests/cluster` kills members with `kill -9` but never pauses one (`kill -STOP`, then `kill -CONT`). That is the real-clock, real-TCP check of a stale holder or owner, the property "safety never depends on timing" rests on. It is covered only in the simulator (a stalled clock) and in one process (`cluster_commit_path.st` (9)). | What would close it: a `tests/cluster/real_pause_holder.sh` that stops the holder once its root is built, waits until the others' lease on it has passed, resumes it, and checks with the verifier that the counters are exact and that the resumed holder's commit ends `#none` or unknown and is never applied twice. |
-| Index maintenance | Not done | Out of scope (design 7.4). Refused explicitly rather than done partly. | A database with indexes can be read, not changed in its indexed collections. |
+| Portable pager tokens, `resumePager:`, `snapshot_ref` | Deferred (spec 3.2, ruling IQ3) | The token's plan digest is BLAKE2b-128 of Python's `repr()` of a nested tuple (`cache.py:264-303`); reproducing Python's `repr` of floats, strings, `Decimal` and nested tuples byte for byte is fragile and not a specified format, so a token from one language would be refused by the other. | A pager lives in one process. What would close it: a digest over a canonical encoding (proposal IQ7, not sent), then a small plan of its own. |
+| Query result cache | Deferred (spec 3.2, ruling IQ3) | An optimisation whose soundness rests on the key covering everything a result depends on (`cache.py:1-49`); its value at protoST's speed is unmeasured, and a wrong key answers wrongly and silently. | Every query is planned and run. What would close it: a port with `proto_db`'s soundness property tests (`tests/property/test_query_cache_soundness.py`). |
+| `GroupBy` / `Agg`, `Join`, `Unnest` (`select_many`), `ValuesScan` | Deferred (spec 3.2, ruling IQ3) | Execution operators, not optimisation: no index is involved and the planner never chooses them. | Programs aggregate or join the rows themselves. What would close it: a follow-up task list over the same plan classes. |
+| Computed values, `startswith` / `endswith`, field-to-field comparison | Deferred (spec 3.2, ruling IQ3) | In `proto_db` they are not terms: they always become a `PythonFilter` (`linq.py:37-46`). | A block predicate through `where:` does the same job, as a `BlockFilter` that never uses an index. |
+| `RepeatedKeysDictionary` writes | Not a goal (unchanged) | A non-goal of the prototype; an indexed one is refused as before. | Its own task. |
+| Collection `rebuilt` (misfiled format-3 repair) | Deferred (spec 3.2) | A repair tool for damage format 3 left; `validate` reports it (`PBMisfiledError`). | Nothing repairs a misfiled collection. What would close it: a port with `validate`'s misfiled checks, if a real format-3 database needs it. |
+| Vector indexes and vector search | Excluded from 0.3.0 (spec 3.3) | `near[]`, `PBVectorIndex` writes and training, `VectorSearch` and the planner's kNN rules were out of this feature's scope; maintaining a collection's other indexes and not its vector one would write a stale index. | A collection with a vector index is read only from protoST. The maintainer has asked for vectors as a separate scope extension after 0.3.0. |
 
 ## What would come next, if the workshop wants it
 
 In the order the cost of the omission is felt:
 
-1. Index maintenance and merges onto indexed collections. Without them protoST cannot change an
-   indexed collection, which limits the shared-directory story to databases without indexes.
+1. Portable pager tokens, which another process can resume (deferred, spec 3.2: they need a
+   plan digest both languages compute, proposal IQ7). Index maintenance, merges onto indexed
+   collections, index queries, the planner and in-process pagers are in 0.3.0
+   ([queries.md](queries.md), [chapters 17-19](tutorial/17-indexes.md)).
 2. The `@sym` kind, once format 5 defines it, with the explicit symbol wrapper in protoST.
 3. A time-zone database in protoST, so zoned datetimes have a wall clock.
 4. Speed of the record and node paths, which is protoST VM work more than library work.

@@ -10,6 +10,7 @@ Import from: 'protobase/keys'.
 Import from: 'protobase/values'.
 Import from: 'protobase/registry'.
 Import from: 'protobase/codec'.
+Import from: 'protobase/keyspec'.
 Import from: 'protobase/notation'.
 Import from: 'protobase/framing'.
 Import from: 'protobase/store'.
@@ -28,9 +29,15 @@ Import from: 'protobase/cluster/holder'.
 Import from: 'protobase/cluster/rejoin'.
 Import from: 'protobase/cluster/coordinator'.
 Import from: 'protobase/avl'.
+Import from: 'protobase/keygroups'.
 Import from: 'protobase/collections'.
 Import from: 'protobase/records'.
 Import from: 'protobase/indexes'.
+Import from: 'protobase/terms'.
+Import from: 'protobase/plans'.
+Import from: 'protobase/planner'.
+Import from: 'protobase/query'.
+Import from: 'protobase/pager'.
 Import from: 'protobase/roots'.
 Import from: 'protobase/publisher'.
 Import from: 'protobase/cluster/round'.

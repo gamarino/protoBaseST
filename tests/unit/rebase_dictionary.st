@@ -4,7 +4,8 @@
  key, keys compared by order key, in order of last occurrence) replayed onto another version
  through setAt:value: and removeAt:. The expected contents are ProtoBase v2.0.0rc1's answers
  for the same calls. A current of another class is PBValidationError (ProtoBase's
- ProtoValidationError); a current with an index is PBNotSupportedError (design spec 7.4)."
+ ProtoValidationError). A current with an index is merged onto, its indexes maintained (indexed
+ queries plan Task 4b; before it, PBNotSupportedError, plan call IP17)."
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -58,10 +59,12 @@ c that: 'a remove of a key absent from current is a no-op there'
 c that: 'a current of another class' signals: PBValidationError containing: 'PBHashDictionary'
   during: [a rebaseOnto: PBHashDictionary new].
 c that: 'a current that is not a collection' signals: PBValidationError during: [a rebaseOnto: 3].
-c that: 'a current with an index' signals: PBNotSupportedError containing: 'by_age'
-  during: [a rebaseOnto: people].
-c that: 'even with an empty log' signals: PBNotSupportedError containing: 'by_city'
-  during: [PBDictionary new rebaseOnto: people].
+"Onto an indexed current (Task 4b)."
+c that: 'a current with an index is merged onto: the key added, the indexes kept and valid'
+  is: ([:m | { m count - people count. m getAt: 'a'. m indexNames asArray. [m validate. true] value }]
+    value: (a rebaseOnto: people))
+  equals: { 1. 1. people indexNames asArray. true }.
+c that: 'an empty log answers the indexed current itself' is: (PBDictionary new rebaseOnto: people) == people equals: true.
 space close.
 base deleteAll.
 c report displayNl.

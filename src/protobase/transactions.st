@@ -666,8 +666,13 @@ PBTransaction >> _sameToken: aToken as: anotherToken
 "The value to store for a root written but neither read nor replaced
  (ProtoBase _merged): aValue rebased onto aCurrent when aValue is a collection
  with a complete log and aCurrent exists and is of the same class; aValue
- otherwise (last writer wins). A rebase onto an indexed current is
- PBNotSupportedError (design spec 7.4)."
+ otherwise (last writer wins). An indexed aCurrent is merged as any other: the
+ replay runs its mutators, which maintain its indexes, then the logged index
+ definitions (PBIndexedCollection >> rebaseOnto:; an index created by this log
+ and concurrently is PBConflictError). An extractor runs here, in the build, and
+ its exception passes through unwrapped and fails only this commit, standalone, in a group commit
+ and in a cluster round (ruling IQ1);
+ a vector index or an index of an unknown kind on aCurrent is PBNotSupportedError."
 PBTransaction >> _merged: aValue onto: aCurrent
   aCurrent == PBTxState missing ifTrue: [^ aValue].
   ((aValue isKindOf: PBIndexedCollection) and: [aValue isMergeable and: [aCurrent class == aValue class]])
@@ -740,7 +745,7 @@ PBTransaction >> _tokenOf: aValue
     atoms add: anAtom.
     PBCodec tokenRef value: anAtom]).
   atoms isEmpty ifTrue: [^ bytes].
-  ^ PBTuple withAll: { bytes. PBTuple withAll: (atoms collect: [:each | each pointer]) }.
+  ^ PBTuple _trustedOn: { bytes. PBTuple withAll: (atoms collect: [:each | each pointer]) }.
 
 PBTransaction >> printOn: aStream
   aStream nextPutAll: 'PBTransaction('; print: database name; nextPutAll: ', version '; print: dbRoot version;

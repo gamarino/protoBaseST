@@ -3,3 +3,4 @@ tests/interop/.venv
 *.tmp
 tests/**/out/
 __pycache__/
+bench/out/

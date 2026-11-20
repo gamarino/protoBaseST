@@ -18,7 +18,7 @@ milliseconds. `Integer` arguments that must be positions or counts and are not a
 `PBValidationError`. "Answers a new version" means a new atom with its own oid.
 
 Contents:
-[Mapping](#mapping-from-protobase) |
+[Mapping](#mapping-from-proto_db) |
 [Space and databases](#space-and-databases) |
 [Transactions](#transactions) |
 [Mutable objects](#mutable-objects) |
@@ -27,6 +27,7 @@ Contents:
 [Values](#values) |
 [Errors](#errors) |
 [Lower layers](#lower-layers) |
+[Indexed queries (0.3.0)](#indexed-queries-030) |
 [The module and its files](#the-module-and-its-files)
 
 ## Mapping from `proto_db`
@@ -234,8 +235,11 @@ kept byte for byte.
 
 All inherit from `PBIndexedCollection` (`proto_db`'s `IndexedCollection`). Every write answers a
 new version. Values, keys and elements pass through `PBCodec canonical:` at once; a key or
-element that is not orderable (a NaN, a list, a map) is `PBValidationError`. A collection that
-has an index refuses every change with `PBNotSupportedError` naming its indexes (design spec 7.4).
+element that is not orderable (a NaN, a list, a map) is `PBValidationError`. Every write
+maintains the collection's indexes in the same step ([Collections gain](#indexes)); a collection
+holding a vector index or an index of an unknown kind is read only (`PBNotSupportedError` naming
+it). An index on an unregistered extractor fails any change that evaluates the extractor
+(`PBValidationError` naming it), as in `proto_db`.
 
 **Common** (`PBIndexedCollection`):
 
@@ -247,7 +251,7 @@ has an index refuses every change with `PBNotSupportedError` naming its indexes 
 | `indexNames`, `getIndex: aName`, `indexes` | The indexes, sorted; `nil` when absent. |
 | `opLog` | A `PBFrozenList` of `PBTuple`s: the intents that built this version (`proto_db`'s names: `('set' k v)`, `('remove' k)`, `('add' e)`, `('transform' e removes adds)`). |
 | `logComplete`, `isMergeable` | True for a version built by `new` and derived only by logged mutators; false for a loaded version and everything derived from it. A `PBList` has no log and is never mergeable. |
-| `rebaseOnto: current` | Replays the net effect of the log onto `current` (the last intent per key, by order key, in order of last occurrence). `current` of another class is `PBValidationError`; one with an index `PBNotSupportedError`. |
+| `rebaseOnto: current` | Replays the net effect of the log onto `current` (the last intent per key, by order key, in order of last occurrence). `current` of another class is `PBValidationError`. The element intents are replayed first, through `current`'s mutators (which maintain its indexes), then the index-definition intents per name (see Indexes below). |
 | `markConsumed`, `consumed` | Set by the publisher after a commit: later versions are no longer mergeable, so a reused value replaces instead of replaying twice (D33). |
 
 **PBList.** Zero-based positions; a negative position counts from the end; a position out of
@@ -281,7 +285,7 @@ out; an absent element answers a new version with the same content), `countOf:`,
 **PBRepeatedKeysDictionary**: `getAt:`, `has:`, `keys`, `values`, `items`, `keysAndValuesDo:`,
 `totalCount`. Read only; its writes are a non-goal.
 
-**Indexes** are decoded and kept, not queried: `PBEqualityIndex`, `PBRangeIndex`
+**Indexes** are decoded, kept, maintained and queried (0.3.0: [Indexed queries](#indexed-queries-030)): `PBEqualityIndex`, `PBRangeIndex`
 (`PBKeyGroupIndex`), `PBVectorIndex` (`dim`, `metric`, `backend`, `params`, `centroids`,
 `trainedSize`, `storeEntries`). On all: `name`, `keySpec`, `hasMemberTokens` (false for an index
 written by format 3), `totalCount`. `PBIndexSet` (`names`, `get:`, `size`, `isEmpty`) holds a
@@ -696,8 +700,10 @@ For tests, tools and readers of the format. An application does not need them.
   `PBRoundEnqueued entry:`, `PBPermitted permission:` (a `PBPermission` or an error value),
   `PBBaseDecided decision:` (a `PBBaseDecision` or an error value), `PBBuilt entry:root:micros:`
   (entry `nil` for the re-commit of a base that needs one; root `nil` for nothing to publish),
-  `PBBuildConflict entry:error:`, `PBBuildFailed entry:error:tierFailed:` (`isTierFailed`: whether
-  the commit's tier had failed, a Boolean the shell always passes), `PBReplicated outcome:`
+  `PBBuildConflict entry:error:`, `PBBuildFailed entry:error:tierFailed:micros:` (`isTierFailed`: whether
+  the commit's tier had failed, a Boolean the shell always passes; `micros`: how long the failed
+  build ran, counted in the round's longest build for CC11 and CC18; `entry:error:tierFailed:`
+  records 0), `PBReplicated outcome:`
   (`#committed`, `#none`, or the replication's `PBOutcomeUnknownError`; a bare `#unknown` is
   refused; `outcome`, `error`),
   `PBHoldExpired token:`, `PBDropKept caller:`. Effects: `PBAskPermit`, `PBAskBase permission:`,
@@ -713,8 +719,9 @@ For tests, tools and readers of the format. An application does not need them.
   (R121, `'sends_refused_reserve'` while the permission is valid; the text names the time left, `sendReserve`, the round's
   longest build, the belief and `leaseDuration`, CC18) and a term below the rejoin ballot (L14;
   `dispatchReplicateWanted:` checks it again at the send against the acceptor's ballot and then
-  sends nothing, `#none`). A build error that is a `PBDBError` fails its commit alone; any other
-  ends the round, nothing sent. Every build, the re-commit's too, comes before the round's
+  sends nothing, `#none`). A build error of any class fails its commit alone and the round builds
+  the next entry (a deviation from rc4, [deviations.md](deviations.md#cluster-mode)); the
+  re-commit's error ends the round. Every build, the re-commit's too, comes before the round's
   `PBReplicate`, so a failed build sent nothing: a failed re-commit ends the permission `#none`,
   never `#unknown` (R233). A build that failed with exactly `PBUnexpectedError` (never a
   subclass) once the permission is no longer valid, the tier not failed, is a retryable
@@ -997,7 +1004,32 @@ For tests, tools and readers of the format. An application does not need them.
 - **AVL** (`avl.st`): `PBNode`, `PBPosNode`, `PBKeyNode`, `PBCountedKeyNode`, `PBValueBox`, and
   `PBAvl` (class-side `posAt:index:`, `posInsert:...`, `keyAt:key:`, `keyPut:...`, `check:` and
   others). Positional trees are not subclassable; a keyed node class may be extended with fields.
-  A large value is stored in a `PBValueBox`.
+  A large value is stored in a `PBValueBox`. The indexes and the rank access use these
+  `PBAvl` class-side functions, ports of `proto_db`'s `avl.py` (an order key is a
+  `PBKeys orderKey:` value; a `nil` bound is open):
+  - `keyDo:over:fromOrderKey:inclusive:toOrderKey:inclusive:` evaluates a `[:key :value]`
+    block over an order-key range, in key order (`avl.key_iter_okey_range`), and
+    `keyReverseDo:over:` over the whole tree in descending order (`avl.key_iter_reversed`).
+  - `keyCountBelow:orderKey:inclusive:` answers the number of keys below an order key (or
+    equal to it, when inclusive) in O(log n) (`avl.key_count_below`).
+  - `keyFromSorted:nodeClass:` builds a balanced keyed tree from an Array of `{ key. value }`
+    pairs in strictly increasing key order, and `keyFromSortedOrderKeys:nodeClass:` builds
+    one from `{ order key. key. value }` triples (`avl.key_from_sorted`,
+    `avl.key_from_sorted_okeys`). The shape is `proto_db`'s node for node. A key out of order
+    or repeated, an element that is not an Array of 2 (pairs) or 3 (triples) elements, and a
+    node class that is not keyed (checked even for an empty Array) are `PBValidationError`.
+  - `keyWeight:` and `keyWeightBelow:orderKey:inclusive:` answer the occurrences of a
+    `PBCountedKeyNode` tree, in all or below an order key (`avl.key_weight`,
+    `avl.key_weight_below`).
+  - `keyDo:over:fromWeight:descending:` evaluates a `[:key :value :skip]` block from
+    occurrence `rank` on, where `0 <= rank <= keyWeight:`; the block's third argument counts
+    the first node's occurrences before that rank (`avl.key_iter_from_weight`).
+  - `posDo:over:from:` and `keyDo:over:from:` walk from a position, `0 <= start <= count`
+    (`avl.pos_iter_from`, `avl.key_iter_from`).
+
+  The weight functions refuse a tree that is not weighted, and a rank or start out of range,
+  with `PBValidationError`. Every walk evaluates its block as it reaches each node, so a `^`
+  from the block stops the walk.
 - **Roots**: `PBSpaceRoot` (`databases`, `clusterTerm`, `clusterEpoch`, `clusterPrevious`;
   `databases:` and, for a cluster commit, `databases:term:epoch:previous:`; `databases:stamp:previous:` chooses between them),
   `PBDatabaseRoot` (`objects`, `mutables`, `version`, `committedAt`, `previous`, `origin`).
@@ -1023,9 +1055,268 @@ For tests, tools and readers of the format. An application does not need them.
   (the deadline in monotonic microseconds), `future`, `transaction`,
   `databaseName`, `isCreateDatabase`, `willRetry`, `deadline`, `writtenAtoms`.
 
+## Indexed queries (0.3.0)
+
+> **0.3.0.** Every message of this section is implemented: "Key specs and extractors"
+> (`src/protobase/keyspec.st`), `PBMemberKeys` and `PBMisfiledError` (`keygroups.st`,
+> `errors.st`), "Indexes" (`indexes.st`), the collection messages of "Collections gain"
+> (`collections.st`), "Terms and expressions" (`terms.st`), "Plans and explain" with the indexes'
+> access paths and rank access (`plans.st`), `PBPlanner` (`planner.st`), `PBField` and `PBQuery`
+> (`query.st`), and `pagerSize:` and "Pagers" (`pager.st`). It is the API of the
+> [indexed-queries spec](superpowers/specs/2026-11-18-indexed-queries-design.md) (sections 5.2
+> and 5.5); `tests/docs/reference_selectors.sh` checks that every selector it names exists. The
+> concepts are in
+> [queries.md](queries.md); the tutorial is chapters [17](tutorial/17-indexes.md),
+> [18](tutorial/18-queries-and-plans.md) and [19](tutorial/19-ordered-reads-and-pages.md).
+
+| `proto_db` | protoBaseST |
+|---|---|
+| `KeySpec`, `register_extractor`, `unregister_extractor`, `extractor_version` | `PBKeySpec`, `PBKeySpec registerExtractor:block:version:`, `unregisterExtractor:`, `extractorVersion:` |
+| `EqualityIndex(name, key)`, `RangeIndex(name, key)` | `PBEqualityIndex name:keySpec:`, `name:path:`; `PBRangeIndex` the same |
+| `add_index`, `remove_index`, `validate` | `addIndex:`, `removeIndex:`, `validate` |
+| `Term`, `And`, `Or`, `Not`, `PythonPredicate`, `Expression.compile` | `PBTerm`, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate`, `PBExpression class >> compile:` |
+| `F.city == "Oslo"`, `F.age > 70`, `&`, `\|`, `~` | `(PBField path: 'city') eq: 'Oslo'`, `(PBField path: 'age') > 70`, `&`, `\|`, `not` |
+| `from_collection(c).where(p).order_by(k).skip(n).take(n)` | `((((PBQuery from: c) where: p) orderBy: k) skip: n) take: n` |
+| `select(...)` | `project:`, `collect:` (`select:` is **not** defined on `PBQuery`) |
+| `count()`, `first()`, `first_or_none()`, `to_list()`, `explain()`, `plan()`, `pager(n)` | `count`, `first`, `firstOrNil`, `asArray`, `explain`, `plan`, `pagerSize:` |
+| `count(p)`, `first(p)`, `first_or_none(p)`, `explain_count()` | `count:`, `first:`, `firstOrNil:`, `explainCount` |
+| `F.a.between(a, b, inclusive=(lo, hi))`, `F.a.between_closed(a, b)`, `F.a.range(a, b, bounds)` | `between:and:inclusive:`, `betweenClosed:and:`, `range:to:`, `range:to:bounds:` |
+| `plan_query(source, where, order_by, limit, offset)` | `PBPlanner plan:where:orderBy:limit:offset:` |
+| `PythonFilter` (an `explain` node) | `BlockFilter` |
+
+### Key specs and extractors
+
+**`PBKeySpec`** (`proto_db`'s `KeySpec`): a frozen `(kind, arg)`, compared by value.
+
+| Message | Meaning |
+|---|---|
+| `PBKeySpec path: 'address.zip'`, `element`, `extractor: aName` | The three kinds. A path is a non-empty dotted String, not starting with `@`, without blank segments; an extractor name has no whitespace and no leading `@`. Otherwise `PBValidationError`. |
+| `PBKeySpec forTermPath: aStringOrNil` | The key spec a term path names: `nil` is the element, `'@name'` an extractor, anything else a path. |
+| `PBKeySpec fromData: aTuple`, `asData` | From and to the persisted tuple `('path' 'a.b')`, `('element' nil)`, `('extractor' name)`: `asData` answers a `PBTuple`; `fromData:` takes a `PBTuple`, a `PBFrozenList` or an `Array` of two items, and malformed data is `PBCorruptionError`. |
+| `kind`, `arg`, `termPath`, `describe` | `kind` is `'path'`, `'element'` or `'extractor'`; `termPath` is the path, `nil` or `'@name'`; `describe` is the path, `'<element>'` or `'@name'`, as `explain` shows it. |
+| `extract: anElement` | The key, or `PBMissing default` when a path step finds no attribute or map key, or steps through any other value; an explicit `nil` stays `nil`. Steps read a `PBObject`'s own attributes, another atom's persisted fields and a map's keys; names starting with `_` and reserved names are never read from an atom. An extractor's answer passes through `PBCodec canonical:`; an exception its block raises passes through unwrapped. |
+| `=`, `hash` | By value: kind and argument. |
+
+**The extractor registry** (process-wide; one `Atom` of an immutable dictionary, changed by
+compare-and-swap):
+
+| Message | Meaning |
+|---|---|
+| `PBKeySpec registerExtractor: aName block: aBlock version: aStringOrNil` | Registers a pure, thread-safe block `[:element | key]`. Registering the same block and version again is a no-op; binding the name to another block or version is `PBValidationError`. |
+| `PBKeySpec unregisterExtractor: aName` | `PBValidationError` when not registered. Stored indexes are not rebuilt. |
+| `PBKeySpec extractorVersion: aName`, `isExtractorRegistered: aName` | The declared version (`PBValidationError` when not registered); whether it is registered. |
+
+Using an extractor that is not registered is `PBValidationError`: "No key extractor is registered
+under 'name'; call PBKeySpec registerExtractor: 'name' block: aBlock version: aStringOrNil in this
+process before using an index or term that names it".
+
+An index or term that names an unregistered extractor answers lookups from its stored trees; a
+change to its collection that evaluates the extractor (an add, remove or replace event, a
+rebuild), a `validate`, or a scan that must extract signals `PBValidationError` naming the
+extractor; a blind write, `removeIndex:` and an `addIndex:` of another index pass, as in
+`proto_db`. The block must be pure: the purity contract is in
+[queries.md](queries.md#extractors-and-their-purity-contract). During a merge it runs in the
+commit's build; an exception it raises fails only that commit, standalone, in a group commit and
+in a cluster round (in the cluster a deviation from `proto_db` rc4, see
+[deviations.md](deviations.md#cluster-mode)), and reaches the caller
+unwrapped, as a copy: the same class, text and fields, not the same object (`proto_db` raises the
+object itself, `transactions.py:1121`).
+
+**Member keys** (`PBMemberKeys`, class side, `proto_db`'s `keyed.py`): an element of a key group is
+filed under its member key, the `PBTuple` `((0, element) | (1, surrogate), exact token)`.
+
+| Message | Meaning |
+|---|---|
+| `PBMemberKeys memberKeyOf: anElement` | The member key: `(0, element)` for an orderable element, `(1, surrogate)` for an unorderable one, then `PBKeys exactToken:` of the element. |
+| `PBMemberKeys surrogate: aValue` | An orderable stand-in: `('l', items)` for a list, `('d', pairs)` for a map (pairs in key order), `('t', items)` for a tuple holding an unorderable value, `('n')` for a NaN, `('v', value)` otherwise. |
+| `PBMemberKeys lowestOf: aValue`, `highestOf: aValue` | The order keys enclosing every member key whose equality part is the value's. |
+| `PBMemberKeys checkDepth: anElement index: anIndex`, `depthLimits` | The element, or `PBValidationError` when its member key would nest deeper than `PBCodec maxValueDepth` (1022), in `proto_db`'s sentence: "Index 'n' (EqualityIndex on a.b) cannot store this element: ..."; the limits are 1018 containers for an orderable element, 254 nested lists, 169 nested maps. The hooks check every element they store. |
+| `PBMemberKeys identityOf: anElement` | `proto_db`'s element_identity: equal for equal elements (atoms by oid, 1 and 1.0 one identity, `true` another, lists and maps item by item, every NaN equal), for comparing multisets. |
+| `PBKeyGroups` | The group operations (class side, `keyed.py` `_group_add`, `_group_remove`, `_group_iter`): a group is the `PBTuple` (members, total), members a `PBCountedKeyNode` tree from member key to `(element, count)`. |
+
+### Indexes
+
+**`PBEqualityIndex`**, **`PBRangeIndex`** (both `PBKeyGroupIndex`):
+
+| Message | Meaning |
+|---|---|
+| `PBEqualityIndex name: aString keySpec: aKeySpec`, `name: aString path: aString` | An empty unsaved index. `name:keySpec:` is the constructor and takes a `PBKeySpec` only: anything else, a String included, is `PBValidationError`. `name:path:` is the convenience for one path, `name: aString keySpec: (PBKeySpec path: aPath)`. `PBRangeIndex` the same. |
+| `withAdded: e`, `withRemoved: e`, `withReplaced: old with: new` | A new unsaved index with one occurrence more, fewer, or replaced (removed, then added). Removing an occurrence the index does not hold is `PBValidationError`, also when it holds an equal value with another exact token (1.0 for 1). The receiver never changes. |
+| `empty`, `build: aCollection` | An empty index with the same definition; the bulk build over the elements of anything answering `do:` (grouped, sorted, balanced trees as `proto_db`'s build), holding what the fold of `withAdded:` from `empty` holds, key for key and member for member; the receiver's content is never kept. |
+| `supports: aTerm`, `estimate: aTerm`, `plan: aTerm` | Whether the index answers the term exactly as a scan would; its `PBEstimate`; its `PBIndexPlan`. An unsupported term is `PBNotSupportedError`. |
+| `supportsOrder: aKeySpec`, `orderedPlan: aKeySpec descending: aBoolean` | `PBRangeIndex` only, by its own key spec: every occurrence in key order (`IndexOrderedScan`, the side group of unorderable keys last), descending its exact reverse. Another key spec, or any order on a `PBEqualityIndex`, is `PBNotSupportedError`; a `descending` that is not a Boolean is `PBValidationError`. |
+| `explain` | `{ 'index'. 'kind'. 'key'. 'entries'. 'keys'. 'unorderable' }` as a `PBFrozenDict`, in that order; `kind` is `proto_db`'s class name, `'EqualityIndex'` or `'RangeIndex'`; `key` is the key spec's `describe`. |
+| `validate: aCollection` | Structural checks and the stored multiset against the elements: `PBCorruptionError` naming the index, or `PBMisfiledError` for an entry its own key does not place (a misfiled format-3 entry, a key tree out of key order). Answers the index. |
+| `keySpec` | Unchanged from 0.1.0: the persisted `(kind, arg)` tuple. |
+| `keySpecObject` | The key spec as a `PBKeySpec` (`PBKeySpec fromData: self keySpec`); a malformed tuple is `PBValidationError` naming the index, when asked, never at read. |
+| `groupCount`, `count`, `countOfKey: aKey`, `membersDo: aBlock` | The number of key groups; the stored occurrences; the occurrences under one orderable key (1, 1.0 and `Decimal` 1 are one key; an unorderable key has no group of its own and is `PBValidationError`); every `[:element :count]`, groups in key order, members in member order, the side group of unorderable keys last. |
+
+| Kind | Operators answered |
+|---|---|
+| `PBEqualityIndex` | `'=='`, `'in'`, `'!='`, `'?N'`, `'?!N'` |
+| `PBRangeIndex` | the same, and `'<'`, `'<='`, `'>'`, `'>='`, `'between[]'`, `'between()'`, `'between(]'`, `'between[)'` |
+
+`PBVectorIndex` is unchanged and read only: `supports:` answers false, and every hook (`withAdded:`,
+`withRemoved:`, `withReplaced:with:`, `empty`, `build:`, `validate:`, `explain`, and `name:keySpec:`),
+like every change to a collection holding one, is `PBNotSupportedError` naming it. An index of a
+kind protoBaseST does not know is refused the same way, by the `PBIndexSet` hooks.
+
+**Collections** gain (on `PBIndexedCollection`):
+
+| Message | Meaning |
+|---|---|
+| `addIndex: anIndex` | A new version holding the index, built over `elements` now (`anIndex empty build: self`). A name already present is `PBValidationError`. Logged as `('@index_add' name index)` on the logged collection classes (never `PBList`), so a blind write that adds an index is merged. |
+| `removeIndex: aName` | A new version without it; an absent name is `PBValidationError`. Logged as `('@index_remove' name)`, never on `PBList`. |
+| `validate` | The placement of the content (`PBMisfiledError` for an entry its own key does not place), then every index's `validate:` against `elements`. Answers the receiver. |
+| every mutator | Answers content and indexes computed in one step, with the hook order of `proto_db`'s mutator: an add, remove or replace event per element that appears, leaves or changes (a `PBCountedSet` fires only when an element appears or disappears; a slice rebuilds every index); a blind write answers the receiver's index set itself. An index written by format 3 is rebuilt before the first change. |
+| `rebaseOnto: current` | Replays the element intents through `current`'s mutators, which maintain its indexes (an extractor runs there, in the commit's build; its exception passes through unwrapped and fails only that commit, standalone, in a group commit and in a cluster round), then the index-definition intents per name: an index this log created that `current` also has is `PBConflictError` naming it; one it removed is removed if `current` still has it; one created and removed leaves `current` as it is. Onto a collection with a vector or unknown index: `PBNotSupportedError`. |
+
+`PBIndexSet` gains `withIndex:` (a taken name is `PBValidationError`), `without:` (an absent name is
+`PBValidationError`), `onAdd:`, `onRemove:`, `onReplace:with:` (the hook on every index, the empty
+set answering itself) and `rebuiltStale: aCollection` (every format-3 index rebuilt as `empty
+build: aCollection`; the set itself when none is stale), each answering a new set;
+`PBMisfiledError` (under `PBCorruptionError`) is new.
+
+### Terms and expressions
+
+`src/protobase/terms.st`, a port of `proto_db`'s `query/terms.py` and `query/expressions.py` (less
+the vector parts). Every condition is a frozen value: no message changes it.
+
+| Message | Meaning |
+|---|---|
+| `PBTerm path: aStringOrNil op: anOperator value: v`, `path: aStringOrNil op: anOperator` | A term; the second form for `'?N'`, `'?!N'`, `'?T'`, `'?!T'`. Operators are `proto_db`'s strings: `'=='` `'!='` `'<'` `'<='` `'>'` `'>='` `'in'` `'between[]'` `'between()'` `'between(]'` `'between[)'` `'?N'` `'?!N'` `'contains'` `'?T'` `'?!T'` (`PBTerm operators`, `unaryOperators`). `'near[]'` is `PBNotSupportedError` (vector search is out of scope). An operand is made canonical (`PBCodec canonical:`) and must be orderable and not `PBMissing`; `'in'` takes an `Array`, `OrderedCollection`, `PBFrozenList`, `PBTuple` or `Set` of operands (a `Set` is sorted by order key, a sequence keeps its order; never a String); a between operator a pair of one type rank. Anything else, an unknown operator or a malformed path included, is `PBValidationError`. |
+| `path`, `op`, `value`, `keySpecObject` | The term's parts: `value` is the canonical operand, a `PBTuple` of operands for `'in'` and of `(low, high)` for a between operator, `nil` for a unary one; `keySpecObject` is the `PBKeySpec` its path names (`PBKeySpec forTermPath: path`). A term has no `keySpec`. |
+| `matches: anElement` | The scan oracle, `proto_db`'s D28 semantics ([queries.md](queries.md#key-specs-missing-and-nil)): `'=='` and `'in'` by order key (1, 1.0 and `Decimal` 1 are equal, `true` is not 1, `nil` is a value); a `PBMissing` key matches only `'?N'`, so `'!='` is not the complement of `'=='`; range operators match keys of the operand's type rank only; unorderable keys match only `'?!N'`, `'!='`, `'contains'`, `'?T'`, `'?!T'`. `'contains'` is a substring of a String or `ByteArray`, an item of a list or tuple, a key of a map, an element of a collection atom by its own membership (`has:`; a `PBList` by element equality). `'?T'` / `'?!T'` test Python's truthiness of a present key. An extractor's exception passes through. |
+| `describe`, `asList` | `{ 'path'. 'op'. 'value' }` as a `PBFrozenDict` for `explain`, the value as `proto_db`'s display_value function renders it (`PBTerm displayValue:`: nil, Booleans, Integers, Strings and finite Floats kept; lists and tuples as Arrays; a map as `{ '@dict' -> pairs }`; anything else as Python's `repr` of it, such as `'Decimal(''1.50'')'`); the 0.1 list form (`{ path. op. value }`, `{ path. op. low. high }`, `{ path. 'in'. operands }`, `{ path. op }`). |
+| `=`, `hash` | By path, operator and the order key of the value, as `proto_db`'s `Term`: equal terms match the same elements. |
+| `PBExpression`: `evaluate: anElement`, `describe`, `asList`, `termsDo: aBlock`, `&`, `\|`, `not` | Every condition (a term, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate`). `evaluate:` is two-valued: `PBAnd` and `PBOr` short-circuit left to right, `PBNot` negates (so the negation of a comparison is true for an element without the key). `&`, `\|` and `not` take expressions only: anything else, a block included, is `PBValidationError` (ruling CR5). `termsDo:` visits every term depth first, left to right. `describe` is `{ 'and' -> { ... } }`, `{ 'or' -> { ... } }`, `{ 'not' -> ... }`. |
+| `PBAnd withAll: anArray`, `PBOr withAll: anArray`, `operands` | Explicit construction: n-ary, nested nodes of the same class flattened, order kept, at least two expressions (`PBValidationError` otherwise). |
+| `PBNot of: anExpression`, `operand` | The negation; `PBNot of:` a `PBNot` answers its operand, so `aCondition not not` is the condition itself. |
+| `PBExpression class >> compile: anArray` | The 0.1 prefix list syntax, from an `Array`, `OrderedCollection` or `PBFrozenList`: `{ 'city'. '=='. 'Oslo' }`; expressions in sequence are joined by AND; `'&'`, `'\|'` binary, `'!'` unary; nested lists and expressions already built are accepted; an expression compiles to itself. Malformed: `PBValidationError` naming the position, counted from 0 as in `proto_db`. Compiling the `asList` of an expression answers an equal expression. |
+| `PBBlockPredicate block: aBlock description: aString`, `block`, `description` | An opaque condition (`proto_db`'s `PythonPredicate`): a block of one argument, whose answer is read as truthiness, and a non-empty description; `describe` is `{ 'block' -> description }`; `asList` is `PBNotSupportedError`. Never answered by an index. |
+
+**`PBField`**, the builder (ruling IQ2):
+
+| Message | Answers |
+|---|---|
+| `PBField path: aString`, `element`, `extractor: aName` | A field: a dotted path (a non-empty String; a malformed one is `PBValidationError`), the element itself, or a registered extractor. A field is not a condition: `where:` refuses it. Implemented (Task 8, `src/protobase/query.st`). |
+| `eq: v`, `ne: v`, `< v`, `<= v`, `> v`, `>= v`, `in: aCollection` | The term of `'=='`, `'!='`, `'<'` ... `'in'`. `=` is **not** overridden: `aField = v` is a Boolean. `in:` refuses a map, a String and a `ByteArray` (`PBValidationError`) and reads any other collection as a sequence. |
+| `between: a and: b`, `betweenOpen:and:`, `betweenLeftOpen:and:`, `betweenRightOpen:and:` | `'between[]'`, `'between()'`, `'between(]'`, `'between[)'`. |
+| `betweenClosed: a and: b`, `between: a and: b inclusive: { includeLow. includeHigh }` | `'between[]'` (`F.a.between_closed(a, b)`); the between of that bound inclusion (`F.a.between(a, b, inclusive=(lo, hi))`): the pair is an `Array` of two Booleans, anything else `PBValidationError`. |
+| `range: a to: b`, `range: a to: b bounds: aString` | The between of the bounds `'[]'` (the default), `'()'`, `'(]'` or `'[)'`, blanks around them ignored (`F.a.range(a, b, bounds)`); other bounds are `PBValidationError`. |
+| `isNone`, `notNone`, `isTrue`, `notTrue`, `contains: v` | `'?N'`, `'?!N'`, `'?T'`, `'?!T'`, `'contains'`. |
+
+### Queries
+
+**`PBQuery`** (Task 8, `src/protobase/query.st`, a port of `proto_db`'s `query/linq.py`) is
+immutable: every message but the ones that run it answers a new query. A cascade
+(`q where: p; take: 5`) sends every message to the first receiver and keeps only the last answer.
+A query keeps the collection version it was built from: later writes do not change its answer.
+
+| Message | Meaning |
+|---|---|
+| `PBQuery from: aCollectionOrPlan` | A query over a collection (its indexes are consulted) or a plan; a `PBQuery` is answered as is. Anything else, a protoST collection included, is `PBValidationError`. |
+| `where: aConditionOrBlock` | Adds a condition; chained `where:` calls combine with AND. A one-argument block is opaque (a `BlockFilter`) and enters a query only here: `&`, `\|` and `not` take expressions only. Anything else, a Boolean and the 0.1 list syntax included (use `PBExpression compile:`), is `PBValidationError` with the text `where: expects a PBExpression or a one-argument block, got a <class name>` (for `true`: `got a Boolean`). The mixing rule of `linq.py`: a pure condition goes whole to the planner; in a top-level AND the pure conjuncts go to the planner and each block gets its own `BlockFilter` on top; an OR or NOT holding a block is one `BlockFilter` for the whole condition. |
+| `orderBy: aKey`, `orderBy: aKey descending: aBoolean`, `thenBy:`, `thenBy:descending:` | A key is a path String, a `PBField` or a block (a block key always sorts with `Sort`). `orderBy:` replaces the order; a `thenBy:` that does not directly follow `orderBy:` or `thenBy:` is `PBUserError`. |
+| `skip: n`, `take: n`, `distinct` | The window (composed like slicing; an Integer >= 0, else `PBValidationError`); first occurrences only. |
+| `project: anArrayOfPaths`, `collect: aBlock` | Each row as a `PBFrozenDict` of the paths (an Array of paths or `PBField`s, or a `PBFrozenDict` of output name to path; an absent field is left out), or through a one-argument block. |
+| `asArray`, `do: aBlock`, `count`, `first`, `firstOrNil` | Run it. `first` of an empty result is `PBUserError`. |
+| `count: aCondition`, `first: aCondition`, `firstOrNil: aCondition` | The same, for the query with `where: aCondition` added (an expression or a one-argument block). |
+| `explainCount` | The explain of the plan `count` runs: a `Count` over the query's plan (`explain_count()`). |
+| `explain`, `plan` | The plan that runs, explained; the plan itself. |
+| `pagerSize: n` | `PBPager on: self pageSize: n` ("Pagers" below). |
+
+`select:` is not defined on `PBQuery`: Smalltalk's `select:` filters, so `proto_db`'s
+projection name would read backwards (ruling IQ2).
+
+**`PBPlanner`** (`proto_db`'s `plan_query`, a pure function of its arguments):
+`PBPlanner plan: aCollectionOrPlan where: aConditionOrArrayOrNil orderBy: keysOrNil limit: anIntegerOrNil offset: anInteger`
+answers a `PBQueryPlan`; `where:` also takes the 0.1 list syntax as an `Array`. Sort keys are
+`PBSortKey key: aPathOrFieldOrBlock descending: aBoolean` (plan call IP14). `PBPlanner normalize:`
+answers a condition with negations pushed inward and the one exact rewrite (`not isNone` is
+`notNone`). Malformed arguments are `PBValidationError` (`proto_db`'s `planner.py:278-343`: the
+source, the condition, the sort keys, and a limit or offset that is not an Integer >= 0). The source
+is a `PBIndexedCollection` (its indexes are consulted in sorted name order, less an index of an
+unknown kind and a `PBVectorIndex`), its `asQueryPlan` (the same), or any other `PBQueryPlan` (no
+index; a `Filter` on top). Implemented (Task 7).
+
+### Plans and explain
+
+Every node is a `PBQueryPlan`, immutable once built, safe to run on any actor:
+
+| Message | Meaning |
+|---|---|
+| `execute` | A new `Array` of the rows, each time. |
+| `do: aBlock` | The rows one by one, lazily (stop early with a non-local return). |
+| `explain` | A `PBFrozenDict`: `'plan'` (the node name), the node's fields, `'estimate'` (`'rows'`, `'cost'`), `'children'`. |
+| `estimate` | A `PBEstimate` (`rows`, `cost`: finite, non-negative Floats). |
+| `windowFrom: start to: stop` | Rows `start` to `stop - 1` of `execute` (`stop` nil: to the end) as a new `Array`, zero-based and half-open. Sought by rank when the plan offers it, otherwise read through `do:` and stopped after the window. Bounds that are not non-negative Integers are `PBValidationError`. |
+| `byRank`, `exactRows` | Whether the plan offers rank access; the exact row count when it is known without producing the rows, else `nil`. |
+
+The nodes are built by their own constructors (`PBQueryPlan new` is `PBUserError`); a malformed
+argument is `PBValidationError`:
+
+| Constructor | Meaning |
+|---|---|
+| `PBCollectionScan on: aCollection`, `aCollection asQueryPlan` | Every element, in the collection's order. A `PBList` and a `PBDictionary` window by position (rank access); the hash collections do not. |
+| `anIndex plan: aTerm`, `anIndex orderedPlan: aKeySpec descending: aBoolean` | A `PBIndexPlan`; `PBIndexPlan index:term:part:` builds one from a `PBIndexPart` (`kind:producer:`, `kind:producer:estimate:details:`), which a plan without a term needs an estimate for. A weighted index's plans have rank access. |
+| `PBFilter source: aPlan terms: anArray` | The rows for which the conjunction of the expressions holds (`PBExpression compile:`; the 0.1 list syntax works). One term over an index's ordered scan that the index answers windows by rank. |
+| `PBBlockFilter source: aPlan predicate: aPBBlockPredicate` | The rows the block accepts. |
+| `PBUnion withAll: plans`, `PBIntersect withAll: plans` | Two or more sources; each element identity with its largest, or smallest, multiplicity. Identity is `proto_db`'s element key: 1, 1.0 and `Decimal` 1 are three elements. |
+| `PBProject source: aPlan fields: paths`, `source:fields:description:` | Each row as a `PBFrozenDict` of the paths (an Array: each path its own output name) or of a `PBFrozenDict` mapping output name to path, an absent value leaving its field out; or a block's answer. |
+| `PBSort source: aPlan keys: { PBSortKey key: k descending: aBoolean }` | Stable and total (orderable keys by order key, unorderable keys after them). A key is a path, a `PBKeySpec` or a block of one argument (`key:descending:description:` names a block in `explain`; `'block'` otherwise). A sort by the index's own key over its plan windows by rank. |
+| `PBLimit source: aPlan limit: anIntegerOrNil offset: anInteger` | The window; by rank over a source that offers it. |
+| `PBCountPlan source: aPlan` | One row, the number of source rows (read by rank when the source knows it exactly). The class is not `PBCount`, the cluster coordinator's counter effect. |
+| `PBDistinct source: aPlan` | The first occurrence of each element identity. |
+
+`PBEstimate rows: r cost: c` (each an Integer or a Float, finite and not negative, kept as a
+Float) and `PBCost log2: n` (the descent term, `n asFloat log: 2`) are the cost model's two
+messages; `PBFilter selectivityOf: anExpression` is the filter's fraction.
+
+| Node (`explain`) | Class | Fields |
+|---|---|---|
+| `CollectionScan` | `PBCollectionScan` | `'collection'` (`proto_db`'s class name: `'Dictionary'`, `'List'`, `'HashDictionary'`, `'Set'`, `'CountedSet'`, `'RepeatedKeysDictionary'`, never the protoST class name), `'rows'`, `'indexes'` |
+| `IndexLookup`, `IndexRange`, `IndexComplement`, `IndexOrderedScan` | `PBIndexPlan` | `'index'`, `'term'` (`nil` for an ordered scan), `'descending'` (ordered scan) |
+| `Filter` | `PBFilter` | `'predicate'` |
+| `BlockFilter` | `PBBlockFilter` | `'description'` |
+| `Union`, `Intersect` | `PBUnion`, `PBIntersect` | none |
+| `Project` | `PBProject` | `'fields'` or `'function'` |
+| `Sort` | `PBSort` | `'keys'` (each `{ 'key'. 'descending' }`) |
+| `Limit` | `PBLimit` | `'limit'`, `'offset'`, `'by_rank'` (only when true) |
+| `Count` | `PBCountPlan` | `'by_rank'` (only when true) |
+| `Distinct` | `PBDistinct` | none |
+
+Explain differs from `proto_db`'s in three documented ways ([deviations](deviations.md)): its lists
+are `PBFrozenList`s; a block is described by its description, `'block'` by default, never a Python
+qualified name; an index's term is described by `PBTerm describe`, so an atom operand prints as
+protoBaseST describes it.
+
+The meaning of every node, field and estimate, with three worked plans, is
+[queries.md, Reading a plan](queries.md#reading-a-plan).
+
+### Pagers
+
+**`PBPager`** (`src/protobase/pager.st`, a port of `proto_db`'s `query/pager.py`, `Pager`) serves
+pages of one plan on one snapshot, in this process: portable tokens and the query result cache are
+deferred (spec 3.2). Every page comes from the versions the plan was built on, so a pager never
+shows a row twice and never skips one, whatever is committed or written meanwhile. The concepts,
+and what a page costs, are in [queries.md](queries.md#ordered-reads-windows-and-pages) and
+[chapter 19](tutorial/19-ordered-reads-and-pages.md).
+
+| Message | Meaning |
+|---|---|
+| `PBPager on: aSource pageSize: n` | A pager of `n` rows per page. aSource is a `PBQuery` (its plan), a `PBQueryPlan`, or a `PBIndexedCollection` (its scan), as `proto_db`'s `cache.as_plan`; `n` an Integer ≥ 1. Anything else is `PBValidationError` (the page size is checked first). |
+| `aQuery pagerSize: n` | `PBPager on: aQuery pageSize: n` (`Queryable.pager`). |
+| `page: k` | Page k, **zero-based** as `proto_db`'s, as a new `Array`; a new empty `Array` past the last page. k is an Integer ≥ 0, else `PBValidationError`. By rank when the plan offers it; otherwise the plan runs once, when a page, `rows` or `pages` first needs it, and its result is kept and sliced. |
+| `rows`, `pages` | The exact number of rows; of pages, `ceiling(rows / n)` (0 for an empty result). |
+| `byRank` | True when pages are sought by rank, O(log n + page size): the plan knows its exact row count and offers rank access (`exactRows`, `byRank` of "Plans and explain"). |
+| `explain` | A `PBFrozenDict`: `'pager'` → `{ 'page_size'. 'by_rank' }` and `'plan'` → the plan's `explain`. No `'portable'` key (tokens are deferred). |
+| `plan`, `pageSize` | The plan paged; the rows per page. |
+| `printOn:` | `PBPager(page size 50, by rank)` or `PBPager(page size 50, materialised)`. |
+
 ## The module and its files
 
-`Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`,
-`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `collections`, `records`, `indexes`, `roots`, `publisher`,
+`Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`, `keyspec`,
+`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `keygroups`, `collections`, `records`, `indexes`, `terms`, `plans`, `planner`, `query`, `pager`, `roots`, `publisher`,
 `round`, `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. The protoST libraries it uses are `decimal`, `calendar`, `uuid` and `net`.

@@ -1,4 +1,4 @@
-"EXPECT: ok 29"
+"EXPECT: ok 30"
 "Refusals of the write side (plan Task 18, design spec 7.1 and 10.5; ProtoBase
  set_root_object, new_mutable, set_mutable and canonical_for): a root name starting with
  '__' is reserved for the format (PBValidationError), for setRootObject: and, since proto_db
@@ -9,11 +9,13 @@
  Root 'name' or Mutable 'name'); so is a value deeper than MAX_VALUE_DEPTH; replace: must
  be a Boolean; a name must be a non-empty String. Each refusal happens at the call, the
  transaction stays active, and its commit publishes nothing of it. A blind merge onto a
- root whose current value has an index is PBNotSupportedError, through the commit."
+ root whose current value has an index is not a refusal since plan Task 4b: it merges as in
+ proto_db (rebase_onto through the current version's mutators), keeping the indexes; it is
+ checked here because this file held the refusal before."
 Import from: 'protobase'.
 Import from: '_check'.
 
-| c base space db tx size deep |
+| c base space db tx size deep count merged |
 c := Check new.
 base := FileSystem temp / ('pbst-tx-refusals-' , Smalltalk pid printString).
 base deleteAll.
@@ -76,20 +78,24 @@ c that: 'a root of 1022 lists round-trips' is: (PBCodec encode: (tx getRootObjec
 c that: 'a cell of 1022 lists too' is: (PBCodec encode: (tx getMutable: 'deep')) equals: (PBCodec encode: deep).
 space close.
 
-"A blind merge onto a root whose current value has indexes: refused through the commit
- (design spec 7.4), on a copy of the database vector ('people' has the indexes by_age and
- by_city)."
+"A blind merge onto a root whose current value has indexes, on a copy of the database vector
+ ('people' has the indexes by_age and by_city): it merges and keeps the indexes (plan Task 4b,
+ proto_db's rebase_onto; tests/unit/idx_merge.st covers the merge itself)."
 base deleteAll.
 base ensureCreateDirectory.
 '../conformance/vectors/database' asFileReference files do: [:f | f copyTo: base / f basename].
 space := PBObjectSpace storage: (PBFileStorage path: base pathString).
 db := space openDatabase: 'db'.
 size := db history size.
+count := (db newTransaction getRootObject: 'people') count.
 tx := db newTransaction.
 tx setRootObject: 'people' value: (tx newDictionary setAt: 'zed' value: 1).
-c that: 'a merge onto an indexed value' signals: PBNotSupportedError containing: 'by_age' during: [tx commit].
-c that: 'the transaction is aborted' is: tx isActive equals: false.
-c that: 'nothing was published' is: db history size equals: size.
+tx commit.
+merged := db newTransaction getRootObject: 'people'.
+c that: 'a merge onto an indexed value commits' is: db history size equals: size + 1.
+c that: 'it keeps the current entries and adds the new one' isTrue: ((merged has: 'zed') and: [merged count = (count + 1)]).
+c that: 'and keeps the indexes' is: merged indexes names asSortedCollection asArray equals: #('by_age' 'by_city').
+c that: 'which validate against the merged entries' isTrue: (merged validate) == merged.
 tx := db newTransaction.
 tx setRootObject: 'people' value: (tx newDictionary setAt: 'zed' value: 1) replace: true.
 tx commit.

@@ -76,6 +76,39 @@ values (and keys and elements) pass through PBCodec canonical: at once:
                                difference: removes each element of c in c's
                                order; always a new version
 
+Indexes (ProtoBase collections/base.py IndexedCollection; indexed queries, plan
+Tasks 4a and 4b, design spec 5.3). Every mutator answers one new version holding the new
+content and the new indexes, computed in the same step with the hook order of
+ProtoBase's mutator: one add event (PBIndexSet onAdd:) per element that appears,
+one remove event per element that leaves, one replace event (onReplace:with:)
+when a list position or a dictionary key gets another value. A Dictionary's
+indexes see its values; a CountedSet's see each distinct element once (a count
+that stays positive fires nothing); slices rebuild every index over the slice. A
+blind write (a present element's add:, an absent key's removeAt:) answers the
+receiver's index set itself, with no index work (base.py 513-519). Before the
+first change, an index written by format 3 (hasMemberTokens false) is rebuilt
+from the elements (_current_indexes, D58); a read or a blind write leaves it as
+it is. So a version always agrees with its own indexes, the one a transaction
+reads back included.
+
+  addIndex: anIndex            a new version holding the index, built over the
+                               elements now (anIndex empty build: self: only its
+                               definition is used); a name already present is
+                               PBValidationError; logs ('@index_add' name anIndex)
+  removeIndex: aName           a new version without it; an absent name is
+                               PBValidationError; logs ('@index_remove' aName)
+  validate                     the placement of the content (PBMisfiledError for
+                               an entry its own key does not place, D58), then
+                               every index's validate: against the elements
+
+What cannot be maintained keeps its collection read only (design spec 3.3 and
+5.4): an index that is a PBVectorIndex, or of a kind protoBaseST does not know
+(an opaque atom), makes every change PBNotSupportedError naming it; an index on
+an extractor this process has not registered fails any change that evaluates
+the extractor (PBValidationError naming it, from PBKeySpec extract:), as in
+proto_db; a blind write, removeIndex: or an addIndex: of another index pass.
+Nothing is rebuilt or dropped silently.
+
 Operation logs (ProtoBase ConcurrentOptimized, D33; design spec 7.2). A
 PBDictionary, a PBHashDictionary, a PBSet and a PBCountedSet are
 ConcurrentOptimized: every version carries two runtime-only fields, never
@@ -85,7 +118,9 @@ persisted, and a cell:
                  that derived the version, ProtoBase's ops: ('set' k v) and
                  ('remove' k) for the dictionaries, ('add' e) and ('remove' e)
                  for a set and a counted set, ('transform' e removes adds) for a
-                 counted set's rebase. Every call logs, a blind write (one that changes
+                 counted set's rebase, and the index-definition ops of every one
+                 of them, ('@index_add' name index) and ('@index_remove' name)
+                 (base.py _index_log: a PBList logs none). Every call logs, a blind write (one that changes
                  nothing) included; a PBDictionary logs a large value in its
                  stored form, the PBValueBox its node holds, so a replay reuses
                  the box (ProtoBase D51)
@@ -107,10 +142,23 @@ persisted, and a cell:
                                (element), keys compared by order key, in order
                                of last occurrence; for a PBCountedSet, the
                                composed counter transform per element (D26,
-                               see _netOps). current must be of the
-                               receiver's exact class (PBValidationError
-                               otherwise), and a current with an index is
-                               PBNotSupportedError (design spec 7.4). The
+                               see _netOps). The element ops are replayed
+                               first, through current's mutators, which keep
+                               its indexes (an extractor runs there, in the
+                               commit's build: its exception passes through
+                               unchanged and fails that commit, ruling IQ1);
+                               then the index-definition ops per name
+                               (base.py 615-631): an index the log created is
+                               added, built over the merged elements, and is
+                               PBConflictError naming it when current has one
+                               of that name already (created concurrently); an
+                               index the log removed is removed if current
+                               still has it; removed then added replaces
+                               current's; created then removed leaves current
+                               untouched. current must be of the receiver's
+                               exact class (PBValidationError otherwise), and
+                               writable (a vector index or an index of an
+                               unknown kind: PBNotSupportedError). The
                                answer's log is current's extended by the
                                replay, so a rebase onto a loaded current (what
                                a commit meets) is incomplete, and one onto a
@@ -135,10 +183,7 @@ function of the value, since persisted trees are ordered by it),
 in a bucket, a tuple of the entries of that hash in insertion order (a hash
 dictionary's entries are (key, value) tuples, a counted set's (element, count)
 tuples); a bucket emptied by a removal
-leaves the tree. A
-collection with an index refuses every change with PBNotSupportedError naming
-the indexes (design spec 7.4): ProtoBase maintains the indexes in the same
-step, which protoBaseST cannot do. A new collection writes its fields in the
+leaves the tree. A new collection writes its fields in the
 order ProtoBase sets them: indexes, count, then its own fields for an empty
 one, persistedFields for a later version.
 
@@ -199,6 +244,93 @@ PBIndexSet class >> new
 
 PBIndexSet >> isEmpty
   ^ (self stateAt: 'root') isNil.
+
+"--- writes (proto_db collections/base.py IndexSet, plan Task 3): each answers a new set ---"
+
+"A new index set whose tree is aRoot (IndexSet._new)."
+PBIndexSet >> _withRoot: aRoot
+  ^ self class _unsavedWithState: (PBFrozenDict withAssociations: { 'root' -> aRoot }).
+
+"The name of anIndex (base.py _index_name): a non-empty String; PBValidationError otherwise."
+PBIndexSet >> _nameOf: anIndex
+  | name |
+  name := (anIndex isClassObject not and: [anIndex isKindOf: PBIndex]) ifTrue: [anIndex name] ifFalse: [nil].
+  ((name isString and: [name isSymbol not]) and: [name notEmpty]) ifFalse: [
+    ^ PBValidationError signal: 'An index needs a non-empty String name, got ' , (PBKeys _preview: name)
+      , ' from ' , (PBKeys _preview: anIndex)].
+  ^ name.
+
+"The set that also holds anIndex; a name already present is PBValidationError (with_index)."
+PBIndexSet >> withIndex: anIndex
+  | name |
+  name := self _nameOf: anIndex.
+  (self get: name) isNil ifFalse: [
+    ^ PBValidationError signal: 'An index named ' , (PBCodec repr: name) , ' already exists'].
+  ^ self _withRoot: ((PBAvl keyPut: (self stateAt: 'root') key: name value: anIndex nodeClass: PBKeyNode) at: 1).
+
+"The set without the index aName; an absent name is PBValidationError (without)."
+PBIndexSet >> without: aName
+  | removed |
+  removed := PBAvl keyRemove: (self stateAt: 'root') key: aName.
+  (removed at: 2) ifFalse: [
+    ^ PBValidationError signal: 'No index named ' , (PBKeySpec _repr: aName)].
+  ^ self _withRoot: (removed at: 1).
+
+"The set after aBlock (index -> new index) on every index, rebuilt balanced; the empty set answers
+ itself (IndexSet._map). An index of a kind protoBaseST does not know (an opaque atom) is
+ PBNotSupportedError naming it (design spec 3.3); a hook that answers an index of another name is
+ PBValidationError."
+PBIndexSet >> _map: aBlock
+  | pairs |
+  self isEmpty ifTrue: [^ self].
+  pairs := OrderedCollection new.
+  PBAvl keysAndValuesDo: [:name :index |
+    | updated |
+    updated := aBlock value: (self _known: index name: name).
+    ((updated isClassObject not and: [updated isKindOf: PBIndex]) and: [updated name = name]) ifFalse: [
+      ^ PBValidationError signal: 'Index ' , (PBCodec repr: name) , ' returned ' , (PBKeys _preview: updated)
+        , ' from a hook; hooks must return an index with the same name'].
+    pairs addLast: { name. updated }] over: (self stateAt: 'root').
+  ^ self _withRoot: (PBAvl keyFromSorted: pairs asArray nodeClass: PBKeyNode).
+
+"anIndex, an index protoBaseST can maintain the hooks of; an opaque atom (a custom proto_db index
+ kind) is PBNotSupportedError naming it: its collection is read only (design spec 3.3, ruling
+ IQ5). A PBVectorIndex refuses in its own hooks."
+PBIndexSet >> _known: anIndex name: aName
+  (anIndex isClassObject not and: [anIndex isKindOf: PBIndex]) ifTrue: [^ anIndex].
+  ^ PBNotSupportedError signal: 'The index ' , (PBCodec repr: aName) , ' is of the type '
+    , ((anIndex isKindOf: PBOpaqueAtom) ifTrue: [anIndex typeName] ifFalse: [anIndex class name])
+    , ', which protoBaseST does not know: a collection holding it is read only (design spec 3.3)'.
+
+"The set after withAdded: anElement on every index (on_add)."
+PBIndexSet >> onAdd: anElement
+  ^ self _map: [:index | index withAdded: anElement].
+
+"The set after withRemoved: anElement on every index (on_remove)."
+PBIndexSet >> onRemove: anElement
+  ^ self _map: [:index | index withRemoved: anElement].
+
+"The set after withReplaced: anOld with: aNew on every index (on_replace)."
+PBIndexSet >> onReplace: anOld with: aNew
+  ^ self _map: [:index | index withReplaced: anOld with: aNew].
+
+"The set with every index written by format 3 (hasMemberTokens false) rebuilt as empty build: over
+ the elements of aCollection (D58), the others kept; the set itself when there is none
+ (rebuilt_stale). An atom that is not a PBIndex counts as current, as proto_db's _current does for
+ an index without has_current_tokens: its first hook refuses it."
+PBIndexSet >> rebuiltStale: aCollection
+  | pairs stale |
+  self isEmpty ifTrue: [^ self].
+  pairs := OrderedCollection new.
+  stale := false.
+  PBAvl keysAndValuesDo: [:name :index |
+    ((index isClassObject not and: [index isKindOf: PBIndex]) and: [index hasMemberTokens not])
+      ifTrue: [
+        stale := true.
+        pairs addLast: { name. index empty build: aCollection }]
+      ifFalse: [pairs addLast: { name. index }]] over: (self stateAt: 'root').
+  stale ifFalse: [^ self].
+  ^ self _withRoot: (PBAvl keyFromSorted: pairs asArray nodeClass: PBKeyNode).
 
 "=== _PBOpLog ================================================================"
 
@@ -305,6 +437,29 @@ PBIndexedCollection >> getIndex: aName
 PBIndexedCollection >> do: aBlock
   ^ PBNotSupportedError signal: self class name , ': ' , self class typeName , ' is abstract: it has no elements'.
 
+"A full-scan plan over this collection (base.py as_query_plan): a PBCollectionScan, from which
+ the planner reads the collection's indexes."
+PBIndexedCollection >> asQueryPlan
+  ^ PBCollectionScan on: self.
+
+"The elements aStart .. aStop - 1 of do: (aStop nil: to the end) without producing the earlier
+ ones, as a new Array, or nil when the structure cannot seek (base.py _scan_window: the default).
+ A collection that answers an Array makes count the number of elements do: evaluates (D56). The
+ caller has checked the bounds (non-negative Integers, aStop possibly nil)."
+PBIndexedCollection >> _scanWindowFrom: aStart to: aStop
+  ^ nil.
+
+"Whether a subclass of aClass up to the receiver's class redefines do:, so its elements are not
+ the tree's in order and cannot be windowed by position (lists.py and dictionaries.py
+ _scan_window: type(self).elements is not List.elements)."
+PBIndexedCollection >> _redefinesDoBelow: aClass
+  | cls |
+  cls := self class.
+  [cls == aClass] whileFalse: [
+    (cls includesSelector: #do:) ifTrue: [^ true].
+    cls := cls superclass].
+  ^ false.
+
 "The elements, in order, as an Array."
 PBIndexedCollection >> elements
   | out |
@@ -406,11 +561,15 @@ PBIndexedCollection >> markConsumed
   ^ self.
 
 "current with the net effect of this version's log replayed through the
- public mutators (ProtoBase ConcurrentOptimized.rebase_onto). The order of the
+ public mutators (ProtoBase ConcurrentOptimized.rebase_onto, base.py 594-631).
+ The element ops first: the net ops of _netOps replayed through current's
+ mutators, which maintain its indexes (an extractor runs there, inside the
+ commit's build: its exception passes through unwrapped, ruling IQ1). Then the
+ index-definition ops, per index name (_replayIndexOps:onto:). The order of the
  checks is protoBaseST's own: a class without a log (PBList) is refused first,
  where ProtoBase's List has no rebase_onto at all (an AttributeError); then a
- current of another class (ProtoBase's type check), then a current with an
- index (design spec 7.4)."
+ current of another class (ProtoBase's type check), then a current that cannot
+ be written (_checkWritable:: a vector index or an index of an unknown kind)."
 PBIndexedCollection >> rebaseOnto: current
   | ops target |
   self class _logsOperations ifFalse: [
@@ -422,14 +581,55 @@ PBIndexedCollection >> rebaseOnto: current
   ops := self _netOps.
   target := current.
   1 to: ops size do: [:i | target := self _replay: (ops at: i) onto: target].
+  ^ self _replayIndexOps: ((_PBOpLog opsOf: log) select: [:op | self class _isIndexOp: op]) onto: target.
+
+"Whether anOp is an index-definition op ('@index_add' or '@index_remove', base.py
+ _INDEX_ADD and _INDEX_REMOVE); element ops never start with '@'."
+PBIndexedCollection class >> _isIndexOp: anOp
+  ^ (anOp at: 1) = '@index_add' or: [(anOp at: 1) = '@index_remove'].
+
+"aTarget after the index-definition ops anIndexOps (oldest first), replayed per index name as
+ base.py rebase_onto does: the last op per name, in order of last occurrence (net_effect keyed
+ by the name), each judged by the first op of its name in the log. A name whose last op is a
+ removal is removed from aTarget when the log found the index there (its first op is a removal)
+ and aTarget still has it; an index the log created and removed leaves aTarget as it is. A name
+ whose last op is an addition: when aTarget has the name, an index the log did not find there
+ (its first op is an addition) was created concurrently, PBConflictError naming it (base.py
+ 627-628), and one it found is replaced; the index is then added from its definition, built
+ over aTarget's elements (addIndex:)."
+PBIndexedCollection >> _replayIndexOps: anIndexOps onto: aTarget
+  | names firstKind target |
+  anIndexOps isEmpty ifTrue: [^ aTarget].
+  names := anIndexOps collect: [:op | op at: 2].
+  firstKind := Dictionary new.
+  anIndexOps do: [:op | (firstKind includesKey: (op at: 2)) ifFalse: [firstKind at: (op at: 2) put: (op at: 1)]].
+  target := aTarget.
+  _PBOpLog lastOccurrencesOf: names do: [:name :i |
+    | op preexisting present |
+    op := anIndexOps at: i.
+    preexisting := (firstKind at: name) = '@index_remove'.
+    present := (target getIndex: name) notNil.
+    (op at: 1) = '@index_remove'
+      ifTrue: [(preexisting and: [present]) ifTrue: [target := target removeIndex: name]]
+      ifFalse: [
+        present ifTrue: [
+          preexisting ifFalse: [
+            ^ PBConflictError signal: 'Index ' , (PBCodec repr: name) , ' was created concurrently by another transaction'].
+          target := target removeIndex: name].
+        target := target addIndex: (op at: 3)]].
   ^ target.
 
-"The ops rebaseOnto: replays (ProtoBase net_effect with the default op key):
- the last op per key, keys compared by order key, in order of last
- occurrence. O(n) in the length of the log."
+"The element ops of the log, oldest first: every op but the index-definition ones
+ (base.py rebase_onto's split)."
+PBIndexedCollection >> _elementOps
+  ^ (_PBOpLog opsOf: log) reject: [:op | self class _isIndexOp: op].
+
+"The ops rebaseOnto: replays of the element ops (ProtoBase _net_ops: net_effect with
+ the default op key): the last op per key, keys compared by order key, in order of
+ last occurrence. O(n) in the length of the log."
 PBIndexedCollection >> _netOps
   | ops out |
-  ops := _PBOpLog opsOf: log.
+  ops := self _elementOps.
   out := OrderedCollection new.
   _PBOpLog lastOccurrencesOf: (_PBOpLog orderKeysOf: ops) do: [:okey :i | out addLast: (ops at: i)].
   ^ out asArray.
@@ -441,30 +641,23 @@ PBIndexedCollection >> _replay: anOp onto: aTarget
 
 "--- new versions ---"
 
-"A new version of this collection (ProtoBase IndexedCollection._with): root
- and count as given, every other field (indexes included) carried over, in
- persistedFields order. Its log is the receiver's, and it is incomplete: a
- change of content that the log does not describe (ProtoBase _with without an
- op). A PBList's writes come here."
-PBIndexedCollection >> _withRoot: aRoot count: aCount
-  ^ self _withRoot: aRoot count: aCount log: log complete: false.
-
-"A new version with root and count as given and anOp (a PBTuple) logged: as
- complete as the receiver."
-PBIndexedCollection >> _withRoot: aRoot count: aCount op: anOp
-  ^ self _withChanges: { 'root' -> aRoot. 'count' -> aCount } op: anOp.
+"A new version of this collection (ProtoBase IndexedCollection._with) with the
+ fields of aChanges (field -> value Associations) changed, every other field
+ carried over, in persistedFields order. Its log is the receiver's, and it is
+ incomplete: a change the log does not describe (ProtoBase _with without an op).
+ A PBList's writes come here, its index-definition changes included."
+PBIndexedCollection >> _withChanges: aChanges
+  ^ self _withChanges: aChanges log: log complete: false.
 
 "A new version with the fields of aChanges (field -> value Associations) changed and anOp
- logged: as complete as the receiver."
+ logged: as complete as the receiver. A blind write passes no change (#()): the
+ receiver's content and indexes, the log extended (ProtoBase base.py 513-519)."
 PBIndexedCollection >> _withChanges: aChanges op: anOp
   ^ self _withChanges: aChanges log: (_PBOpLog after: log op: anOp) complete: self logComplete.
 
-"A new version with the receiver's content and log (ProtoBase _with())."
+"A new version with the receiver's content, indexes and log (ProtoBase _with())."
 PBIndexedCollection >> _newVersion
-  ^ self _withRoot: (self stateAt: 'root') count: (self stateAt: 'count') log: log complete: self logComplete.
-
-PBIndexedCollection >> _withRoot: aRoot count: aCount log: aLog complete: aBoolean
-  ^ self _withChanges: { 'root' -> aRoot. 'count' -> aCount } log: aLog complete: aBoolean.
+  ^ self _withChanges: #() log: log complete: self logComplete.
 
 "A new version whose persisted fields named in aChanges (an Array of field -> value
  Associations) take those values, every other field carried over, in persistedFields
@@ -506,17 +699,137 @@ PBIndexedCollection >> _elementsOf: aCollection for: aSelector
   aCollection do: [:each | out addLast: each].
   ^ out asArray.
 
-"Signals PBNotSupportedError naming the indexes when the collection has any:
- protoBaseST cannot maintain an index, so it refuses every change to an
- indexed collection (design spec 7.4), where ProtoBase would update the
- indexes in the same step."
+"Signals when the collection cannot be written (design spec 3.3, ruling IQ5): an
+ index that is a PBVectorIndex, or not a PBIndex at all (an opaque atom: an index
+ kind protoBaseST does not know), is PBNotSupportedError naming it, since
+ maintaining the other indexes and not that one would write a stale index.
+ Nothing is rebuilt or dropped. Every change sends it first, addIndex: and
+ removeIndex: included. An extractor this process has not registered is not
+ checked here: as in proto_db (keyspec.py 232), only a change that evaluates the
+ extractor fails, PBValidationError naming it (PBKeySpec extract:)."
 PBIndexedCollection >> _checkWritable: aSelector
   | set |
   set := self indexes.
   (set isNil or: [set isEmpty]) ifTrue: [^ self].
-  ^ PBNotSupportedError signal: self class name , ' ' , aSelector , ': the collection has the indexes '
-    , (set names inject: '' into: [:acc :each | acc isEmpty ifTrue: [each] ifFalse: [acc , ', ' , each]])
-    , ', which protoBaseST cannot maintain: it refuses every change to an indexed collection (design spec 7.4)'.
+  PBAvl keysAndValuesDo: [:name :index |
+    ((index isClassObject not and: [index isKindOf: PBIndex]) and: [(index isKindOf: PBVectorIndex) not])
+      ifFalse: [
+        ^ PBNotSupportedError signal: self class name , ' ' , aSelector , ': the index ' , (PBCodec repr: name)
+          , ' is of the type '
+          , ((index isClassObject not and: [index isKindOf: PBOpaqueAtom])
+            ifTrue: [index typeName]
+            ifFalse: [(index isClassObject not and: [index isKindOf: PBAtom]) ifTrue: [index class typeName] ifFalse: [index class name]])
+          , ', which protoBaseST reads but never writes: a collection holding it is read only (design spec 3.3, ruling IQ5)']]
+    over: (set stateAt: 'root').
+  ^ self.
+
+"--- indexes (ProtoBase collections/base.py IndexedCollection, plan Task 4a) ---"
+
+"The index set to change: the stored one, or an empty one when the record holds
+ none (a reader's tolerance; ProtoBase always writes an IndexSet)."
+PBIndexedCollection >> _indexSet
+  | set |
+  set := self indexes.
+  ^ set isNil ifTrue: [PBIndexSet new] ifFalse: [set].
+
+"A new version holding anIndex built over the elements now (base.py add_index):
+ only its definition is used, as anIndex empty build: self, never content it may
+ hold. A name already present is PBValidationError, checked before the build; a
+ build: that answers an index of another name is PBValidationError. A logged
+ collection logs ('@index_add' name anIndex), anIndex as given, which a merge adds
+ to the current version (rebaseOnto:); a PBList logs nothing (base.py
+ _index_log)."
+PBIndexedCollection >> addIndex: anIndex
+  | set name built |
+  self _checkWritable: 'addIndex:'.
+  set := self _indexSet.
+  name := set _nameOf: anIndex.
+  (set get: name) isNil ifFalse: [
+    ^ PBValidationError signal: 'An index named ' , (PBCodec repr: name) , ' already exists'].
+  built := anIndex empty build: self.
+  ((built isClassObject not and: [built isKindOf: PBIndex]) and: [built name = name]) ifFalse: [
+    ^ PBValidationError signal: 'Index ' , (PBCodec repr: name) , ' build: answered ' , (PBKeys _preview: built)
+      , '; expected the same name'].
+  ^ self _withIndexChanges: { 'indexes' -> (set withIndex: built) }
+    op: (PBTuple _trustedOn: { '@index_add'. name. anIndex }).
+
+"A new version without the index aName (base.py remove_index); an absent name is
+ PBValidationError. A logged collection logs ('@index_remove' aName)."
+PBIndexedCollection >> removeIndex: aName
+  self _checkWritable: 'removeIndex:'.
+  ^ self _withIndexChanges: { 'indexes' -> (self _indexSet without: aName) }
+    op: (PBTuple _trustedOn: { '@index_remove'. aName }).
+
+"An index-definition change (base.py _index_log): logged as anOp by a class that
+ logs its operations, which keeps the log as complete as the receiver's; a plain
+ change for any other (a PBList)."
+PBIndexedCollection >> _withIndexChanges: aChanges op: anOp
+  self class _logsOperations ifFalse: [^ self _withChanges: aChanges].
+  ^ self _withChanges: aChanges op: anOp.
+
+"Checks this version (base.py validate): the placement of its content
+ (_checkPlacement: PBMisfiledError for an entry its own key does not place,
+ PBCorruptionError for a broken tree), then every index against the elements
+ (PBIndex >> validate:). An index of a kind protoBaseST does not know is
+ PBNotSupportedError, and so is a vector index (it never validates); an
+ unregistered extractor is PBValidationError naming it. Loads every node: O(n log n).
+ Answers the receiver."
+PBIndexedCollection >> validate
+  | set elements |
+  self _checkPlacement.
+  set := self _indexSet.
+  set isEmpty ifTrue: [^ self].
+  elements := self elements.
+  set names do: [:name | (set _known: (set get: name) name: name) validate: elements].
+  ^ self.
+
+"base.py _check_placement: positional content needs nothing."
+PBIndexedCollection >> _checkPlacement
+  ^ self.
+
+"PBMisfiledError naming the collection (base.py _misfiled). proto_db's text ends
+ with its repair, collection.rebuilt(), which protoBaseST does not port."
+PBIndexedCollection >> _misfiled: aString
+  ^ PBMisfiledError signal: self class name , ' holds a misfiled entry: ' , aString
+    , '. Format 3 wrote built-in subclasses (a (str, Enum) member, a subclass overriding __str__, __float__ or __bytes__) '
+    , 'through their own conversion but filed them by their base value (D58); the collection must be rebuilt '
+    , '(proto_db: collection.rebuilt())'.
+
+"PBMisfiledError unless the keys of the keyed tree aRoot are in strictly increasing
+ order key (base.py check_sorted_keys); then the tree's invariants (PBAvl check:)."
+PBIndexedCollection >> _checkSortedKeys: aRoot
+  | previous previousKey |
+  previous := nil.
+  PBAvl keysAndValuesDo: [:key :value |
+    | okey |
+    okey := PBKeys orderKey: key.
+    (previous notNil and: [(previous compareWith: okey) >= 0]) ifTrue: [
+      self _misfiled: 'the key ' , (PBKeys _preview: key) , ' is stored after ' , (PBKeys _preview: previousKey)
+        , ', which its key order places after it'].
+    previous := okey.
+    previousKey := key] over: aRoot.
+  PBAvl check: aRoot.
+
+"The index set after one element added, removed or replaced (base.py _after_add,
+ _after_remove, _after_replace): the hooks run on _currentIndexes. A record that
+ holds no index set keeps none."
+PBIndexedCollection >> _afterAdd: anElement
+  ^ self _currentIndexesThen: [:set | set onAdd: anElement].
+
+PBIndexedCollection >> _afterRemove: anElement
+  ^ self _currentIndexesThen: [:set | set onRemove: anElement].
+
+PBIndexedCollection >> _afterReplace: anOld with: aNew
+  ^ self _currentIndexesThen: [:set | set onReplace: anOld with: aNew].
+
+"aBlock on the index set ready to be changed (base.py _current_indexes, D58): every
+ index written by format 3 (hasMemberTokens false) rebuilt from this version's
+ elements first; usually the stored set itself."
+PBIndexedCollection >> _currentIndexesThen: aBlock
+  | set |
+  set := self indexes.
+  set isNil ifTrue: [^ nil].
+  ^ aBlock value: (set rebuiltStale: self).
 
 "=== PBList ==================================================================="
 
@@ -534,6 +847,26 @@ PBList class >> persistedFields
 
 PBList >> do: aBlock
   _PBTree nodesOf: (self stateAt: 'root') kind: PBPosNode in: self do: [:node | aBlock value: node value].
+
+"Items aStart .. aStop - 1 by position, in O(log n + k) (lists.py _scan_window, D56)."
+PBList >> _scanWindowFrom: aStart to: aStop
+  | stop out left |
+  (self _redefinesDoBelow: PBList) ifTrue: [^ nil].
+  stop := aStop isNil ifTrue: [self count] ifFalse: [aStop min: self count].
+  aStart >= stop ifTrue: [^ Array new: 0].
+  out := OrderedCollection new.
+  left := stop - aStart.
+  self _window: [:v |
+      out addLast: v.
+      left := left - 1.
+      left = 0] from: aStart.
+  ^ out asArray.
+
+"Evaluates aBlock with each item from position aStart on until it answers true (an early exit by
+ non-local return)."
+PBList >> _window: aBlock from: aStart
+  PBAvl posDo: [:v | (aBlock value: v) ifTrue: [^ self]]
+    over: (_PBTree node: (self stateAt: 'root') kind: PBPosNode in: self) from: aStart.
 
 "The position anIndex stands for, in 0 .. anUpper (ProtoBase List._position,
  plan call C15): a negative index counts from the end; an index that is not an
@@ -554,31 +887,42 @@ PBList >> getAt: anIndex
   position := self _position: anIndex upper: self count - 1.
   ^ (_PBTree nodeAt: position of: (self stateAt: 'root') in: self) value.
 
-"--- writes (ProtoBase List mutators) ---"
+"--- writes (ProtoBase List mutators, lists.py: content and indexes in one step) ---"
 
-"A list whose element at anIndex is aValue."
+"A list whose element at anIndex is aValue (one replace event)."
 PBList >> setAt: anIndex value: aValue
-  | position value |
+  | position value old |
   self _checkWritable: 'setAt:value:'.
   position := self _position: anIndex upper: self count - 1.
   value := self _canonical: aValue as: 'element'.
-  ^ self _withRoot: (PBAvl posSet: (self stateAt: 'root') at: position value: value) count: self count.
+  old := PBAvl posAt: (self stateAt: 'root') index: position.
+  ^ self _withChanges: {
+      'root' -> (PBAvl posSet: (self stateAt: 'root') at: position value: value).
+      'indexes' -> (self _afterReplace: old with: value) }.
 
-"A list with aValue inserted before position anIndex (insertAt: count appends)."
+"A list with aValue inserted before position anIndex (insertAt: count appends; one
+ add event)."
 PBList >> insertAt: anIndex value: aValue
   | position value |
   self _checkWritable: 'insertAt:value:'.
   position := self _position: anIndex upper: self count.
   value := self _canonical: aValue as: 'element'.
-  ^ self _withRoot: (PBAvl posInsert: (self stateAt: 'root') at: position value: value) count: self count + 1.
+  ^ self _withChanges: {
+      'root' -> (PBAvl posInsert: (self stateAt: 'root') at: position value: value).
+      'count' -> (self count + 1).
+      'indexes' -> (self _afterAdd: value) }.
 
 "A list without the element at anIndex (a new list, unlike Pharo's
- removeAt:, which removes in place and answers the element)."
+ removeAt:, which removes in place and answers the element; one remove event)."
 PBList >> removeAt: anIndex
-  | position |
+  | position old |
   self _checkWritable: 'removeAt:'.
   position := self _position: anIndex upper: self count - 1.
-  ^ self _withRoot: (PBAvl posRemove: (self stateAt: 'root') at: position) count: self count - 1.
+  old := PBAvl posAt: (self stateAt: 'root') index: position.
+  ^ self _withChanges: {
+      'root' -> (PBAvl posRemove: (self stateAt: 'root') at: position).
+      'count' -> (self count - 1).
+      'indexes' -> (self _afterRemove: old) }.
 
 "A list with aValue before the first element."
 PBList >> appendFirst: aValue
@@ -589,9 +933,9 @@ PBList >> appendLast: aValue
   ^ self insertAt: self count value: aValue.
 
 "A list with the elements of aCollection (anything answering do:, a PBList
- included, but not a String or Symbol) appended in order; read in full before
- anything is built. An empty aCollection answers the receiver, as ProtoBase's
- extend, an indexed list included."
+ included, but not a String or Symbol) appended in order (one add event per
+ element); read in full before anything is built. An empty aCollection answers
+ the receiver, as ProtoBase's extend, an indexed list included."
 PBList >> extend: aCollection
   | values |
   "A String is refused (_elementsOf:for:)."
@@ -601,21 +945,36 @@ PBList >> extend: aCollection
    looked at, so an indexed list answers itself too."
   values isEmpty ifTrue: [^ self].
   self _checkWritable: 'extend:'.
-  ^ self
-    _withRoot: (PBAvl posConcat: (self stateAt: 'root') with: (PBAvl posFromArray: values))
-    count: self count + values size.
+  ^ self _withChanges: {
+      'root' -> (PBAvl posConcat: (self stateAt: 'root') with: (PBAvl posFromArray: values)).
+      'count' -> (self count + values size).
+      'indexes' -> (self _currentIndexesThen: [:set |
+        | indexes |
+        indexes := set.
+        values do: [:v | indexes := indexes onAdd: v].
+        indexes]) }.
 
 "The list of the elements at aStart .. aStop - 1, with Python slice rules
  (ProtoBase List.slice): a bound may be nil (the start or the end), a negative
  one counts from the end, and both are clamped to the list; a stop before the
- start gives an empty list. A new list, built in O(log n)."
+ start gives an empty list. A new collection, not an edit of this one: its
+ indexes are the same definitions rebuilt (empty build:) over the slice, as
+ ProtoBase's (a list without indexes keeps its index set). Built in O(log n) plus
+ the index rebuilds."
 PBList >> sliceFrom: aStart to: aStop
-  | n lo hi |
+  | n lo hi root set items |
   self _checkWritable: 'sliceFrom:to:'.
   n := self count.
   lo := self _sliceBound: aStart default: 0 count: n.
   hi := (self _sliceBound: aStop default: n count: n) max: lo.
-  ^ self _withRoot: (PBAvl posSlice: (self stateAt: 'root') from: lo to: hi) count: hi - lo.
+  root := PBAvl posSlice: (self stateAt: 'root') from: lo to: hi.
+  set := self indexes.
+  (set isNil or: [set isEmpty]) ifTrue: [^ self _withChanges: { 'root' -> root. 'count' -> (hi - lo) }].
+  items := OrderedCollection new.
+  PBAvl posDo: [:v | items addLast: v] over: root.
+  items := items asArray.
+  ^ self _withChanges: {
+      'root' -> root. 'count' -> (hi - lo). 'indexes' -> (set _map: [:index | index empty build: items]) }.
 
 "The first anInteger elements (sliceFrom: nil to: anInteger: a negative
  anInteger drops elements from the end)."
@@ -678,6 +1037,27 @@ PBDictionary >> keysAndValuesDo: aBlock
 PBDictionary >> do: aBlock
   self keysAndValuesDo: [:k :v | aBlock value: v].
 
+"Values aStart .. aStop - 1 in key order, by the node counts, in O(log n + k) (dictionaries.py
+ _scan_window, D56)."
+PBDictionary >> _scanWindowFrom: aStart to: aStop
+  | stop out left |
+  (self _redefinesDoBelow: PBDictionary) ifTrue: [^ nil].
+  stop := aStop isNil ifTrue: [self count] ifFalse: [aStop min: self count].
+  aStart >= stop ifTrue: [^ Array new: 0].
+  out := OrderedCollection new.
+  left := stop - aStart.
+  self _window: [:v |
+      out addLast: v.
+      left := left - 1.
+      left = 0] from: aStart.
+  ^ out asArray.
+
+"Evaluates aBlock with each value from the aStart-th key on until it answers true (an early exit by
+ non-local return)."
+PBDictionary >> _window: aBlock from: aStart
+  PBAvl keyDo: [:k :v | (aBlock value: v) ifTrue: [^ self]]
+    over: (_PBTree node: (self stateAt: 'root') kind: PBKeyNode in: self) from: aStart.
+
 PBDictionary >> keys
   | out |
   out := OrderedCollection new.
@@ -696,35 +1076,42 @@ PBDictionary >> items
 
 "--- writes (ProtoBase Dictionary set_at, remove_at) ---"
 
-"A dictionary with aKey mapped to aValue. The key must be orderable (a list,
- a map or a NaN is PBValidationError); an existing key keeps its stored key
- object."
+"A dictionary with aKey mapped to aValue (a replace event for an existing key,
+ an add event for a new one: the indexes see the values). The key must be
+ orderable (a list, a map or a NaN is PBValidationError); an existing key keeps
+ its stored key object."
 PBDictionary >> setAt: aKey value: aValue
-  | key stored put |
+  | key stored value put op |
   self _checkWritable: 'setAt:value:'.
   key := self _canonical: aKey as: 'key'.
   "The log keeps the stored form: a replay reuses the box (ProtoBase D51)."
   stored := _PBTree boxed: (self _canonical: aValue as: 'value').
+  value := _PBTree unboxed: stored.
   put := PBAvl keyPut: (self stateAt: 'root') key: key value: stored nodeClass: PBKeyNode.
-  ^ self
-    _withRoot: (put at: 1)
-    count: ((put at: 2) ifTrue: [self count] ifFalse: [self count + 1])
-    op: (PBTuple withAll: { 'set'. key. stored }).
+  op := PBTuple _trustedOn: { 'set'. key. stored }.
+  (put at: 2) ifTrue: [
+    ^ self _withChanges: { 'root' -> (put at: 1). 'indexes' -> (self _afterReplace: (put at: 3) with: value) } op: op].
+  ^ self _withChanges: { 'root' -> (put at: 1). 'count' -> (self count + 1). 'indexes' -> (self _afterAdd: value) } op: op.
 
-"A dictionary without aKey; for an absent key, a new version with the same
- content (ProtoBase's remove_at)."
+"A dictionary without aKey (a remove event); for an absent key, a new version
+ with the same content and indexes (ProtoBase's remove_at)."
 PBDictionary >> removeAt: aKey
-  | key removed |
+  | key removed op |
   self _checkWritable: 'removeAt:'.
   key := self _canonical: aKey as: 'key'.
   removed := PBAvl keyRemove: (self stateAt: 'root') key: key.
-  ^ self
-    _withRoot: (removed at: 1)
-    count: ((removed at: 2) ifTrue: [self count - 1] ifFalse: [self count])
-    op: (PBTuple withAll: { 'remove'. key }).
+  op := PBTuple _trustedOn: { 'remove'. key }.
+  (removed at: 2) ifFalse: [^ self _withChanges: #() op: op].
+  ^ self _withChanges: {
+      'root' -> (removed at: 1). 'count' -> (self count - 1). 'indexes' -> (self _afterRemove: (removed at: 3)) }
+    op: op.
 
 PBDictionary class >> _logsOperations
   ^ true.
+
+"dictionaries.py Dictionary._check_placement."
+PBDictionary >> _checkPlacement
+  self _checkSortedKeys: (self stateAt: 'root').
 
 PBDictionary >> _replay: anOp onto: aTarget
   | kind |
@@ -805,40 +1192,61 @@ PBHashDictionary class >> entryWrapping
 PBHashDictionary class >> wrapper
   ^ 'its bucket entry (key, value) in its bucket tuple'.
 
-"A hash dictionary with aKey mapped to aValue. The key must be hashable and
+"A hash dictionary with aKey mapped to aValue (a replace event for an existing
+ key, an add event for a new one). The key must be hashable and
  orderable (a list, a map or a NaN is PBValidationError); an existing key
  keeps its stored key object and its place in the bucket."
 PBHashDictionary >> setAt: aKey value: aValue
-  | key value found entries position |
+  | key value found entries position op old |
   self _checkWritable: 'setAt:value:'.
   key := self _canonical: aKey as: 'key' wrapping: self class entryWrapping by: self class wrapper.
   value := self _canonical: aValue as: 'value' wrapping: self class entryWrapping by: self class wrapper.
   found := _PBBuckets find: key in: (self stateAt: 'root') pairs: true owner: self.
   entries := found at: 2.
   position := found at: 3.
-  position > 0
-    ifTrue: [
-      entries := entries copy.
-      entries at: position put: (PBTuple withAll: { (entries at: position) at: 1. value })]
-    ifFalse: [entries := entries copyWith: (PBTuple withAll: { key. value })].
-  ^ self
-    _withRoot: ((PBAvl keyPut: (self stateAt: 'root') key: (found at: 1) value: (PBTuple withAll: entries) nodeClass: PBKeyNode) at: 1)
-    count: (position > 0 ifTrue: [self count] ifFalse: [self count + 1])
-    op: (PBTuple withAll: { 'set'. key. value }).
+  op := PBTuple _trustedOn: { 'set'. key. value }.
+  position > 0 ifTrue: [
+    old := (entries at: position) at: 2.
+    entries := entries copy.
+    entries at: position put: (PBTuple _trustedOn: { (entries at: position) at: 1. value }).
+    ^ self _withChanges: {
+        'root' -> ((PBAvl keyPut: (self stateAt: 'root') key: (found at: 1) value: (PBTuple withAll: entries) nodeClass: PBKeyNode) at: 1).
+        'indexes' -> (self _afterReplace: old with: value) }
+      op: op].
+  ^ self _withChanges: {
+      'root' -> ((PBAvl keyPut: (self stateAt: 'root') key: (found at: 1)
+        value: (PBTuple withAll: (entries copyWith: (PBTuple _trustedOn: { key. value }))) nodeClass: PBKeyNode) at: 1).
+      'count' -> (self count + 1).
+      'indexes' -> (self _afterAdd: value) }
+    op: op.
 
-"A hash dictionary without aKey; for an absent key, a new version with the
- same content (ProtoBase's remove_at)."
+"A hash dictionary without aKey (a remove event); for an absent key, a new
+ version with the same content and indexes (ProtoBase's remove_at)."
 PBHashDictionary >> removeAt: aKey
   | key found op |
   self _checkWritable: 'removeAt:'.
   key := self _canonical: aKey as: 'key'.
   found := _PBBuckets find: key in: (self stateAt: 'root') pairs: true owner: self.
-  op := PBTuple withAll: { 'remove'. key }.
-  (found at: 3) = 0 ifTrue: [^ self _withRoot: (self stateAt: 'root') count: self count op: op].
-  ^ self _withRoot: (_PBBuckets without: found in: (self stateAt: 'root')) count: self count - 1 op: op.
+  op := PBTuple _trustedOn: { 'remove'. key }.
+  (found at: 3) = 0 ifTrue: [^ self _withChanges: #() op: op].
+  ^ self _withChanges: {
+      'root' -> (_PBBuckets without: found in: (self stateAt: 'root')).
+      'count' -> (self count - 1).
+      'indexes' -> (self _afterRemove: (((found at: 2) at: (found at: 3)) at: 2)) }
+    op: op.
 
 PBHashDictionary class >> _logsOperations
   ^ true.
+
+"hash_dictionaries.py _check_placement: every key in the bucket of its own hash,
+ then the tree's invariants."
+PBHashDictionary >> _checkPlacement
+  PBAvl keysAndValuesDo: [:h :bucket |
+    (_PBBuckets entriesOf: bucket pairs: true in: self) do: [:entry |
+      (PBKeys orderKey: (self _bucketHash: (entry at: 1))) = (PBKeys orderKey: h) ifFalse: [
+        self _misfiled: 'the key ' , (PBKeys _preview: (entry at: 1)) , ' is in the bucket of another hash']]]
+    over: (self stateAt: 'root').
+  PBAvl check: (self stateAt: 'root').
 
 PBHashDictionary >> _replay: anOp onto: aTarget
   | kind |
@@ -938,6 +1346,20 @@ PBHashBuckets >> _entryAt: anElement
 PBHashBuckets >> has: anElement
   ^ (self _entryAt: anElement) notNil.
 
+"sets.py _HashBuckets._check_placement: every element in the bucket of its own
+ hash, then the tree's invariants."
+PBHashBuckets >> _checkPlacement
+  | pairs |
+  pairs := self _pairs.
+  PBAvl keysAndValuesDo: [:h :bucket |
+    (_PBBuckets entriesOf: bucket pairs: pairs in: self) do: [:entry |
+      | element |
+      element := self _elementOf: entry.
+      (PBKeys orderKey: (self _bucketHash: element)) = (PBKeys orderKey: h) ifFalse: [
+        self _misfiled: 'the element ' , (PBKeys _preview: element) , ' is in the bucket of another hash']]]
+    over: (self stateAt: 'root').
+  PBAvl check: (self stateAt: 'root').
+
 PBHashBuckets subclass: #PBSet.
 PBSet comment: 'Every message answers a new version; the receiver never changes. ProtoBase''s Set (proto_db.collections.Set): a hash set over a keyed AVL tree from the hash key of an element to a bucket tuple of the elements of that hash; membership is by order key, so 1, 1.0 and Decimal 1.00 are one element and true another. add:, remove:, union:, intersection: and difference: answer the new set (unlike Pharo''s add: and remove:, which change the set in place and answer the element); a statement that discards the result changes nothing. Each version logs its intents (opLog) for rebaseOnto:.'.
 
@@ -960,31 +1382,38 @@ PBSet class >> elementWrapping
 PBSet class >> wrapper
   ^ 'its bucket tuple'.
 
-"A set holding anElement; when it is present already, a new version with the
- same content. The element must be orderable (PBValidationError otherwise)."
+"A set holding anElement (an add event); when it is present already, a new
+ version with the same content and indexes (a blind write). The element must be
+ orderable (PBValidationError otherwise)."
 PBSet >> add: anElement
   | element found op |
   self _checkWritable: 'add:'.
   element := self _canonical: anElement as: 'element' wrapping: self class elementWrapping by: self class wrapper.
   found := _PBBuckets find: element in: (self stateAt: 'root') pairs: false owner: self.
-  op := PBTuple withAll: { 'add'. element }.
-  (found at: 3) > 0 ifTrue: [^ self _withRoot: (self stateAt: 'root') count: self count op: op].
-  ^ self
-    _withRoot: ((PBAvl keyPut: (self stateAt: 'root') key: (found at: 1)
-      value: (PBTuple withAll: ((found at: 2) copyWith: element)) nodeClass: PBKeyNode) at: 1)
-    count: self count + 1
+  op := PBTuple _trustedOn: { 'add'. element }.
+  (found at: 3) > 0 ifTrue: [^ self _withChanges: #() op: op].
+  ^ self _withChanges: {
+      'root' -> ((PBAvl keyPut: (self stateAt: 'root') key: (found at: 1)
+        value: (PBTuple withAll: ((found at: 2) copyWith: element)) nodeClass: PBKeyNode) at: 1).
+      'count' -> (self count + 1).
+      'indexes' -> (self _afterAdd: element) }
     op: op.
 
-"A set without anElement; when it is absent, a new version with the same
- content (unlike Pharo's remove:, which signals)."
+"A set without anElement (a remove event of the stored element); when it is
+ absent, a new version with the same content and indexes (unlike Pharo's
+ remove:, which signals)."
 PBSet >> remove: anElement
   | element found op |
   self _checkWritable: 'remove:'.
   element := self _canonical: anElement as: 'element'.
   found := _PBBuckets find: element in: (self stateAt: 'root') pairs: false owner: self.
-  op := PBTuple withAll: { 'remove'. element }.
-  (found at: 3) = 0 ifTrue: [^ self _withRoot: (self stateAt: 'root') count: self count op: op].
-  ^ self _withRoot: (_PBBuckets without: found in: (self stateAt: 'root')) count: self count - 1 op: op.
+  op := PBTuple _trustedOn: { 'remove'. element }.
+  (found at: 3) = 0 ifTrue: [^ self _withChanges: #() op: op].
+  ^ self _withChanges: {
+      'root' -> (_PBBuckets without: found in: (self stateAt: 'root')).
+      'count' -> (self count - 1).
+      'indexes' -> (self _afterRemove: ((found at: 2) at: (found at: 3))) }
+    op: op.
 
 "This set plus every element of aCollection (a set, or anything answering
  do:): add: of each element in aCollection's order, so each is logged."
@@ -1102,7 +1531,7 @@ PBCountedSet >> add: anElement
   | element |
   self _checkWritable: 'add:'.
   element := self _canonical: anElement as: 'element' wrapping: self class elementWrapping by: self class wrapper.
-  ^ self _step: element removes: 0 adds: 1 op: (PBTuple withAll: { 'add'. element }).
+  ^ self _step: element removes: 0 adds: 1 op: (PBTuple _trustedOn: { 'add'. element }).
 
 "A counted set with one occurrence fewer of anElement (the last one takes
  the element out); when it is absent, a new version with the same content
@@ -1112,25 +1541,27 @@ PBCountedSet >> remove: anElement
   | element |
   self _checkWritable: 'remove:'.
   element := self _canonical: anElement as: 'element'.
-  ^ self _step: element removes: 1 adds: 0 op: (PBTuple withAll: { 'remove'. element }).
+  ^ self _step: element removes: 1 adds: 0 op: (PBTuple _trustedOn: { 'remove'. element }).
 
 "The counter transform (removes, adds) applied to anElement as one
  adjustment, logged as ('transform' element removes adds) so that a rebased
  version can itself be rebased (ProtoBase CountedSet._transform). Only
- rebaseOnto: sends it."
+ rebaseOnto: sends it, on the merge's target, whose indexes it maintains as
+ add: and remove: do."
 PBCountedSet >> _transform: anElement removes: aRemoves adds: anAdds
   | element |
   self _checkWritable: 'rebaseOnto:'.
   element := self _canonical: anElement as: 'element' wrapping: self class elementWrapping by: self class wrapper.
   ^ self _step: element removes: aRemoves adds: anAdds
-    op: (PBTuple withAll: { 'transform'. element. aRemoves. anAdds }).
+    op: (PBTuple _trustedOn: { 'transform'. element. aRemoves. anAdds }).
 
 "The version where aCanonical occurs as often as the counter transform
  (removes, adds) makes it, with anOp logged (ProtoBase CountedSet._step and
- _retarget_at): an unchanged count keeps the content, a count that stays
- positive replaces the entry in place, a new element is appended to its
- bucket, and a count that drops to 0 takes the entry out (and an emptied
- bucket leaves the tree)."
+ _retarget_at): an unchanged count keeps the content and the indexes, a count
+ that stays positive replaces the entry in place (no index event), a new element
+ is appended to its bucket (an add event), and a count that drops to 0 takes the
+ entry out (a remove event of the stored element; an emptied bucket leaves the
+ tree). The indexes see each distinct element once, as ProtoBase's."
 PBCountedSet >> _step: aCanonical removes: aRemoves adds: anAdds op: anOp
   | root found entries position n final total |
   root := self stateAt: 'root'.
@@ -1141,11 +1572,11 @@ PBCountedSet >> _step: aCanonical removes: aRemoves adds: anAdds op: anOp
     ifTrue: [0]
     ifFalse: [_PBTree integer: ((entries at: position) at: 2) field: 'count of an element' of: self].
   final := self class transform: n removes: aRemoves adds: anAdds.
-  final = n ifTrue: [^ self _withRoot: root count: self count op: anOp].
+  final = n ifTrue: [^ self _withChanges: #() op: anOp].
   total := self totalCount + final - n.
   (n > 0 and: [final > 0]) ifTrue: [
     entries := entries copy.
-    entries at: position put: (PBTuple withAll: { (entries at: position) at: 1. final }).
+    entries at: position put: (PBTuple _trustedOn: { (entries at: position) at: 1. final }).
     ^ self _withChanges: {
         'root' -> ((PBAvl keyPut: root key: (found at: 1) value: (PBTuple withAll: entries) nodeClass: PBKeyNode) at: 1).
         'total_count' -> total }
@@ -1153,17 +1584,19 @@ PBCountedSet >> _step: aCanonical removes: aRemoves adds: anAdds op: anOp
   final > 0 ifTrue: [
     ^ self _withChanges: {
         'root' -> ((PBAvl keyPut: root key: (found at: 1)
-          value: (PBTuple withAll: (entries copyWith: (PBTuple withAll: { aCanonical. final }))) nodeClass: PBKeyNode) at: 1).
+          value: (PBTuple withAll: (entries copyWith: (PBTuple _trustedOn: { aCanonical. final }))) nodeClass: PBKeyNode) at: 1).
         'count' -> (self count + 1).
-        'total_count' -> total }
+        'total_count' -> total.
+        'indexes' -> (self _afterAdd: aCanonical) }
       op: anOp].
   ^ self _withChanges: {
       'root' -> (_PBBuckets without: found in: root).
       'count' -> (self count - 1).
-      'total_count' -> total }
+      'total_count' -> total.
+      'indexes' -> (self _afterRemove: ((entries at: position) at: 1)) }
     op: anOp.
 
-"The ops rebaseOnto: replays (ProtoBase CountedSet._net_ops and
+"The ops rebaseOnto: replays of the element ops (ProtoBase CountedSet._net_ops and
  counter_net_effect, D26): per element, the composition of its ops as one
  counter transform (removes, adds). add is (0, 1), remove is (1, 0),
  transform its own pair, and (r1, a1) followed by (r2, a2) is
@@ -1174,7 +1607,7 @@ PBCountedSet >> _step: aCanonical removes: aRemoves adds: anAdds op: anOp
  identity transform (0, 0) is omitted. O(n) in the length of the log."
 PBCountedSet >> _netOps
   | ops keys net out |
-  ops := _PBOpLog opsOf: log.
+  ops := self _elementOps.
   keys := _PBOpLog orderKeysOf: ops.
   net := Dictionary new.
   1 to: ops size do: [:i |
@@ -1201,7 +1634,7 @@ PBCountedSet >> _netOps
     | entry |
     entry := net at: okey.
     ((entry at: 2) = 0 and: [(entry at: 3) = 0]) ifFalse: [
-      out addLast: (PBTuple withAll: { 'net'. entry at: 1. entry at: 2. entry at: 3 })]].
+      out addLast: (PBTuple _trustedOn: { 'net'. entry at: 1. entry at: 2. entry at: 3 })]].
   ^ out asArray.
 
 PBCountedSet >> _replay: anOp onto: aTarget
@@ -1230,6 +1663,12 @@ PBRepeatedKeysDictionary class >> _emptyValueOf: aField
  mutators here (its writes are a non-goal), so its log stays empty."
 PBRepeatedKeysDictionary class >> _logsOperations
   ^ true.
+
+"dictionaries.py RepeatedKeysDictionary._check_placement: the keys in order, then
+ each key's records."
+PBRepeatedKeysDictionary >> _checkPlacement
+  self _checkSortedKeys: (self stateAt: 'root').
+  self keysAndValuesDo: [:k :records | records _checkPlacement].
 
 PBRepeatedKeysDictionary >> totalCount
   ^ _PBTree integer: (self stateAt: 'total_count') field: 'total_count' of: self.

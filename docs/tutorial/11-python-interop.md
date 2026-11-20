@@ -3,10 +3,13 @@
 <!-- example: examples/tutorial/_interop_write.st -->
 <!-- example: examples/tutorial/11_python_side.py -->
 <!-- example: examples/tutorial/_interop_read.st -->
+<!-- example: examples/tutorial/_indexed_change.st -->
+<!-- example: examples/tutorial/11_indexed_python_side.py -->
 Program: [examples/tutorial/11_python_interop.sh](../../examples/tutorial/11_python_interop.sh),
 which runs [_interop_write.st](../../examples/tutorial/_interop_write.st),
 [11_python_side.py](../../examples/tutorial/11_python_side.py) and
-[_interop_read.st](../../examples/tutorial/_interop_read.st) on one directory.
+[_interop_read.st](../../examples/tutorial/_interop_read.st) on one directory; and, for the
+indexed section, [examples/tutorial/11_indexed_interop.sh](../../examples/tutorial/11_indexed_interop.sh).
 Previous: [10. Crashes and reopening](10-crash-recovery.md). Next: [12. What is refused, and why](12-refusals.md).
 
 This is the reason protoBaseST exists. It is not a Smalltalk database with an export format: its
@@ -113,7 +116,65 @@ other `proto_db` release.
 
 Python's `proto_db` can do things this prototype cannot, on the same directory: maintain and query
 indexes, write `RepeatedKeysDictionary`, run a cluster. A directory that uses them is still read by
-protoST, which refuses only the changes it cannot make exactly.
+protoST, which refuses only the changes it cannot make exactly. Index maintenance and queries come
+with 0.3.0; the next section shows the interplay.
+
+## Indexes, from both sides
+
+> **protoBaseST 0.3.0** (the
+> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md), chapter 17).
+> The code comes from [11_indexed_interop.sh](../../examples/tutorial/11_indexed_interop.sh),
+> which runs [11_indexed_python_side.py](../../examples/tutorial/11_indexed_python_side.py)
+> and [_indexed_change.st](../../examples/tutorial/_indexed_change.st) on one directory; it runs
+> as a test against the pinned `proto_db` (and is skipped, exit 77, without the interop venv).
+
+Python writes forty people and indexes them:
+
+```python
+        for i in range(40):
+            people = people.set_at(i, tr.new_object(name=f"person{i}", city=CITIES[i % 4], age=18 + i))
+        people = people.add_index(EqualityIndex("by_city", "city")).add_index(RangeIndex("by_age", "age"))
+        tr.set_root_object("people", people)
+```
+
+protoST queries those indexes, changes the collection through its mutators, and merges a blind
+write onto it:
+
+```smalltalk
+people := db newTransaction getRootObject: 'people'.
+lesson check: 'Python''s indexes are read' is: people indexNames equals: #('by_age' 'by_city').
+lesson check: 'and queried here' is: (inOslo value: people) equals: 10.
+db run: [:tr | | ps |
+    ps := tr getRootObject: 'people'.
+    ps := ps setAt: 0 value: ((ps getAt: 0) with: 'city' value: 'Oslo').
+    ps := ps removeAt: 1.
+    ps := ps setAt: 40 value: (tr newObject: { 'name' -> 'person40'. 'city' -> 'Oslo'. 'age' -> 58 }).
+    tr setRootObject: 'people' value: ps].
+```
+
+```smalltalk
+mine := db newTransaction.
+mine setRootObject: 'people' value: (mine newDictionary
+    setAt: 41 value: (mine newObject: { 'name' -> 'person41'. 'city' -> 'Oslo'. 'age' -> 59 })).
+mine commit.
+```
+
+Python then checks every index against a scan, plans the same query with the same index, and runs
+`proto_db`'s verifier on the directory:
+
+```python
+    people.validate()
+    assert people.index_names() == ["by_age", "by_city"], people.index_names()
+    oslo = from_collection(people).where(F.city == "Oslo")
+    assert oslo.explain()["plan"] == "IndexLookup", oslo.explain()
+    assert oslo.count() == 12, oslo.count()
+```
+
+For this to hold, protoBaseST must write the index trees `proto_db` would have written for the same
+changes, node for node: the same keys, the same tree shapes, the same order of index updates in
+every mutator (spec 5.4). That is checked by the interop tests of spec 6.1, which run the same
+seeded operations in both languages and compare the dumps, and by this lesson's last step:
+`proto_db` validates every index protoST changed and its verifier accepts the directory.
 
 ## Running it
 

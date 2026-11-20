@@ -2,11 +2,25 @@
 # variable. Each is a private initialiser called once by a class-side constructor
 # (or, for PBMissing, PBZoneKeys and _PBOidPool, once when the module loads). One entry per line:
 # Class>>selector or Class class>>selector.
-# PBAtom>>_slots and PBAtom>>_installState: are not initialisers: they publish the runtime-only
-# slots field once, by compare-and-swap from nil (setInstVar:from:to:), always from the installed
-# envelope (Task 16b).
+# PBAtom>>_slots and the _publish... methods are not initialisers: each publishes a runtime-only
+# field (slots, oid, saved, memo, a keyed node's order key, an index's key spec object) once, by
+# compare-and-swap from nil on the instance variable (setInstVar:from:to:); the loser of a race
+# answers the winner's value (Task 16b; Task 11, spec 4.1 decision 3 as amended 2026-11-19).
+# PBAtom>>_publishOid:slots:memo: and PBAtom>>_publishEnvelope: publish what a load fills (oid,
+# slots, memo) the same way, one field at a time (Task 12).
+# PBAtom>>_installSlots:memo: and PBKeyNode>>_installSlots:memo:orderKey: are initialisers of a
+# fresh atom.
 PBAtom>>_slots
-PBAtom>>_installState:
+PBAtom>>_publishOid:
+PBAtom>>_publishSaved:
+PBAtom>>_publishMemo:
+PBAtom>>_publishOid:slots:memo:
+PBAtom>>_publishEnvelope:
+PBKeyNode>>_publishOrderKey:
+PBIndex>>_publishKeySpec:
+PBAtom>>_installSlots:memo:
+PBKeyNode>>_installSlots:memo:orderKey:
+PBNode class>>_initializeShapes
 _PBSequence>>_setItems:
 PBFrozenDict>>_setKeys:values:index:
 PBOrderKey>>_setRank:payload:
@@ -43,7 +57,6 @@ PBTxState class>>_initializeMarks
 PBOrderKey class>>_initializeInfinities
 _PBLoadResolver>>_setStorage:chain:
 _PBNameMap>>_setEntries:
-PBKeyNode>>_setOid:pointer:storage:
 _PBPlace>>_setPointer:storage:
 PBIndexedCollection>>_setLog:complete:
 _PBOpLog>>_setPrevious:op:
@@ -107,7 +120,7 @@ PBPermitted>>_setPermission:
 PBBaseDecided>>_setDecision:
 PBBuilt>>_setEntry:root:micros:
 PBBuildConflict>>_setEntry:error:
-PBBuildFailed>>_setEntry:error:tierFailed:
+PBBuildFailed>>_setEntry:error:tierFailed:micros:
 PBReplicated>>_setOutcome:error:
 PBReplicateFailed>>_setError:
 PBRoundClosed>>_setLeft:
@@ -135,3 +148,28 @@ _PBAcceptor>>_setCells:rules:tier:
 PBPersister>>_setTier:coordinator:writer:interval:lag:stats:
 PBClusterCoordinator>>_setConfig:rules:acceptorClass:cells:run:
 PBOwnStepFailed>>_setMessage:error:
+PBKeySpec>>_setKind:arg:segments:
+PBKeySpec class>>_initializeRegistry
+PBKeys class>>_initializeAtomToken
+PBMemberKeys class>>_initializeConstants
+PBTerm>>_setPath:op:value:keySpecObject:valueKey:operandKeys:
+_PBNode>>_setOperands:
+PBBlockPredicate>>_setBlock:description:
+PBEstimate>>_setRows:cost:
+PBRankAccess>>_setSegments:
+PBIndexPart>>_setKind:producer:estimate:details:rank:sortedRank:
+PBSortKey>>_setKey:descending:spec:description:
+PBCollectionScan>>_setCollection:
+PBIndexPlan>>_setIndex:term:part:
+_PBOneSourcePlan>>_setSource:
+PBFilter>>_setPredicate:
+PBBlockFilter>>_setPredicate:
+PBProject>>_setFields:block:description:
+PBSort>>_setKeys:
+PBLimit>>_setLimit:offset:
+_PBSetPlan>>_setSources:
+_PBCandidate>>_setPlan:names:scans:cost:
+PBPlanner>>_setBase:indexes:
+PBField>>_setPath:spec:
+PBQuery>>_setSource:ops:
+PBPager>>_setPlan:pageSize:rows:ranked:

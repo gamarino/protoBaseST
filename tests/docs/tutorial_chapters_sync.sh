@@ -9,6 +9,14 @@
 # or the reverse, fails here. The programs themselves run as tests (tests/run_tests.sh), so the
 # quoted code runs. Every numbered chapter must name at least one program that exists, and every
 # lesson of examples/tutorial and examples/cluster (pending ones included) must be named by a chapter. Scope: code blocks only, not prose.
+# Indexed queries (plan Task 0): the query chapters (17-19, and chapter 11's indexed section) and
+# the guide docs/queries.md, under the same rule, name programs of examples/queries/ too; a
+# program written before its API lives in examples/queries/pending/ as X.st.pending, X.sh.pending
+# or X.py.pending (its README lists them and the task that moves each one). Every program of
+# examples/queries/ and examples/queries/pending/ but a .sh one must be named by a chapter or by
+# the guide. A section whose program a later task writes declares it with
+# "<!-- pending example: examples/queries/X (plan task N) -->": such a program must not exist yet
+# (once it does, the line becomes an "example:" line, and its blocks are checked).
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -20,12 +28,19 @@ bad, named, blocks_checked = [], set(), 0
 chapters = sorted(glob.glob(os.path.join(repo, "docs/tutorial/[0-9][0-9]-*.md")))
 if not chapters:
     bad.append("no chapter found in docs/tutorial")
+chapters.append(os.path.join(repo, "docs/queries.md"))
 for chapter in chapters:
     rel = os.path.relpath(chapter, repo)
     text = open(chapter, encoding="utf-8").read()
-    programs = re.findall(r"<!-- example: (examples/(?:tutorial|cluster)/[^ ]+) -->", text)
+    programs = re.findall(r"<!-- example: (examples/(?:tutorial|cluster|queries)/[^ ]+) -->", text)
     if not programs:
-        bad.append("%s names no program (<!-- example: examples/tutorial/... or examples/cluster/... -->)" % rel)
+        bad.append("%s names no program (<!-- example: examples/tutorial/..., examples/cluster/... or examples/queries/... -->)" % rel)
+    for p, task in re.findall(r"<!-- pending example: (examples/queries/[^ ]+) \(plan task (\d+)\) -->", text):
+        if os.path.exists(os.path.join(repo, p)):
+            bad.append("%s declares %s pending (plan task %s), but it exists: make it an example: line" % (rel, p, task))
+    for line in re.findall(r"<!-- pending example:[^\n]*", text):
+        if not re.fullmatch(r"<!-- pending example: examples/queries/[^ ]+ \(plan task \d+\) -->", line):
+            bad.append("%s: malformed pending example line: %s" % (rel, line))
     sources = {}
     for p in programs:
         path = os.path.join(repo, p)
@@ -59,10 +74,13 @@ lessons = sorted(os.path.relpath(f, repo) for f in glob.glob(os.path.join(repo, 
                  + glob.glob(os.path.join(repo, "examples/cluster/[0-9][0-9]_*"))
                  + glob.glob(os.path.join(repo, "examples/cluster/pending/[0-9][0-9]_*"))
                  if f.endswith(".st") or f.endswith(".sh") or f.endswith(".st.pending"))
+lessons += sorted(os.path.relpath(f, repo) for f in glob.glob(os.path.join(repo, "examples/queries/*"))
+                  + glob.glob(os.path.join(repo, "examples/queries/pending/*"))
+                  if f.endswith((".st", ".py", ".st.pending", ".py.pending")))
 for lesson in lessons:
     if lesson not in named and not lesson.endswith(".sh"):
-        bad.append("%s is not named by any chapter" % lesson)
+        bad.append("%s is not named by any chapter or by docs/queries.md" % lesson)
 if bad:
     print("\n".join(bad)); sys.exit(1)
-print("docs/tutorial: %d blocks in %d chapters are in their programs" % (blocks_checked, len(chapters)))
+print("docs/tutorial and docs/queries.md: %d blocks in %d documents are in their programs" % (blocks_checked, len(chapters)))
 PY

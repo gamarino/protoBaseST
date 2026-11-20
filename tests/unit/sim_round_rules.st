@@ -1,4 +1,4 @@
-"EXPECT: ok 26"
+"EXPECT: ok 27"
 "The commit round as a pure state machine (cluster/holder.st, PBCoordinatorCore round:in:now:;
  proto_db transactions.py _run_round, _permit_round, _keep, _take_kept, _await_retries; spec 5.6,
  D-LIVE-2, CC11, CC18, R121, H7) in the simulator: every node commits through its PBRoundState,
@@ -28,7 +28,12 @@
  caught. (25) A base re-commit that cannot read its base's SpaceRoot on shared storage (rc4:
  proto_db _commit_base's _load_space before its replicate) sent nothing: the permission ends
  none, the term is kept, and the commit ends with the read error; (26) the same read
- outliving the permission is a retryable conflict, and the retry commits."
+ outliving the permission is a retryable conflict, and the retry commits. (27) An entry's build
+ error that is not a PBDBError (ZeroDivide, an extractor's exception in a merge; indexed queries
+ Task 4b, the maintainer's decision of 2026-11-19), under a valid permission and after it
+ expired, on several seeds: it fails that commit alone, never turned into a conflict, and the
+ commit queued after it in the same round commits (a deviation from rc4's _permit_round, which
+ fails the whole round)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_round'.
@@ -206,5 +211,13 @@ c that: 'a base re-commit that cannot read its base sent nothing: none, the term
 c that: 'a base re-commit whose read of its base outlives the permission is a retryable conflict, the term kept, and the retry commits ({ outcome. attempts. the read error. converted. replicates. report. terms abandoned })'
   is: (PBSimSoak same: [:n | RoundFamilies unreadableBase: RoundRules new seed: n late: true] over: #(1))
   equals: { #acknowledged. 2. false. true. 0. #none. 0 }.
+
+"(27) { the two outcomes, sorted. attempts of the failed commit. its first error's class. the
+ planted error itself. the other commit saw the error. the other's attempts. replicates under the
+ failed permission }, valid permission then expired"
+c that: 'an entry''s build error that is not a PBDBError fails it alone, never a conflict; the other entry of the round commits ({ outcomes. attempts. error class. the planted error. the other saw it. its attempts. replicates under the failed permission })'
+  is: (PBSimSoak same: [:n | { RoundFamilies buildErrorAlone: RoundRules new seed: n error: (ZeroDivide new messageText: 'ZeroDivide'; yourself) late: false.
+      RoundFamilies buildErrorAlone: RoundRules new seed: n error: (ZeroDivide new messageText: 'ZeroDivide'; yourself) late: true }] over: #(1 2 3 4 5))
+  equals: { { #('acknowledged' 'failed'). 1. ZeroDivide. true. false. 1. 1 }. { #('acknowledged' 'failed'). 1. ZeroDivide. true. false. 1. 0 } }.
 
 c report.

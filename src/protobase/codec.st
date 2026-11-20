@@ -379,10 +379,15 @@ PBCodec class >> _canonicalLeaf: v
     ^ PBMutableObject name: (self _field: 'cellName' of: v base: PBMutableObject)].
   (v isKindOf: Dictionary) ifTrue: [
     ^ self _refuse: v because: 'its order is unspecified, and the order is part of the bytes; use PBFrozenDict'].
-  (self _isReference: v) ifTrue: [
-    ((v respondsTo: #tag) and: [v tag isString]) ifTrue: [self _checkUTF8: v tag].
-    ^ v].
+  (self _isReference: v) ifTrue: [^ self _checkReference: v].
   ^ self _refuse: v because: 'it is not a canonical value of format 4'.
+
+"The reference v (an atom, a PBUnresolvedRef) as canonical: keeps it: its tag, when it has a
+ String one, must be valid UTF-8 (_checkUTF8:). Shared by _canonicalLeaf: and the atom token of
+ PBKeys exactToken:, which answers without encoding."
+PBCodec class >> _checkReference: v
+  ((v respondsTo: #tag) and: [v tag isString]) ifTrue: [self _checkUTF8: v tag].
+  ^ v.
 
 PBCodec class >> _refuse: v because: aString
   ^ PBValidationError signal: 'PBCodec: a ' , v class name , ' cannot be stored ('
@@ -656,12 +661,36 @@ PBCodec class >> decode: aByteArray
  as _fromWireOpen:depth:resolver:on: answers it (same order of tests): nil, an
  integer, a string, a float, a Boolean. The attribute values of a record."
 PBCodec class >> fromWireValue: aTree resolver: aResolver
+  | assoc |
   aTree isNil ifTrue: [^ aTree].
   aTree isInteger ifTrue: [^ aTree].
   (aTree isString and: [aTree isSymbol not]) ifTrue: [^ aTree].
   aTree isFloat ifTrue: [^ aTree].
   (aTree == true or: [aTree == false]) ifTrue: [^ aTree].
+  "A list, or a @tup, whose items are all their own values (plan Task 12): the
+   value the walk below answers, built on the decoder's Array without a frame
+   or a copy (the wire data is the decoder's and is dropped after the decode).
+   Nothing here can be refused, so any other data takes the walk, with its
+   checks and errors."
+  (aTree isKindOf: Array) ifTrue: [
+    (self _allWireScalars: aTree) ifTrue: [^ PBFrozenList _trustedOn: aTree]].
+  ((aTree isKindOf: MessagePackMap) and: [aTree size = 1]) ifTrue: [
+    assoc := aTree associations first.
+    ((assoc key isString and: [assoc key isSymbol not]) and: [assoc key = '@tup'
+        and: [(assoc value isKindOf: Array) and: [self _allWireScalars: assoc value]]])
+      ifTrue: [^ PBTuple _trustedOn: assoc value]].
   ^ self fromWire: aTree resolver: aResolver.
+
+"Whether every item of anArray is wire data that is its own value, as
+ _fromWireOpen:depth:resolver:on: answers it: nil, a Boolean, an integer, a
+ float, a string, bytes."
+PBCodec class >> _allWireScalars: anArray
+  1 to: anArray size do: [:i |
+    | x |
+    x := anArray at: i.
+    (x isNil or: [x == true or: [x == false or: [x isInteger or: [x isFloat
+        or: [(x isString and: [x isSymbol not]) or: [x isKindOf: ByteArray]]]]]]) ifFalse: [^ false]].
+  ^ true.
 
 PBCodec class >> fromWire: aTree resolver: aResolver
   | stack result |

@@ -172,7 +172,7 @@ PBTypeRegistry class >> register: aClass
       | entry |
       entry := old at: key ifAbsent: [nil].
       entry isNil
-        ifTrue: [additions add: key -> (PBTuple withAll: { aClass. name })]
+        ifTrue: [additions add: key -> (PBTuple _trustedOn: { aClass. name })]
         ifFalse: [
           ((entry at: 1) == aClass and: [(entry at: 2) = name]) ifFalse: [
             ^ PBValidationError signal: 'PBTypeRegistry: the type name ' , key printString
@@ -291,21 +291,38 @@ PBTypeRegistry class >> unloadedAtomFor: aTag at: aPointer storage: aStorage
 
 "=== PBAtom ================================================================="
 
-"The abstract base of every persistent object. An atom holds oid (an Atom
- cell holding nil or its 16-byte oid), its pointer and storage (a stub's, set
- when it is made; nil for an atom made in memory), saved (for an atom made in
- memory, an Atom cell holding nil or the _PBPlace its save recorded; nil for a
- stub), and memo (an Atom cell holding nil or the loaded envelope: what
- storage loadAt:expecting: answers, tag, oid and the state PBFrozenDict). The
- cells are the runtime-only fields a load, a first need or the save fills
- (plan, immutability by convention), as ProtoBase sets oid and atom_pointer
- with object.__setattr__; each is filled once, by compare-and-swap, so two
- threads that race install one value and both answer it. An atom also holds
- slots: nil, or the slots Array of its installed envelope (the values of its persistedFields, in that
- order), which its accessors read at literal positions. It is published once
- by compare-and-swap on the field itself (_slots), always from the installed
- envelope, so every reader sees nil or that one immutable Array. Like the
- cells, it is runtime-only: never persisted, compared or hashed.
+"The abstract base of every persistent object. An atom holds oid (nil, or its
+ 16-byte oid), its pointer and storage (a stub's, set when it is made; nil for
+ an atom made in memory), saved (nil, or the _PBPlace the save of an atom made
+ in memory recorded), slots (nil, or the values of its record in the slot
+ order of its class's record shape, which its accessors read at literal
+ positions) and memo (nil until its state is known, then what the state is
+ read through). These are the runtime-only fields a constructor, a load, a
+ first need or the save fills (spec 4.1, decision 3 as amended 2026-11-19), as
+ ProtoBase sets oid and atom_pointer with object.__setattr__; never persisted,
+ compared or hashed.
+
+ The memo is one of two things (plan Task 12, atom weight stage 2):
+  - the class's record shape (_PBRecordShape), shared by every atom of the
+    class, when the state holds exactly the shape's persisted fields in that
+    order and the shape's slots are its state (_PBRecordShape keepsState:):
+    the atom keeps its slots and its oid, and nothing else. Its state is a
+    PBFrozenDict on the shape's keys over the slots, derived on demand
+    (state), equal to the state it was built or decoded from;
+  - otherwise the envelope (PBAtomEnvelope: tag, oid, the state PBFrozenDict
+    and the slots), as a load or a constructor made it: a record of a class
+    with no persisted fields (PBObject), a record whose names differ from its
+    class's shape, a write that leaves a field of its class absent, an opaque
+    atom.
+ A constructor writes the fields it knows on the fresh instance, in one write
+ group, and never writes nil (an unset instance variable reads as nil). Every
+ later fill writes a field once, by a compare-and-swap from nil on the
+ instance variable itself (_publishOid:, _publishSaved:, _publishMemo:, and
+ _slots), so two threads that race install one value and both answer it. A
+ load publishes the memo last for a shaped record (its oid and slots first)
+ and first for an envelope (its slots then, from the installed envelope), so
+ a reader that sees the memo sees the fields it is read with, and every
+ reader sees nil or one immutable slots Array.
 
  Identity (ProtoBase D21, core/atom.py _assign_oid): an atom's oid is not a
  storage id. A stored atom's oid is its record's (a stub loads the record to
@@ -372,22 +389,32 @@ PBAtom class >> slotFields
 PBAtom class >> _recordShape
   ^ _PBRecordShape for: self.
 
-"The envelope an atom of this class holds for aState, a state its caller built
- (an unsaved atom's tag aTag and oid anOid), with the slots, its integer fields
- checked."
-PBAtom class >> _envelopeTag: aTag oid: anOid state: aState for: anAtom
-  | shape |
-  shape := self _recordShape.
-  ^ PBAtomEnvelope basicNew _setTag: aTag oid: anOid state: aState
-    slots: (shape check: (shape slotsOf: aState) of: anAtom).
+"The memo an atom of this class keeps for aState, whose slots (aShape
+ slotsOf:) are aSlotArray: aShape, the class's record shape, when the atom
+ keeps its state as its slots (_PBRecordShape keepsState:), else the in-memory
+ envelope of aState (tag aTag, no oid) with the slots."
+PBAtom class >> _memoOfState: aPBFrozenDict slots: aSlotArray tag: aTag shape: aShape
+  (aShape keepsState: aPBFrozenDict) ifTrue: [^ aShape].
+  ^ PBAtomEnvelope basicNew _setTag: aTag oid: nil state: aPBFrozenDict slots: aSlotArray.
 
-"The envelope anAtom of this class keeps once its record at aPointer is
- loaded: anEnvelope as the storage decoded it, checked against the class (its
- required fields, the reserved names, its integer fields), with the slots. The
- required fields are not searched for when the shape proves them present
- (_PBRecordShape holdsRequiredFields:)."
-PBAtom class >> _loadedEnvelope: anEnvelope at: aPointer for: anAtom
-  | shape state missing |
+"The memo a new atom of this class keeps when a writer gives anArray, the
+ values of the first anArray size fields of aShape, the class's record shape
+ (_unsavedWithSlots:), whose slots are aPaddedArray (aShape slotsPadded:
+ anArray): aShape when anArray holds every field (_PBRecordShape keepsSlots:),
+ else the in-memory envelope of the state they make (_PBRecordShape
+ stateOfSlots:)."
+PBAtom class >> _memoOfSlots: anArray padded: aPaddedArray shape: aShape
+  (aShape keepsSlots: anArray) ifTrue: [^ aShape].
+  ^ PBAtomEnvelope basicNew _setTag: nil oid: nil state: (aShape stateOfSlots: anArray) slots: aPaddedArray.
+
+"Checks anEnvelope, the record at aPointer as a storage decoded it (or as the
+ atom cache rebuilt it), against this class (its required fields, the reserved
+ names, its integer fields) and fills anAtom, a stub of that record or its
+ decoded twin, with what it keeps (see the class comment); answers anAtom's
+ memo, the one installed. The required fields are not searched for when the
+ shape proves them present (_PBRecordShape holdsRequiredFields:)."
+PBAtom class >> _load: anEnvelope at: aPointer into: anAtom
+  | shape state missing recordSlots |
   shape := self _recordShape.
   state := anEnvelope state.
   (shape holdsRequiredFields: state) ifFalse: [
@@ -396,8 +423,10 @@ PBAtom class >> _loadedEnvelope: anEnvelope at: aPointer for: anAtom
       ^ PBCorruptionError signal: 'the atom at ' , aPointer printString , ' (' , (PBTypeRegistry nameOfTag: anAtom tag)
         , ') lacks the required fields ' , missing printString]].
   self _checkPersistedNames: state at: aPointer.
-  ^ PBAtomEnvelope basicNew _setTag: anEnvelope tag oid: anEnvelope oid state: state
-    slots: (shape check: (shape slotsOf: state) of: anAtom).
+  recordSlots := shape check: (shape slotsOf: state) of: anAtom.
+  (shape keepsState: state) ifTrue: [^ anAtom _publishOid: anEnvelope oid slots: recordSlots memo: shape].
+  ^ anAtom _publishEnvelope: (PBAtomEnvelope basicNew _setTag: anEnvelope tag oid: anEnvelope oid state: state
+    slots: recordSlots).
 
 "The check of a loaded record's attribute names against the behaviour names
  of this class (format spec, 'Attribute names'): PBCorruptionError for a
@@ -418,30 +447,35 @@ PBAtom class >> _unsavedWithState: aPBFrozenDict
   ^ self _unsavedWithState: aPBFrozenDict tag: nil.
 
 "As _unsavedWithState:, for a caller that built aPBFrozenDict itself. aTag is
- kept in the in-memory envelope only (the AVL writes pass the tag they computed
- once per class); the save writes PBAtom >> tag, read from the class."
+ kept in the in-memory envelope only, when the atom keeps one; the save writes
+ PBAtom >> tag, read from the class."
 PBAtom class >> _unsavedWithState: aPBFrozenDict tag: aTag
   ^ self _unsaved: self basicNew withState: aPBFrozenDict tag: aTag.
 
 "aBlank (a fresh basicNew instance of this class, which a subclass may have
  given its own runtime-only fields first) made an unsaved atom holding
- aPBFrozenDict. The attribute names must be valid (PBAtomEnvelope
- _nameProblem:): the save does not check them again (PBAtomEnvelope
- _ofAtomTag:oid:state:); the public constructors guarantee it. The values may
- come from a decoded record (PBObject >> withAll: copies the fields it does
- not change, a tree rebuild copies stored values), so they are not trusted to
- be writable: the save checks each as a writer must (PBAtomEnvelope >>
- encode)."
+ aPBFrozenDict, its integer fields checked. The attribute names must be valid
+ (PBAtomEnvelope _nameProblem:): the save does not check them again
+ (PBAtomEnvelope _ofAtomTag:oid:state:); the public constructors guarantee
+ it. The values may come from a decoded record (PBObject >> withAll: copies
+ the fields it does not change, a tree rebuild copies stored values), so they
+ are not trusted to be writable: the save checks each as a writer must
+ (PBAtomEnvelope >> encode)."
 PBAtom class >> _unsaved: aBlank withState: aPBFrozenDict tag: aTag
-  | atom |
+  | atom shape recordSlots |
   atom := aBlank _setOid: nil pointer: nil storage: nil.
-  ^ atom _installState: (self _envelopeTag: aTag oid: nil state: aPBFrozenDict for: atom).
+  shape := self _recordShape.
+  recordSlots := shape check: (shape slotsOf: aPBFrozenDict) of: atom.
+  ^ atom _installSlots: recordSlots
+    memo: (self _memoOfState: aPBFrozenDict slots: recordSlots tag: aTag shape: shape).
 
-PBAtom >> _installState: anEnvelope
-  "Runs once, on a fresh instance: an unsaved atom, or a decoded twin. The
-   envelope is installed, so its slots are the ones to publish."
-  (memo value: anEnvelope ifCurrent: nil) ifFalse: [^ PBUserError signal: 'PBAtom: the state is installed once'].
-  self setInstVar: #slots from: nil to: anEnvelope slots.
+PBAtom >> _installSlots: anArray memo: aMemo
+  "Runs once, on a fresh instance that is not shared yet: an unsaved atom. Its
+   slots and its memo (the record shape, or an envelope) are written in one
+   write group."
+  memo isNil ifFalse: [^ PBUserError signal: 'PBAtom: the state is installed once'].
+  memo := aMemo.
+  slots := anArray.
   ^ self.
 
 "A new, unsaved atom of this class whose slots are anArray, the values of the
@@ -450,16 +484,11 @@ PBAtom >> _installState: anEnvelope
  (heights, counts, weights), so the integer fields are not checked again.
  anArray is kept as the slots: never to be changed."
 PBAtom class >> _unsavedWithSlots: anArray
-  | shape |
+  | shape padded |
   shape := self _recordShape.
-  ^ self _unsavedWithSlots: (shape slotsPadded: anArray) state: (shape stateOfSlots: anArray).
-
-"As _unsavedWithSlots:, for a writer that has every slot, aSlotArray, and the
- state they make, aPBFrozenDict (a node copy that carries fields it does not
- know: PBNode >> _copyWithSlots:)."
-PBAtom class >> _unsavedWithSlots: aSlotArray state: aPBFrozenDict
+  padded := shape slotsPadded: anArray.
   ^ (self basicNew _setOid: nil pointer: nil storage: nil)
-    _installState: (PBAtomEnvelope basicNew _setTag: nil oid: nil state: aPBFrozenDict slots: aSlotArray).
+    _installSlots: padded memo: (self _memoOfSlots: anArray padded: padded shape: shape).
 
 "An unloaded atom (a stub) of this class: its record is at aPointer in
  aStorage and is loaded on first use."
@@ -471,15 +500,61 @@ PBAtom class >> unloadedAt: aPointer storage: aStorage
   ^ self basicNew _setOid: nil pointer: aPointer storage: aStorage.
 
 PBAtom >> _setOid: anOid pointer: aPointer storage: aStorage
-  "Runs once, on a fresh instance. A stub (aPointer given) is stored from the
-   start and has no saved cell; an atom made in memory gets one."
-  memo isNil ifFalse: [^ PBUserError signal: 'PBAtom is initialised once'].
-  oid := Atom on: anOid.
+  "Runs once, on a fresh instance: every constructor of an atom calls it. A stub
+   (aPointer and aStorage given, and anOid when the caller knows it: a decoded
+   twin) gets them in one write group; an atom made in memory gets anOid when
+   one is given, and nothing else. No field is written nil: an unset instance
+   variable reads as nil. A second call is refused once any of these fields or the
+   state is set, so an oid drawn or given is never replaced."
+  (memo isNil and: [pointer isNil and: [oid isNil]]) ifFalse: [^ PBUserError signal: 'PBAtom is initialised once'].
+  aPointer isNil ifTrue: [
+    anOid isNil ifFalse: [oid := anOid].
+    ^ self].
+  anOid isNil ifTrue: [
+    pointer := aPointer.
+    storage := aStorage.
+    ^ self].
+  oid := anOid.
   pointer := aPointer.
   storage := aStorage.
-  saved := aPointer isNil ifTrue: [Atom on: nil] ifFalse: [nil].
-  memo := Atom on: nil.
   ^ self.
+
+"The write-once publishers of the runtime-only fields (spec 4.1, decision 3):
+ each installs its argument unless the field holds a value already, by a
+ compare-and-swap from nil on the instance variable, and answers the value the
+ field then holds: the argument, or the value an earlier or a racing
+ publication installed (the loser of a race answers the winner's)."
+PBAtom >> _publishOid: anOid
+  self setInstVar: #oid from: nil to: anOid.
+  ^ oid.
+
+PBAtom >> _publishSaved: aPBPlace
+  self setInstVar: #saved from: nil to: aPBPlace.
+  ^ saved.
+
+PBAtom >> _publishMemo: aMemo
+  self setInstVar: #memo from: nil to: aMemo.
+  ^ memo.
+
+"The load of a record the atom keeps as its slots (PBAtom class >>
+ _load:at:into:): its oid, then its slots, then aShape, the memo, each by a
+ compare-and-swap from nil, so a reader that sees the memo sees the oid and
+ the slots. Racing loads of one record publish equal oids and slots: each
+ field keeps the first, and every racer answers the installed memo."
+PBAtom >> _publishOid: anOid slots: anArray memo: aShape
+  self _publishOid: anOid.
+  self setInstVar: #slots from: nil to: anArray.
+  ^ self _publishMemo: aShape.
+
+"The load of a record the atom keeps as an envelope (PBAtom class >>
+ _load:at:into:): anEnvelope, then the slots of the envelope installed (the
+ first racer's), each by a compare-and-swap from nil; answers the installed
+ envelope."
+PBAtom >> _publishEnvelope: anEnvelope
+  | installed |
+  installed := self _publishMemo: anEnvelope.
+  self setInstVar: #slots from: nil to: installed slots.
+  ^ installed.
 
 "A reference to an atom, for PBCodec."
 PBAtom >> isPBReference
@@ -488,19 +563,15 @@ PBAtom >> isPBReference
 "The atom's PBAtomPointer: a stub's, or the one its save recorded; nil while
  it is not saved."
 PBAtom >> pointer
-  | place |
   pointer isNil ifFalse: [^ pointer].
   saved isNil ifTrue: [^ nil].
-  place := saved value.
-  ^ place isNil ifTrue: [nil] ifFalse: [place pointer].
+  ^ saved pointer.
 
 "The storage the atom is stored in (nil while it is not saved)."
 PBAtom >> _storage
-  | place |
   storage isNil ifFalse: [^ storage].
   saved isNil ifTrue: [^ nil].
-  place := saved value.
-  ^ place isNil ifTrue: [nil] ifFalse: [place storage].
+  ^ saved storage.
 
 "Whether the atom has a record (a stub, or an atom whose save is done)."
 PBAtom >> isSaved
@@ -510,14 +581,14 @@ PBAtom >> isSaved
  drawing one: a stub learns its oid from its record, an atom that is not stored
  draws it on first need (oid)."
 PBAtom >> knownOid
-  ^ oid value.
+  ^ oid.
 
 "The tag a writer puts for this atom's type (PBTypeRegistry tagFor:)."
 PBAtom >> tag
   ^ PBTypeRegistry tagFor: self class.
 
 PBAtom >> isLoaded
-  ^ memo value notNil.
+  ^ memo notNil.
 
 "A new, unloaded stub of this stored atom: what a holder answers when it must
  not keep the record loaded (DatabaseRoot previous, D53). An atom with no
@@ -528,11 +599,13 @@ PBAtom >> unloadedCopy
   ptr isNil ifTrue: [^ self].
   ^ self class unloadedAt: ptr storage: self _storage.
 
-"The loaded envelope, loading it once through the storage."
-PBAtom >> _envelope
-  ^ self _envelopeWithin: #().
+"The memo (the record shape, or the envelope), loading the record once through
+ the storage."
+PBAtom >> _loaded
+  memo isNil ifFalse: [^ memo].
+  ^ self _loadedWithin: #().
 
-"The loaded envelope, loaded within aChain: an Array of the pointers whose
+"The memo, the record loaded within aChain: an Array of the pointers whose
  decoding is in progress on this call stack and needs this record (a map key
  is identified by its oid, so decoding a map whose keys are references loads
  them: PBCodec asks its resolver, _PBLoadResolver, to load each key within the
@@ -548,29 +621,26 @@ PBAtom >> _envelope
  save-dependents-first invariant (review note N3 of plan Task 10). The chain is passed explicitly, never
  kept in a stub and never shared, so loads on other threads are independent and
  an application's exception handlers see nothing."
-PBAtom >> _envelopeWithin: aChain
-  | envelope |
-  envelope := memo value.
-  envelope isNil ifFalse: [^ envelope].
+PBAtom >> _loadedWithin: aChain
+  memo isNil ifFalse: [^ memo].
   (storage isNil or: [pointer isNil]) ifTrue: [
     ^ PBUserError signal: self class name , ': an atom with no stored record has no state to load'].
   (aChain includes: pointer) ifTrue: [
     ^ PBCorruptionError signal: 'the record at ' , pointer printString , ' (' , (PBTypeRegistry nameOfTag: self tag)
       , ') cannot be loaded: decoding its state needs the record itself (a map key refers back to it: damaged data, or a writer that broke the save-dependents-first invariant)'].
-  envelope := storage _pbLoadedEnvelopeAt: pointer for: self within: (aChain copyWith: pointer).
-  (memo value: envelope ifCurrent: nil) ifTrue: [^ envelope].
-  ^ memo value.
+  ^ storage _pbLoad: pointer into: self within: (aChain copyWith: pointer).
 
-"The slots Array (_PBRecordShape): the installed envelope's, loading the
- record on first use. It is published into the slots field once, by
- compare-and-swap from nil, and always from the envelope the memo cell holds,
- so a reader of the field sees nil or this one Array. The literal accessors
- read the field and come here only while it is nil."
+"The slots Array (_PBRecordShape), loading the record on first use. A load
+ publishes it; while the memo is an envelope whose slots are not published yet
+ (a racing load is between its two compare-and-swaps), they are published
+ here from the installed envelope, so a reader of the field sees nil or this
+ one Array. The literal accessors read the field and come here only while it
+ is nil."
 PBAtom >> _slots
-  | envelope |
-  envelope := self _envelope.
-  self setInstVar: #slots from: nil to: envelope slots.
-  ^ envelope slots.
+  | m |
+  m := self _loaded.
+  slots == nil ifTrue: [self setInstVar: #slots from: nil to: m slots].
+  ^ slots.
 
 "The slot anIndex (_PBRecordShape): what a literal accessor reads. The
  built-in node classes read the slots field directly. An application
@@ -583,36 +653,53 @@ PBAtom >> _slotAt: anIndex
   ^ slots at: anIndex.
 
 "The persisted state, a PBFrozenDict of attribute name to value, in the
- record's order (loaded on first use)."
+ record's order (loaded on first use): the envelope's, or, for an atom that
+ keeps its slots, a PBFrozenDict on its shape's keys over them, made on
+ demand (= to the state the atom was built or decoded from; never ==)."
 PBAtom >> state
-  ^ self _envelope state.
+  | m |
+  m := memo.
+  m isNil ifTrue: [m := self _loaded].
+  ^ m _pbStateOver: slots.
 
 "The value of the persisted attribute aName; an attribute the record does not
  hold reads as nil (an application type's later field, format spec 'Required
  fields')."
 PBAtom >> stateAt: aName
-  "Every field read of every atom runs here: the loaded envelope is read from
-   its cell directly, and the lookup creates no block."
-  | envelope state i |
-  envelope := memo value.
-  envelope isNil ifTrue: [envelope := self _envelope].
-  state := envelope state.
-  i := state _indexOfKey: aName.
+  "Every field read of every atom runs here: the memo is read from its field
+   directly (the slots are set once it is), the lookup creates no block and,
+   for an atom that keeps its slots, no state."
+  | m i |
+  m := memo.
+  m isNil ifTrue: [m := self _loaded].
+  i := m _pbIndexOfField: aName.
   i = 0 ifTrue: [^ self _absentField: aName].
-  ^ state _valueAt: i.
+  ^ m _pbFieldAt: i over: slots.
 
 PBAtom >> _absentField: aName
   ^ nil.
 
+"As state at: aName ifAbsent: aBlock, without making the state of an atom
+ that keeps its slots (plan Task 12): the per-row field read of a key path
+ (PBKeySpec >> _step:name:)."
+PBAtom >> _stateAt: aName ifAbsent: aBlock
+  | m i |
+  m := memo.
+  m isNil ifTrue: [m := self _loaded].
+  i := m _pbIndexOfField: aName.
+  i = 0 ifTrue: [^ aBlock value].
+  ^ m _pbFieldAt: i over: slots.
+
 "The atom's oid (16 bytes): the record's for a stored atom (a stub loads it);
  for an atom that is not stored, the one drawn on first need (ProtoBase D21)."
 PBAtom >> oid
-  | known |
-  known := oid value.
-  known isNil ifFalse: [^ known].
-  pointer isNil ifFalse: [^ self _envelope oid].
-  oid value: self _newOid ifCurrent: nil.
-  ^ oid value.
+  | m |
+  oid isNil ifFalse: [^ oid].
+  pointer isNil ifTrue: [^ self _publishOid: self _newOid].
+  m := self _loaded.
+  "A record the atom keeps as its slots published its oid before the memo."
+  oid isNil ifFalse: [^ oid].
+  ^ m oid.
 
 "A fresh oid: the 16 bytes of a version-4 UUID (ProtoBase uuid.uuid4()), from
  _PBOidPool. The seam a test overrides to drive two first readers in a chosen
@@ -630,41 +717,58 @@ one call to the generator instead of a dozen. Every oid is 16 bytes of the
 generator's output, of which the same 6 bits are fixed as in UUID new, so the
 distribution is UUID new's.
 
-The pool is an Atom holding { bytes. next }: the batch (batchSize * 16 bytes,
-already marked) and the offset of the next unused oid. A draw takes the slice at
-next by compare-and-swap of a new pair, so each slice is handed out once,
-whatever the threads; a batch that is used up is replaced by a fresh one, by
-compare-and-swap too (a batch drawn by a loser of that race is dropped, never
-handed out). No lock, and nothing depends on timing."
-Object subclass: #_PBOidPool classVariableNames: 'Pool'.
+The pool is an Atom holding the unused rest of the current batch: a ByteArray
+of whole oids (a multiple of 16 bytes, already marked). A draw takes the first
+16 bytes by compare-and-swap of the rest after them; the compare is by
+identity and every rest is a new object, so each slice is handed out once,
+whatever the threads. A batch that is used up (an empty rest) is replaced by a
+fresh one, by compare-and-swap too (a batch drawn by a loser of that race is
+dropped, never handed out). No lock, and nothing depends on timing.
+
+A draw allocates the two slices and the publication (plan Task 12). A batch is
+marked by concatenating slices of the generator's bytes with the marked bytes
+from a table of the 256 one-byte ByteArrays (ByteArrays are immutable, and
+setting the two bytes of each oid through an Array of the batch's bytes cost
+about 276 cells per oid drawn)."
+Object subclass: #_PBOidPool classVariableNames: 'Pool Bytes'.
 
 _PBOidPool class >> batchSize
   ^ 64.
 
 "The 16 bytes of a fresh version-4 UUID."
 _PBOidPool class >> next
-  [| current bytes at |
+  [| current |
    current := Pool value.
-   bytes := current at: 1.
-   at := current at: 2.
-   at + 16 > bytes size
-     ifTrue: [Pool value: { self _batch. 0 } ifCurrent: current]
-     ifFalse: [(Pool value: { bytes. at + 16 } ifCurrent: current) ifTrue: [^ bytes copyFrom: at + 1 to: at + 16]]]
+   current size < 16
+     ifTrue: [Pool value: self _batch ifCurrent: current]
+     ifFalse: [
+       (Pool value: (current copyFrom: 17 to: current size) ifCurrent: current) ifTrue: [
+         ^ current copyFrom: 1 to: 16]]]
     repeat.
 
-"batchSize oids: random bytes with the version and variant bits of each set."
+"batchSize oids: random bytes, marked (_mark:)."
 _PBOidPool class >> _batch
-  | raw marked |
-  raw := ByteArray randomBytes: self batchSize * 16.
-  marked := Array new: raw size.
-  1 to: raw size do: [:i | marked at: i put: (raw at: i)].
-  0 to: self batchSize - 1 do: [:k |
-    marked at: k * 16 + 7 put: (((raw at: k * 16 + 7) bitAnd: 16r0F) bitOr: 16r40).
-    marked at: k * 16 + 9 put: (((raw at: k * 16 + 9) bitAnd: 16r3F) bitOr: 16r80)].
-  ^ ByteArray withAll: marked.
+  ^ self _mark: (ByteArray randomBytes: self batchSize * 16).
+
+"aByteArray, oids of 16 bytes back to back, with the version and variant bits
+ of each set as UUID new sets them: byte 7's high nibble is 4 (version 4) and
+ byte 9's two high bits are 2r10 (the variant); every other bit is kept."
+_PBOidPool class >> _mark: aByteArray
+  | out |
+  out := ByteArray new.
+  0 to: aByteArray size // 16 - 1 do: [:k |
+    | at |
+    at := k * 16.
+    out := out , (aByteArray copyFrom: at + 1 to: at + 6)
+      , (Bytes at: (((aByteArray at: at + 7) bitAnd: 16r0F) bitOr: 16r40) + 1)
+      , (aByteArray copyFrom: at + 8 to: at + 8)
+      , (Bytes at: (((aByteArray at: at + 9) bitAnd: 16r3F) bitOr: 16r80) + 1)
+      , (aByteArray copyFrom: at + 10 to: at + 16)].
+  ^ out.
 
 _PBOidPool class >> _initializePool
-  Pool := Atom on: { ByteArray new. 0 }.
+  Bytes := (0 to: 255) asArray collect: [:b | ByteArray withAll: { b }].
+  Pool := Atom on: ByteArray new.
 
 _PBOidPool _initializePool.
 
@@ -690,7 +794,7 @@ PBAtom >> printOn: aStream
  its publisher (publisher.st), one round at a time."
 
 "A saved atom's place: its pointer and the storage it was written to (an
- immutable pair, what the saved cell of an atom holds)."
+ immutable pair, what the saved field of an atom holds)."
 Object subclass: #_PBPlace instanceVariableNames: 'pointer storage'.
 
 _PBPlace class >> pointer: aPointer storage: aStorage
@@ -730,30 +834,34 @@ PBAtom >> _saveInto: aStorage
   | stack known |
   known := self _pointerIn: aStorage.
   known isNil ifFalse: [^ known].
-  "Pairs { atom. its unsaved references, or nil before they are listed }."
+  "Frames { atom. nil } before the atom is visited, { atom. its state. its
+   unsaved references } once it is: the state is built once per atom saved and
+   serves the walk, the record and the atom cache (plan Task 10)."
   stack := OrderedCollection new.
   stack addLast: self; addLast: nil.
   [stack notEmpty] whileTrue: [
-    | refs atom |
+    | refs atom st |
     refs := stack removeLast.
-    atom := stack last.
     refs isNil
       ifTrue: [
+        atom := stack last.
         (atom _pointerIn: aStorage) isNil
           ifTrue: [
             "The class is checked before any dependent is written or bound to
              aStorage, as ProtoBase's _save checks the declared type name before
              it encodes the state."
             atom tag.
+            st := atom state.
             refs := OrderedCollection new.
-            atom state _pbAddUnsavedAtomsTo: refs in: aStorage.
-            stack addLast: refs.
+            st _pbAddUnsavedAtomsTo: refs in: aStorage.
+            stack addLast: st; addLast: refs.
             refs size to: 1 by: -1 do: [:i | stack addLast: (refs at: i); addLast: nil]]
           ifFalse: [stack removeLast]]
       ifFalse: [
-        stack removeLast.
+        st := stack removeLast.
+        atom := stack removeLast.
         "A dependent met twice is saved once: the second visit finds it saved."
-        (atom _pointerIn: aStorage) isNil ifTrue: [atom _pushInto: aStorage]]].
+        (atom _pointerIn: aStorage) isNil ifTrue: [atom _push: st into: aStorage]]].
   ^ self pointer.
 
 "The pointer of this atom in aStorage, or nil while it is not saved; an atom
@@ -763,7 +871,7 @@ PBAtom >> _pointerIn: aStorage
   pointer isNil ifFalse: [
     storage == aStorage ifTrue: [^ pointer].
     ^ self _storedElsewhere: aStorage].
-  place := saved value.
+  place := saved.
   place isNil ifTrue: [^ nil].
   place storage == aStorage ifTrue: [^ place pointer].
   ^ self _storedElsewhere: aStorage.
@@ -780,53 +888,44 @@ PBAtom >> _storedElsewhere: aStorage
  (the record just pushed is an orphan nothing refers to, in an append-only
  segment); in another storage, PBValidationError, the error a sequential
  second save meets (_pointerIn:)."
-PBAtom >> _pushInto: aStorage
-  | ptr |
-  ptr := aStorage pushAtom: (PBAtomEnvelope _ofAtomTag: self tag oid: self oid state: self state).
-  (saved value: (_PBPlace pointer: ptr storage: aStorage) ifCurrent: nil) ifTrue: [
-    aStorage _pbSaved: self at: ptr.
+PBAtom >> _push: aState into: aStorage
+  | ptr place |
+  ptr := aStorage pushAtom: (PBAtomEnvelope _ofAtomTag: self tag oid: self oid state: aState).
+  place := _PBPlace pointer: ptr storage: aStorage.
+  (self _publishSaved: place) == place ifTrue: [
+    aStorage _pbSaved: self state: aState at: ptr.
     ^ ptr].
   ^ self _pointerIn: aStorage.
 
 "=== loading through a storage, and the stored form of a saved state =========="
 
-"The loaded envelope of the record at aPointer for anAtom, a stub of this
- storage (PBAtom >> _envelopeWithin:): the record decoded, expecting anAtom's
- tag, within aChain, then checked against anAtom's class (_loadedEnvelope:).
- A storage may answer one it holds already (PBFileStorage's atom cache)."
-Object >> _pbLoadedEnvelopeAt: aPointer for: anAtom within: aChain
-  ^ anAtom class _loadedEnvelope: (self loadAt: aPointer expecting: anAtom tag within: aChain)
-    at: aPointer for: anAtom.
+"Loads the record at aPointer into anAtom, a stub of this storage (PBAtom >>
+ _loadedWithin:): the record decoded, expecting anAtom's tag, within aChain,
+ then checked against anAtom's class, which fills anAtom (PBAtom class >>
+ _load:at:into:); answers anAtom's memo. A storage may rebuild the record from
+ what it holds already (PBFileStorage's atom cache)."
+Object >> _pbLoad: aPointer into: anAtom within: aChain
+  ^ anAtom class _load: (self loadAt: aPointer expecting: anAtom tag within: aChain) at: aPointer into: anAtom.
 
-"Told by a save that anAtom's record is now at aPointer in this storage (a
- storage may keep the loaded envelope a decode of it would give)."
-Object >> _pbSaved: anAtom at: aPointer
+"Told by a save that anAtom's record, of the state aState, is now at aPointer
+ in this storage (a storage may keep what a decode of it would give)."
+Object >> _pbSaved: anAtom state: aState at: aPointer
   ^ self.
 
-"What a decode of the record of this saved atom's state would hold, built
- from the state without decoding: each attribute value that is an atom becomes
- a new stub of it in aStorage (the atom itself is never shared: its runtime
- fields belong to the transaction that made it), each other value is itself,
- canonical and immutable. nil when a container value holds a reference, or a
- value is a reference read without a resolver: those are left to a decode."
-PBAtom >> _pbStoredStateIn: aStorage
-  | st values shape |
-  st := self state.
-  values := Array new: st size.
-  1 to: st size do: [:i |
-    | v kind |
-    v := st _valueAt: i.
-    kind := v _pbReferenceKind.
-    kind = 0 ifFalse: [
-      kind = 1 ifFalse: [^ nil].
-      v := v _pbStubIn: aStorage].
-    values at: i put: v].
-  "As a decode does, a state in the persisted order of its class shares the
-   class's keys and index."
+"aState, this atom's state as its save just wrote it, in the form a decode of
+ that record would hold before its references are resolved: the same values
+ (an atom stays itself; the storage that caches it makes the one new stub of
+ each, PBFileStorage >> _pbOwnValues:), and, as a decode does, on the class's
+ shared keys and index when it is in the persisted order of its class. nil when
+ a container value holds a reference, or a value is a reference read without a
+ resolver: those are left to a decode."
+PBAtom >> _pbCacheableState: aState
+  | shape values |
+  aState _pbHoldsNestedReference ifTrue: [^ nil].
   shape := self class _recordShape.
-  (st _valuesIfKeys: shape persisted) notNil ifTrue: [
-    ^ PBFrozenDict _keys: shape persisted index: shape persistedIndex values: values].
-  ^ st _withValues: values.
+  values := aState _valuesIfKeys: shape persisted.
+  values isNil ifTrue: [^ aState].
+  ^ PBFrozenDict _keys: shape persisted index: shape persistedIndex values: values.
 
 "0: the value holds no reference; 1: it is an atom; 2: it is a reference read
  without a resolver, or a container holding a reference."
@@ -899,7 +998,8 @@ PBAtom >> _decodedTwin
     expecting: self tag
     resolver: (_PBLoadResolver storage: st chain: { ptr }).
   twin := self class basicNew _setOid: envelope oid pointer: ptr storage: st.
-  ^ twin _installState: (self class _loadedEnvelope: envelope at: ptr for: twin).
+  self class _load: envelope at: ptr into: twin.
+  ^ twin.
 
 "=== record shapes (plan Task 16b) ==========================================="
 
@@ -916,6 +1016,13 @@ PBAtom >> _decodedTwin
   integerSlots    the slots of its integerFields that are required (nil is
                   corruption) and optionalIntegerSlots, those that are not (nil
                   is an older record, valid)
+  slotsAreState   whether persisted is not empty and fields is persisted itself:
+                  then a record holding exactly the persisted fields, in order,
+                  is its slots under persisted (keepsState:), and an atom keeps
+                  no state of its own (PBAtom, plan Task 12)
+  namesValid      whether every persisted name may be a record's attribute name
+                  (nameProblem:), so a decoder that finds a record's names equal
+                  to persisted need not check each (PBAtomEnvelope decode:...)
 
  A record carries a slots Array, the values of fields in that order (nil for a
  field the state does not hold), which the accessors read at literal slot
@@ -923,7 +1030,7 @@ PBAtom >> _decodedTwin
  every registered class that declares one). The slots are derived from the
  immutable state once per record and are never persisted, compared or hashed:
  the state stays the record, in its own order. A shape is immutable."
-Object subclass: #_PBRecordShape instanceVariableNames: 'persisted persistedIndex fields persistedSlots integerSlots optionalIntegerSlots requiredPersisted required'
+Object subclass: #_PBRecordShape instanceVariableNames: 'persisted persistedIndex fields persistedSlots integerSlots optionalIntegerSlots requiredPersisted required slotsAreState namesValid'
   classVariableNames: 'Table'.
 
 "Table: an Atom cell holding a Dictionary class -> shape, never changed once
@@ -992,7 +1099,23 @@ _PBRecordShape >> _setPersisted: anArray index: aPBMapKeyIndex fields: aFieldArr
   optionalIntegerSlots := anOptionalArray.
   required := aRequiredArray.
   requiredPersisted := aRequiredArray allSatisfy: [:f | anArray includes: f].
+  slotsAreState := anArray notEmpty and: [aFieldArray == anArray].
+  namesValid := anArray allSatisfy: [:f | (_PBRecordShape nameProblem: f) isNil].
   ^ self.
+
+"Why aName cannot be a persisted attribute name, or nil (format spec 'Atom
+ records'): a non-empty String, not starting with _, not oid, atom_pointer or
+ context. The rule of every reader and writer (PBAtomEnvelope _nameProblem:),
+ run once per key path step: the reserved names are compared one by one (a
+ literal Array's includes: cost more than the rest of the rule together; plan
+ Task 10)."
+_PBRecordShape class >> nameProblem: aName
+  ((aName isString and: [aName isSymbol not]) and: [aName notEmpty]) ifFalse: [
+    ^ 'an attribute name is a non-empty string, not ' , aName printString].
+  aName first = $_ ifTrue: [^ 'the attribute name ' , aName printString , ' starts with _'].
+  (aName = 'oid' or: [aName = 'atom_pointer' or: [aName = 'context']]) ifTrue: [
+    ^ 'the attribute name ' , aName printString , ' is reserved'].
+  ^ nil.
 
 "The persistedFields, shared by the states built on them (never to be changed)."
 _PBRecordShape >> persisted
@@ -1005,6 +1128,41 @@ _PBRecordShape >> persistedIndex
 "The slot order (never to be changed)."
 _PBRecordShape >> fields
   ^ fields.
+
+"Whether every persisted name may be an attribute name (see namesValid)."
+_PBRecordShape >> persistedNamesValid
+  ^ namesValid.
+
+"Whether an atom whose state is aState keeps it as its slots (PBAtom, plan
+ Task 12): the shape's slots are its state (slotsAreState) and aState holds
+ exactly the persisted fields, in order, so its values are its slots (slotsOf:
+ answers them) and a PBFrozenDict on persisted over the slots equals it."
+_PBRecordShape >> keepsState: aState
+  slotsAreState ifFalse: [^ false].
+  ^ (aState _valuesIfKeys: persisted) notNil.
+
+"Whether a new atom whose writer gives anArray, the values of the first
+ anArray size fields (PBAtom class >> _unsavedWithSlots:), keeps them as its
+ slots: the shape's slots are its state and anArray gives every field
+ (stateOfSlots: would answer a PBFrozenDict on persisted over anArray)."
+_PBRecordShape >> keepsSlots: anArray
+  slotsAreState ifFalse: [^ false].
+  ^ anArray size = fields size.
+
+"The memo protocol of PBAtom (shared with PBAtomEnvelope): an atom whose memo
+ is its shape keeps its state as aSlotArray, its slots. Its state, made on
+ demand: the shared keys and index over the slots."
+_PBRecordShape >> _pbStateOver: aSlotArray
+  ^ PBFrozenDict _keys: persisted index: persistedIndex values: aSlotArray.
+
+"The position of the field aName in such a state (the map-key rule, as
+ PBFrozenDict >> _indexOfKey:), or 0."
+_PBRecordShape >> _pbIndexOfField: aName
+  ^ persistedIndex indexOf: aName.
+
+"The value at the position anIndex (from _pbIndexOfField:) of such a state."
+_PBRecordShape >> _pbFieldAt: anIndex over: aSlotArray
+  ^ aSlotArray at: anIndex.
 
 "Whether aState holds every required field because its keys are persisted, in
  order (the shared Array or an equal one), and the class's requiredFields are

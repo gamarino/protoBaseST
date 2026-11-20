@@ -8,7 +8,10 @@
 # boxes and the encoded bytes of each state. The 'list' sequence (plan Task 15) applies
 # PBList's messages (insertAt:, setAt:, removeAt:, appendFirst:, appendLast:, extend:,
 # sliceFrom:to:, head:, tail:, negative positions and nil bounds included) and ProtoBase's
-# List replays them: the lists' trees must be identical too. avl_ops_identical_large.sh does the same at
+# List replays them: the lists' trees must be identical too. The 'bulk' sequence (indexed
+# queries, plan Task 1) builds keyed trees of 0 to 64 and 2000 sorted pairs with keyFromSorted:
+# (KeyNode) and keyFromSortedOrderKeys: (CountedKeyNode), which ProtoBase rebuilds with
+# key_from_sorted and key_from_sorted_okeys: every node line identical. avl_ops_identical_large.sh does the same at
 # about 2000 nodes. Exit 77 without the interop venv.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,7 +23,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 
-for kind in pos key counted list; do
+for kind in pos key counted list bulk; do
     (cd "$HERE" && "$PROTOST" _st_avl_ops.st "$kind" > "$TMP/$kind.txt") || fail "_st_avl_ops.st $kind exited $?"
     "$PY" "$HERE/py_avl_replay.py" "$kind" "$TMP/$kind.txt" || fail "py_avl_replay.py $kind"
 done

@@ -1,4 +1,4 @@
-"EXPECT: ok 82"
+"EXPECT: ok 88"
 "The concurrency table with two protoST actors in one process (design spec 10.4, last line;
  plan Task 21). For every case of tests/interop/concurrency_cases.json, on a new space set up
  by protoST: the actor A starts its transaction and runs its steps, then the actor B does,
@@ -7,12 +7,11 @@
  timing; the driver is the script itself and never waits inside an actor, and an actor waits
  only on its commit's Future, settled by the space's round runner (open question K23, ruling
  R19, CC10). The outcomes and the final contents must be proto_db's
- reference, as the JSON records it, except for the blind write onto an indexed root, where
- both commits end in protoBaseST's documented PBNotSupportedError (design spec 7.4; the JSON's
- 'protobasest' entry). The table also holds the swapped variant of row 7 (fix round 1) and 13 counted set cases
- (plan Task 22 and its review), so it has 27 cases. Only the
- indexed-root case may record a refusal, and only PBNotSupportedError (CaseTable
- recordedFor:variant:). The same steps and dump as the cross-language runs (_case_ops.st)."
+ reference, as the JSON records it, for every case (CaseTable expectedFor: refuses a recorded
+ difference; the blind write onto an indexed root merges since indexed queries plan Task 4b).
+ The table also holds the swapped variant of row 7 (fix round 1), 13 counted set cases (plan
+ Task 22 and its review) and two concurrent addIndex: cases (plan Task 4b), so it has 29 cases.
+ The same steps and dump as the cross-language runs (_case_ops.st)."
 Import from: 'protobase'.
 Import from: '../tests/interop/_case_ops'.
 Import from: '_check'.
@@ -21,7 +20,7 @@ Import from: '_check'.
 c := Check new.
 base := FileSystem temp / ('pbst-concurrency-actors-' , Smalltalk pid printString).
 cases := CaseTable load.
-c that: 'the 13 rows of design spec 10.4, the swapped row 7 and the 13 counted set cases' is: cases size equals: 27.
+c that: 'the 13 rows of design spec 10.4, the swapped row 7, the 13 counted set cases and the 2 addIndex: cases' is: cases size equals: 29.
 [base deleteAll.
  cases do: [:case | | id dir space db a b outcomeA outcomeB recorded |
    id := case at: 'id'.
@@ -35,7 +34,7 @@ c that: 'the 13 rows of design spec 10.4, the swapped row 7 and the 13 counted s
     (b start: (case at: 'b') in: db) wait.
     outcomeB := b commit wait.
     outcomeA := a commit wait.
-    recorded := CaseTable recordedFor: case variant: 'actors'.
+    recorded := CaseTable expectedFor: case.
     c that: id , ': the outcomes' is: 'A=' , outcomeA , ' B=' , outcomeB equals: (recorded at: 'outcome').
     c that: id , ': the final contents' is: (CaseTable dump: case in: db) equals: (recorded at: 'dump') asArray.
     c that: id , ': a new space reads them too' is: [ | other |

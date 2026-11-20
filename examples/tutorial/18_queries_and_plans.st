@@ -1,0 +1,112 @@
+"EXPECT: 18 queries and plans ok (25 checks)"
+"Lesson 18: queries and the planner.
+ Tutorial chapter: docs/tutorial/18-queries-and-plans.md
+
+ What it teaches:
+ - a PBQuery is a value: every message answers a new query, so a cascade loses all but its
+   last message, and a field compared with = answers a Boolean, not a predicate;
+ - explain answers the plan that runs, node by node, with an estimate per node;
+ - one access path plus residual filters; an index never changes an answer;
+ - for a one-element collection the cost model prefers the scan;
+ - not (age = 30) is not age ne: 30: an element without an age satisfies only the first;
+ - an OR uses a union only when every branch has an index;
+ - a block predicate is opaque: it never uses an index, and it is named in explain.
+
+ Run it (from examples/tutorial): STPATH=<repository>/src protost 18_queries_and_plans.st"
+Import from: 'protobase'.
+Import from: '_lesson'.
+
+| lesson dir space db cities people planOf q city age cascaded kept oslo plan oldInOslo scan tiny few sevens mixed |
+lesson := Lesson named: '18 queries and plans'.
+dir := FileSystem temp / ('pbst-tutorial-18-' , Smalltalk pid printString).
+dir deleteAll.
+space := PBObjectSpace storage: (PBFileStorage path: dir pathString).
+db := space newDatabase: 'people'.
+cities := #('Lima' 'Oslo' 'Paris' 'Rome').
+db newTransactionDo: [:t |
+    | ps |
+    ps := t newDictionary.
+    0 to: 599 do: [:i |
+        ps := ps setAt: i value: (t newObject: {
+            'name' -> ('person' , i printString).
+            'city' -> (cities at: i \\ 4 + 1).
+            'age' -> (18 + (i \\ 60)) })].
+    t setRootObject: 'people' value: ((ps
+        addIndex: (PBEqualityIndex name: 'by_city' path: 'city'))
+        addIndex: (PBRangeIndex name: 'by_age' path: 'age'))].
+people := db newTransaction getRootObject: 'people'.
+
+"The node names of a plan, from the root down its first children."
+planOf := [:query | | names node |
+    names := OrderedCollection new.
+    node := query explain.
+    [node isNil] whileFalse: [
+        names add: (node at: 'plan').
+        node := (node at: 'children') isEmpty ifTrue: [nil] ifFalse: [(node at: 'children') at: 1]].
+    names inject: '' into: [:acc :each | acc isEmpty ifTrue: [each] ifFalse: [acc , ' <- ' , each]]].
+
+"A query is a value. A cascade sends every message to the first receiver."
+q := PBQuery from: people.
+city := PBField path: 'city'.
+age := PBField path: 'age'.
+cascaded := q where: (city eq: 'Oslo'); take: 5.
+lesson check: 'a cascade sent take: to q: the where: is lost' is: (planOf value: cascaded) equals: 'Limit <- CollectionScan'.
+kept := (q where: (city eq: 'Oslo')) take: 5.
+lesson check: 'keep each answer' is: (planOf value: kept) equals: 'Limit <- IndexLookup'.
+lesson check: 'a field is not compared with =: that is a Boolean' is: (city = 'Oslo') equals: false.
+lesson check: 'and where: refuses a Boolean'
+    signals: PBValidationError containing: 'where: expects a PBExpression or a one-argument block, got a Boolean'
+    during: [q where: city = 'Oslo'].
+
+"Reading a plan: one node."
+oslo := q where: (city eq: 'Oslo').
+plan := oslo explain.
+lesson check: 'the root node' is: (plan at: 'plan') equals: 'IndexLookup'.
+lesson check: 'the index it reads' is: ((plan at: 'index') at: 'index') equals: 'by_city'.
+lesson check: 'the term it answers' is: ((plan at: 'term') at: 'op') equals: '=='.
+lesson check: 'the estimated rows: exact for an equality' is: ((plan at: 'estimate') at: 'rows') equals: 150.
+lesson check: 'the rows it produces' is: oslo count equals: 150.
+
+"Two conditions: one access path, the other a residual filter."
+oldInOslo := q where: ((city eq: 'Oslo') & (age > 70)).
+lesson check: 'the age index, then a filter' is: (planOf value: oldInOslo) equals: 'Filter <- IndexRange'.
+lesson check: 'the filter keeps the city test' is: ((oldInOslo explain at: 'predicate') at: 'path') equals: 'city'.
+lesson check: 'estimated 35 rows, 20 found' is: { (oldInOslo explain at: 'estimate') at: 'rows'. oldInOslo count } equals: #(35 20).
+scan := (PBQuery from: ((people removeIndex: 'by_city') removeIndex: 'by_age')) where: ((city eq: 'Oslo') & (age > 70)).
+lesson check: 'without indexes: a scan' is: (planOf value: scan) equals: 'Filter <- CollectionScan'.
+lesson check: 'the same rows: an index never changes an answer'
+    is: (scan asArray collect: [:p | p at: 'name']) asSortedCollection asArray
+    equals: (oldInOslo asArray collect: [:p | p at: 'name']) asSortedCollection asArray.
+
+"A one-element collection: the descent costs more than the scan."
+tiny := (PBDictionary new setAt: 1 value: (people getAt: 1)) addIndex: (PBEqualityIndex name: 'by_city' path: 'city').
+lesson check: 'the planner scans a tiny collection'
+    is: (planOf value: ((PBQuery from: tiny) where: (city eq: 'Oslo'))) equals: 'Filter <- CollectionScan'.
+
+"not (age = 30) is not age ne: 30."
+few := ((PBList new
+    appendLast: (PBObject withAll: { 'name' -> 'thirty'. 'age' -> 30 }))
+    appendLast: (PBObject withAll: { 'name' -> 'forty'. 'age' -> 40 }))
+    appendLast: (PBObject withAll: { 'name' -> 'ageless' }).
+lesson check: 'not (age = 30): the ageless one too' is: ((PBQuery from: few) where: (age eq: 30) not) count equals: 2.
+lesson check: 'age ne: 30: a present age only' is: ((PBQuery from: few) where: (age ne: 30)) count equals: 1.
+lesson check: 'a negation stays a residual filter' is: (planOf value: (q where: (age eq: 30) not)) equals: 'Filter <- CollectionScan'.
+lesson check: 'ne: has an index plan, the complement' is: (planOf value: (q where: (age ne: 30))) equals: 'IndexComplement'.
+lesson check: 'the one exact rewrite: not isNone is notNone' is: (planOf value: (q where: age isNone not)) equals: 'IndexRange'.
+
+"OR: a union only when every branch has an index."
+lesson check: 'two indexed branches: a union'
+    is: (planOf value: (q where: ((city eq: 'Oslo') | (city eq: 'Rome')))) equals: 'Union <- IndexLookup'.
+lesson check: 'an unindexed branch: one scan for the whole OR'
+    is: (planOf value: (q where: ((city eq: 'Oslo') | ((PBField path: 'name') contains: '7')))) equals: 'Filter <- CollectionScan'.
+
+"A block is opaque: it runs element by element and never uses an index."
+sevens := q where: [:p | (p at: 'age') \\ 7 = 0].
+lesson check: 'a block predicate is a BlockFilter over a scan' is: (planOf value: sevens) equals: 'BlockFilter <- CollectionScan'.
+mixed := (q where: (city eq: 'Oslo')) where: [:p | (p at: 'age') \\ 7 = 0].
+lesson check: 'beside an indexed conjunct, the block filters on top' is: (planOf value: mixed) equals: 'BlockFilter <- IndexLookup'.
+lesson check: 'Oslo people whose age is a multiple of 7' is: mixed count equals: 20.
+
+space close.
+dir deleteAll.
+lesson finish.

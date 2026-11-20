@@ -135,8 +135,13 @@ that clash with Pharo's meaning.
 constructor or a transaction factory, and none of its methods assigns an instance variable
 afterwards. protoST does not enforce this at run time (LANGUAGE.md §4.5). Two runtime-only
 fields are exceptions, and neither is persisted: the memo of a lazy load (§6.3) and the
-consumed mark of a collection's operation log (§7.2). Both are `Atom` cells, and both mirror
-what `proto_db` does with `object.__setattr__`.
+consumed mark of a collection's operation log (§7.2). Each is written once, by a
+compare-and-swap from nil on its instance variable (or an `Atom`), and both mirror what
+`proto_db` does with `object.__setattr__`. The atom's other runtime-only fields (its oid, the
+place its save recorded, a keyed node's order key, an index's parsed key spec) follow the same
+rule; the loser of a race answers the winner's value. *Amended 2026-11-19 (maintainer, plan
+Task 11): this read "Both are `Atom` cells"; an `Atom` per field cost about 25 cells per node,
+and the write-once rule needs only the compare-and-swap.*
 
 ### 4.2 Value kinds and protoST classes
 
@@ -673,8 +678,12 @@ From the bottom up. Each layer depends only on the layers below it.
 
 **Structures (layer 5).**
 - A reference decodes to an unloaded atom (a pointer plus its storage) that loads its record
-  when a message needs its state. The loaded state is memoised in an `Atom`. Two concurrent
-  loads give equal values, so the race is harmless. This is `proto_db`'s lazy loading, which
+  when a message needs its state. The loaded record is kept once, each field written by a
+  compare-and-swap from nil: an atom whose class has a record shape and whose record holds
+  exactly the shape's fields keeps its slots and its oid, and its state is derived on demand;
+  any other atom keeps the decoded envelope. Two concurrent loads give equal values, so the
+  race is harmless. *Amended 2026-11-19 (plan Tasks 11 and 12): this read "The loaded state is
+  memoised in an `Atom`".* This is `proto_db`'s lazy loading, which
   the spec calls implementation-specific.
 - New versions are built in memory by path copying. AVL insert and remove keep the invariants
   of spec §"AVL nodes": height, count, balance, key order and `weight`.

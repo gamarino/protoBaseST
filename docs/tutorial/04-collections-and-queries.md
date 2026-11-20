@@ -57,8 +57,12 @@ increments merge (chapter 6).
 
 ## Queries
 
-This prototype has **no query language, no query planner and no index query**. A question is
-answered in one of two ways.
+> **Indexed queries (0.3.0).** Maintained indexes, a query front end (`PBQuery`,
+> `PBField`) and a cost-based planner are in [chapters 17](17-indexes.md) and
+> [18](18-queries-and-plans.md), and pagers in [chapter 19](19-ordered-reads-and-pages.md). This
+> section shows the two ways a question is answered without them, which chapter 17 starts from.
+
+Without an index, a question is answered in one of two ways.
 
 A walk over a collection, which visits every element:
 
@@ -91,22 +95,25 @@ for a record that needs no class of its own.
 
 ## `proto_db`'s indexes
 
-`proto_db` has equality, range and vector indexes that it maintains itself. protoBaseST **reads
-them and keeps them, but neither queries nor maintains them**. A collection that has an index
-refuses every change, naming the index, rather than answer a version whose index is stale:
+`proto_db` has equality, range and vector indexes that it maintains itself. protoBaseST reads them,
+and maintains an equality or range index in every change, in the same step, as `proto_db` does
+(0.3.0): the new version's indexes agree with its elements.
 
 ```smalltalk
 people := (space openDatabase: 'db') newTransaction getRootObject: 'people'.
 lesson check: 'the indexes are read' is: people indexNames equals: #('by_age' 'by_city').
 lesson check: 'an index keeps its definition' is: (people getIndex: 'by_age') name equals: 'by_age'.
 lesson check: 'the indexed collection is read as usual' is: people count equals: people keys size.
-lesson check: 'and refuses every change, naming its indexes'
-    signals: PBNotSupportedError containing: 'by_age' during: [people setAt: 'zed' value: 1].
+changed := people setAt: 'zed' value: (PBObject withAll: { 'name' -> 'Zed'. 'age' -> 40 }).
+lesson check: 'a change answers a new version with one more element' is: changed count equals: people count + 1.
+lesson check: 'whose indexes were maintained in the same step'
+    is: ([changed validate. 'clean'] on: PBCorruptionError do: [:e | e messageText]) equals: 'clean'.
 ```
 
-So a directory shared with Python can use indexes on the Python side; protoST reads those
-collections and changes only the others. Index maintenance is the first item of "what would come
-next" in [not-done.md](../not-done.md).
+So a directory shared with Python can use indexes from both languages. A collection holding a
+vector index, or an index of a kind protoBaseST does not know, still refuses every change, naming
+it ([chapter 12](12-refusals.md)). [Chapter 17](17-indexes.md) explains why a hand-kept index fails
+and what replaces it; [chapter 18](18-queries-and-plans.md) queries the indexes.
 
 ## What to take away
 

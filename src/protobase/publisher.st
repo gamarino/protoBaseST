@@ -68,9 +68,16 @@ lock in step 2, which is the root the validation of step 3 compared the first
 entry's reads with, as in proto_db's _standalone_round: a root that moved
 since the transaction started is validated, not overwritten.
 
-The publisher runs no application code: the builder is the library's
-validation and merge (rebaseOnto: replays a log through the collections' own
-mutators)."
+The builder is the library's validation and merge (rebaseOnto: replays a log
+through the collections' own mutators). The one application code it runs is an
+extractor (PBKeySpec registerExtractor:block:version:), when a merge onto an
+indexed current evaluates it (ruling IQ1, as proto_db, whose KeySpec.extract
+runs it in the commit): its exception, of whatever class, passes through
+unchanged (never wrapped) and is that entry's build error alone (steps 3 and 4),
+so only the commit whose merge ran it fails and the others of the round go on, as
+in a cluster round (cluster/round.st).
+An extractor must be pure and quick: a slow one delays the round, under the root
+lock."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/values'.
