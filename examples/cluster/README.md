@@ -1,7 +1,7 @@
 # The cluster examples
 
 Programs for the cluster chapters of the tutorial,
-[docs/tutorial/13-16](../../docs/tutorial/README.md#cluster-mode-020-unreleased). Each
+[docs/tutorial/13-16](../../docs/tutorial/README.md#cluster-mode-020). Each
 one checks what it shows, like the lessons of [examples/tutorial/](../tutorial/README.md) (whose
 `_lesson.st` they import): a line per check, and a last line `<lesson> ok (N checks)`; a failed
 check exits with status 1.

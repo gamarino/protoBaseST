@@ -47,7 +47,7 @@ code you read here runs. The prose is not checked by a machine.
 | 11 | [One directory, two languages](11-python-interop.md) | `11_python_interop.sh` |
 | 12 | [What is refused, and why](12-refusals.md) | `12_refusals.st` |
 
-### Cluster mode (0.2.0, unreleased)
+### Cluster mode (0.2.0)
 
 Several protoST processes sharing one database directory: a peer lease elects an owner, the owner
 issues write permissions, commits are acknowledged by a majority, faulty nodes are fenced, and a

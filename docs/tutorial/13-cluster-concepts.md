@@ -4,7 +4,7 @@
 Program: [examples/cluster/13_terms_and_majorities.st](../../examples/cluster/13_terms_and_majorities.st).
 Previous: [12. What is refused, and why](12-refusals.md). Next: [14. A three-node cluster](14-a-three-node-cluster.md).
 
-> **Status.** Cluster mode belongs to protoBaseST 0.2.0, which is not released. It is built and
+> **Status.** Cluster mode was released in protoBaseST 0.2.0 (2026-11-19). It is built and
 > tested: the protocol core, the simulator that tests it, the transports, the coordinator shell,
 > the shared tier, commits, reads and the persister, real processes killed with `kill -9`, and a
 > first measurement (chapter 16). The final verification of the

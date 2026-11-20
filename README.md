@@ -40,7 +40,7 @@ disjoint roots, and a third as many on one hot key ([docs/deviations.md](docs/de
 [chapter 13](docs/tutorial/13-cluster-concepts.md); what it does not do is in
 [docs/not-done.md](docs/not-done.md).
 
-**Indexed queries (0.3.0, unreleased).** Equality and range indexes that are part of a collection
+**Indexed queries (0.3.0).** Equality and range indexes that are part of a collection
 version, maintained by every mutator and by merges; the query front end (`PBQuery`, `PBField`),
 `proto_db`'s cost-based planner with the same plans and model costs, ordered reads, pages and
 counts by rank, all from `proto_db` `v2.0.0rc4`, on the same disk format. Vector indexes are
@@ -107,8 +107,8 @@ spends most of its time on index work (65 % with one index, 85 % with three)
 | protoIO | v0.7.0 | https://github.com/gamarino/protoIO |
 | protoST | v0.12.0 | https://github.com/gamarino/protoST |
 
-These are the minimum versions; the full test suite also passes on protoCore 3.6.1 with protoST
-0.13.0 (the soak and the timer audit ran on the minimum versions).
+These are the minimum versions. The 0.3.0 suite, both soaks and the benchmarks ran on exactly
+these versions; the 0.2.0 suite also passed on protoCore 3.6.1 with protoST 0.13.0.
 
 Build protoST 0.12.0 against protoCore 3.6.0 and protoIO 0.7.0 (see its own README); it provides
 `lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S40 and

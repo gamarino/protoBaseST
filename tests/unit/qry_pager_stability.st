@@ -5,8 +5,10 @@
  reader actors page through snapshots: an ordered scan (by rank), a range ordered by its key,
  descending (by rank), and an unindexed condition (materialised). Each reader takes four snapshots,
  the k-th after at least 8 k commits, builds its pager on it and reads every page, waiting before
- each page after the first for at least one more commit, so commits land between the pages of
- every pager by construction, not by how the actors are scheduled. Every reader must see exactly the
+ each page after the first until the commit count has risen since the previous page, so every
+ pager has commits counted while it is open, by construction, not by how the actors are scheduled
+ (the count rises after a commit lands, so a counted commit is concurrent with the pager, not
+ necessarily later than the previous page's read). Every reader must see exactly the
  rows of its own snapshot: no row twice, none skipped, rows equal to the snapshot's asArray. The
  cached-query half of proto_db's test is not ported: the query result cache is deferred (spec 3.2,
  ruling IQ3); tests/unit/queries_checklist.tsv notes it. The writers' draws come from QData random:
@@ -24,8 +26,8 @@ Import from: '_queries'.
  boundary, at most two more per request when the three writers race), so the readers' work does
  not depend on how fast the writers run (proto_db bounds free-running writers with MAX_COMMITS,
  CI-314; free-running writers with a cap made a run take 13 s or 6 minutes, by scheduling, in plan
- Task 10). The writers outlive every reader and answer every request, so commits land before each
- snapshot and between the pages of every pager by construction. The three writers change
+ Task 10). The writers outlive every reader and answer every request, so commits are counted before each
+ snapshot and while every pager is open, by construction. The three writers change
  one PBList root, which never merges, so every concurrent commit but one conflicts and is
  retried; a writer whose run: exhausts its retries (PBConflictError: the others kept winning)
  starts the same change again, until it commits or the readers are done. Losing a race is the

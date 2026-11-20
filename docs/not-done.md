@@ -10,7 +10,7 @@ design (spec section 2) or a cut made while building, with its reason.
 - Not a product, not production ready, and not fast.
 - What is shown: one directory, opened by Python and by protoST, gives the same answers in the
   scenarios tested (below). Nothing outside those scenarios is claimed.
-- Cluster mode (0.2.0, unreleased) runs over **one shared directory** only: no tiered storage
+- Cluster mode (0.2.0) runs over **one shared directory** only: no tiered storage
   (Phase D), no pipelined permits (DEPTH 1), no mixed clusters with `proto_db` nodes (a
   non-goal), no TLS (frames are plaintext; an optional HMAC authenticates them), no read-only
   barrier, no notify. A three-member cluster commits about half as many small transactions per
@@ -19,8 +19,8 @@ design (spec section 2) or a cut made while building, with its reason.
 - No vector-index writes, training or vector search: a collection holding a vector index, or an
   index of a kind protoBaseST does not know, stays read only, and a `near[]` term is refused.
   Equality and range indexes are maintained by every write and by merges onto indexed
-  collections, queried through `PBQuery` and a cost-based planner, and paged in process (0.3.0,
-  unreleased; [chapters 17-19](tutorial/17-indexes.md), [queries.md](queries.md)).
+  collections, queried through `PBQuery` and a cost-based planner, and paged in process (0.3.0;
+  [chapters 17-19](tutorial/17-indexes.md), [queries.md](queries.md)).
 - No writes to `RepeatedKeysDictionary`.
 - No IANA time zones: no wall-clock conversion; a fixed pinned list of zone keys.
 - No runtime registry and no symbol kind (`@sym`): format 5 (`proto_db` 2.0.0rc4, D62) is

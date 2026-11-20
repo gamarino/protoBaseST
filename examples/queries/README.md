@@ -1,6 +1,6 @@
 # The query examples
 
-> **In progress for protoBaseST 0.3.0.** Every program of this directory runs as a test;
+> **protoBaseST 0.3.0.** Every program of this directory runs as a test;
 > [pending/](pending/README.md) is empty.
 
 Programs for indexed queries: the guide [docs/queries.md](../../docs/queries.md) quotes the ones
