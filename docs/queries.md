@@ -953,7 +953,10 @@ the mutator (and so inside a merge or a cluster round's build) that crossed the 
    float is the C library's pow function, which is not correctly rounded, and it differs from
    `(a - b) * (a - b)` on half-way squares (measured: 55,729 of 117,197 such squares while
    designing this phase, Addendum V 2.5). protoBaseST squares with protoST's `raisedTo: 2`, which
-   calls the same function.
+   calls the same function, and adds a centroid's members with plain `+` in data order, as Python
+   does. On protoST 0.15.0 the correctly rounded sums (each distance's `_sum_nonnegative`, and the
+   norm in the cosine normalisation of the vectors and the centroids) run in protoST's fsum
+   primitive and answer the same bits; the squares and the plain sums stay Smalltalk.
 
 So "the same centroids" has a precise scope: the same history, `proto_db` without numpy (with numpy
 it trains with numpy's own arithmetic), and the same C library on the same host. Whoever trained

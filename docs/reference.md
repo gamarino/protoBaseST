@@ -1426,7 +1426,13 @@ signal `PBValidationError` with CPython's text (DV7). Every result is pinned bit
 the feature probe's answer, read once when the module loads, and `usesFsumPrimitive` whether the
 kernel calls them; `_forceSmalltalkKernel:` exists for the tests only, which run every vendored
 case on both paths. The Smalltalk kernel is the oracle and the fallback (protoST 0.14.1, an
-Integer term, sequences of unequal sizes); k-means keeps its Smalltalk `raisedTo: 2` loop.
+Integer term, sequences of unequal sizes). `normalized:`, which k-means uses for cosine (the
+vectors before training and the centroids after), takes its norm from the primitive and stays bit
+for bit the Smalltalk kernel's. k-means itself keeps its Smalltalk loops: each distance term is
+`(a - b) raisedTo: 2` (libm pow), summed by `sumNonNegative:` (the primitive `Float fsum:` where
+present, the same correctly rounded sum), and the centroid sums are plain `+` in data order.
+`rank:query:metric:k:threshold:`, `PBVectorIvfFlat listFor:vector:` and `probeOrder:query:` copy
+the query to an Array once per call, not once per scored vector.
 
 ## The module and its files
 

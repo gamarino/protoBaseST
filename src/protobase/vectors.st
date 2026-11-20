@@ -255,7 +255,10 @@ PBVectorMath class >> _fsum: aSequence overflow: anOverflowBlock
 
 "aSequence as the fsum primitives read it fastest: itself when it is an Array or an
  OrderedCollection, or when the kernel does not use the primitives; a fresh Array of its items
- otherwise (a PBTuple or a PBFrozenList, which the primitives would read through size and at:)."
+ otherwise (a PBTuple or a PBFrozenList, which the primitives would read through size and at:).
+ The answer is never changed. Callers that score one query against many vectors (rank:, and
+ PBVectorIvfFlat listFor:vector: and probeOrder:query:) convert the query once with it, so
+ score:query:vector: finds an Array and copies nothing more for it."
 PBVectorMath class >> _primitiveOperand: aSequence
   self usesFsumPrimitive ifFalse: [^ aSequence].
   ((aSequence isKindOf: Array) or: [aSequence isKindOf: OrderedCollection]) ifTrue: [^ aSequence].
@@ -402,11 +405,13 @@ PBVectorMath class >> scoreFloor: aMetric threshold: aThreshold
  {memberKey. element. count. vector}. The sort key is Python's (-score, order_key(memberKey)):
  ties, -0.0 and 0.0 included, go to the smaller order key (PBKeys orderKey:)."
 PBVectorMath class >> rank: anEntries query: q metric: aMetric k: anInteger threshold: aThreshold
-  | floor scored sorted |
+  | floor scored sorted query |
   floor := self scoreFloor: aMetric threshold: aThreshold.
+  "The query as the primitives read it, copied once per ranking, not once per entry."
+  query := self _primitiveOperand: q.
   scored := OrderedCollection new.
   anEntries do: [:entry | | s |
-    s := self score: aMetric query: q vector: (entry at: 4).
+    s := self score: aMetric query: query vector: (entry at: 4).
     (floor notNil and: [(s >= floor) not]) ifFalse: [
       scored add: {s negated. PBKeys orderKey: (entry at: 1). entry at: 2. entry at: 3}]].
   sorted := scored asArray sort: [:a :b |
@@ -965,14 +970,16 @@ PBVectorIvfFlat class >> _assignMetric: aMetric
  higher score replaces the best); -1 when the index is untrained (no centroids). proto_db's numpy
  screen only skips centroids that cannot win, so every centroid is scored here (Addendum V, 2.4)."
 PBVectorIvfFlat class >> listFor: anIndex vector: aVector
-  | centroids metric best bestScore |
+  | centroids metric best bestScore query |
   centroids := anIndex centroids.
   centroids isEmpty ifTrue: [^ self untrained].
   metric := self _assignMetric: anIndex metric.
   best := 0.
   bestScore := nil.
+  "The vector as the fsum primitives read it, copied once, not once per centroid."
+  query := PBVectorMath _primitiveOperand: aVector.
   1 to: centroids size do: [:j | | s |
-    s := PBVectorMath score: metric query: aVector vector: (centroids at: j).
+    s := PBVectorMath score: metric query: query vector: (centroids at: j).
     (bestScore isNil or: [s > bestScore]) ifTrue: [best := j - 1. bestScore := s]].
   ^ best.
 
@@ -1013,12 +1020,14 @@ PBVectorIvfFlat class >> train: anIndex vectors: aVectors
  Python sorts the pairs (-score, number). An Array of Integers. Search itself is the vectors
  phase's V6."
 PBVectorIvfFlat class >> probeOrder: anIndex query: aQuery
-  | centroids metric scored |
+  | centroids metric scored query |
   centroids := anIndex centroids.
   centroids isEmpty ifTrue: [^ { self untrained }].
   metric := self _assignMetric: anIndex metric.
+  "The query as the fsum primitives read it, copied once, not once per centroid."
+  query := PBVectorMath _primitiveOperand: aQuery.
   scored := (1 to: centroids size) asArray collect: [:j |
-    { (PBVectorMath score: metric query: aQuery vector: (centroids at: j)) negated. j - 1 }].
+    { (PBVectorMath score: metric query: query vector: (centroids at: j)) negated. j - 1 }].
   scored := scored sort: [:a :b | (a at: 1) < (b at: 1) or: [(a at: 1) = (b at: 1) and: [(a at: 2) <= (b at: 2)]]].
   ^ { self untrained } , (scored collect: [:pair | pair at: 2]).
 
