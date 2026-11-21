@@ -97,7 +97,13 @@ score come in the order of their member keys, which for records is their oids
 the same database.
 
 What an exact search costs here, per query and for the first query after opening a database:
-[measured in V6: bench VB1, exact kNN latency and the first query, 10^3 and 10^4 documents of 8 and 32 dimensions, both implementations].
+on protoST 0.16.0 (bench VB1, 2026-11-21, `proto_db`'s clustered benchmark data, k = 10), a query
+over 10^3 documents takes 42 to 64 ms and over 10^4 documents 0.45 to 0.7 s, and the first query
+costs what the others cost, since protoBaseST keeps no derived structure between searches (DV4).
+`proto_db` answers the same queries (verified, answer for answer) in 5 to 10 ms and 79 to 129 ms
+in pure Python, its first query 1.2 to 1.5 times a later one, and with numpy in about 1 ms or less per
+query once its matrix is built (the first query, which builds it, 2 to 28 ms). The full table is in
+[deviations.md](../deviations.md#vectors).
 
 ## Combining `near:` with conditions
 
@@ -265,7 +271,12 @@ different centroids. `proto_db`'s fix (R128) sorts the training vectors by their
 (`vector_backends.py:650-655`), and then samples with Python's `random.Random(seed)`. protoBaseST
 ports both: the byte order, and CPython's Mersenne Twister seeding and `random.sample`, since protoST's own
 `Random` is a different generator. The IVF build and query costs, and recall against exact:
-[measured in V6: bench VB2, IVF bulk build, query time by nprobe 1, 4 and nlist, recall at k against exact, 10^4 documents of 32 dimensions].
+on 10^4 documents of 32 dimensions with nlist 100 (bench VB2, protoST 0.16.0), the build
+(k-means) took 164 s (`proto_db` 57 s in pure Python, 1.2 s with numpy, whose centroids are its
+own, DV3); a query took 62 ms at nprobe 1, 110 ms at nprobe 4 and 1.46 s at nprobe 100 (every
+list, so exact; about twice an exact search, since each list is read by a bounded walk of the
+store tree); recall at 10 against exact was 0.46, 0.85 and 1.0, the same in protoBaseST and in
+both of `proto_db`'s modes.
 
 An index trained by either implementation is valid for the other: the format leaves training to
 the writer, and list numbers, probes and rankings are computed from the stored centroids, whoever

@@ -2276,6 +2276,61 @@ the commits over the minimum time of 5 runs (every median within 6 % of it):
   16 ms per member, about 11 s for 700 members and 80 s for 5000, with headroom for load. The lease bounds the write outage after a holder dies,
   which is the price.
 
+**VB1 and VB2, vector search** (vectors phase task V6). `RUNS=5 bench/run_query.sh VB1 VB2`,
+measured 2026-11-21, ending 19:58 UTC, on an AMD Ryzen 5 5500U (12 CPUs, Linux 7.0.0-43-generic),
+load average 1.78 before and 2.08 after; protoBaseST `09e9d4f` (the clean committed tree), protoST
+0.16.0 (`worktrees/pinned-0160/protoST/build_release/protost`), `proto_db` `v2.0.0rc4` in its
+reference mode (CPython 3.14.6, glibc 2.43, numpy and hnswlib blocked) and its default mode (column
+numpy: numpy 2.3.5, CPython 3.14.0, `tests/interop/.venv-numpy`). Data: `proto_db`'s clustered
+benchmark set (seed 51, 16 centres) with 10 query points (`bench/py_vector_data.py`); k = 10; the
+records `{ 'i'. 'vec' }` searched through a `PBVectorSearch` (`proto_db`: `VectorSearch`) over the
+index's plan, since the planner's near[] rules are V7's. `-first` is the first query after the
+index is built, `-knn` the 10 queries (the first among them again); VB2's `-build` is the
+`ivf_flat` build (nlist 100, k-means on 10^4 vectors of dim 32), `-nprobe<p>` the 10 queries on the
+same trained index with that nprobe. The runner printed `verified`: every run of every
+implementation reported `proto_db`'s first run's work, so VB1's answers are `proto_db`'s in both of
+its modes (exact answers do not depend on numpy), and VB2's centroids and answers are those of its
+reference mode; its numpy mode trains its own centroids (DV3) and is verified by its counts only.
+Recall at 10 against the exact answer, over the 10 queries, was the same in all three: 46 of 100 at
+nprobe 1, 85 at nprobe 4, 100 at nprobe 100. Times in microseconds, minimum and median of 5
+interleaved runs; nothing is asserted about time.
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB1 | 1000 | d8-cosine-first | 7218 / 7355 | 57825 / 61184 | 8.0x | 25 / 690 | 2359 / 2597 |
+| VB1 | 1000 | d8-cosine-knn | 62024 / 67962 | 586644 / 630240 | 9.5x | 25 / 690 | 3148 / 3496 |
+| VB1 | 1000 | d8-l2-first | 5699 / 6348 | 41481 / 44389 | 7.3x | 25 / 566 | 1758 / 2411 |
+| VB1 | 1000 | d8-l2-knn | 52120 / 55621 | 416098 / 435433 | 8.0x | 25 / 566 | 2291 / 3163 |
+| VB1 | 1000 | d32-cosine-first | 10443 / 11806 | 62752 / 64007 | 6.0x | 26 / 775 | 3007 / 3092 |
+| VB1 | 1000 | d32-cosine-knn | 100088 / 112890 | 638561 / 661812 | 6.4x | 26 / 775 | 3862 / 3983 |
+| VB1 | 1000 | d32-l2-first | 7624 / 8688 | 42381 / 45254 | 5.6x | 26 / 650 | 2945 / 3238 |
+| VB1 | 1000 | d32-l2-knn | 72244 / 78409 | 451270 / 452496 | 6.2x | 26 / 650 | 3289 / 3469 |
+| VB1 | 10000 | d8-cosine-first | 132369 / 133825 | 597254 / 616935 | 4.5x | 48 / 5092 | 15630 / 16188 |
+| VB1 | 10000 | d8-cosine-knn | 900436 / 915571 | 6320614 / 6346510 | 7.0x | 48 / 5092 | 3604 / 3779 |
+| VB1 | 10000 | d8-l2-first | 123199 / 124910 | 436108 / 459867 | 3.5x | 48 / 5092 | 15219 / 15500 |
+| VB1 | 10000 | d8-l2-knn | 787593 / 801469 | 4461892 / 4727204 | 5.7x | 48 / 5092 | 4482 / 4629 |
+| VB1 | 10000 | d32-cosine-first | 173640 / 176979 | 666384 / 675408 | 3.8x | 61 / 5089 | 26370 / 27713 |
+| VB1 | 10000 | d32-cosine-knn | 1289632 / 1298917 | 6954950 / 7155001 | 5.4x | 61 / 5089 | 6200 / 6816 |
+| VB1 | 10000 | d32-l2-first | 154145 / 164234 | 479321 / 484646 | 3.1x | 61 / 5089 | 27739 / 28208 |
+| VB1 | 10000 | d32-l2-knn | 1016612 / 1034286 | 4944847 / 4997425 | 4.9x | 61 / 5089 | 9880 / 10261 |
+| VB2 | 10000 | d32-ivf-build | 56686826 / 56950388 | 163933587 / 167256841 | 2.9x | 79 / 5089 | 1245128 / 1312498 |
+| VB2 | 10000 | d32-ivf-nprobe1 | 21920 / 22080 | 617364 / 768519 | 28.2x | 79 / 5089 | 11798 / 11945 |
+| VB2 | 10000 | d32-ivf-nprobe4 | 144924 / 149445 | 1095917 / 1159150 | 7.6x | 79 / 5089 | 11414 / 11716 |
+| VB2 | 10000 | d32-ivf-nprobe100 | 1362887 / 1393694 | 14563864 / 14671563 | 10.7x | 79 / 5089 | 21535 / 22158 |
+
+Observed: protoBaseST's first query costs what every later one costs (no derived cache, DV4),
+where `proto_db`'s first query builds its flat snapshot (1.2 to 1.5 times a later query in the
+reference mode; with numpy, its matrix too: 7 times at 10^3, about 40 times at 10^4). An exact
+query over 10^4 vectors takes about 0.45 to 0.7 s on protoST 0.16.0: 4.9 to 7.0 times
+`proto_db`'s pure-Python search (6.2 to 9.5 times at 10^3) and 500 to 1800 times its numpy
+search. The `ivf_flat` build is 2.9 times the pure-Python one, and its probes of 1 and 4
+lists take 0.06 and 0.11 s per query. A full probe (nprobe 100) takes about twice an exact search
+of the same index size (1.46 s against 0.70 s per query), where `proto_db`'s costs about the same
+as its exact search: the 100 bounded range walks compare every node they reach with their bounds,
+which the exact walk does not; this is the likely cost, not measured separately. The peak resident
+set of protoBaseST (about 5 GB at 10^4) is protoCore's heap budget being used, not a working set
+(memory figures are not a headline).
+
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded

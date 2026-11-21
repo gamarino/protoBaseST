@@ -134,6 +134,14 @@
   (proto_db's estimates by their IEEE bytes; eight actors on one version and its loaded stub) and
   `tests/unit/vec_contract.st` (the index contract for eight vector registrations, its three
   planted defects caught).
+- **Benchmarks VB1 and VB2** (`bench/run_query.sh VB1 VB2`): exact kNN (k 10) over 10^3 and 10^4
+  vectors of dim 8 and 32, cosine and l2, the first query and ten; an `ivf_flat` index of nlist 100
+  over 10^4 vectors of dim 32, its build and its queries at nprobe 1, 4 and 100 with their recall;
+  self-verified against `proto_db`'s answers (both modes for exact; the reference mode, centroids
+  included, for IVF). On protoST 0.16.0 an exact query over 10^4 vectors takes 0.45 to 0.7 s (4.9
+  to 7.0 times `proto_db`'s pure-Python search), the IVF build 164 s (2.9 times), a query at
+  nprobe 1 and 4 62 and 110 ms; recall 0.46, 0.85 and 1.0 in both implementations
+  (`docs/deviations.md`, Performance, "Vectors").
 ### Indexed queries
 
 - **AVL functions for indexes and rank access** (`PBAvl`, class side, ports of `proto_db`'s
