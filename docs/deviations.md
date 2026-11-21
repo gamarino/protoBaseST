@@ -2256,16 +2256,20 @@ the commits over the minimum time of 5 runs (every median within 6 % of it):
   | 2000 | 9182 ms | 6941 ms |
   | 5150 | 26535 ms | 19080 ms |
 
-  k-means is about 0.65 s of the retrain at 631 members (measured apart); the rest is the
-  assignment of every member to its list (`listFor:`, one score per centroid) and the store's
-  rebuild. A retrain is still 2.3 to 2.9 times the 667 ms a member believes a permission under
+  Per member, the retrain costs 2.5 to 2.6 ms at 631, 2.5 to 2.8 ms at 696, 3.4 ms at 1000, 3.5 ms
+  at 2000 and 3.7 ms at 5150: it grows with the size. k-means is about half of a retrain; the rest is rebuilding the members: the store walk (each
+  member's order key recomputed, then a sort) about 20 %, the store rebuild about 15 %, and the
+  assignment of every member to its list (`listFor:`) about 10 %, the smallest part (the V5 review's
+  split at 631 members, each part timed alone, load about 3.5, indicative). A later speed pass
+  should start from the store walk. A retrain is still 2.3 to 2.9 times the 667 ms a member believes a permission under
   the default 2000 ms lease, so the long-lease requirement of a cluster that retrains an IVF index
   stays, and VB5's IVF cluster unit keeps its 90 s lease (it retried 0 times in 5 runs; the exact
   unit, on the default lease, 34, 31, 28, 30 and 30). **Sizing rule:** a build must fit in the
   believed permission less the send reserve, a third of the lease less a twelfth, so the lease
-  must exceed four times the longest retrain: on protoST 0.16.0 about 3 ms per member at dim 8,
-  nlist 16 and 10 iterations (2.5 ms per member at 631, 3.7 at 5150), so 8 s for 700 members and
-  80 s for 5000, with headroom for load. The lease bounds the write outage after a holder dies,
+  must exceed four times the measured retrain for the index's size. On protoST 0.16.0 at
+  dim 8 (nlist 16, 10 iterations) a retrain costs a growing amount per member, 2.5 ms at 631 members
+  rising to 3.7 ms at 5150, so up to about 4 ms per member over the measured range: a lease above
+  16 ms per member, about 11 s for 700 members and 80 s for 5000, with headroom for load. The lease bounds the write outage after a holder dies,
   which is the price.
 
 ## Known protoST limits

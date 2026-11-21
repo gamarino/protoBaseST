@@ -1049,9 +1049,9 @@ the cluster-wide write permission. Measured (bench VB3, 200 appends committed on
 vectors of dim 8, protoST 0.16.0): 35.9, 16.2 and 5.0 commits per second with no index, an exact
 index and an IVF index retraining at every 3 % of growth (`proto_db` 156, 133 and 52 in its
 reference mode, 142, 119 and 70 with numpy), and about the same over 5000 vectors (32.1, 15.1 and
-5.1); a retrain (k-means over every member, then every member's list) takes about 1.6 to 1.9 s for
-650 to 700 members on protoST 0.16.0, of which k-means is about 0.65 s, against 0.2 s for
-`proto_db`'s pure-path k-means and about 4 ms with numpy (indicative single timings,
+5.1); a retrain (k-means over every member, then the members rebuilt with their lists) takes about
+1.6 to 1.9 s for 630 to 700 members on protoST 0.16.0, about half of it k-means and most of the
+rest the store walk and rebuild (indicative), against 0.2 s for `proto_db`'s pure-path k-means and about 4 ms with numpy (indicative single timings,
 [deviations.md](deviations.md#vectors)). Bench VB5, 120 blind writes merged onto a vector-indexed
 dictionary of 600: 16.1 and 4.7 commits per second standalone with an exact and an IVF index
 (`proto_db` 132 and 51, with numpy 114 and 73), 8.1 and 3.7 in a three-member cluster
@@ -1059,9 +1059,11 @@ dictionary of 600: 16.1 and 4.7 commits per second standalone with an exact and 
 permission, which `proto_db`'s default 2000 ms lease lets a member believe for 667 ms: a retrain
 that takes longer never commits (every attempt outlasts its permission and is refused as a
 retryable conflict), so an IVF index retrained in a cluster needs a longer lease
-(`leaseDuration`), more than four times its longest retrain (the permission is a third of the
-lease, less a twelfth kept to send): about 3 ms per member on protoST 0.16.0 at dim 8, so about
-8 s for 700 members and 80 s for 5000; VB5's IVF cluster unit runs with 90 s. The longer lease
+(`leaseDuration`), more than four times the measured retrain for its size (the permission is a
+third of the lease, less a twelfth kept to send). The cost per member grows with the size, 2.5 ms
+at 631 members rising to 3.7 ms at 5150 on protoST 0.16.0 at dim 8, so over that range count up
+to about 4 ms per member: a lease above 16 ms per member, about 11 s for 700 members and 80 s for
+5000; VB5's IVF cluster unit runs with 90 s. The longer lease
 costs availability: when the permission's holder dies, no member writes until its lease and
 drift margin have passed. A
 format-3 vector index (written before member tokens existed) is rebuilt at the first change of its

@@ -105,9 +105,10 @@
   vector-indexed dictionary, standalone and in a three-member cluster, self-verified against
   `proto_db`'s checksums (the IVF centroids included). On protoST 0.16.0 an IVF retrain dominates:
   5.0 commits per second against 16.2 with an exact index and 35.9 with none (3.3, 16.6 and 36.7
-  on 0.15.0); a retrain over 650 to 700 members takes 1.6 to 1.9 s, so in a cluster, where a retrain
+  on 0.15.0); a retrain over 630 to 700 members takes 1.6 to 1.9 s, so in a cluster, where a retrain
   longer than the write permission (667 ms with the default lease) never commits, an IVF index
-  needs a lease of more than four times its longest retrain (about 3 ms per member); VB5's IVF
+  needs a lease of more than four times the measured retrain for its size (2.5 ms per member at
+  631 rising to 3.7 at 5150: count up to about 4 ms, so 11 s for 700 members, 80 s for 5000); VB5's IVF
   cluster unit runs with a 90 s lease, which lengthens the write outage when a member dies
   (`docs/deviations.md`, Performance, "Vectors").
   `proto_db`'s default mode (numpy, `tests/interop/.venv-numpy`) is a column of the VB3 and VB5
