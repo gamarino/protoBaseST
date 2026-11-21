@@ -16,13 +16,14 @@ design (spec section 2) or a cut made while building, with its reason.
   barrier, no notify. A three-member cluster commits about half as many small transactions per
   second as one standalone process on disjoint roots, and a third as many on one hot key ([deviations.md](deviations.md#cluster-mode-commits-per-second)).
 - No cloud or tiered storage, no durability mode other than `fsync`, no Windows.
-- No vector search yet: since the vectors phase's V3 a `PBVectorIndex` with the exact or hnsw
+- No planned vector search yet: since the vectors phase's V3 a `PBVectorIndex` with the exact or hnsw
   backend, and since V4 one with the `ivf_flat` backend (its lists, training and retraining, the
   centroids byte for byte those of `proto_db` without numpy on the same host, DV3), is defined,
   maintained by its hooks, validated and explained, node for node as `proto_db` does, and since V5
   the collections holding one are written and merged like any other (a collection holding an
-  index of a kind protoBaseST does not know stays read only); a query naming `near[]` is refused
-  when it is planned (until V6 and V7).
+  index of a kind protoBaseST does not know stays read only); since V6 a vector index answers
+  `near[]` through its own plans and `PBVectorSearch` (hnsw search refused, DV1), but the planner
+  does not choose them yet: a query naming `near[]` is refused when it is planned (until V7).
   Equality and range indexes are maintained by every write and by merges onto indexed
   collections, queried through `PBQuery` and a cost-based planner, and paged in process (0.3.0;
   [chapters 17-19](tutorial/17-indexes.md), [queries.md](queries.md)).

@@ -239,34 +239,34 @@ test_pager.py::test_a_forged_atom_operand_in_a_token_is_a_client_error	n/a	defer
 test_pager.py::test_a_pager_whose_plan_has_no_structured_digest_has_no_token	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
 test_pager.py::test_resume_reads_the_database_identity_once_per_handle	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
 test_vector_index.py::test_definition_type_names_and_validation	ported	tests/unit/vec_index.st	the definition is validated in proto_db's order, with its texts
-test_vector_index.py::test_supports_only_near_on_its_key_with_matching_dimension_and_metric	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_exact_backend_equals_brute_force	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_exact_backend_equals_brute_force_at_extreme_magnitudes	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_results_are_nearest_first_and_ties_follow_the_member_key	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_duplicates_are_counted_and_equal_values_come_back_exactly	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_invalid_vectors_are_kept_aside_and_never_returned	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
+test_vector_index.py::test_supports_only_near_on_its_key_with_matching_dimension_and_metric	ported	tests/unit/vec_exact.st	supports: answers near[] on its own key, its dimension and its metric only
+test_vector_index.py::test_exact_backend_equals_brute_force	ported	tests/unit/vec_exact.st	the exact backend answers what the brute force answers, for every metric, k and threshold
+test_vector_index.py::test_exact_backend_equals_brute_force_at_extreme_magnitudes	ported	tests/unit/vec_exact.st	the exact backend answers what the brute force answers at extreme magnitudes
+test_vector_index.py::test_results_are_nearest_first_and_ties_follow_the_member_key	ported	tests/unit/vec_exact.st	results come nearest first and ties follow the member key
+test_vector_index.py::test_duplicates_are_counted_and_equal_values_come_back_exactly	ported	tests/unit/vec_exact.st	duplicates are counted and equal values come back exactly
+test_vector_index.py::test_invalid_vectors_are_kept_aside_and_never_returned	ported	tests/unit/vec_exact.st	invalid vectors are kept aside and never returned
 test_vector_index.py::test_zero_vectors_have_cosine_similarity_zero	ported	tests/unit/vec_math.st	zero vectors have cosine similarity zero; l2 and ip of small vectors
 test_vector_index.py::test_with_removed_of_an_absent_element_raises	ported	tests/unit/vec_index.st	withRemoved: of an element the index does not hold is PBValidationError
-test_vector_index.py::test_ivf_flat_with_full_probe_equals_exact	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_ivf_flat_trains_on_growth_and_stays_consistent	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_ivf_flat_partial_probe_has_good_recall_and_widens_for_k	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_ivf_flat_training_depends_on_the_data_and_seed_only	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_ivf_flat_round_trip_through_file_storage_keeps_centroids	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
+test_vector_index.py::test_ivf_flat_with_full_probe_equals_exact	ported	tests/unit/vec_ivf.st	an ivf_flat index probing every list answers what the exact index answers
+test_vector_index.py::test_ivf_flat_trains_on_growth_and_stays_consistent	ported	tests/unit/vec_ivf.st	an ivf_flat index grown and shrunk answers what the brute force answers
+test_vector_index.py::test_ivf_flat_partial_probe_has_good_recall_and_widens_for_k	ported	tests/unit/vec_ivf.st	a partial probe has good recall and widens for k
+test_vector_index.py::test_ivf_flat_training_depends_on_the_data_and_seed_only	ported	tests/unit/vec_ivf.st	ivf_flat answers depend on the data and the seed only
+test_vector_index.py::test_ivf_flat_round_trip_through_file_storage_keeps_centroids	ported	tests/unit/vec_ivf.st	an ivf_flat index keeps its centroids and answers through a file storage
 test_vector_index.py::test_validate_detects_structural_corruption	ported	tests/unit/vec_ivf.st	validate: catches tampering on an ivf_flat index, a removed centroid included
-test_vector_index.py::test_near_k_and_predicate_returns_k_among_the_matching	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_near_k_with_threshold_and_predicate_and_threshold_only_post_filter	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_several_near_terms_and_disjunctions_keep_set_semantics	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_oracle_with_predicate_callable_and_expression_agree	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
+test_vector_index.py::test_near_k_and_predicate_returns_k_among_the_matching	ported	tests/unit/vec_plans.st	near(k) with a residual predicate answers k among the matching
+test_vector_index.py::test_near_k_with_threshold_and_predicate_and_threshold_only_post_filter	ported	tests/unit/vec_plans.st	a threshold with a predicate, and a threshold-only search under a Filter, answer the oracle
+test_vector_index.py::test_several_near_terms_and_disjunctions_keep_set_semantics	ported	tests/unit/vec_plans.st	several near[] terms and disjunctions keep set semantics
+test_vector_index.py::test_oracle_with_predicate_callable_and_expression_agree	ported	tests/unit/vec_plans.st	the oracle restricted by an expression, the list syntax or a block agrees
 test_vector_index.py::test_commit_through_a_transaction_and_query_after_reopen	deferred	V7	It queries through the planner or the front end, whose near[] rules are ported in V7.
 test_vector_index.py::test_linq_near_k_and_lambda_is_k_nearest_among_the_lambda_matches	deferred	V7	It queries through the planner or the front end, whose near[] rules are ported in V7.
 test_vector_index.py::test_python_predicate_expression_node	deferred	V7	It queries through the planner or the front end, whose near[] rules are ported in V7.
-test_vector_index.py::test_eight_threads_query_one_version	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
-test_vector_index.py::test_missing_hnswlib_raises_not_supported_at_first_use	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
+test_vector_index.py::test_eight_threads_query_one_version	ported	tests/unit/vec_plans.st	eight actors reading one version, and its loaded stub, get the twin's answers
+test_vector_index.py::test_missing_hnswlib_raises_not_supported_at_first_use	ported	tests/unit/vec_plans.st	an hnsw search is refused at its first execution, not before
 test_vector_index.py::test_importing_the_vector_modules_does_not_import_hnswlib	n/a	Python-only API	Python import mechanics and the GIL state of CPython 3.14t have no protoST counterpart.
 test_vector_index.py::test_hnsw_recall_at_10_on_2000_random_vectors	n/a	deviation: DV1	It searches an hnsw index, and hnsw search is refused (ruling VQ1, DV1).
 test_vector_index.py::test_hnsw_index_contract_in_a_child_process	n/a	deviation: DV1	It searches an hnsw index, and hnsw search is refused (ruling VQ1, DV1).
 test_vector_index.py::test_hnsw_cache_under_eight_concurrent_readers_and_predicates	n/a	deviation: DV1	It searches an hnsw index, and hnsw search is refused (ruling VQ1, DV1).
-test_vector_index.py::test_vector_contract_rejects_broken_variants	deferred	V6	It ends with a vector search, which the plans and backends of V6 answer (Addendum V, 5.4).
+test_vector_index.py::test_vector_contract_rejects_broken_variants	ported	tests/unit/vec_contract.st	every planted vector defect is rejected by planMatchesScan
 test_vector_index.py::test_closing_a_space_releases_its_derived_vector_structures	n/a	deviation: DV4	protoBaseST keeps no derived-structure cache to release (DV4, Addendum V section 4).
 test_query_cache.py::test_equal_queries_on_one_version_share_a_key_and_an_entry	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
 test_query_cache.py::test_a_commit_to_the_collection_changes_the_key_and_another_root_does_not	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
@@ -306,7 +306,7 @@ test_pager_stability.py::test_pagers_and_cached_queries_stay_on_their_snapshot_u
 # test_plans.py: the plan operators (queries Task 6) and its two vector tests.
 test_plans.py::test_collection_scan_explain_has_estimate_and_children	ported	tests/unit/qry_plans.st	a collection scan executes, estimates and explains as proto_db, empty or not
 test_plans.py::test_index_plan_lookup_range_and_ordered_scan	ported	tests/unit/qry_index_plans.st	presence, equality and unorderable keys answer like a scan; ordered scans follow the total order
-test_plans.py::test_vector_search_wraps_the_index_plan	deferred	V6	PBVectorSearch and its explain and estimate are built with the vector plans in V6.
+test_plans.py::test_vector_search_wraps_the_index_plan	ported	tests/unit/vec_plans.st	PBVectorSearch wraps the index plan; the estimates are proto_db's, bit for bit
 test_plans.py::test_filter_matches_reference_and_estimates_selectivity	ported	tests/unit/qry_plans.st	Filter keeps half per term: And multiplies, Or is 1 - prod(1 - s), Not is 1 - s; BlockFilter is one term
 test_plans.py::test_filter_accepts_prefix_lists_and_rejects_near	ported	tests/unit/vec_terms.st	PBFilter takes prefix lists and refuses near[]
 test_plans.py::test_python_filter_is_explicit_and_never_swallows	ported	tests/unit/qry_plans.st	a BlockFilter is explicit and never swallows an error of its block

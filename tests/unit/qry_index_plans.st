@@ -3,7 +3,7 @@
  v2.0.0rc4, lines 461-647; equality.py, range.py and base.py). The plan halves of
  tests/unit/test_equality_index.py and test_range_index.py, and test_index_base.py's supports, plan,
  estimate, ordered-scan and IndexPlan behaviours: supports: per operator per kind on the index's
- own key (a vector index supports nothing), PBNotSupportedError for the rest; plans that answer
+ own key (a vector index near[] on its own key only, vectors phase V6), PBNotSupportedError for the rest; plans that answer
  what a scan answers (1 = 1.0 = Decimal 1, true is not 1, PBMissing matches only '?N', ranges stay
  within the operand's type rank, unorderable keys only '!=' and '?!N'), the stored values and not
  an equal representative; ordered scans in the total order, descending its exact reverse; the D30
@@ -59,10 +59,11 @@ c that: 'supports: answers per operator and per kind, on the index''s own key on
     (PBRangeIndex name: 'r' path: 'age') supports: (t value: 'other' value: '<' value: 1).
     { range supportsOrder: (PBKeySpec path: 'age'). range supportsOrder: (PBKeySpec path: 'other').
       range supportsOrder: PBKeySpec element. byCity supportsOrder: (PBKeySpec path: 'city') }.
-    PBVectorIndex basicNew supports: (t value: 'city' value: '==' value: 'x') }
+    { (PBVectorIndex name: 'v' path: 'city' dim: 2 metric: 'l2') supports: (t value: 'city' value: 'near[]' value: (PBNearQuery vector: #(1 2) k: 1)).
+      (PBVectorIndex name: 'v' path: 'city' dim: 2 metric: 'l2') supports: (t value: 'city' value: '==' value: 'x') } }
   equals: { { #(true true). #(true true). #(true true). #(true true). #(true true). #(false true). #(false true). #(false true).
       #(false true). #(false true). #(false true). #(false true). #(false true). #(false false). #(false false). #(false false) }.
-    false. false. false. #(true false false false). false }.
+    false. false. false. #(true false false false). #(true false) }.
 
 "=== unsupported terms and orders (test_plan_on_unsupported_term_raises_not_supported,
      test_estimate_on_unsupported_term_raises_not_supported, test_ordered_iteration_is_unsupported_by_default) ==="

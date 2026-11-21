@@ -988,6 +988,13 @@ PBAvl class >> keysAndValuesDo: aBlock over: aRoot
  side. aLowInclusive and aHighInclusive admit a key equal to the bound. O(log n
  + k) for k pairs."
 PBAvl class >> keyDo: aBlock over: aRoot fromOrderKey: aLow inclusive: aLowInclusive toOrderKey: aHigh inclusive: aHighInclusive
+  self nodeDo: [:node | aBlock value: node key value: node value] over: aRoot
+    fromOrderKey: aLow inclusive: aLowInclusive toOrderKey: aHigh inclusive: aHighInclusive.
+
+"As keyDo:over:fromOrderKey:inclusive:toOrderKey:inclusive:, evaluating aBlock with each node of
+ the range itself, so the caller may read what the node holds besides its key and value (its
+ cached order key: the vector index's search, indexes.st)."
+PBAvl class >> nodeDo: aBlock over: aRoot fromOrderKey: aLow inclusive: aLowInclusive toOrderKey: aHigh inclusive: aHighInclusive
   | stack node c |
   self _root: aRoot kind: PBKeyNode.
   stack := OrderedCollection new.
@@ -1007,7 +1014,7 @@ PBAvl class >> keyDo: aBlock over: aRoot fromOrderKey: aLow inclusive: aLowInclu
     (aHigh notNil and: [
         c := node orderKey compareWith: aHigh.
         c > 0 or: [c = 0 and: [aHighInclusive not]]]) ifTrue: [^ self].
-    aBlock value: node key value: node value.
+    aBlock value: node.
     node := self _right: node].
 
 "Evaluates aBlock with each key and value (unboxed) of the keyed tree aRoot, in

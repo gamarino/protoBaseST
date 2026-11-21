@@ -66,6 +66,13 @@ on them. PBNearQuery is the public value of a near[] term (terms.st).
                                     the centroids (vectors phase V4), the backend's explain entries
     PBVectorIvfFlat probeOrder: index query: q
                                     _probe_order: -1, then the lists by descending centroid score
+    search: index query: q k: k threshold: t eligible: aBlockOrNil
+                                    the { element. count } pairs answering a near[] query (vectors
+                                    phase V6): exact ranks every accepted member; ivf_flat probes
+                                    the best nprobe non-empty lists, widening for k; hnsw is
+                                    PBNotSupportedError (ruling VQ1, DV1)
+    estimate: index k: k threshold: t filtered: aBoolean
+                                    the backend's PBEstimate, in Python's arithmetic (S30)
     Values quoted in refusals are rendered as Python's repr (PBCodec _pyRepr:).
     The index (PBVectorIndex, indexes.st) holds every value; the backends are stateless and this
     module never imports indexes.st.
@@ -422,8 +429,10 @@ PBVectorMath class >> scoreFloor: aMetric threshold: aThreshold
 "rank_entries (vector_backends.py:147-167): the {element. count} pairs of the best anInteger
  entries (all of them when nil; cut as Python's del scored[k:], so 0 keeps none and a negative k
  drops that many from the end) that pass aThreshold, nearest first. anEntries holds
- {memberKey. element. count. vector}. The sort key is Python's (-score, order_key(memberKey)):
- ties, -0.0 and 0.0 included, go to the smaller order key (PBKeys orderKey:)."
+ {memberKey. element. count. vector}, optionally a fifth item, the member key's order key when the
+ caller holds it already (a store node caches it). The sort key is Python's (-score,
+ order_key(memberKey)): ties, -0.0 and 0.0 included, go to the smaller order key (PBKeys
+ orderKey:)."
 PBVectorMath class >> rank: anEntries query: q metric: aMetric k: anInteger threshold: aThreshold
   | floor scored sorted query |
   floor := self scoreFloor: aMetric threshold: aThreshold.
@@ -433,7 +442,7 @@ PBVectorMath class >> rank: anEntries query: q metric: aMetric k: anInteger thre
   anEntries do: [:entry | | s |
     s := self score: aMetric query: query vector: (entry at: 4).
     (floor notNil and: [(s >= floor) not]) ifFalse: [
-      scored add: {s negated. PBKeys orderKey: (entry at: 1). entry at: 2. entry at: 3}]].
+      scored add: {s negated. entry size > 4 ifTrue: [entry at: 5] ifFalse: [PBKeys orderKey: (entry at: 1)]. entry at: 2. entry at: 3}]].
   sorted := scored asArray sort: [:a :b |
     (a at: 1) < (b at: 1) or: [(a at: 1) = (b at: 1) and: [(a at: 2) <= (b at: 2)]]].
   anInteger isNil ifFalse: [sorted := sorted copyFrom: 1 to: (self _sliceEnd: anInteger size: sorted size)].
@@ -817,7 +826,7 @@ PBVectorBackend subclass: #PBVectorExact.
 PBVectorExact comment: 'proto_db''s ExactBackend: every member in list 0, no training.'.
 
 PBVectorBackend subclass: #PBVectorIvfFlat.
-PBVectorIvfFlat comment: 'proto_db''s IvfFlatBackend: inverted lists around persisted centroids, trained by the pure-Python k-means (deviation DV3); its search is the vectors phase''s task V6.'.
+PBVectorIvfFlat comment: 'proto_db''s IvfFlatBackend: inverted lists around persisted centroids, trained by the pure-Python k-means (deviation DV3), searched by probing the nearest lists (vectors phase V6).'.
 
 PBVectorBackend subclass: #PBVectorHnsw.
 PBVectorHnsw comment: 'proto_db''s HnswBackend: maintained and validated like the exact backend (list 0, no training); its search is refused (ruling VQ1).'.
@@ -1059,8 +1068,8 @@ PBVectorIvfFlat class >> train: anIndex vectors: aVectors
 "_probe_order (vector_backends.py:663-669): the list numbers a search of aQuery probes, in order:
  -1 (the untrained vectors) first, then, when anIndex is trained, every centroid's number by
  descending exact score (the assignment metric, the query first), ties by ascending number, as
- Python sorts the pairs (-score, number). An Array of Integers. Search itself is the vectors
- phase's V6."
+ Python sorts the pairs (-score, number). An Array of Integers (search:query:k:threshold:eligible:
+ probes the non-empty ones in this order)."
 PBVectorIvfFlat class >> probeOrder: anIndex query: aQuery
   | centroids metric scored query |
   centroids := anIndex centroids.
@@ -1102,5 +1111,123 @@ PBVectorHnsw class >> check: aDictionary
     'ef_construction' -> (self _positiveInt: 'ef_construction' value: (aDictionary at: 'ef_construction' ifAbsent: [200])).
     'ef_search' -> (self _positiveInt: 'ef_search' value: (aDictionary at: 'ef_search' ifAbsent: [64])).
     'seed' -> seed }.
+
+"=== search and estimates (vectors phase V6; vector_backends.py:147-167, 378-383, 505-524,
+     685-730 and 790-821) ===
+
+A backend answers a near[] query over one index version, which holds every value it reads (the
+store, the centroids, the parameters): there is no derived cache (deviation DV4), so every search
+walks the store of that version. anIndex's entry walkers (indexes.st) answer the store's entries
+as rank:query:metric:k:threshold: takes them, { memberKey. element. count. vector. member order
+key }. Every score is PBVectorMath's."
+
+"The { element. count } pairs answering a near[] query over anIndex (_Backend.search): aQuery the
+ canonical query vector (a PBTuple of Floats of the index's dimension), anInteger k or nil,
+ aThreshold a Float or nil (not both nil), anEligible nil or a block of one element answering a
+ Boolean (the residual predicate, ruling R27: the search runs among the elements it accepts).
+ Nearest first, ties by the member key."
+PBVectorBackend class >> search: anIndex query: aQuery k: anInteger threshold: aThreshold eligible: anEligible
+  ^ self _subclassResponsibility: 'search:query:k:threshold:eligible:'.
+
+"The PBEstimate of a search of anIndex (_Backend.estimate, the cost model D30), filtered when a
+ residual predicate is evaluated."
+PBVectorBackend class >> estimate: anIndex k: anInteger threshold: aThreshold filtered: aBoolean
+  ^ self _subclassResponsibility: 'estimate:k:threshold:filtered:'.
+
+"_Backend._rows (vector_backends.py:377-383), in Python's arithmetic: half the members without k,
+ else min(k, members); halved again when k and a threshold are both given."
+PBVectorBackend class >> _rows: anIndex k: anInteger threshold: aThreshold
+  | members rows |
+  members := anIndex memberCount.
+  rows := anInteger isNil ifTrue: [members * PBCost filterSelectivity] ifFalse: [anInteger min: members].
+  (aThreshold notNil and: [anInteger notNil]) ifTrue: [rows := rows * PBCost filterSelectivity].
+  ^ rows.
+
+"The entries of anEntries whose element anEligible accepts (vector_backends.py _filtered)."
+PBVectorBackend class >> _filtered: anEntries eligible: anEligible
+  anEligible isNil ifTrue: [^ anEntries].
+  ^ anEntries select: [:entry | anEligible value: (entry at: 2)].
+
+"--- PBVectorExact (ExactBackend.search and estimate, vector_backends.py:505-524) ---"
+
+"Every member the predicate accepts, ranked exactly. proto_db screens with numpy when it is
+ installed and re-scores exactly, which answers the same; protoBaseST has no screening (DV2)."
+PBVectorExact class >> search: anIndex query: aQuery k: anInteger threshold: aThreshold eligible: anEligible
+  | entries |
+  entries := OrderedCollection new.
+  anIndex _entriesDo: [:entry |
+    (anEligible isNil or: [anEligible value: (entry at: 2)]) ifTrue: [entries addLast: entry]].
+  ^ PBVectorMath rank: entries query: aQuery metric: anIndex metric k: anInteger threshold: aThreshold.
+
+"Touches every member (twice when a predicate is evaluated): cost = members * (2 or 1) + rows + 1."
+PBVectorExact class >> estimate: anIndex k: anInteger threshold: aThreshold filtered: aBoolean
+  | rows |
+  rows := self _rows: anIndex k: anInteger threshold: aThreshold.
+  ^ PBEstimate rows: rows cost: anIndex memberCount * (aBoolean ifTrue: [2] ifFalse: [1]) + rows + 1.
+
+"--- PBVectorIvfFlat (IvfFlatBackend.search and estimate, vector_backends.py:685-730) ---"
+
+"Probes the best nprobe non-empty lists by probeOrder:query: (list -1, the untrained vectors, is
+ always probed in addition), and, with k, doubles the probe while fewer than k members match (the
+ predicate and the threshold included); then ranks the accepted members of the probed lists
+ exactly. With nprobe = nlist every list is probed and the answer is the exact one."
+PBVectorIvfFlat class >> search: anIndex query: aQuery k: anInteger threshold: aThreshold eligible: anEligible
+  | order probe floor done probed matching query metric |
+  order := (self probeOrder: anIndex query: aQuery) select: [:j | anIndex _holdsList: j].
+  probe := (anIndex paramAt: 'nprobe')
+    + ((order notEmpty and: [order first = self untrained]) ifTrue: [1] ifFalse: [0]).
+  metric := anIndex metric.
+  floor := PBVectorMath scoreFloor: metric threshold: aThreshold.
+  query := PBVectorMath _primitiveOperand: aQuery.
+  done := 0.
+  probed := OrderedCollection new.
+  matching := 0.
+  [done + 1 to: (probe min: order size) do: [:i | | entries |
+      entries := anIndex _listEntries: (order at: i).
+      probed addAll: entries.
+      (anInteger notNil and: [anEligible isNil and: [floor isNil]])
+        ifTrue: [matching := matching + entries size]
+        ifFalse: [anInteger isNil ifFalse: [
+          entries do: [:entry |
+            ((anEligible isNil or: [anEligible value: (entry at: 2)])
+                and: [floor isNil or: [(PBVectorMath score: metric query: query vector: (entry at: 4)) >= floor]])
+              ifTrue: [matching := matching + 1]]]]].
+    done := probe min: order size.
+    done >= order size or: [anInteger isNil or: [matching >= anInteger]]]
+      whileFalse: [probe := order size min: 2 * probe].
+  ^ PBVectorMath rank: (self _filtered: probed eligible: anEligible) query: aQuery metric: metric
+    k: anInteger threshold: aThreshold.
+
+"Touches the centroids and the probed fraction of the members: fraction = min(1.0, nprobe / nlist)
+ when trained, else 1.0; cost = centroids + members * fraction * (2 or 1) + rows + 1."
+PBVectorIvfFlat class >> estimate: anIndex k: anInteger threshold: aThreshold filtered: aBoolean
+  | centroids fraction rows touched |
+  centroids := anIndex centroids.
+  fraction := centroids isEmpty
+    ifTrue: [1.0]
+    ifFalse: [1.0 min: (anIndex paramAt: 'nprobe') asFloat / (anIndex paramAt: 'nlist') asFloat].
+  rows := self _rows: anIndex k: anInteger threshold: aThreshold.
+  touched := anIndex memberCount * fraction * (aBoolean ifTrue: [2] ifFalse: [1]).
+  ^ PBEstimate rows: rows cost: centroids size + touched + rows + 1.
+
+"--- PBVectorHnsw (HnswBackend.search and estimate, vector_backends.py:790-821) ---"
+
+"Refused (ruling VQ1, deviation DV1): the graph is hnswlib's, which protoST cannot load. Raised at
+ the first execution of the plan, as proto_db raises it without hnswlib (load_hnswlib), never at
+ planning; the text names the index and is rewritten for protoST (DV8)."
+PBVectorHnsw class >> search: anIndex query: aQuery k: anInteger threshold: aThreshold eligible: anEligible
+  ^ PBNotSupportedError signal: anIndex _subject , ': the ''hnsw'' vector backend needs hnswlib, which protoST '
+    , 'cannot load; use the ''exact'' or ''ivf_flat'' backend'.
+
+"About ef candidates per graph level visited, plus the predicate on those candidates:
+ ef = max(ef_search, k or 0), visited = min(members, ef * log2(members + 2)), cost = visited *
+ (2 or 1) + rows + 1. log2 is PBCost log2: (deviation DV6)."
+PBVectorHnsw class >> estimate: anIndex k: anInteger threshold: aThreshold filtered: aBoolean
+  | members ef rows visited |
+  members := anIndex memberCount.
+  ef := (anIndex paramAt: 'ef_search') max: (anInteger isNil ifTrue: [0] ifFalse: [anInteger]).
+  rows := self _rows: anIndex k: anInteger threshold: aThreshold.
+  visited := members min: ef * (PBCost log2: members + 2).
+  ^ PBEstimate rows: rows cost: visited * (aBoolean ifTrue: [2] ifFalse: [1]) + rows + 1.
 
 PBVectorMath _initializeKernel.

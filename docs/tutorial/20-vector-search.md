@@ -246,10 +246,17 @@ lesson check: 'nprobe = nlist is exact' is: (recall value: 16) equals: 1.0.
 ```
 
 Recall at 1 and 4 probes of 16 lists, on these random vectors (which have no cluster structure for
-the index to exploit): [measured in V6: recall at 10 for nprobe 1 and 4 of nlist 16, the chapter's block run several times in both implementations]. `proto_db`'s own tutorial
-says its partial-probe recall varied between runs on identical data, while its code records the
-cause as fixed (R128, below); this chapter will state what the repeated runs of V6 observe, in
-both implementations, and nothing it has not observed.
+the index to exploit), over the block's 40 queries: **0.5625 at nprobe 1 (225 of 400) and 0.93 at
+nprobe 4 (372 of 400)**, and 1.0 at nprobe 16. That is what the block's search observed on
+2026-11-21, with the index built in memory and searched through `PBVectorSearch` (the planner's
+`near:` rule is the vectors phase's V7): six runs of protoBaseST (three on protoST 0.14.1, three on
+0.16.0) and the same block in `proto_db` v2.0.0rc4 on the same data, three runs in its reference
+mode (numpy blocked) and three with numpy, all gave these same counts, query for query the same
+sets. `proto_db`'s own tutorial says its partial-probe recall varied between runs on identical data,
+while its code records the cause as fixed (R128, below). On its own tutorial's data
+(`random.Random(7)`, `uniform(-1, 1)`), the same check gave 240, 360 and 400 of 400 in all six
+`proto_db` runs: no variation was observed. What was not observed here is the tutorial's path
+through a database and a transaction, whose fresh oids are what R128 fixed.
 
 Training is reproducible from the data and the seed. The obvious way to pick the initial centroids
 is to sample the members in stored order, and that is what `proto_db` first did; it failed because

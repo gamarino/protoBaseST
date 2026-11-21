@@ -1,4 +1,4 @@
-"EXPECT: ok 6"
+"EXPECT: ok 11"
 "Vectors phase V4 (Addendum V, 2.4, 2.5 and 5.1): the ivf_flat backend's lists, training and
  retraining (PBVectorIvfFlat listFor:vector:, needsTraining:, train:vectors:, probeOrder:query:),
  against proto_db v2.0.0rc4 (proto_db/indexing/vector_backends.py:527-563, 566-670 and 732-734,
@@ -13,13 +13,19 @@
  flush to zero would tie them), and a half-way case, where the libm pow squares of k-means put a
  vector nearer the second centroid while the correctly rounded squares (x * x) would tie it with
  the first. Rows 1 to 4 check the port against proto_db's rules and against itself; the
- byte identity of whole histories with proto_db is tests/interop/vector_index_identical.sh's. Each check gathers its mismatches and requires none,
- so one label covers one behaviour."
+ byte identity of whole histories with proto_db is tests/interop/vector_index_identical.sh's.
+ Then the search rows (vectors phase V6; vector_backends.py:663-730, vector.py:272-319):
+ test_ivf_flat_with_full_probe_equals_exact, the search halves of the two tests above,
+ test_ivf_flat_partial_probe_has_good_recall_and_widens_for_k and
+ test_ivf_flat_round_trip_through_file_storage_keeps_centroids, on fewer vectors than proto_db's
+ (the interpreted kernel of protoST 0.14.1 is the floor). Each check gathers its mismatches and
+ requires none, so one label covers one behaviour."
 Import from: 'protobase'.
 Import from: '_check'.
 
 | c fails expect refused tup rec hex hexes vi defs coords records index elements trained lists
-  build first again other key value store tampered entry summary sizes |
+  build first again other key value store tampered entry summary sizes near ids oracle shrunk exact
+  queries answers hits recall dir storage pointer loaded extra q term grownLater kept |
 c := Check new.
 expect := [:label :actual :expected |
   actual = expected ifFalse: [fails add: label , ': expected ' , expected printString , ', got ' , actual printString]].
@@ -65,6 +71,8 @@ summary := { index centroids. index trainedSize }.
 expect value: 'removals keep the training' value: { index centroids. index trainedSize } value: summary.
 expect value: 'the shrunk index validates' value: (index validate: (elements copyFrom: 41 to: 80)) == index value: true.
 c that: 'an ivf_flat index trains on growth and stays consistent' is: fails asArray equals: #().
+shrunk := index.
+kept := elements copyFrom: 41 to: 80.
 
 "test_ivf_flat_training_depends_on_the_data_and_seed_only, its training half (R128): build: over the
  same vectors in three orders, in fresh records each time (other member keys), gives the same
@@ -213,5 +221,109 @@ expect value: 'probeOrder:query: ties by number'
     PBVectorIvfFlat probeOrder: (index _with: { 'centroids' -> (tup value: #()). 'trained_size' -> 0 }) query: (tup value: #(0.0 5.0)) }
   value: #(#(-1 0 1) #(-1 1 0) #(-1)).
 c that: 'a half-way distance tie between two centroids is resolved as proto_db resolves it' is: fails asArray equals: #().
+
+"=== the search rows (vectors phase V6) ==="
+near := [:v :k :t | PBTerm path: 'vec' op: 'near[]' value: (PBNearQuery vector: v k: k threshold: t metric: nil)].
+"The stored elements themselves, in order: exact token and identity of each."
+ids := [:anArray | anArray asArray collect: [:e | (PBKeys exactToken: e) hex , ':' , (PBMemberKeys identityOf: e) printString]].
+oracle := [:anIndex :anArray :aTerm | ids value: (PBVectorIndex nearOracle: anArray keySpec: anIndex keySpecObject
+  query: aTerm value metric: anIndex metric predicate: nil)].
+
+"test_ivf_flat_with_full_probe_equals_exact: with nprobe = nlist an ivf_flat index probes every
+ list, so for every metric, k, threshold and both it answers what the exact index and the brute
+ force answer, nearest first."
+fails := OrderedCollection new.
+elements := records value: (coords value: 160 value: 6 value: 11).
+queries := coords value: 8 value: 6 value: 12.
+#('cosine' 'l2' 'ip') do: [:metric | | ivf thresholds |
+  ivf := (vi value: (PBKeySpec path: 'vec') value: 6 value: metric value: { 'nlist' -> 8. 'nprobe' -> 8 }) build: elements.
+  exact := (PBVectorIndex name: 'v' keySpec: (PBKeySpec path: 'vec') dim: 6 metric: metric) build: elements.
+  ivf centroids size = 8 ifFalse: [fails add: metric , ': ' , ivf centroids size printString , ' centroids'].
+  thresholds := metric = 'cosine' ifTrue: [#(-0.5 0.3 0.9)] ifFalse: [metric = 'l2' ifTrue: [#(0.5 1.5 3.0)] ifFalse: [#(-1.0 0.5 2.0)]].
+  queries doWithIndex: [:v :j |
+    { near value: v value: (#(1 10 50) at: j \\ 3 + 1) value: nil. near value: v value: nil value: (thresholds at: j \\ 3 + 1).
+      near value: v value: 7 value: (thresholds at: (j + 1) \\ 3 + 1) } do: [:aTerm | | got |
+      got := ids value: (ivf plan: aTerm) execute.
+      (got = (ids value: (exact plan: aTerm) execute) and: [got = (oracle value: ivf value: elements value: aTerm)]) ifFalse: [
+        fails add: metric , ' ' , aTerm describe printString]]]].
+c that: 'an ivf_flat index probing every list answers what the exact index answers' is: fails asArray equals: #().
+
+"test_ivf_flat_trains_on_growth_and_stays_consistent, its search half: the index grown by withAdded:
+ and shrunk by withRemoved: (the first check above), nprobe = nlist, answers what the brute force
+ answers over the elements it holds."
+fails := OrderedCollection new.
+elements := kept.
+(coords value: 3 value: 4 value: 33) do: [:v | | term |
+  term := near value: v value: 9 value: nil.
+  (ids value: (shrunk plan: term) execute) = (oracle value: shrunk value: elements value: term) ifFalse: [
+    fails add: 'grown and shrunk ' , term describe printString]].
+expect value: 'it holds 40 members' value: elements size value: 40.
+c that: 'an ivf_flat index grown and shrunk answers what the brute force answers' is: fails asArray equals: #().
+
+"test_ivf_flat_partial_probe_has_good_recall_and_widens_for_k: 600 records of dim 8, nlist 16,
+ nprobe 4; recall at 10 against the exact index over 20 queries is at least 0.6, as proto_db
+ requires; a k beyond what the nprobe lists hold widens the probe until k members are found."
+fails := OrderedCollection new.
+elements := records value: (coords value: 600 value: 8 value: 5).
+index := (vi value: (PBKeySpec path: 'vec') value: 8 value: 'l2' value: { 'nlist' -> 16. 'nprobe' -> 4 }) build: elements.
+exact := (PBVectorIndex name: 'v' keySpec: (PBKeySpec path: 'vec') dim: 8 metric: 'l2') build: elements.
+hits := 0.
+(coords value: 20 value: 8 value: 6) do: [:v | | a b |
+  a := (index plan: (near value: v value: 10 value: nil)) execute.
+  b := (exact plan: (near value: v value: 10 value: nil)) execute.
+  a size = 10 ifFalse: [fails add: 'a query answered ' , a size printString].
+  hits := hits + ((a collect: [:e | e at: 'i']) asSet select: [:i | (b collect: [:e | e at: 'i']) includes: i]) size].
+recall := hits / 200.
+expect value: 'recall at least 0.6' value: recall >= (6 / 10) value: true.
+expect value: 'k = 450 widens to 450 members'
+  value: (index plan: (near value: (coords value: 1 value: 8 value: 7) first value: 450 value: nil)) execute size value: 450.
+c that: 'a partial probe has good recall and widens for k' is: fails asArray equals: #().
+
+"test_ivf_flat_training_depends_on_the_data_and_seed_only, its search half (R128): the same records
+ built in three orders answer the same records for the same queries."
+fails := OrderedCollection new.
+elements := records value: (coords value: 90 value: 5 value: 11).
+#('l2' 'cosine') do: [:metric |
+  build := [:orderSeed :seed | | permutation |
+    permutation := PBPythonRandom sampleRange: 90 count: 90 seed: orderSeed.
+    (vi value: (PBKeySpec path: 'vec') value: 5 value: metric value: { 'nlist' -> 6. 'nprobe' -> 2. 'seed' -> seed })
+      build: (permutation collect: [:k | elements at: k + 1])].
+  queries := coords value: 6 value: 5 value: 13.
+  answers := [:anIndex | queries collect: [:v |
+    ((anIndex plan: (near value: v value: 10 value: nil)) execute collect: [:e | e at: 'i']) asSortedCollection asArray]].
+  first := answers value: (build value: 1 value: 0).
+  #(2 3) do: [:orderSeed |
+    (answers value: (build value: orderSeed value: 0)) = first ifFalse: [fails add: metric , ' order ' , orderSeed printString]]].
+c that: 'ivf_flat answers depend on the data and the seed only' is: fails asArray equals: #().
+
+"test_ivf_flat_round_trip_through_file_storage_keeps_centroids: saved to a file storage and loaded
+ back by its tag, the index has the same centroids, parameters and explain, answers the same,
+ validates, and keeps working: one more record, at the query vector, is its own nearest member.
+ The space goes to out/vec_ivf (git ignores out/), a new directory per run; nothing is removed."
+fails := OrderedCollection new.
+elements := records value: (coords value: 120 value: 5 value: 9).
+index := (vi value: (PBKeySpec path: 'vec') value: 5 value: 'cosine' value: { 'nlist' -> 6. 'nprobe' -> 2 }) build: elements.
+dir := ('out/vec_ivf' asFileReference / ('run-' , Smalltalk pid printString , '-' , Time microsecondClockValue printString)) pathString.
+storage := PBFileStorage path: dir.
+index _saveInto: storage.
+pointer := index pointer.
+storage close.
+storage := PBFileStorage path: dir.
+loaded := PBTypeRegistry unloadedAtomFor: index tag at: pointer storage: storage.
+expect value: 'centroids, params and explain' value: { loaded centroids = index centroids. loaded centroids size.
+    loaded params = index params. loaded explain = index explain }
+  value: #(true 6 true true).
+q := (coords value: 1 value: 5 value: 10) first.
+term := near value: q value: 8 value: nil.
+expect value: 'the same answer' value: ((loaded plan: term) execute collect: [:e | e at: 'i'])
+  value: ((index plan: term) execute collect: [:e | e at: 'i']).
+expect value: 'the loaded index validates' value: (loaded validate: elements) == loaded value: true.
+extra := rec value: -1 value: q.
+grownLater := loaded withAdded: extra.
+expect value: 'grown, its own nearest' value: ((grownLater plan: (near value: q value: 1 value: nil)) execute collect: [:e | e at: 'i'])
+  value: #(-1).
+expect value: 'grown, it validates' value: (grownLater validate: elements , { extra }) == grownLater value: true.
+storage close.
+c that: 'an ivf_flat index keeps its centroids and answers through a file storage' is: fails asArray equals: #().
 
 c report displayNl.

@@ -11,8 +11,9 @@ tests/interop/index_build_identical.sh). The vector index is a port of vector.py
 (vectors phase V3, Addendum V 2.3): its definition, hooks, validate: and explain,
 node-identical to proto_db's for the exact and hnsw backends
 (tests/interop/vector_index_identical.sh), and so are the ivf_flat lists,
-training and retraining (V4); its backends are in vectors.st, and vector search
-lands in V6. Collections holding vector indexes are written and merged like any other
+training and retraining (V4); its backends are in vectors.st, and so is vector
+search (V6: supports:, estimate:, plan: and filteredPlan:where: of near[] terms).
+Collections holding vector indexes are written and merged like any other
 (V5, ruling IQ5a): their mutators run these hooks, node-identical to proto_db's at the
 collection level too (tests/interop/vector_ops_identical.sh).
 
@@ -67,11 +68,17 @@ IP15), answering the plan classes of plans.st:
 
   supports: aTerm    whether plan: answers aTerm exactly as a scan would: a key-group index
                      answers the operators of supportedOperators on its own key spec only;
-                     a vector index nothing until V6 (a non-term is PBValidationError)
+                     a vector index near[] on its own key spec, of its dimension, with its
+                     metric or none (a non-term is PBValidationError)
   estimate: aTerm    its PBEstimate (the cost model D30, keyed.py estimate)
   plan: aTerm        a PBIndexPlan: an IndexLookup ('==', 'in', '?N'), an IndexRange ('?!N'
                      and the range operators) or an IndexComplement ('!='); with rank access
                      (windowFrom:to:, exactRows) when the index is weighted
+  supportsFiltered: aTerm, filteredPlan: aTerm where: anExpression
+                     aTerm answered among the elements anExpression accepts only (base.py,
+                     ruling R27): a vector index restricts every term it supports (VectorExact,
+                     VectorIvfFlat and VectorHnsw plans, the residual predicate in their
+                     details); a key-group index restricts none (PBNotSupportedError)
   supportsOrder: aKeySpec, orderedPlan: aKey descending: aBoolean
                      PBRangeIndex only: every occurrence in key order (IndexOrderedScan),
                      descending its exact reverse
@@ -87,7 +94,10 @@ key order, the side group last).
 A vector index (its section below) is defined by name:keySpec:dim:metric:backend:params: and its
 conveniences, and answers dim, metric, backend, params, paramAt:, store, invalid, centroids,
 trainedSize, memberCount, invalidCount and storeEntries (the store tree's key -> (element, count,
-vector) Associations, in key order: the list number of a member is its key's first item)."
+vector) Associations, in key order: the list number of a member is its key's first item).
+PBVectorIndex nearOracle: elements keySpec: aKeySpec query: aPBNearQuery metric: aMetric
+predicate: aPredicateOrNil is vector.py near_oracle, the brute-force answer to a near[] query (the
+vector scan oracle of the tests)."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/values'.
@@ -343,6 +353,17 @@ PBIndex >> _checkSupported: aTerm
     ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: self name) , ' (' , self class kindName , ' on '
       , self keySpecObject describe , ') does not support ' , (PBKeySpec _repr: aTerm op) , ' on '
       , (PBKeySpec _repr: aTerm path)].
+
+"Whether filteredPlan:where: answers aTerm restricted to a predicate (base.py supports_filtered:
+ false by default)."
+PBIndex >> supportsFiltered: aTerm
+  ^ false.
+
+"aTerm answered over the elements satisfying aWhere only (base.py filtered_plan): by default
+ PBNotSupportedError, base.py's sentence."
+PBIndex >> filteredPlan: aTerm where: aWhere
+  ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: self name) , ' (' , self class kindName
+    , ') cannot answer ' , (PBKeySpec _repr: aTerm op) , ' restricted to a predicate'.
 
 "=== PBKeyGroupIndex (keyed.py KeyGroupIndex) ================================="
 
@@ -916,6 +937,13 @@ PBVectorIndex class >> storeKeyWrapping
 PBVectorIndex class >> metrics
   ^ #('cosine' 'l2' 'ip').
 
+"aMetric, or PBValidationError with proto_db's text (vector.py _check_metric)."
+PBVectorIndex class >> _checkMetric: aMetric
+  ((PBNearQuery _isText: aMetric) and: [self metrics includes: aMetric]) ifFalse: [
+    ^ PBValidationError signal: 'Unknown vector metric ' , (PBCodec _pyRepr: aMetric)
+      , '; expected one of [''cosine'', ''l2'', ''ip'']'].
+  ^ aMetric.
+
 "--- definition (vector.py:141-168) ---"
 
 "An empty unsaved vector index named aString on aPBKeySpec (vector.py VectorIndex.__init__):
@@ -931,9 +959,7 @@ PBVectorIndex class >> name: aString keySpec: aPBKeySpec dim: aDim metric: aMetr
   self _checkName: aString keySpec: aPBKeySpec.
   ((PBVectorBackend _isInt: aDim) and: [aDim >= 1]) ifFalse: [
     ^ PBValidationError signal: 'A vector index needs an int dim >= 1, not ' , (PBCodec _pyRepr: aDim)].
-  ((PBNearQuery _isText: aMetric) and: [self metrics includes: aMetric]) ifFalse: [
-    ^ PBValidationError signal: 'Unknown vector metric ' , (PBCodec _pyRepr: aMetric)
-      , '; expected one of [''cosine'', ''l2'', ''ip'']'].
+  self _checkMetric: aMetric.
   params := PBVectorBackend normalize: aParams backend: aBackend.
   ^ self _newWithFields: {
       'name' -> aString. 'key_spec' -> aPBKeySpec asData. 'dim' -> aDim. 'metric' -> aMetric copy.
@@ -1153,12 +1179,148 @@ PBVectorIndex >> _retrained
     members addLast: { PBKeys orderKey: (key at: 2). key at: 2. entry at: 1. entry at: 2. entry at: 3 }] over: self store.
   ^ self _withMembers: (members asArray sort: [:a :b | (a at: 1) <= (b at: 1)]).
 
-"--- terms (vector search lands in V6) ---"
+"--- terms and plans (vector.py:272-319; vectors phase V6) ---"
 
-"No term is answered by a vector index until the vectors phase's V6 (vector search: supports:,
- estimates and plans); the planner never consults one before V7."
+"near[] on this index's key spec, of its dimension, with its metric or none (vector.py supports);
+ a non-term is PBValidationError."
 PBVectorIndex >> supports: aTerm
+  | query |
+  self _checkTerm: aTerm.
+  (aTerm op = PBTerm nearOperator and: [aTerm keySpecObject = self keySpecObject]) ifFalse: [^ false].
+  query := aTerm value.
+  ^ (query metric isNil or: [query metric = self metric])
+    and: [(PBVectorMath canonicalVector: query vector dim: self dim) notNil].
+
+"Every supported term can be restricted to a residual predicate (ruling R27)."
+PBVectorIndex >> supportsFiltered: aTerm
+  ^ self supports: aTerm.
+
+"The backend's estimate of aTerm (D30 units); PBNotSupportedError for a term it does not support."
+PBVectorIndex >> estimate: aTerm
+  self _checkSupported: aTerm.
+  ^ self _backend estimate: self k: aTerm value k threshold: aTerm value threshold filtered: false.
+
+"The members answering aTerm, nearest first (ties by the member key), each occurrence once: a
+ PBIndexPlan of kind VectorExact, VectorIvfFlat or VectorHnsw (vector.py plan). The search runs
+ when the plan does, on this version; an hnsw plan is refused then (ruling VQ1)."
+PBVectorIndex >> plan: aTerm
+  self _checkSupported: aTerm.
+  ^ self _plan: aTerm where: nil.
+
+"aTerm answered among the elements satisfying aWhere only (vector.py filtered_plan, ruling R27):
+ aWhere is compiled (PBExpression compile:) and may not hold a near[] term (PBValidationError)."
+PBVectorIndex >> filteredPlan: aTerm where: aWhere
+  | expr near |
+  self _checkSupported: aTerm.
+  expr := PBExpression compile: aWhere.
+  near := false.
+  expr termsDo: [:each | each op = PBTerm nearOperator ifTrue: [near := true]].
+  near ifTrue: [
+    ^ PBValidationError signal: 'A residual predicate cannot hold a ''near[]'' term (' , expr printString , ')'].
+  ^ self _plan: aTerm where: expr.
+
+"vector.py _plan: the plan's producer runs the backend's search on this version, the estimate is
+ the backend's, the details name the backend, the metric and, when restricted, the predicate."
+PBVectorIndex >> _plan: aTerm where: anExpressionOrNil
+  | query q k threshold backend eligible details index |
+  query := aTerm value.
+  q := PBVectorMath canonicalVector: query vector dim: self dim.
+  k := query k.
+  threshold := query threshold.
+  backend := self _backend.
+  index := self.
+  eligible := self class _predicate: anExpressionOrNil.
+  details := { 'backend' -> self backend. 'metric' -> self metric }.
+  anExpressionOrNil isNil ifFalse: [details := details , { 'where' -> anExpressionOrNil describe }].
+  ^ PBIndexPlan index: self term: aTerm part: (PBIndexPart kind: backend kindName
+    producer: [:aBlock |
+      (backend search: index query: q k: k threshold: threshold eligible: eligible) do: [:pair |
+        (pair at: 2) timesRepeat: [aBlock value: (pair at: 1)]]]
+    estimate: (backend estimate: self k: k threshold: threshold filtered: anExpressionOrNil notNil)
+    details: (PBFrozenDict withAssociations: details) rank: nil sortedRank: nil).
+
+"vector.py _predicate: nil for none; a block is applied and its answer taken as Python's bool
+ (PBTerm _truthy:); anything else is compiled (PBExpression compile:, the 0.1 list syntax
+ included) and evaluated. A block of one element answering a Boolean, or nil."
+PBVectorIndex class >> _predicate: aWhere
+  | expr |
+  aWhere isNil ifTrue: [^ nil].
+  (aWhere isClassObject not and: [aWhere isKindOf: BlockClosure]) ifTrue: [
+    ^ [:element | PBTerm _truthy: (aWhere value: element)]].
+  expr := PBExpression compile: aWhere.
+  ^ [:element | expr evaluate: element].
+
+"vector.py near_oracle: the exact answer to aQuery over anElements by brute force (the vector scan
+ oracle). aMetric is the index metric, used when the query names none; aPredicate (nil, an
+ expression, the 0.1 list syntax or a block) restricts the search to the elements satisfying it.
+ Keys that are not vectors of the query's dimension are ignored. Elements are grouped into members
+ by exact member key; the answer lists each selected member's occurrences, nearest member first,
+ ties by the member key. Refusals are PBValidationError with proto_db's texts."
+PBVectorIndex class >> nearOracle: anElements keySpec: aKeySpec query: aQuery metric: aMetric predicate: aPredicate
+  | metric q dim satisfies members slots out |
+  (aQuery isClassObject not and: [aQuery isKindOf: PBNearQuery]) ifFalse: [
+    ^ PBValidationError signal: 'near_oracle needs a NearQuery, not ' , (PBCodec _pyRepr: aQuery)].
+  metric := self _checkMetric: (aQuery metric isNil ifTrue: [aMetric] ifFalse: [aQuery metric]).
+  (aKeySpec isClassObject not and: [aKeySpec isKindOf: PBKeySpec]) ifFalse: [
+    ^ PBValidationError signal: 'near_oracle needs a KeySpec, not ' , (PBCodec _pyRepr: aKeySpec)].
+  q := aQuery vector.
+  dim := q size.
+  satisfies := self _predicate: aPredicate.
+  members := Dictionary new.
+  slots := OrderedCollection new.
+  anElements do: [:element | | vector |
+    vector := PBVectorMath canonicalVector: (aKeySpec extract: element) dim: dim.
+    (vector isNil or: [satisfies notNil and: [(satisfies value: element) not]]) ifFalse: [ | pair slot |
+      pair := PBMemberKeys memberKeyAndOrderKeyOf: element.
+      slot := members at: (pair at: 2) ifAbsent: [nil].
+      slot isNil
+        ifTrue: [
+          slot := { pair at: 1. element. 1. vector. pair at: 2 }.
+          members at: (pair at: 2) put: slot.
+          slots addLast: slot]
+        ifFalse: [slot at: 3 put: (slot at: 3) + 1]]].
+  out := OrderedCollection new.
+  (PBVectorMath rank: slots query: q metric: metric k: aQuery k threshold: aQuery threshold) do: [:pair |
+    (pair at: 2) timesRepeat: [out addLast: (pair at: 1)]].
+  ^ out asArray.
+
+"--- the store's entries, as the backends' searches read them ---"
+
+"The entry of a store node, as PBVectorMath rank:query:metric:k:threshold: takes it: { member key.
+ element. count. vector. the member key's order key } (the node caches its order key, the store
+ key's, whose second item is the member key's)."
+PBVectorIndex >> _entryOf: aNode
+  | key value |
+  key := aNode key.
+  value := aNode value.
+  ^ { key at: 2. value at: 1. value at: 2. value at: 3. aNode orderKey payload at: 2 }.
+
+"Evaluates aBlock with each store entry, in store key order (vector_backends.py iter_entries)."
+PBVectorIndex >> _entriesDo: aBlock
+  PBAvl nodeDo: [:node | aBlock value: (self _entryOf: node)] over: self store
+    fromOrderKey: nil inclusive: false toOrderKey: nil inclusive: false.
+
+"The entries of list aListNumber, in store key order: the store keys between the bounds of
+ vector_backends.py list_bounds, both exclusive: (j) below every (j, member key), and (j, a key
+ above every rank) above them."
+PBVectorIndex >> _listEntries: aListNumber
+  | out |
+  out := OrderedCollection new.
+  self _listNodesOf: aListNumber do: [:node | out addLast: (self _entryOf: node)].
+  ^ out asArray.
+
+"Whether list aListNumber holds a member (the 'j in lists' of vector_backends.py:688): one bounded
+ probe of its range."
+PBVectorIndex >> _holdsList: aListNumber
+  self _listNodesOf: aListNumber do: [:node | ^ true].
   ^ false.
+
+PBVectorIndex >> _listNodesOf: aListNumber do: aBlock
+  | j |
+  j := PBKeys orderKey: aListNumber.
+  PBAvl nodeDo: aBlock over: self store
+    fromOrderKey: (PBOrderKey rank: PBMemberKeys _tupleRank payload: { j }) inclusive: false
+    toOrderKey: (PBOrderKey rank: PBMemberKeys _tupleRank payload: { j. PBMemberKeys _aboveEveryRank }) inclusive: false.
 
 "--- explain and validate (vector.py:323-425) ---"
 

@@ -162,6 +162,7 @@ PBIndexPart>>_setKind:producer:estimate:details:rank:sortedRank:
 PBSortKey>>_setKey:descending:spec:description:
 PBCollectionScan>>_setCollection:
 PBIndexPlan>>_setIndex:term:part:
+PBVectorSearch>>_setIndex:term:where:inner:
 _PBOneSourcePlan>>_setSource:
 PBFilter>>_setPredicate:
 PBBlockFilter>>_setPredicate:

@@ -11,10 +11,6 @@
 # Task 9: PBPager
 # Vectors phase (Addendum V, docs/superpowers/specs/2026-11-19-vectors-addendum.md), drafted by V0.
 # V6: vector search plans
-supportsFiltered:	V6
-filteredPlan:where:	V6
-nearOracle:keySpec:query:metric:predicate:	V6
-index:term:where:	V6
 # V7: the front end
 near:	V7
 near:k:	V7

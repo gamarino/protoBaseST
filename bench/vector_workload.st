@@ -37,7 +37,24 @@
  new dictionary holding key 600 + j alone (vector 600 + j), never reading the root, so the commit
  merges it onto the current version and the replayed add maintains its index (an IVF retrain in
  the commit's build). The read-back is VB3's, its checksum without the centroids (order-free, so
- bench/cluster_workload.st's vb5 profiles verify a three-member cluster against it)."
+ bench/cluster_workload.st's vb5 profiles verify a three-member cluster against it).
+
+ VB1, exact kNN (task V6): units VB1:<n>:d<dim>-<metric> for n 1000 and 10000, dim 8 and 32, metric
+ cosine and l2, on the n vectors and the file's 10 query points. The records { 'i'. 'vec' }
+ (VectorBench records:) are indexed by an exact index on 'vec' (build:, untimed); then two
+ timings: '-first', the first query (k = 10, a PBVectorSearch); '-knn', the 10 queries (the
+ first again among them). protoBaseST has no derived cache (DV4), so its first query costs what
+ the others cost; proto_db's builds its flat snapshot (and, with numpy, its matrix) there. The
+ WORK lines' checksums are the CRC-32 of the answers' positions, so the runner verifies every
+ answer against proto_db's, in both of its modes (an exact answer does not depend on numpy).
+ VB2, IVF (task V6): the unit VB2:10000:d32-ivf: the same records, an exact cosine index answering
+ the 10 queries (the truth, untimed), then '-build', the ivf_flat index's build: with nlist =
+ max(4, int(sqrt n)) = 100 (benchmarks/workloads/vector.py:118-119), its WORK checksum the
+ CRC-32 of its centroids (DV3: equal to proto_db's reference mode); then, for nprobe 1, 4 and
+ nlist, the built index with that nprobe (the same store and centroids: training does not read
+ nprobe), one untimed warm query, and '-nprobe<p>', the 10 queries, with a RECALL line: the
+ positions it shares with the truth, of 10 per query. A TIME line per timing, each a row of the
+ runner's table."
 Import from: 'protobase'.
 Import from: '_vector_bench'.
 
@@ -96,6 +113,60 @@ emit := [:rows :queries :aChecksum :micros |
     tx abort.
     space close.
     emit valueWithArguments: { count. commits. checksum. us }.
+    'query_workload ok' displayNl.
+    Smalltalk exit: 0].
+((id = 'VB1' and: [plan = ('d' , dim printString , '-' , op) and: [#('cosine' 'l2') includes: op]])
+    or: [id = 'VB2' and: [plan = ('d' , dim printString , '-ivf')]])
+  ifTrue: [ | queries records index first answers search emitOne nlist exact truth built |
+    vectors := VectorBench vectorsFrom: path n: n dim: dim.
+    queries := VectorBench queriesFrom: path dim: dim.
+    records := VectorBench records: vectors.
+    search := [:anIndex :aQuery | VectorBench search: anIndex query: aQuery k: 10].
+    emitOne := [:label :rows :count :aChecksum :micros |
+      ('WORK id=' , id , ' impl=st size=' , n printString , ' rows=' , rows printString , ' queries=' , count printString
+        , ' plan=' , label , ' checksum=' , aChecksum printString) displayNl.
+      ('TIME id=' , id , ' impl=st size=' , n printString , ' plan=' , label , ' us=' , micros printString) displayNl].
+    id = 'VB1' ifTrue: [
+      index := (PBVectorIndex name: 'by_vec' keySpec: (PBKeySpec path: 'vec') dim: dim metric: op) build: records.
+      t0 := Time microsecondClockValue.
+      first := search value: index value: queries first.
+      us := Time microsecondClockValue - t0.
+      emitOne valueWithArguments: { plan , '-first'. first size. 1. VectorBench answersChecksum: { first }. us }.
+      t0 := Time microsecondClockValue.
+      answers := queries collect: [:q | search value: index value: q].
+      us := Time microsecondClockValue - t0.
+      emitOne valueWithArguments: { plan , '-knn'. answers inject: 0 into: [:s :a | s + a size]. queries size.
+        VectorBench answersChecksum: answers. us }.
+      'query_workload ok' displayNl.
+      Smalltalk exit: 0].
+    nlist := 4 max: n sqrt truncated.
+    exact := (PBVectorIndex name: 'by_vec' keySpec: (PBKeySpec path: 'vec') dim: dim metric: 'cosine') build: records.
+    truth := queries collect: [:q | search value: exact value: q].
+    t0 := Time microsecondClockValue.
+    built := (PBVectorIndex name: 'by_vec' keySpec: (PBKeySpec path: 'vec') dim: dim metric: 'cosine' backend: 'ivf_flat'
+      params: (Dictionary new at: 'nlist' put: nlist; at: 'nprobe' put: 1; yourself)) build: records.
+    us := Time microsecondClockValue - t0.
+    w := WriteStream on: ByteArray new.
+    built centroids do: [:c | c do: [:x | w nextPutFloat64: x bigEndian: true]].
+    emitOne valueWithArguments: { plan , '-build'. built centroids size. 0. w contents crc32. us }.
+    { 1. 4. nlist } do: [:nprobe | | probing hits label params |
+      params := Dictionary new.
+      built params do: [:pair | params at: (pair at: 1) put: (pair at: 2)].
+      params at: 'nprobe' put: nprobe.
+      "The built index with another nprobe: the same store and centroids (training does not read
+       nprobe), so the three probes are measured on one training."
+      probing := built _with: { 'params' -> (PBVectorBackend normalize: params backend: 'ivf_flat') }.
+      search value: probing value: queries first.
+      t0 := Time microsecondClockValue.
+      answers := queries collect: [:q | search value: probing value: q].
+      us := Time microsecondClockValue - t0.
+      hits := 0.
+      answers with: truth do: [:a :t | hits := hits + (a asSet select: [:i | t includes: i]) size].
+      label := plan , '-nprobe' , nprobe printString.
+      emitOne valueWithArguments: { label. answers inject: 0 into: [:s :a | s + a size]. queries size.
+        VectorBench answersChecksum: answers. us }.
+      ('RECALL id=' , id , ' impl=st size=' , n printString , ' plan=' , label , ' hits=' , hits printString
+        , ' of=' , (10 * queries size) printString) displayNl].
     'query_workload ok' displayNl.
     Smalltalk exit: 0].
 (id = 'VB0' and: [(plan at: 1) = $d and: [#('products' 'naive' 'fsum' 'ip' 'l2' 'cosine') includes: op]])

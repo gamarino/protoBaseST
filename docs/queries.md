@@ -137,10 +137,10 @@ written by another `proto_db` program
 (`indexing-framework.rst`, "Writing a custom index"): protoBaseST reads it as an opaque atom, keeps
 it, and its collection refuses changes. `proto_db`'s index contract is ported as tests of the two
 built-in kinds (`tests/unit/idx_contract.st`, `tests/unit/idx_contract_plans.st`), not as an
-extension point for new kinds. Vector search (`near[]`) is not answered yet: since the vectors
-phase's V2 a term with that operator is built, its value a `PBNearQuery`, but no plan answers it
-until V6 and V7, so a query naming it is refused when it is planned (`PBValidationError`, from the
-residual `PBFilter`).
+extension point for new kinds. Vector search (`near[]`) is answered by a vector index's plans and
+by `PBVectorSearch` since the vectors phase's V6; the planner chooses them in V7, so until then a
+query naming `near[]` is refused when it is planned (`PBValidationError`, from the residual
+`PBFilter`), and a program builds the `PBVectorSearch` itself.
 
 ## Key specs, MISSING and nil
 

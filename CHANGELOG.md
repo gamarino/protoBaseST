@@ -116,6 +116,24 @@
 
 ## 0.3.0 (2026-11-20)
 
+- **Vector search** (task V6): `PBVectorIndex` answers `near[]` on its own key spec, of its
+  dimension, with its metric or none (`supports:`, `supportsFiltered:`, `estimate:`, `plan:`,
+  `filteredPlan:where:`, `vector.py:272-319`), and `PBVectorSearch index:term:where:`
+  (`src/protobase/plans.st`, `plans.py`'s `VectorSearch`) wraps any index that supports the term,
+  with a residual predicate when given (the k nearest among the matching, ruling R27); `PBIndex`
+  gains `base.py`'s defaults (`supportsFiltered:` false, `filteredPlan:where:` refused with its
+  text). The backends search as `proto_db`'s: exact ranks every accepted member (no numpy
+  screening, DV2), `ivf_flat` probes the best `nprobe` non-empty lists, each read by a key range
+  of the store tree, doubling the probe while fewer than k members match (no derived cache, DV4),
+  and hnsw is `PBNotSupportedError` at the first execution, never at planning (ruling VQ1, DV1; its
+  text rewritten for protoST, DV8). Every score is `PBVectorMath`'s; the estimates are Python's
+  arithmetic, bit for bit (S30). `PBVectorIndex nearOracle:keySpec:query:metric:predicate:` is
+  `near_oracle`. The planner's near[] rules are V7's: until then a planned query naming `near[]` is
+  still refused, and a program builds the `PBVectorSearch` itself. Pinned by
+  `tests/unit/vec_exact.st`, the search rows of `tests/unit/vec_ivf.st`, `tests/unit/vec_plans.st`
+  (proto_db's estimates by their IEEE bytes; eight actors on one version and its loaded stub) and
+  `tests/unit/vec_contract.st` (the index contract for eight vector registrations, its three
+  planted defects caught).
 ### Indexed queries
 
 - **AVL functions for indexes and rank access** (`PBAvl`, class side, ports of `proto_db`'s

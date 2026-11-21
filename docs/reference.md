@@ -1157,8 +1157,9 @@ filed under its member key, the `PBTuple` `((0, element) | (1, surrogate), exact
 | `PBEqualityIndex` | `'=='`, `'in'`, `'!='`, `'?N'`, `'?!N'` |
 | `PBRangeIndex` | the same, and `'<'`, `'<='`, `'>'`, `'>='`, `'between[]'`, `'between()'`, `'between(]'`, `'between[)'` |
 
-`PBVectorIndex` answers no term yet (`supports:` answers false until the vectors phase's V6). Its
-hooks, `validate:` and `explain` work as an index's ([Vector indexes](#vector-indexes), task V3),
+`PBVectorIndex` answers `near[]` on its own key spec (task V6; [Vector indexes](#vector-indexes));
+the planner does not choose it before the vectors phase's V7, so a near[] term reaches it through
+`PBVectorSearch` or the index's own `plan:`. Its hooks, `validate:` and `explain` work as an index's ([Vector indexes](#vector-indexes), task V3),
 and every mutator of a collection holding one runs them (task V5; a merge onto it too, a
 format-3 one rebuilt at the first change).
 An index of a kind protoBaseST does not know refuses every hook, through the `PBIndexSet` hooks.
@@ -1186,7 +1187,7 @@ the vector parts). Every condition is a frozen value: no message changes it.
 
 | Message | Meaning |
 |---|---|
-| `PBTerm path: aStringOrNil op: anOperator value: v`, `path: aStringOrNil op: anOperator` | A term; the second form for `'?N'`, `'?!N'`, `'?T'`, `'?!T'`. Operators are `proto_db`'s strings: `'=='` `'!='` `'<'` `'<='` `'>'` `'>='` `'in'` `'between[]'` `'between()'` `'between(]'` `'between[)'` `'?N'` `'?!N'` `'contains'` `'?T'` `'?!T'` (`PBTerm operators`, `unaryOperators`). `'near[]'` is `PBNotSupportedError` (vector search is out of scope). An operand is made canonical (`PBCodec canonical:`) and must be orderable and not `PBMissing`; `'in'` takes an `Array`, `OrderedCollection`, `PBFrozenList`, `PBTuple` or `Set` of operands (a `Set` is sorted by order key, a sequence keeps its order; never a String); a between operator a pair of one type rank. Anything else, an unknown operator or a malformed path included, is `PBValidationError`. |
+| `PBTerm path: aStringOrNil op: anOperator value: v`, `path: aStringOrNil op: anOperator` | A term; the second form for `'?N'`, `'?!N'`, `'?T'`, `'?!T'`. Operators are `proto_db`'s strings: `'=='` `'!='` `'<'` `'<='` `'>'` `'>='` `'in'` `'between[]'` `'between()'` `'between(]'` `'between[)'` `'?N'` `'?!N'` `'contains'` `'?T'` `'?!T'` (`PBTerm operators`, `unaryOperators`). `'near[]'` takes a `PBNearQuery` ([Near queries](#near-queries)). An operand is made canonical (`PBCodec canonical:`) and must be orderable and not `PBMissing`; `'in'` takes an `Array`, `OrderedCollection`, `PBFrozenList`, `PBTuple` or `Set` of operands (a `Set` is sorted by order key, a sequence keeps its order; never a String); a between operator a pair of one type rank. Anything else, an unknown operator or a malformed path included, is `PBValidationError`. |
 | `path`, `op`, `value`, `keySpecObject` | The term's parts: `value` is the canonical operand, a `PBTuple` of operands for `'in'` and of `(low, high)` for a between operator, `nil` for a unary one; `keySpecObject` is the `PBKeySpec` its path names (`PBKeySpec forTermPath: path`). A term has no `keySpec`. |
 | `matches: anElement` | The scan oracle, `proto_db`'s D28 semantics ([queries.md](queries.md#key-specs-missing-and-nil)): `'=='` and `'in'` by order key (1, 1.0 and `Decimal` 1 are equal, `true` is not 1, `nil` is a value); a `PBMissing` key matches only `'?N'`, so `'!='` is not the complement of `'=='`; range operators match keys of the operand's type rank only; unorderable keys match only `'?!N'`, `'!='`, `'contains'`, `'?T'`, `'?!T'`. `'contains'` is a substring of a String or `ByteArray`, an item of a list or tuple, a key of a map, an element of a collection atom by its own membership (`has:`; a `PBList` by element equality). `'?T'` / `'?!T'` test Python's truthiness of a present key. An extractor's exception passes through. |
 | `describe`, `asList` | `{ 'path'. 'op'. 'value' }` as a `PBFrozenDict` for `explain`, the value as `proto_db`'s display_value function renders it (`PBTerm displayValue:`: nil, Booleans, Integers, Strings and finite Floats kept; lists and tuples as Arrays; a map as `{ '@dict' -> pairs }`; anything else as Python's `repr` of it, such as `'Decimal(''1.50'')'`); the 0.1 list form (`{ path. op. value }`, `{ path. op. low. high }`, `{ path. 'in'. operands }`, `{ path. op }`). |
@@ -1298,13 +1299,16 @@ The meaning of every node, field and estimate, with three worked plans, is
 
 #### PBVectorSearch (0.4.0, draft)
 
-**`PBVectorSearch`** (`src/protobase/plans.st`, task V6), `proto_db`'s `VectorSearch`, joins the
-nodes above. **Draft: not implemented yet**; it is the API of
-[Vector search (0.4.0, draft)](#vector-search-040-draft), and V6 makes it fact:
+**`PBVectorSearch`** (`src/protobase/plans.st`, task V6, done), `proto_db`'s `VectorSearch`, joins
+the nodes above. It works with any index whose `supports:` accepts the term. Until the vectors
+phase's V7 the planner does not build it: a query whose conditions hold a `near[]` term is still
+refused when it is planned (`PBValidationError`, from the residual `PBFilter`), so a program builds
+the node itself, as below and in [chapter 20](tutorial/20-vector-search.md).
 
 | Message | Meaning |
 |---|---|
-| `PBVectorSearch index: aVectorIndex term: aNearTerm where: anExpressionOrNil` | The k nearest (or those within the threshold) answering the term, among the elements satisfying the condition when it is given; `proto_db`'s checks and texts. |
+| `PBVectorSearch index: aVectorIndex term: aNearTerm where: anExpressionOrNil` | The k nearest (or those within the threshold) answering the term, among the elements satisfying the condition when it is given (the k nearest among those, not a filtered kNN: ruling R27); `proto_db`'s checks and texts, in its order: a term that is not `near[]` is `PBValidationError`, one the index does not support `PBNotSupportedError`; the condition (an expression or the 0.1 list syntax) may not hold a `near[]` term (`PBValidationError`) and needs an index that `supportsFiltered:` the term (`PBNotSupportedError`). It runs `plan:`, or `filteredPlan:where:` with a condition. |
+| `index`, `term`, `where`, `inner` | The index, the term, the compiled condition (or nil), the index plan. |
 | `do:`, `execute`, `estimate` | Those of its index plan: rows nearest first, ties by member key. |
 | `explain` | `'plan'` → `'VectorSearch'`, `'index'` (the index's `explain`), `'term'`, `'where'` when given (a block is `{ 'block' -> description }`, DV5), `'estimate'`, `'children'` (the index plan). |
 
@@ -1333,8 +1337,9 @@ and what a page costs, are in [queries.md](queries.md#ordered-reads-windows-and-
 > **Draft: this section is implemented up to its task markers.** It is the API of
 > [Addendum V](superpowers/specs/2026-11-19-vectors-addendum.md) (sections 2.1 to 2.9), written
 > before the code; V1 (the kernel), V2 (near queries) and V3 (the vector index's definition,
-> hooks, `validate:` and `explain`, for the exact and hnsw backends), V4 (ivf_flat) and V5
-> (collections holding vector indexes written and merged) are done. `tests/docs/pending_selectors.tsv` names, for each selector below that does not
+> hooks, `validate:` and `explain`, for the exact and hnsw backends), V4 (ivf_flat), V5
+> (collections holding vector indexes written and merged) and V6 (vector search: the index's
+> plans, `PBVectorSearch`, `nearOracle:...`) are done. `tests/docs/pending_selectors.tsv` names, for each selector below that does not
 > exist yet, the vectors task that builds it (V1 to V7); each task moves its part of this section
 > from draft to fact. A collection holding a `PBVectorIndex` is written and merged like any other
 > (V5, ruling IQ5a). The concepts are in
@@ -1362,13 +1367,14 @@ of `proto_db`'s `indexing/vector.py`:
 | `withAdded: e`, `withRemoved: e`, `withReplaced: old with: new`, `empty`, `build: aCollection` | As for every index (task V3, done for exact and hnsw; task V4, done for the IVF lists and training): a new unsaved version, node for node `proto_db`'s (`tests/interop/vector_index_identical.sh`). An element whose key is not a vector of `dim` finite numbers (a `PBTuple` or `PBFrozenList` of Integers, Floats or `Decimal`s, not Booleans, with a finite norm) goes to the invalid group; a valid one is one more occurrence of its member (its exact member key) in the store, under its list number (0 for exact and hnsw; for `'ivf_flat'` the number of its nearest centroid, from 0, or -1 while the index is untrained). Adding a member can train or retrain an IVF index: it trains when it first holds `'nlist'` members and retrains when its members reach `'retrain_growth'` times the size it was trained at (Python's comparison of an int with a Float product: with 2.2 and 25, 55 members do not retrain and 56 do), refiling every member; a removal, a second occurrence of a member or an invalid element never trains. Training is `proto_db`'s pure-Python k-means (the vectors sorted by their bytes, the initial centroids `random.Random(seed).sample`, the squares by the C library's pow), so the centroids are byte for byte those of `proto_db` without numpy on the same host (DV3); `build:` trains once on all its vectors, or not below `'nlist'` of them. Removing an element the index does not hold, or an equal element with another exact token, is `PBValidationError`. An element whose member key would nest deeper than the format allows is `PBValidationError` with `proto_db`'s text; the store key wraps a valid member in 2 more containers. A signalling-NaN `Decimal` component is `PBValidationError` with CPython's text (`proto_db` raises Python's `ValueError` there; DV7 b). Node classes are `proto_db`'s: a build makes `PBKeyNode` trees; the invalid group grows `PBCountedKeyNode`s only from empty. |
 | `validate: aCollection` | `proto_db`'s checks (tasks V3 and V4, done), in its order: the training state, the trees, every member under its own key and list with its own vector, positive counts, the invalid group, the totals, and the stored multiset against the elements; `PBCorruptionError` with `proto_db`'s texts. On an index written by format 3 the member keys' tokens are not compared. A total compares as Python's `==` does (`true` is 1, `6.0` is 6), and every value a text quotes is rendered as Python's `repr`. An `'ivf_flat'` index's centroids are checked (`'nlist'` of them or none, a trained size that agrees, each a canonical vector) and every member's list is recomputed from them. Answers the index. |
 | `explain` | A `PBFrozenDict`: `'index'`, `'kind'` (`'VectorIndex'`), `'key'`, then `'dim'`, `'metric'`, `'backend'`, `'params'` (a `PBFrozenDict`), `'entries'` (occurrences), `'vectors'` (those with a valid vector), `'members'` (distinct ones), `'invalid'` (task V3, done), and for an IVF index `'lists'` (trained centroids, 0 untrained) and `'trained_size'` (tasks V3 and V4, done). |
-| `supports: aTerm`, `supportsFiltered: aTerm` | Whether the index answers a `near[]` term (task V6): on its own key spec, with no metric or its own, and a vector valid for its `dim`. `supportsFiltered:` is the same for a vector index; `PBIndex` answers false. |
-| `estimate: aTerm`, `plan: aTerm`, `filteredPlan: aTerm where: anExpression` | The model estimate ([queries.md](queries.md#the-cost-model-for-vectors)); a `PBIndexPlan` of kind `'VectorExact'`, `'VectorIvfFlat'` or `'VectorHnsw'` (with `'where'` when filtered). An unsupported term is `PBNotSupportedError`; a condition holding a `near[]` term is `PBValidationError`. `PBIndex >> filteredPlan:where:` is `PBNotSupportedError`. |
-| `PBVectorIndex nearOracle: elements keySpec: aKeySpec query: aPBNearQuery metric: aString predicate: aBlockOrExpressionOrNil` | The brute-force definition of the answer, `proto_db`'s `vector.near_oracle`, used by the tests and the contract. |
+| `supports: aTerm`, `supportsFiltered: aTerm` | Whether the index answers a `near[]` term (task V6, done): on its own key spec, with no metric or its own, and a vector of its `dim`. `supportsFiltered:` is the same for a vector index; `PBIndex` answers false. A non-term is `PBValidationError`. |
+| `estimate: aTerm`, `plan: aTerm`, `filteredPlan: aTerm where: anExpression` | The model estimate ([queries.md](queries.md#the-cost-model-for-vectors)), in Python's arithmetic, bit for bit `proto_db`'s; a `PBIndexPlan` of kind `'VectorExact'`, `'VectorIvfFlat'` or `'VectorHnsw'`, its details `'backend'`, `'metric'` and, when filtered, `'where'` (task V6, done). The rows are the members nearest first, ties by the member key, each occurrence once; the search runs when the plan does, on this version (no cache, DV4), and every score is `PBVectorMath`'s. An exact search scores every member the condition accepts (no numpy screening, DV2); an `'ivf_flat'` search probes the `'nprobe'` best non-empty lists (and list -1, while untrained), doubling the probe while fewer than k members match, and with `'nprobe'` = `'nlist'` answers exactly. An unsupported term is `PBNotSupportedError` (`proto_db`'s text); a condition holding a `near[]` term is `PBValidationError`. `PBIndex >> filteredPlan:where:` is `PBNotSupportedError` (`base.py`'s text). |
+| `PBVectorIndex nearOracle: elements keySpec: aKeySpec query: aPBNearQuery metric: aString predicate: aBlockOrExpressionOrNil` | The brute-force definition of the answer, `proto_db`'s `vector.near_oracle` (task V6, done): elements whose key is not a vector of the query's dimension are ignored, the rest grouped into members by exact member key and ranked as the index ranks them; the predicate is nil, an expression, the 0.1 list syntax or a block (its answer taken as Python's truth). `proto_db`'s texts for a query that is not a `PBNearQuery`, an unknown metric and a key spec that is not a `PBKeySpec`. Used by the tests and the contract. |
 
-An execution of a `'VectorHnsw'` plan is `PBNotSupportedError` naming the index (ruling VQ1): the
-hnsw graph needs hnswlib, a native library protoST cannot load. Its maintenance, `validate:`,
-`explain` and planning work.
+An execution of a `'VectorHnsw'` plan is `PBNotSupportedError` naming the index (ruling VQ1, DV1;
+the text rewritten for protoST, DV8): the hnsw graph needs hnswlib, a native library protoST
+cannot load. Its maintenance, `validate:`, `explain`, `estimate:` and planning work; the refusal
+comes at the first execution, never at planning, as `proto_db`'s without hnswlib.
 
 The backends are `PBVectorExact`, `PBVectorIvfFlat` and `PBVectorHnsw` (`src/protobase/vectors.st`),
 stateless classes as `proto_db`'s are: `PBVectorBackend named: aString` (`proto_db`'s backend_for), and on each
@@ -1376,8 +1382,10 @@ stateless classes as `proto_db`'s are: `PBVectorBackend named: aString` (`proto_
 Associations in `proto_db`'s order), `listFor: anIndex vector: aVector`, `needsTraining: anIndex`,
 `train: anIndex vectors: aVectors` and `explainOf: anIndex`; `PBVectorIvfFlat` adds
 `probeOrder: anIndex query: aVector` (`proto_db`'s `_probe_order`: -1, then every list by
-descending centroid score, ties by number; task V4) and `untrained` (-1). They serve the index; an
-application names a backend by its String.
+descending centroid score, ties by number; task V4) and `untrained` (-1); and, since task V6,
+`search: anIndex query: aVector k: k threshold: t eligible: aBlockOrNil` (the `{ element. count }`
+pairs, nearest first) and `estimate: anIndex k: k threshold: t filtered: aBoolean`. They serve the
+index; an application names a backend by its String.
 
 ### Near queries
 
@@ -1417,8 +1425,9 @@ Float or `Decimal`), `canonicalVector:dim:`, `fsum:` (CPython's `math.fsum`), `s
 `sampleRange:count:seed:` (`random.Random(seed).sample(range(n), k)`) and `bits:count:seed:` (a
 test entry point: the first values of `random.getrandbits`). `canonicalVector:dim:` answers a `PBTuple`
 of Floats or nil; `normalized:` and `kmeans:nlist:iterations:seed:` answer Arrays of Floats (k-means: an
-Array of centroids); `rank:query:metric:k:threshold:` takes entries `{memberKey. element. count. vector}`
-and answers `{element. count}` pairs. Where CPython raises an error of its own (the overflow and the
+Array of centroids); `rank:query:metric:k:threshold:` takes entries `{memberKey. element. count. vector}` (a fifth
+item, the member key's order key, when the caller holds it: a store node caches it) and answers
+`{element. count}` pairs. Where CPython raises an error of its own (the overflow and the
 infinities of opposite signs of Python's math.fsum, Python's float of a signalling-NaN `Decimal`, a
 sample larger than its population), they
 signal `PBValidationError` with CPython's text (DV7). Every result is pinned bit for bit by

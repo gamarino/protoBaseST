@@ -9,8 +9,8 @@ Usage: python py_vector_workload.py <unit>      (QUERY_VECTOR_DATA names the dat
                                                  VB3 and VB5 also need QUERY_DATA, a new directory
                                                  for their spaces)
 
-VB3 and VB5 (task V5) are vector_workload.st's; the indexes, the starting collections and the
-checksum are bench/_vector_bench.st's, computed here with the same formulas.
+VB3 and VB5 (task V5), VB1 and VB2 (task V6) are vector_workload.st's; the indexes, the starting
+collections and the checksums are bench/_vector_bench.st's, computed here with the same formulas.
 """
 import math
 import os
@@ -21,9 +21,9 @@ import zlib
 from pathlib import Path
 
 # QUERY_PY_NUMPY=1 runs proto_db's default mode (numpy importable, tests/interop/.venv-numpy) for
-# VB3 and VB5, reported as impl=pyn: its centroids are numpy's (deviation DV3), so only the work that
-# does not depend on them is verified (the COUNTS line; the WORK line too where no centroid is
-# checksummed). Otherwise numpy and hnswlib are blocked: the reference mode, impl=py.
+# VB1, VB2, VB3 and VB5, reported as impl=pyn: its centroids are numpy's (deviation DV3), so only the
+# work that does not depend on them is verified (the COUNTS lines; the WORK lines too where no
+# centroid decides them: VB1's exact answers are verified, VB2's are reported by recall). Otherwise numpy and hnswlib are blocked: the reference mode, impl=py.
 NUMPY_MODE = os.environ.get("QUERY_PY_NUMPY") == "1"
 IMPL = "pyn" if NUMPY_MODE else "py"
 if not NUMPY_MODE:
@@ -38,6 +38,8 @@ from proto_db.collections.lists import List  # noqa: E402
 from proto_db.indexing import KeySpec  # noqa: E402
 from proto_db.indexing import vector_backends as vb  # noqa: E402
 from proto_db.indexing.vector import VectorIndex  # noqa: E402
+from proto_db import DBObject  # noqa: E402
+from proto_db.query.terms import NEAR, NearQuery, Term  # noqa: E402
 
 OPS = ("products", "naive", "fsum", "ip", "l2", "cosine")
 
@@ -164,6 +166,86 @@ def maintenance(id_: str, n: int, plan: str, dim: int, op: str, path: str):
     print(f"TIME id={id_} impl={IMPL} size={n} plan={plan} us={us}")
 
 
+def read_queries(path: str, dim: int) -> list:
+    """VectorBench queriesFrom:dim:."""
+    with open(path, "rb") as f:
+        data = msgpack.unpackb(f.read(), raw=False)
+    queries = [tuple(q) for q in data["queries"]]
+    if any(len(q) != dim for q in queries):
+        raise SystemExit(f"vector bench: {path} holds queries of another dim than {dim}")
+    return queries
+
+
+def records(vectors) -> list:
+    """VectorBench records:."""
+    return [DBObject(i=i, vec=v) for i, v in enumerate(vectors)]
+
+
+def answers_checksum(answers) -> int:
+    """VectorBench answersChecksum:."""
+    out = bytearray()
+    for answer in answers:
+        for i in answer:
+            out += struct.pack(">d", float(i))
+    return zlib.crc32(bytes(out))
+
+
+def search(index, q, k: int = 10) -> list:
+    """VectorBench search:query:k:, a VectorSearch over the index's plan (the planner's near[] rules
+    are task V7's; proto_db's plan for near(k) on an indexed collection is this one)."""
+    from proto_db.query.plans import VectorSearch
+    return [e.i for e in VectorSearch(index, Term("vec", NEAR, NearQuery(q, k=k))).execute()]
+
+
+def knn(id_: str, n: int, plan: str, dim: int, op: str, path: str):
+    """VB1 and VB2; see vector_workload.st."""
+    vectors = read_vectors(path, n, dim)
+    queries = read_queries(path, dim)
+    recs = records(vectors)
+    if id_ == "VB1":
+        index = VectorIndex("by_vec", KeySpec.path("vec"), dim, op, "exact").build(recs)
+        t0 = time.perf_counter_ns()
+        first = search(index, queries[0])
+        us_first = (time.perf_counter_ns() - t0) // 1000
+        t0 = time.perf_counter_ns()
+        answers = [search(index, q) for q in queries]
+        us = (time.perf_counter_ns() - t0) // 1000
+        print(f"WORK id={id_} impl={IMPL} size={n} rows={len(first)} queries=1 plan={plan}-first checksum={answers_checksum([first])}")
+        print(f"WORK id={id_} impl={IMPL} size={n} rows={sum(map(len, answers))} queries={len(queries)} plan={plan}-knn "
+              f"checksum={answers_checksum(answers)}")
+        print(f"TIME id={id_} impl={IMPL} size={n} plan={plan}-first us={us_first}")
+        print(f"TIME id={id_} impl={IMPL} size={n} plan={plan}-knn us={us}")
+        return
+    nlist = max(4, int(n ** 0.5))
+    exact = VectorIndex("by_vec", KeySpec.path("vec"), dim, "cosine", "exact").build(recs)
+    truth = [search(exact, q) for q in queries]
+    t0 = time.perf_counter_ns()
+    built = VectorIndex("by_vec", KeySpec.path("vec"), dim, "cosine", "ivf_flat", nlist=nlist, nprobe=1).build(recs)
+    us_build = (time.perf_counter_ns() - t0) // 1000
+    out = bytearray()
+    for c in built.centroids:
+        for x in c:
+            out += struct.pack(">d", x)
+    print(f"WORK id={id_} impl={IMPL} size={n} rows={len(built.centroids)} queries=0 plan={plan}-build checksum={zlib.crc32(bytes(out))}")
+    print(f"COUNTS id={id_} impl={IMPL} size={n} plan={plan}-build members={built.explain()['members']} lists={len(built.centroids)}")
+    print(f"TIME id={id_} impl={IMPL} size={n} plan={plan}-build us={us_build}")
+    for nprobe in (1, 4, nlist):
+        # The built index with another nprobe: the same store and centroids (training does not read
+        # nprobe), so the three probes are measured on one training.
+        index = built._with(params=vb.normalize_params("ivf_flat", {**dict(built.params), "nprobe": nprobe}))
+        search(index, queries[0])
+        t0 = time.perf_counter_ns()
+        answers = [search(index, q) for q in queries]
+        us = (time.perf_counter_ns() - t0) // 1000
+        hits = sum(len(set(a) & set(t)) for a, t in zip(answers, truth))
+        label = f"{plan}-nprobe{nprobe}"
+        print(f"WORK id={id_} impl={IMPL} size={n} rows={sum(map(len, answers))} queries={len(queries)} plan={label} "
+              f"checksum={answers_checksum(answers)}")
+        print(f"COUNTS id={id_} impl={IMPL} size={n} plan={label} rows={sum(map(len, answers))}")
+        print(f"RECALL id={id_} impl={IMPL} size={n} plan={label} hits={hits} of={10 * len(queries)}")
+        print(f"TIME id={id_} impl={IMPL} size={n} plan={label} us={us}")
+
+
 def run(unit: str):
     id_, n, plan = unit.split(":")
     n = int(n)
@@ -172,6 +254,10 @@ def run(unit: str):
     path = os.environ.get("QUERY_VECTOR_DATA")
     if not path:
         raise SystemExit("py_vector_workload: QUERY_VECTOR_DATA names the data file")
+    if (id_ == "VB1" and op in ("cosine", "l2")) or (id_ == "VB2" and op == "ivf"):
+        if dim < 1:
+            raise SystemExit(f"py_vector_workload: unknown unit {unit}")
+        return knn(id_, n, plan, dim, op, path)
     if (id_ == "VB3" and op in ("none", "exact", "ivf")) or (id_ == "VB5" and op in ("exact", "ivf")):
         if dim < 1:
             raise SystemExit(f"py_vector_workload: unknown unit {unit}")
@@ -205,8 +291,8 @@ def main():
     if NUMPY_MODE:
         if vb.numpy_module() is None:
             sys.exit("py_vector_workload: QUERY_PY_NUMPY=1 but proto_db does not see numpy")
-        if not sys.argv[1].startswith(("VB3:", "VB5:")):
-            sys.exit("py_vector_workload: proto_db's numpy mode is measured for VB3 and VB5 only")
+        if not sys.argv[1].startswith(("VB1:", "VB2:", "VB3:", "VB5:")):
+            sys.exit("py_vector_workload: proto_db's numpy mode is measured for VB1, VB2, VB3 and VB5 only")
     elif vb.numpy_module() is not None:
         sys.exit("py_vector_workload: numpy is importable although blocked")
     run(sys.argv[1])

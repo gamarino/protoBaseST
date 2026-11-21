@@ -3,7 +3,7 @@
 # the interop venv) on the same workloads, verifies the work and prints the timings (spec 7.3).
 #
 # Usage: bench/run_query.sh [ids...]          (default: M1 M2 M3; the planner workloads P1 P2 P3, the query workloads Q1-Q5
-#                                              and the vector workloads VB0, VB3 and VB5 by name)
+#                                              and the vector workloads VB0, VB1, VB2, VB3 and VB5 by name)
 #
 # A workload is split into units, <id>:<size>:<plan> (M1: 600:idx0, 600:idx1, 600:idx3; M2: <n>:build
 # and <n>:fold for each size of QUERY_M2_SIZES, default "100 1000 10000 100000"), and every unit runs
@@ -67,6 +67,15 @@
 # permission at every attempt (measured with retrain_growth 1.05: with the default lease no member finished its 40 commits
 # in 1700 s, against 15 s for the exact unit; docs/deviations.md, "Vectors").
 #
+# VB1 and VB2, vector search (vectors phase task V6; bench/vector_workload.st states them): VB1:<n>:d<dim>-
+# <metric> for n of QUERY_VB1_SIZES (default "1000 10000"), dim 8 and 32, metric cosine and l2, exact
+# kNN with k 10, timed as '-first' (the first query) and '-knn' (the data file's 10 queries);
+# VB2:10000:d32-ivf, an ivf_flat index of nlist 100 timed as '-build', then '-nprobe1', '-nprobe4' and
+# '-nprobe100' (the 10 queries each), each with a RECALL line against the exact answer, printed at
+# the end. A unit prints a TIME line per timing and the table a row per timing. VB1's answers are
+# verified in both of proto_db's modes; VB2's in its reference mode (answers and centroids), its
+# numpy mode reported by recall and verified by its COUNTS lines only (DV3).
+#
 # M3's cluster units (plan Task 4b) run bench/run_cluster.sh once per round (RUNS=1, MODES=3, the
 # profile m3-<plan>, KEEP_TMP=1, CLUSTER_TMPDIR a new directory under QUERY_OUT/data, so nothing
 # is removed): three protost member processes, each with the heap budget
@@ -112,6 +121,9 @@ for id in "${@:-M1 M2 M3}"; do
             VB3) for n in ${QUERY_VB3_SIZES:-600 5000}; do
                     for p in none exact ivf; do units+=("VB3:$n:d8-$p"); done; done ;;
             VB5) units+=(VB5:600:d8-exact VB5:600:d8-ivf VB5:600:d8-exact-c3 VB5:600:d8-ivf-c3) ;;
+            VB1) for n in ${QUERY_VB1_SIZES:-1000 10000}; do
+                    for d in 8 32; do for m in cosine l2; do units+=("VB1:$n:d$d-$m"); done; done; done ;;
+            VB2) units+=(VB2:10000:d32-ivf) ;;
             *) fail "unknown workload $one" ;;
         esac
     done
@@ -167,7 +179,7 @@ CLUSTER_HEAP="${QUERY_CLUSTER_HEAP_LIMIT_CELLS:-32000000}"
 VB5_IVF_LEASE_MS="${QUERY_VB5_IVF_LEASE_MS:-90000}"
 # proto_db's default mode, numpy importable (Addendum V 5.5, review M3 of task V5): with
 # tests/interop/.venv-numpy (tests/interop/setup_venv_numpy.sh, the pinned proto_db), every
-# standalone VB3 and VB5 unit also runs py_vector_workload.py with QUERY_PY_NUMPY=1, impl pyn, its
+# standalone VB1, VB2, VB3 and VB5 unit also runs py_vector_workload.py with QUERY_PY_NUMPY=1, impl pyn, its
 # times a column of the table. Its centroids are numpy's, not comparable with the pure path's
 # (deviation DV3), so its verification is the COUNTS line (contents, members, invalid occurrences,
 # trained size, centroid count: equal to the reference mode's) and the WORK line where no centroid
@@ -205,7 +217,7 @@ for ((r = 1; r <= RUNS; r++)); do
         mkdir -p "$dir" || fail "cannot create $dir"
         if [[ "$unit" == *-c3 ]]; then cluster_unit "$unit" "$r"; continue; fi
         impls=(py st)
-        [[ $numpy_mode == 1 && "$unit" == VB[35]:* ]] && impls=(py pyn st)
+        [[ $numpy_mode == 1 && "$unit" == VB[1235]:* ]] && impls=(py pyn st)
         for impl in "${impls[@]}"; do
             out="$dir/$impl.$r"
             data="$OUT/data/${unit//:/_}-$impl-$r-$$-$(date +%s%N)"
@@ -231,13 +243,13 @@ for ((r = 1; r <= RUNS; r++)); do
             [[ "$(tail -n 1 "$out")" == "query_workload ok" ]] || { cat "$out"; fail "$impl $unit run $r did not finish"; }
             grep '^WORK ' "$out" | sed 's/ impl=[a-z]*//' > "$out.work"
             [[ -s "$out.work" ]] || fail "$impl $unit run $r reported no work"
-            if [[ $impl == py* && "$unit" == VB[35]:* ]]; then
+            if [[ $impl == py* && "$unit" == VB[235]:* ]]; then
                 grep '^COUNTS ' "$out" | sed 's/ impl=[a-z]*//' > "$out.counts"
                 [[ -s "$out.counts" ]] || fail "$impl $unit run $r reported no counts"
                 cmp -s "$out.counts" "$dir/py.1.counts" || {
                     diff "$dir/py.1.counts" "$out.counts"; fail "$impl $unit run $r: the counts differ from proto_db's reference mode"; }
                 # DV3: numpy's centroids are its own; VB3's ivf WORK checksum covers them.
-                [[ $impl == pyn && "$unit" == VB3:*-ivf ]] && continue
+                [[ $impl == pyn && ( "$unit" == VB3:*-ivf || "$unit" == VB2:* ) ]] && continue
             fi
             cmp -s "$out.work" "$dir/py.1.work" || {
                 diff "$dir/py.1.work" "$out.work"; fail "$impl $unit run $r: the work differs from proto_db's"; }
@@ -275,7 +287,7 @@ echo "protost: $PROTOST (PROTOCORE_HEAP_LIMIT_CELLS=$PROTOCORE_HEAP_LIMIT_CELLS;
 if [[ " ${units[*]}" == *" VB"* ]]; then
     echo "proto_db mode (vector units): reference, numpy: blocked, hnswlib: blocked; libc $("$PY" -c 'import platform; print(*platform.libc_ver())')"
     if [[ $numpy_mode == 1 ]]; then
-        echo "proto_db default mode (VB3 and VB5, column numpy): numpy $("${PYN[@]}" -c 'import numpy; print(numpy.__version__)'), $("$NUMPY_VENV/bin/python" --version 2>&1); its centroids are numpy's (DV3), not comparable: counts verified, and the work where no centroid is checksummed"
+        echo "proto_db default mode (VB1, VB2, VB3 and VB5, column numpy): numpy $("${PYN[@]}" -c 'import numpy; print(numpy.__version__)'), $("$NUMPY_VENV/bin/python" --version 2>&1); its centroids are numpy's (DV3), not comparable: counts verified, and the work where no centroid is checksummed"
     else
         echo "SKIP: proto_db's default mode (numpy): tests/interop/.venv-numpy is absent"
     fi
@@ -286,6 +298,10 @@ echo "$(date -u +%Y-%m-%dT%H:%MZ); protoBaseST $commit; $("$PROTOST" --version 2
 echo "Machine: $(lscpu | sed -n 's/^\(Model name\|Nombre del modelo\): *//p' | head -n 1), $(nproc) CPUs, Linux $(uname -r)"
 for unit in "${units[@]}"; do [[ "$unit" == *-c3 ]] || cat "$OUT/${unit//:/_}/py.1.work"; done
 for unit in "${units[@]}"; do [[ "$unit" == P[23]:* ]] && grep -h '^MODEL ' "$OUT/${unit//:/_}/py.1" "$OUT/${unit//:/_}/st.1"; done
+for unit in "${units[@]}"; do
+    [[ "$unit" == VB2:* ]] || continue
+    for impl in py pyn st; do [[ -f "$OUT/${unit//:/_}/$impl.1" ]] && grep -h '^RECALL ' "$OUT/${unit//:/_}/$impl.1"; done
+done
 for unit in "${units[@]}"; do
     [[ "$unit" == *-c3 ]] || continue
     echo "$unit retries per run (block runs beyond one per commit): $(for ((r = 1; r <= RUNS; r++)); do sed -n 's/^RETRIES .*retries=//p' "$OUT/${unit//:/_}/st.$r"; done | tr '\n' ' ')"
@@ -305,20 +321,24 @@ for unit in "${units[@]}"; do
     cat "${files[@]}" | grep '^TIME ' | awk -v rp="$rss_py" -v rs="$rss_st" '
         { for (i = 2; i <= NF; i++) { split($i, kv, "="); f[kv[1]] = kv[2] }
           id = f["id"]; size = f["size"]; plan = f["plan"]; impl = f["impl"]
-          n[impl]++; v[impl, n[impl]] = f["us"] + 0 }
-        function stat(impl,   c, i, j, t, a) {
-            c = n[impl]; for (i = 1; i <= c; i++) a[i] = v[impl, i]
+          if (!(plan in seen)) { seen[plan] = 1; plans[++np] = plan }
+          n[plan, impl]++; v[plan, impl, n[plan, impl]] = f["us"] + 0 }
+        function stat(plan, impl,   c, i, j, t, a) {
+            c = n[plan, impl]; for (i = 1; i <= c; i++) a[i] = v[plan, impl, i]
             for (i = 2; i <= c; i++) { t = a[i]; for (j = i - 1; j >= 1 && a[j] > t; j--) a[j + 1] = a[j]; a[j + 1] = t }
             mn = a[1]; md = (c % 2) ? a[(c + 1) / 2] : (a[c / 2] + a[c / 2 + 1]) / 2 }
         END {
-            if (n["py"] == 0) {
-                stat("st")
-                printf "| %s | %s | %s | - | %d / %d | - | - / %d (largest member) | - |\n", id, size, plan, mn, md, rs / 1024
-                exit
+            for (p = 1; p <= np; p++) {
+                plan = plans[p]
+                if (n[plan, "py"] == 0) {
+                    stat(plan, "st")
+                    printf "| %s | %s | %s | - | %d / %d | - | - / %d (largest member) | - |\n", id, size, plan, mn, md, rs / 1024
+                    continue
+                }
+                numpy = "-"
+                if (n[plan, "pyn"] > 0) { stat(plan, "pyn"); numpy = sprintf("%d / %d", mn, md) }
+                stat(plan, "py"); pm = mn; pd = md; stat(plan, "st")
+                printf "| %s | %s | %s | %d / %d | %d / %d | %.1fx | %d / %d | %s |\n", id, size, plan, pm, pd, mn, md, mn / pm, rp / 1024, rs / 1024, numpy
             }
-            numpy = "-"
-            if (n["pyn"] > 0) { stat("pyn"); numpy = sprintf("%d / %d", mn, md) }
-            stat("py"); pm = mn; pd = md; stat("st")
-            printf "| %s | %s | %s | %d / %d | %d / %d | %.1fx | %d / %d | %s |\n", id, size, plan, pm, pd, mn, md, mn / pm, rp / 1024, rs / 1024, numpy
         }'
 done
