@@ -2202,10 +2202,71 @@ index retrained past its start. Commits per second are the commits divided by th
   lease and drift margin have passed (with 90 s, two and a half minutes), and a starting member
   grants nothing for the same span. The advice stands until the k-means distance gets a protoST
   primitive (planned for protoST 0.16.0), when the retrain will be measured again against the
-  default 667 ms permission.
+  default 667 ms permission. (Measured on 0.16.0 in the run below: the retrain still does not fit,
+  so the advice stays, with a sizing rule.)
 - The peak resident set of a protoBaseST unit is mostly the heap budget it is allowed
   (`QUERY_HEAP_LIMIT_CELLS`, about 5 GB), which protoCore keeps until it needs it; it is not a
   measure of the working set.
+
+**VB3 and VB5 on protoST 0.16.0, with `proto_db`'s default mode** (task V5, fix round 2).
+`RUNS=5 bench/run_query.sh VB3 VB5`, measured 2026-11-21, ending 17:01 UTC, on the same machine,
+load average 1.62 before and 3.10 after (the machine was also building other projects at times);
+protoBaseST `97e25e4` (clean tree), protoST 0.16.0
+(`worktrees/pinned-0160/protoST/build_release/protost`, protoCore 3.6.1 per `ldd`, now the
+benchmark binary: its `Float fsumOfPowSquaredDifferences:with:` computes every k-means distance,
+DV3), the same data, indexes and verification as the run above. `proto_db` `v2.0.0rc4` ran in
+both of its modes: the reference mode (numpy and hnswlib blocked, CPython 3.14.6), whose work every
+protoBaseST run equals (`verified`), and its default mode (numpy 2.3.5 in
+`tests/interop/.venv-numpy`, CPython 3.14.0), whose counts (contents, members, invalid
+occurrences, trained sizes, centroid counts) and, except for VB3's IVF checksum, which covers the
+centroids, whole work equal the reference mode's. Its centroids are numpy's and are not compared
+(DV3): that column is a timing of the same commits, not of the same training. Commits per second,
+the commits over the minimum time of 5 runs (every median within 6 % of it):
+
+| unit | proto_db, reference | proto_db, numpy | protoBaseST | peak RSS MB py / st |
+|---|---|---|---|---|
+| VB3, 600 + 200 appends, no index | 156.2 | 142.3 | 35.9 | 27 / 1105 |
+| VB3, 600 + 200 appends, exact | 133.0 | 119.3 | 16.2 | 36 / 5118 |
+| VB3, 600 + 200 appends, IVF | 51.6 | 69.8 | 5.0 | 45 / 5093 |
+| VB3, 5000 + 200 appends, no index | 147.3 | 136.6 | 32.1 | 34 / 2484 |
+| VB3, 5000 + 200 appends, exact | 129.2 | 108.7 | 15.1 | 64 / 5136 |
+| VB3, 5000 + 200 appends, IVF | 57.4 | 75.4 | 5.1 | 83 / 5131 |
+| VB5, 120 blind writes merged onto 600, exact | 132.3 | 114.1 | 16.1 | 32 / 3929 |
+| VB5, the same, IVF | 50.8 | 73.1 | 4.7 | 39 / 5093 |
+| VB5, the same in a three-member cluster, exact | - | - | 8.1 | - / 2074 (largest member) |
+| VB5, the same in a three-member cluster, IVF (90 s lease) | - | - | 3.7 | - / 2075 (largest member) |
+
+- **The primitive's gain.** An IVF commit rate rose from 3.3 to 5.0 (VB3 at 600), 3.3 to 5.1 (VB3
+  at 5000) and 3.2 to 4.7 (VB5) commits per second against 0.15.0, 2.7 to 3.7 in the cluster
+  (these two runs also differ in fix round 1's k-means buffers, which only 0.16.0's run has). The
+  units without an IVF index are unchanged (35.9 against 36.7, 16.2 against 16.6: noise of the
+  load). `proto_db` commits 10 to 11 times faster than protoBaseST with an IVF index in its reference
+  mode, 14 to 16 times with numpy; its default mode is slower than its reference mode where nothing trains (other CPython
+  patch release in that venv; not investigated), faster where an IVF index retrains.
+- **The retrain against the default permission.** One training, each size in a fresh process
+  (`build:` of the VB data, then `_retrained` of the result, which is what a merge crossing the
+  threshold runs; dim 8, nlist 16, 10 iterations), measured before the run above under the bench
+  marker at load 2.3 rising to 4.0 (indicative: single runs, three at the two VB sizes):
+
+  | members | `build:` | retrain (`_retrained`) |
+  |---|---|---|
+  | 631 | 2047 to 2151 ms | 1555 to 1636 ms |
+  | 696 | 2200 to 2353 ms | 1747 to 1935 ms |
+  | 1000 | 3874 ms | 3404 ms |
+  | 2000 | 9182 ms | 6941 ms |
+  | 5150 | 26535 ms | 19080 ms |
+
+  k-means is about 0.65 s of the retrain at 631 members (measured apart); the rest is the
+  assignment of every member to its list (`listFor:`, one score per centroid) and the store's
+  rebuild. A retrain is still 2.3 to 2.9 times the 667 ms a member believes a permission under
+  the default 2000 ms lease, so the long-lease requirement of a cluster that retrains an IVF index
+  stays, and VB5's IVF cluster unit keeps its 90 s lease (it retried 0 times in 5 runs; the exact
+  unit, on the default lease, 34, 31, 28, 30 and 30). **Sizing rule:** a build must fit in the
+  believed permission less the send reserve, a third of the lease less a twelfth, so the lease
+  must exceed four times the longest retrain: on protoST 0.16.0 about 3 ms per member at dim 8,
+  nlist 16 and 10 iterations (2.5 ms per member at 631, 3.7 at 5150), so 8 s for 700 members and
+  80 s for 5000, with headroom for load. The lease bounds the write outage after a holder dies,
+  which is the price.
 
 ## Known protoST limits
 

@@ -78,7 +78,8 @@
 - **The fsum primitives of protoST 0.15.0** (task VP-adopt; internal): `PBVectorMath` probes
   `Float respondsTo: #fsum:` once when the module loads and, where the primitives exist, computes
   fsum, `sumNonNegative:`, the three scores, `normalized:` and the squared norm of
-  `canonicalVector:dim:` with them; k-means keeps its Smalltalk loop of `raisedTo: 2` terms. The
+  `canonicalVector:dim:` with them; k-means keeps its Smalltalk loop of `raisedTo: 2` terms (until
+  protoST 0.16.0's own primitive, below under Requirements). The
   Smalltalk kernel stays as the oracle and the fallback (an Integer term, sequences of unequal
   sizes, a protoST without the primitives), and the primitives' errors become the kernel's
   (`PBValidationError` with CPython's text, infinity in `sumNonNegative:`). Pinned on both paths,
@@ -102,10 +103,12 @@
 - **Benchmarks VB3 and VB5** (`bench/run_query.sh VB3 VB5`, `bench/_vector_bench.st`): appends
   committed to a vector-indexed list of 600 and 5000, and blind writes merged onto a
   vector-indexed dictionary, standalone and in a three-member cluster, self-verified against
-  `proto_db`'s checksums (the IVF centroids included). On protoST 0.15.0 an IVF retrain dominates:
-  3.3 commits per second against 16.6 with an exact index and 36.7 with none; in a cluster a
-  retrain longer than the write permission (667 ms with the default lease) never commits, so VB5's
-  IVF cluster unit runs with a 90 s lease, which lengthens the write outage when a member dies
+  `proto_db`'s checksums (the IVF centroids included). On protoST 0.16.0 an IVF retrain dominates:
+  5.0 commits per second against 16.2 with an exact index and 35.9 with none (3.3, 16.6 and 36.7
+  on 0.15.0); a retrain over 650 to 700 members takes 1.6 to 1.9 s, so in a cluster, where a retrain
+  longer than the write permission (667 ms with the default lease) never commits, an IVF index
+  needs a lease of more than four times its longest retrain (about 3 ms per member); VB5's IVF
+  cluster unit runs with a 90 s lease, which lengthens the write outage when a member dies
   (`docs/deviations.md`, Performance, "Vectors").
   `proto_db`'s default mode (numpy, `tests/interop/.venv-numpy`) is a column of the VB3 and VB5
   tables: its counts are verified, its centroids are numpy's (DV3) and not compared.

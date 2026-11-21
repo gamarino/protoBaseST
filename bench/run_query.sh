@@ -61,8 +61,8 @@
 # QUERY_VB5_IVF_LEASE_MS (default 90000 ms, a write permission believed for 30 s; the members' startup
 # grace, untimed, grows with it to 150 s), not proto_db's
 # default 2000 ms: a retrain is k-means in the round's build, under the permission, and protoBaseST's
-# k-means over ~650 vectors of dim 8 takes about 3 s on protoST 0.15.0 and 8 s on 0.14.1 (one
-# fresh process each, indicative), beyond the 667 ms a default permission is
+# retrain over ~650 vectors of dim 8 takes about 1.6 to 1.9 s on protoST 0.16.0 (its k-means about
+# 3 s on 0.15.0 and 8 s on 0.14.1; one fresh process each, indicative), beyond the 667 ms a default permission is
 # believed, so with the default lease a retraining merge cannot commit: its build outlasts the
 # permission at every attempt (measured with retrain_growth 1.05: with the default lease no member finished its 40 commits
 # in 1700 s, against 15 s for the exact unit; docs/deviations.md, "Vectors").

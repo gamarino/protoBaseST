@@ -287,18 +287,18 @@ lesson check: 'its search is refused' signals: PBNotSupportedError containing: '
 - **Every write pays for the index.** A vector index is part of the collection version, so every
   commit that adds a document adds it to the index, and a commit that crosses a retrain threshold
   of an IVF index runs k-means inside that commit, in the merge of a blind write too:
-  appending to a list of 600 vectors commits 36.7 times per second with no index, 16.6 with an
-  exact index and 3.3 with an IVF index retraining at every 3 % of growth (5000 vectors: 32.2,
-  15.1 and 3.3; bench VB3, protoST 0.15.0, where `proto_db` commits 157, 133 and 51 times). In a
-  cluster, that k-means runs in the round's build, under the cluster-wide write permission: 120
-  blind writes onto a vector-indexed dictionary commit 8.4 times per second with an exact index
-  and 2.7 with an IVF index in a three-member cluster (16.2 and 3.2 standalone; bench VB5). A
-  retrain takes about 3 s for 650 vectors on protoST 0.15.0 (8 s on 0.14.1), longer than the
-  667 ms a write permission lasts under the default lease, so an IVF index retrained in a cluster
-  needs a longer `leaseDuration` (VB5 used 90 s): with the default one, such a commit never
-  succeeds. The longer lease has a cost: if the member holding the permission dies, nobody writes
-  until its lease and drift margin have passed. This will be measured again when the k-means
-  distance gets a protoST primitive (planned for protoST 0.16.0)
+  appending to a list of 600 vectors commits 35.9 times per second with no index, 16.2 with an
+  exact index and 5.0 with an IVF index retraining at every 3 % of growth (5000 vectors: 32.1,
+  15.1 and 5.1; bench VB3, protoST 0.16.0, where `proto_db` commits 156, 133 and 52 times, 142,
+  119 and 70 with numpy). In a cluster, that k-means runs in the round's build, under the
+  cluster-wide write permission: 120 blind writes onto a vector-indexed dictionary commit 8.1
+  times per second with an exact index and 3.7 with an IVF index in a three-member cluster (16.1
+  and 4.7 standalone; bench VB5). A retrain takes about 1.6 to 1.9 s for 650 to 700 members on
+  protoST 0.16.0, longer than the 667 ms a write permission lasts under the default lease, so an
+  IVF index retrained in a cluster needs a longer `leaseDuration`, more than four times the
+  longest retrain: about 3 ms per member, so 8 s for 700 members (VB5 used 90 s). With the
+  default lease such a commit never succeeds. The longer lease has a cost: if the member holding
+  the permission dies, nobody writes until its lease and drift margin have passed
   ([deviations.md](../deviations.md#vectors)).
 - **A dedicated vector database** is the better tool when vector search is the whole workload: such
   systems offer more index kinds, quantisation and GPU execution (general knowledge, not measured

@@ -84,8 +84,10 @@ A feature probe, not a version check, decides when the module loads (Float respo
 the protoST floor stays 0.14.1, where the Smalltalk kernel runs alone. The primitives serve fsum:,
 sumNonNegative: and the scores (the products and the squared differences, each rounded as the
 Smalltalk kernel rounds them, and cosine's norms), normalized: and canonicalVector:dim:'s norm;
-k-means keeps its Smalltalk loop of raisedTo: 2 terms (libm pow, which no primitive computes) and
-sums them with sumNonNegative:. The Smalltalk kernel stays as the oracle and the fallback, and
+k-means squares with raisedTo: 2 (libm pow) and sums with sumNonNegative:; protoST 0.16.0's
+Float fsumOfPowSquaredDifferences:with: computes that whole distance, the same bytes, and a second
+probe made when the module loads (Float respondsTo: #fsumOfPowSquaredDifferences:with:) decides
+whether k-means calls it, since 0.15.0 has the others but not it. The Smalltalk kernel stays as the oracle and the fallback, and
 answers wherever the primitive cannot: an Integer term (the primitive takes Floats only; the
 Smalltalk kernel's answer is kept), and sequences of unequal sizes in a score (zip). The
 primitive's own errors (Error, 'fsum: intermediate overflow' and 'fsum: -inf + inf') are matched by

@@ -957,7 +957,9 @@ the mutator (and so inside a merge or a cluster round's build) that crossed the 
    calls the same function, and adds a centroid's members with plain `+` in data order, as Python
    does. On protoST 0.15.0 the correctly rounded sums (each distance's `_sum_nonnegative`, and the
    norm in the cosine normalisation of the vectors and the centroids) run in protoST's fsum
-   primitive and answer the same bits; the squares and the plain sums stay Smalltalk.
+   primitive and answer the same bits; on 0.16.0 each whole distance, the libm pow squares included,
+   is one primitive call, behind its own feature probe, with the same bits again; the plain sums
+   stay Smalltalk.
 
 So "the same centroids" has a precise scope: the same history, `proto_db` without numpy (with numpy
 it trains with numpy's own arithmetic), and the same C library on the same host. Whoever trained
@@ -1044,21 +1046,24 @@ the current version's vector indexes as it maintains its key-group indexes, and 
 cluster's wire changes. One cost is new: a mutator that crosses an IVF retrain threshold runs
 k-means inside that commit, standalone in the publisher, and in a cluster in the round's build under
 the cluster-wide write permission. Measured (bench VB3, 200 appends committed one by one to a list of 600
-vectors of dim 8, protoST 0.15.0): 36.7, 16.6 and 3.3 commits per second with no index, an exact
-index and an IVF index retraining at every 3 % of growth (`proto_db` 157, 133 and 51), and about
-the same over 5000 vectors (32.2, 15.1 and 3.3); a retrain is k-means over every member, about 3 s
-for 650 vectors on protoST 0.15.0 (8 s on the floor, 0.14.1), against 0.2 s for `proto_db`'s pure
-path and about 4 ms with numpy (indicative single timings, [deviations.md](deviations.md#vectors)). Bench VB5, 120 blind writes merged onto
-a vector-indexed dictionary of 600: 16.2 and 3.2 commits per second standalone with an exact and an
-IVF index (`proto_db` 129.7 and 48.7), 8.4 and 2.7 in a three-member cluster
+vectors of dim 8, protoST 0.16.0): 35.9, 16.2 and 5.0 commits per second with no index, an exact
+index and an IVF index retraining at every 3 % of growth (`proto_db` 156, 133 and 52 in its
+reference mode, 142, 119 and 70 with numpy), and about the same over 5000 vectors (32.1, 15.1 and
+5.1); a retrain (k-means over every member, then every member's list) takes about 1.6 to 1.9 s for
+650 to 700 members on protoST 0.16.0, of which k-means is about 0.65 s, against 0.2 s for
+`proto_db`'s pure-path k-means and about 4 ms with numpy (indicative single timings,
+[deviations.md](deviations.md#vectors)). Bench VB5, 120 blind writes merged onto a vector-indexed
+dictionary of 600: 16.1 and 4.7 commits per second standalone with an exact and an IVF index
+(`proto_db` 132 and 51, with numpy 114 and 73), 8.1 and 3.7 in a three-member cluster
 ([deviations.md](deviations.md#vectors)). In a cluster the retrain runs under the write
 permission, which `proto_db`'s default 2000 ms lease lets a member believe for 667 ms: a retrain
 that takes longer never commits (every attempt outlasts its permission and is refused as a
-retryable conflict), so an IVF index whose k-means is that slow needs a longer lease
-(`leaseDuration`); VB5's IVF cluster unit runs with 90 s. The longer lease costs availability:
-when the permission's holder dies, no member writes until its lease and drift margin have passed.
-This advice will be revisited once the k-means distance has a protoST primitive (planned for
-protoST 0.16.0). A
+retryable conflict), so an IVF index retrained in a cluster needs a longer lease
+(`leaseDuration`), more than four times its longest retrain (the permission is a third of the
+lease, less a twelfth kept to send): about 3 ms per member on protoST 0.16.0 at dim 8, so about
+8 s for 700 members and 80 s for 5000; VB5's IVF cluster unit runs with 90 s. The longer lease
+costs availability: when the permission's holder dies, no member writes until its lease and
+drift margin have passed. A
 format-3 vector index (written before member tokens existed) is rebuilt at the first change of its
 collection, as `proto_db`'s `rebuilt_stale()` does: `empty build:` over the elements, a training
 included for IVF. An index of a kind protoBaseST does not know still keeps its collection read
