@@ -45,8 +45,7 @@
 # (QUERY_VECTOR_DATA). proto_db runs in its reference mode (numpy and hnswlib blocked: every score is
 # its pure-Python function, every IVF training its pure-Python k-means), the only mode whose work
 # protoBaseST reproduces to the bit (deviation DV3: with numpy, proto_db's centroids are numpy's), so
-# the only one these units can verify; the runner says whether tests/interop/.venv-numpy exists and
-# that its mode is not measured here. VB0's checksums are CRC-32s of the results' bytes, so
+# the only one VB0 can verify. VB0's checksums are CRC-32s of the results' bytes, so
 # 'verified' means every sum, score and product equals proto_db's to the bit.
 #
 # VB3 and VB5, vector index maintenance (vectors phase task V5, Addendum V 5.5;
@@ -166,6 +165,22 @@ cluster_unit() {
 }
 CLUSTER_HEAP="${QUERY_CLUSTER_HEAP_LIMIT_CELLS:-32000000}"
 VB5_IVF_LEASE_MS="${QUERY_VB5_IVF_LEASE_MS:-90000}"
+# proto_db's default mode, numpy importable (Addendum V 5.5, review M3 of task V5): with
+# tests/interop/.venv-numpy (tests/interop/setup_venv_numpy.sh, the pinned proto_db), every
+# standalone VB3 and VB5 unit also runs py_vector_workload.py with QUERY_PY_NUMPY=1, impl pyn, its
+# times a column of the table. Its centroids are numpy's, not comparable with the pure path's
+# (deviation DV3), so its verification is the COUNTS line (contents, members, invalid occurrences,
+# trained size, centroid count: equal to the reference mode's) and the WORK line where no centroid
+# is checksummed (every unit but VB3's ivf). Without the venv the mode is skipped and says so.
+NUMPY_VENV="$REPO/tests/interop/.venv-numpy"
+numpy_mode=0
+if [[ -x "$NUMPY_VENV/bin/python" && -d "$NUMPY_VENV/protobase/proto_db" ]]; then
+    pinned="$(sed -n 's/^TAG_COMMIT="\(.*\)"$/\1/p' "$REPO/tests/interop/setup_venv_numpy.sh")"
+    held="$(cat "$NUMPY_VENV/protobase/.commit" 2>/dev/null || true)"
+    [[ -n "$pinned" && "$held" == "$pinned"* ]] || fail "tests/interop/.venv-numpy holds proto_db ${held:-of unknown commit}, not $pinned (run tests/interop/setup_venv_numpy.sh)"
+    numpy_mode=1
+fi
+PYN=(env PYTHONPATH="$NUMPY_VENV/protobase" QUERY_PY_NUMPY=1 "$NUMPY_VENV/bin/python")
 
 # vector_data <unit>: the data file of a VB unit (one per count and dim, written once per run of this
 # script): n vectors for VB0, n + the commits for VB3 and VB5 (the vectors their commits add).
@@ -189,7 +204,9 @@ for ((r = 1; r <= RUNS; r++)); do
         dir="$OUT/${unit//:/_}"
         mkdir -p "$dir" || fail "cannot create $dir"
         if [[ "$unit" == *-c3 ]]; then cluster_unit "$unit" "$r"; continue; fi
-        for impl in py st; do
+        impls=(py st)
+        [[ $numpy_mode == 1 && "$unit" == VB[35]:* ]] && impls=(py pyn st)
+        for impl in "${impls[@]}"; do
             out="$dir/$impl.$r"
             data="$OUT/data/${unit//:/_}-$impl-$r-$$-$(date +%s%N)"
             if [[ "$unit" == VB* ]]; then
@@ -197,6 +214,9 @@ for ((r = 1; r <= RUNS; r++)); do
                 if [[ $impl == py ]]; then
                     (cd "$HERE" && QUERY_VECTOR_DATA="$vdata" QUERY_DATA="$data" /usr/bin/time -f '%M' -o "$out.rss" \
                         "$PY" py_vector_workload.py "$unit") > "$out" 2>&1
+                elif [[ $impl == pyn ]]; then
+                    (cd "$HERE" && QUERY_VECTOR_DATA="$vdata" QUERY_DATA="$data" /usr/bin/time -f '%M' -o "$out.rss" \
+                        "${PYN[@]}" py_vector_workload.py "$unit") > "$out" 2>&1
                 else
                     (cd "$HERE" && QUERY_VECTOR_DATA="$vdata" QUERY_DATA="$data" STPATH="$REPO/src" /usr/bin/time -f '%M' -o "$out.rss" \
                         "$PROTOST" vector_workload.st "$unit") > "$out" 2>&1
@@ -211,6 +231,14 @@ for ((r = 1; r <= RUNS; r++)); do
             [[ "$(tail -n 1 "$out")" == "query_workload ok" ]] || { cat "$out"; fail "$impl $unit run $r did not finish"; }
             grep '^WORK ' "$out" | sed 's/ impl=[a-z]*//' > "$out.work"
             [[ -s "$out.work" ]] || fail "$impl $unit run $r reported no work"
+            if [[ $impl == py* && "$unit" == VB[35]:* ]]; then
+                grep '^COUNTS ' "$out" | sed 's/ impl=[a-z]*//' > "$out.counts"
+                [[ -s "$out.counts" ]] || fail "$impl $unit run $r reported no counts"
+                cmp -s "$out.counts" "$dir/py.1.counts" || {
+                    diff "$dir/py.1.counts" "$out.counts"; fail "$impl $unit run $r: the counts differ from proto_db's reference mode"; }
+                # DV3: numpy's centroids are its own; VB3's ivf WORK checksum covers them.
+                [[ $impl == pyn && "$unit" == VB3:*-ivf ]] && continue
+            fi
             cmp -s "$out.work" "$dir/py.1.work" || {
                 diff "$dir/py.1.work" "$out.work"; fail "$impl $unit run $r: the work differs from proto_db's"; }
             grep '^MODEL ' "$out" | sed 's/ impl=[a-z]*//' > "$out.model"
@@ -246,8 +274,8 @@ echo "protost: $PROTOST (PROTOCORE_HEAP_LIMIT_CELLS=$PROTOCORE_HEAP_LIMIT_CELLS;
 [[ " ${units[*]}" == *"VB5:600:d8-ivf-c3"* ]] && echo "VB5 ivf cluster unit: lease $VB5_IVF_LEASE_MS ms (proto_db's default 2000 ms for every other cluster unit)"
 if [[ " ${units[*]}" == *" VB"* ]]; then
     echo "proto_db mode (vector units): reference, numpy: blocked, hnswlib: blocked; libc $("$PY" -c 'import platform; print(*platform.libc_ver())')"
-    if [[ -x "$REPO/tests/interop/.venv-numpy/bin/python" ]]; then
-        echo "NOTE: proto_db's default mode (numpy) is not measured: its centroids are numpy's, so its work cannot be verified against protoBaseST's (DV3)"
+    if [[ $numpy_mode == 1 ]]; then
+        echo "proto_db default mode (VB3 and VB5, column numpy): numpy $("${PYN[@]}" -c 'import numpy; print(numpy.__version__)'), $("$NUMPY_VENV/bin/python" --version 2>&1); its centroids are numpy's (DV3), not comparable: counts verified, and the work where no centroid is checksummed"
     else
         echo "SKIP: proto_db's default mode (numpy): tests/interop/.venv-numpy is absent"
     fi
@@ -262,13 +290,14 @@ for unit in "${units[@]}"; do
     [[ "$unit" == *-c3 ]] || continue
     echo "$unit retries per run (block runs beyond one per commit): $(for ((r = 1; r <= RUNS; r++)); do sed -n 's/^RETRIES .*retries=//p' "$OUT/${unit//:/_}/st.$r"; done | tr '\n' ' ')"
 done
-echo "| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st |"
-echo "|---|---|---|---|---|---|---|"
+echo "| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |"
+echo "|---|---|---|---|---|---|---|---|"
 for unit in "${units[@]}"; do
     dir="$OUT/${unit//:/_}"
     files=(); rss_py=0; rss_st=0
     for ((r = 1; r <= RUNS; r++)); do
         [[ -f "$dir/py.$r" ]] && files+=("$dir/py.$r")
+        [[ -f "$dir/pyn.$r" ]] && files+=("$dir/pyn.$r")
         files+=("$dir/st.$r")
         [[ -f "$dir/py.$r.rss" ]] && { k=$(tail -n 1 "$dir/py.$r.rss"); ((k > rss_py)) && rss_py=$k; }
         k=$(tail -n 1 "$dir/st.$r.rss"); ((k > rss_st)) && rss_st=$k
@@ -284,10 +313,12 @@ for unit in "${units[@]}"; do
         END {
             if (n["py"] == 0) {
                 stat("st")
-                printf "| %s | %s | %s | - | %d / %d | - | - / %d (largest member) |\n", id, size, plan, mn, md, rs / 1024
+                printf "| %s | %s | %s | - | %d / %d | - | - / %d (largest member) | - |\n", id, size, plan, mn, md, rs / 1024
                 exit
             }
+            numpy = "-"
+            if (n["pyn"] > 0) { stat("pyn"); numpy = sprintf("%d / %d", mn, md) }
             stat("py"); pm = mn; pd = md; stat("st")
-            printf "| %s | %s | %s | %d / %d | %d / %d | %.1fx | %d / %d |\n", id, size, plan, pm, pd, mn, md, mn / pm, rp / 1024, rs / 1024
+            printf "| %s | %s | %s | %d / %d | %d / %d | %.1fx | %d / %d | %s |\n", id, size, plan, pm, pd, mn, md, mn / pm, rp / 1024, rs / 1024, numpy
         }'
 done

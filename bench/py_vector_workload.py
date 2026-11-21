@@ -20,8 +20,15 @@ import time
 import zlib
 from pathlib import Path
 
-sys.modules["numpy"] = None
-sys.modules["hnswlib"] = None
+# QUERY_PY_NUMPY=1 runs proto_db's default mode (numpy importable, tests/interop/.venv-numpy) for
+# VB3 and VB5, reported as impl=pyn: its centroids are numpy's (deviation DV3), so only the work that
+# does not depend on them is verified (the COUNTS line; the WORK line too where no centroid is
+# checksummed). Otherwise numpy and hnswlib are blocked: the reference mode, impl=py.
+NUMPY_MODE = os.environ.get("QUERY_PY_NUMPY") == "1"
+IMPL = "pyn" if NUMPY_MODE else "py"
+if not NUMPY_MODE:
+    sys.modules["numpy"] = None
+    sys.modules["hnswlib"] = None
 
 import msgpack  # noqa: E402
 
@@ -148,11 +155,13 @@ def maintenance(id_: str, n: int, plan: str, dim: int, op: str, path: str):
         if op == "ivf" and coll.get_index("near").trained_size <= n:
             raise SystemExit(f"{id_}: the IVF index never retrained (trained size {coll.get_index('near').trained_size})")
         check = bench_checksum(coll, blind, not blind)
+        counts = bench_checksum(coll, blind, False)
         tx.abort()
     finally:
         space.close()
-    print(f"WORK id={id_} impl=py size={n} rows={count} queries={commits} plan={plan} checksum={check}")
-    print(f"TIME id={id_} impl=py size={n} plan={plan} us={us}")
+    print(f"WORK id={id_} impl={IMPL} size={n} rows={count} queries={commits} plan={plan} checksum={check}")
+    print(f"COUNTS id={id_} impl={IMPL} size={n} plan={plan} checksum={counts}")
+    print(f"TIME id={id_} impl={IMPL} size={n} plan={plan} us={us}")
 
 
 def run(unit: str):
@@ -193,7 +202,12 @@ def run(unit: str):
 def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
-    if vb.numpy_module() is not None:
+    if NUMPY_MODE:
+        if vb.numpy_module() is None:
+            sys.exit("py_vector_workload: QUERY_PY_NUMPY=1 but proto_db does not see numpy")
+        if not sys.argv[1].startswith(("VB3:", "VB5:")):
+            sys.exit("py_vector_workload: proto_db's numpy mode is measured for VB3 and VB5 only")
+    elif vb.numpy_module() is not None:
         sys.exit("py_vector_workload: numpy is importable although blocked")
     run(sys.argv[1])
     print("query_workload ok")

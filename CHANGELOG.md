@@ -13,6 +13,11 @@
   `fsumOfProducts:with:` and `fsumOfSquaredDifferences:with:` primitives speed up the vector
   scores; protoBaseST finds them by a feature probe and runs its Smalltalk kernel without them,
   with the same answers to the bit.
+- **protoST 0.16.0 recommended for vectors** (the floor stays 0.14.1): its
+  `Float fsumOfPowSquaredDifferences:with:` computes the IVF k-means distance (`pow(a_i - b_i,
+  2.0)`, then the msum of `fsum:`); protoBaseST finds it by its own feature probe (0.15.0 has the
+  fsum primitives but not this one) and keeps the Smalltalk loop as its oracle and fallback, the
+  centroids byte-identical on both paths. The vector benchmarks run on 0.16.0.
 
 ### Vectors
 
@@ -102,6 +107,8 @@
   retrain longer than the write permission (667 ms with the default lease) never commits, so VB5's
   IVF cluster unit runs with a 90 s lease, which lengthens the write outage when a member dies
   (`docs/deviations.md`, Performance, "Vectors").
+  `proto_db`'s default mode (numpy, `tests/interop/.venv-numpy`) is a column of the VB3 and VB5
+  tables: its counts are verified, its centroids are numpy's (DV3) and not compared.
 
 ## 0.3.0 (2026-11-20)
 

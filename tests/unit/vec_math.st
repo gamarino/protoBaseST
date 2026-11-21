@@ -1,4 +1,4 @@
-"EXPECT: ok 14"
+"EXPECT: ok 16"
 "Vectors phase V1 (Addendum V, 2.2 and 5.1): PBVectorMath, the vector math kernel, against
  CPython and proto_db v2.0.0rc4 (proto_db/indexing/vector_backends.py). Every expected Float is
  written as its IEEE 754 binary64 bytes (big-endian hex) and every result is compared by its bytes,
@@ -24,12 +24,18 @@
  them from protoST 0.15.0 on, and only there (Smalltalk version), and the test-only switch forces
  the Smalltalk kernel; on both paths the kernel answers alike and the primitives' errors become
  the kernel's (PBValidationError with CPython's text, infinity in sumNonNegative:), an Integer term
- keeps the Smalltalk kernel's answer, and sequences of unequal sizes pair as Python's zip."
+ keeps the Smalltalk kernel's answer, and sequences of unequal sizes pair as Python's zip. Last,
+ the k-means distance's primitive of protoST 0.16.0 (Float fsumOfPowSquaredDifferences:with:): its
+ own probe selects it from 0.16.0 on, and only there (0.15.0 has fsum: but not it), the same
+ test-only switch forces the Smalltalk loop, and both paths answer the same bytes: the libm pow
+ half-way square of a positive and of a negative difference, an overflowing square (infinity), an overflowing sum (infinity, as
+ sumNonNegative:), an Integer term, and k-means centroids over seeded data."
 Import from: 'protobase'.
 Import from: '_check'.
 
 | c f hex hexes outcome tuple list pow2 bitsOf floatOfBits unitsOf nearest seed next decimals
-  oracleFails half five entries ranked q x witness vs sorted hi lo yr version released paths |
+  oracleFails half five entries ranked q x witness vs sorted hi lo yr version released paths
+  released16 seedPow nextPow data |
 c := Check new.
 "A Float from its big-endian hex bytes, and the hex bytes of a Float (nil answers 'nil')."
 f := [:h | (Check bytes: h) float64At: 1 bigEndian: true].
@@ -363,5 +369,40 @@ c that: 'the primitives'' errors become the kernel''s, and both paths answer ali
     '0000000000000000'. '7ff0000000000000'. '3fe8000000000000'. '400c000000000000'. 'refused: intermediate overflow in fsum'.
     '402c000000000000'. 'fff0000000000000'. 'bfc9999999999999'. 'refused: -inf + inf in fsum'. '3ff0000000000000'. '0000000000000000'.
     #('3fe3333333333333' '3fe999999999999a'). 'nil' } }.
+
+"--- 15. The k-means distance's primitive: its own probe and the same switch ---"
+released16 := ((version at: 1) * 1000000) + ((version at: 2) * 1000) + (version at: 3) >= 16000.
+paths := OrderedCollection new.
+paths add: { PBVectorMath hasPowSquaresPrimitive. PBVectorMath usesPowSquaresPrimitive }.
+PBVectorMath _forceSmalltalkKernel: true.
+paths add: { PBVectorMath hasPowSquaresPrimitive. PBVectorMath usesPowSquaresPrimitive }.
+PBVectorMath _forceSmalltalkKernel: false.
+paths add: { PBVectorMath hasPowSquaresPrimitive. PBVectorMath usesPowSquaresPrimitive }.
+c that: 'the k-means distance primitive is probed on its own, from protoST 0.16.0 on; the switch forces the Smalltalk loop'
+  is: { (Float respondsTo: #fsumOfPowSquaredDifferences:with:) = released16. paths asArray }
+  equals: { true. { { released16. released16 }. { released16. false }. { released16. released16 } } }.
+
+"--- 16. The k-means distance and centroids: the same bytes on both paths ---"
+seedPow := 4242.
+nextPow := [seedPow := (seedPow * 1103515245 + 12345) \\ 2147483648. (seedPow / 2147483648.0) * 10.0 - 5.0].
+data := (1 to: 120) asArray collect: [:i | tuple value: ((1 to: 5) asArray collect: [:j | nextPow value])].
+paths := { false. true } collect: [:forced |
+  PBVectorMath _forceSmalltalkKernel: forced.
+  [ { hex value: (PBVectorMath _kmeansDistance: {x} to: {0.0}).
+      hex value: (PBVectorMath _kmeansDistance: {0.0} to: {x}).
+      hex value: (PBVectorMath _kmeansDistance: {x. 3.0} to: {0.0. 1.0}).
+      hex value: (PBVectorMath _kmeansDistance: {1.0e200. 1.0} to: {-1.0e200. 0.0}).
+      hex value: (PBVectorMath _kmeansDistance: {1.0e154. 1.0e154} to: {0.0. 0.0}).
+      hex value: (PBVectorMath _kmeansDistance: #(1 2) to: #(0.5 0.5)).
+      hex value: (PBVectorMath _kmeansDistance: (tuple value: #(0.1 0.2 0.3)) to: #(0.3 0.2)).
+      (PBVectorMath kmeans: data nlist: 7 iterations: 6 seed: 13) collect: [:centroid | hexes value: centroid].
+      witness := PBVectorMath kmeans: {{0.0. 0.0}. {99924809.0. 132238537.0}. {111524509.0. 122614363.0}}
+        nlist: 2 iterations: 1 seed: 0.
+      witness collect: [:centroid | hexes value: centroid] } ]
+    ensure: [PBVectorMath _forceSmalltalkKernel: false]].
+c that: 'the k-means distance answers the same bytes with the pow primitive and with the Smalltalk loop'
+  is: { paths first = paths last. (paths last copyFrom: 1 to: 7). paths last last }
+  equals: { true. #('434e3f9396099985' '434e3f9396099985' '434e3f9396099987' '7ff0000000000000' '7ff0000000000000' '4004000000000000' '3fa47ae147ae147a').
+    {#('4197d2ed24000000' '419f873324000000'). #('418a96ea74000000' '418d3bc96c000000')} }.
 
 c report displayNl.
