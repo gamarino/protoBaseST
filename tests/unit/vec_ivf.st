@@ -1,4 +1,4 @@
-"EXPECT: ok 11"
+"EXPECT: ok 13"
 "Vectors phase V4 (Addendum V, 2.4, 2.5 and 5.1): the ivf_flat backend's lists, training and
  retraining (PBVectorIvfFlat listFor:vector:, needsTraining:, train:vectors:, probeOrder:query:),
  against proto_db v2.0.0rc4 (proto_db/indexing/vector_backends.py:527-563, 566-670 and 732-734,
@@ -18,14 +18,17 @@
  test_ivf_flat_with_full_probe_equals_exact, the search halves of the two tests above,
  test_ivf_flat_partial_probe_has_good_recall_and_widens_for_k and
  test_ivf_flat_round_trip_through_file_storage_keeps_centroids, on fewer vectors than proto_db's
- (the interpreted kernel of protoST 0.14.1 is the floor). Each check gathers its mismatches and
- requires none, so one label covers one behaviour."
+ (the interpreted kernel of protoST 0.14.1 is the floor); the list walk and the probe loop against
+ the forms they replaced (review I1 of task V6); and the non-empty lists rule of the probe against
+ answers computed by proto_db itself (review I3). Each check gathers its mismatches and requires
+ none, so one label covers one behaviour."
 Import from: 'protobase'.
 Import from: '_check'.
 
 | c fails expect refused tup rec hex hexes vi defs coords records index elements trained lists
   build first again other key value store tampered entry summary sizes near ids oracle shrunk exact
-  queries answers hits recall dir storage pointer loaded extra q term grownLater kept |
+  queries answers hits recall dir storage pointer loaded extra q term grownLater kept oldList oldSearch same
+  cases emptied listOf gone answer probes |
 c := Check new.
 expect := [:label :actual :expected |
   actual = expected ifFalse: [fails add: label , ': expected ' , expected printString , ', got ' , actual printString]].
@@ -295,6 +298,130 @@ elements := records value: (coords value: 90 value: 5 value: 11).
   #(2 3) do: [:orderSeed |
     (answers value: (build value: orderSeed value: 0)) = first ifFalse: [fails add: metric , ' order ' , orderSeed printString]]].
 c that: 'ivf_flat answers depend on the data and the seed only' is: fails asArray equals: #().
+
+"The list walk and the probe loop of PBVectorIvfFlat search: (review I1 of task V6) against the
+ forms they replaced, kept here as the reference: a list walk bounded by list_bounds' tuple order
+ keys, (j) and (j, a key above every rank), both exclusive, and proto_db's loop over the probe
+ order filtered to the non-empty lists first (vector_backends.py:685-707). On the indexes of the
+ rows above (every metric at nprobe 8 and 2, the 600-member index, the shrunk one), an untrained
+ one and one with a list emptied by removals, every list (-1 to nlist, one past the last) visits
+ the same nodes (==) in the same order, and every query (k, k widened by a predicate or by a
+ threshold, a threshold alone) answers the same elements (==) and counts."
+fails := OrderedCollection new.
+oldList := [:anIndex :j | | out jk |
+  out := OrderedCollection new.
+  jk := PBKeys orderKey: j.
+  PBAvl nodeDo: [:node | out addLast: node] over: anIndex store
+    fromOrderKey: (PBOrderKey rank: PBMemberKeys _tupleRank payload: { jk }) inclusive: false
+    toOrderKey: (PBOrderKey rank: PBMemberKeys _tupleRank payload: { jk. PBMemberKeys _aboveEveryRank }) inclusive: false.
+  out asArray].
+oldSearch := [:anIndex :aQuery :k :t :eligible | | order probe floor done probed matching metric |
+  order := (PBVectorIvfFlat probeOrder: anIndex query: aQuery) select: [:j | (oldList value: anIndex value: j) notEmpty].
+  probe := (anIndex paramAt: 'nprobe') + ((order notEmpty and: [order first = -1]) ifTrue: [1] ifFalse: [0]).
+  metric := anIndex metric.
+  floor := PBVectorMath scoreFloor: metric threshold: t.
+  done := 0.
+  probed := OrderedCollection new.
+  matching := 0.
+  [done + 1 to: (probe min: order size) do: [:i | | entries |
+      entries := (oldList value: anIndex value: (order at: i)) collect: [:node | anIndex _entryOf: node].
+      probed addAll: entries.
+      (k notNil and: [eligible isNil and: [floor isNil]])
+        ifTrue: [matching := matching + entries size]
+        ifFalse: [k isNil ifFalse: [entries do: [:entry |
+          ((eligible isNil or: [eligible value: (entry at: 2)])
+              and: [floor isNil or: [(PBVectorMath score: metric query: aQuery vector: (entry at: 4)) >= floor]])
+            ifTrue: [matching := matching + 1]]]]].
+    done := probe min: order size.
+    done >= order size or: [k isNil or: [matching >= k]]]
+      whileFalse: [probe := order size min: 2 * probe].
+  PBVectorMath rank: (PBVectorBackend _filtered: probed eligible: eligible) query: aQuery metric: metric k: k threshold: t].
+same := [:a :b | a size = b size and: [(1 to: a size) allSatisfy: [:i |
+  ((a at: i) at: 1) == ((b at: i) at: 1) and: [((a at: i) at: 2) = ((b at: i) at: 2)]]]].
+elements := records value: (coords value: 160 value: 6 value: 11).
+cases := OrderedCollection new.
+#('cosine' 'l2' 'ip') do: [:metric | #(8 2) do: [:p |
+  cases add: metric , ' nprobe ' , p printString
+    -> ((vi value: (PBKeySpec path: 'vec') value: 6 value: metric value: { 'nlist' -> 8. 'nprobe' -> p }) build: elements)]].
+cases add: 'partial probe' -> index.
+cases add: 'grown and shrunk' -> shrunk.
+cases add: 'untrained' -> ((vi value: (PBKeySpec path: 'vec') value: 6 value: 'l2' value: { 'nlist' -> 8. 'nprobe' -> 2 })
+  build: (elements copyFrom: 1 to: 5)).
+emptied := (cases at: 2) value.
+emptied := (elements select: [:e | (PBVectorIvfFlat listFor: emptied vector: (e at: 'vec')) = 3])
+  inject: emptied into: [:acc :e | acc withRemoved: e].
+cases add: 'list 3 emptied' -> emptied.
+cases do: [:case | | anIndex dim nlist |
+  anIndex := case value.
+  dim := anIndex dim.
+  nlist := anIndex paramAt: 'nlist'.
+  -1 to: nlist do: [:j | | old new |
+    old := oldList value: anIndex value: j.
+    new := OrderedCollection new.
+    anIndex _listNodesOf: j do: [:node | new addLast: node].
+    (old size = new size and: [(1 to: old size) allSatisfy: [:i | (old at: i) == (new at: i)]]) ifFalse: [
+      fails add: case key , ' list ' , j printString]].
+  (coords value: 4 value: dim value: 21) doWithIndex: [:v :n | | qv t |
+    qv := PBVectorMath canonicalVector: v dim: dim.
+    t := anIndex metric = 'l2' ifTrue: [1.2] ifFalse: [0.1].
+    { { 10. nil. nil }. { 40. nil. [:e | (e at: 'i') \\ 7 = 0] }. { 30. t. nil }. { nil. t. nil }. { 5. nil. [:e | false] } }
+      doWithIndex: [:query :m |
+        ((same value: (oldSearch value: anIndex value: qv value: (query at: 1) value: (query at: 2) value: (query at: 3))
+            value: (PBVectorIvfFlat search: anIndex query: qv k: (query at: 1) threshold: (query at: 2) eligible: (query at: 3))))
+          ifFalse: [fails add: case key , ' query ' , n printString , '.' , m printString]]]].
+expect value: 'list 3 emptied' value: (emptied _listEntries: 3) size value: 0.
+c that: 'the list walk and the probe loop read what the order-key walk and proto_db''s loop read' is: fails asArray equals: #().
+
+"The non-empty lists rule of the probe (vector_backends.py:688, 'j in lists'; Addendum V 2.4: same
+ lists, same order, same answer): an empty list never counts toward nprobe. 60 records of dim 3
+ (integer residues, the same Floats in both languages), l2, nlist 6, nprobe 2; the members of list
+ 0, the nearest to the query, are removed (the training stays), and the queries run before and
+ after: a threshold alone that every member passes (the answer is the probed lists: their count
+ is the probe), k 5, and k 12 widened by a predicate and by a threshold. Expected: proto_db
+ v2.0.0rc4 itself (CPython 3.14, numpy and hnswlib blocked; its probed lists are the answers'
+ lists here); an emptied list counted toward the probe would probe list 3 alone."
+fails := OrderedCollection new.
+elements := (1 to: 60) asArray collect: [:i | rec value: i value: (tup value: {
+  (i * 37 \\ 23) asFloat / 11.0 - 1.0. (i * 53 \\ 29) asFloat / 14.0 - 1.0. (i * 71 \\ 31) asFloat / 15.0 - 1.0 })].
+index := (vi value: (PBKeySpec path: 'vec') value: 3 value: 'l2' value: { 'nlist' -> 6. 'nprobe' -> 2 }) build: elements.
+q := tup value: #(0.3 -0.2 0.1).
+listOf := [:e | PBVectorIvfFlat listFor: index vector: (e at: 'vec')].
+expect value: 'probe order and list sizes'
+  value: { PBVectorIvfFlat probeOrder: index query: q. (0 to: 5) asArray collect: [:j | (elements select: [:e | (listOf value: e) = j]) size] }
+  value: #(#(-1 0 3 2 1 5 4) #(9 12 9 11 9 10)).
+gone := elements select: [:e | (listOf value: e) = 0].
+expect value: 'list 0' value: (gone collect: [:e | e at: 'i']) value: #(11 16 22 29 34 39 50 52 57).
+emptied := gone inject: index into: [:acc :e | acc withRemoved: e].
+expect value: 'the training stays' value: emptied centroids = index centroids value: true.
+answer := [:anIndex :k :t :eligible | | qv out |
+  qv := PBVectorMath canonicalVector: q dim: 3.
+  out := OrderedCollection new.
+  (PBVectorIvfFlat search: anIndex query: qv k: k threshold: t eligible: eligible) do: [:pair |
+    (pair at: 2) timesRepeat: [out addLast: (pair at: 1)]].
+  out asArray].
+probes := [:anIndex :label | | all |
+  all := answer value: anIndex value: nil value: 100.0 value: nil.
+  expect value: label , ' threshold 100.0'
+    value: { ((all collect: [:e | listOf value: e]) asSet asSortedCollection asArray). all collect: [:e | e at: 'i'] }
+    value: (label = 'full'
+      ifTrue: [#(#(0 3) #(9 50 16 57 39 22 37 19 29 34 11 55 2 43 20 52 30 53 12 48))]
+      ifFalse: [#(#(2 3) #(9 26 44 37 19 3 54 55 2 43 47 13 20 30 53 6 12 24 48 41))]).
+  expect value: label , ' k 5' value: ((anIndex plan: (near value: q value: 5 value: nil)) execute collect: [:e | e at: 'i'])
+    value: (label = 'full' ifTrue: [#(9 50 16 57 39)] ifFalse: [#(9 26 44 37 19)]).
+  all := answer value: anIndex value: 12 value: nil value: [:e | (e at: 'i') \\ 3 = 0].
+  expect value: label , ' k 12, i \\ 3 = 0'
+    value: { ((all collect: [:e | listOf value: e]) asSet asSortedCollection asArray). all collect: [:e | e at: 'i'] }
+    value: (label = 'full'
+      ifTrue: [#(#(0 1 2 3) #(9 57 39 60 3 54 21 42 36 30 6 12))]
+      ifFalse: [#(#(1 2 3 5) #(9 60 3 54 21 42 36 15 45 30 6 12))]).
+  expect value: label , ' k 12, threshold 0.9'
+    value: ((anIndex plan: (near value: q value: 12 value: 0.9)) execute collect: [:e | e at: 'i'])
+    value: (label = 'full'
+      ifTrue: [#(9 50 16 57 26 39 44 60 22 37 19 8)]
+      ifFalse: [#(9 26 44 32 60 37 19 8 49 3 54 4)])].
+probes value: index value: 'full'.
+probes value: emptied value: 'emptied'.
+c that: 'an ivf_flat probe skips the lists that removals emptied, as proto_db''s does' is: fails asArray equals: #().
 
 "test_ivf_flat_round_trip_through_file_storage_keeps_centroids: saved to a file storage and loaded
  back by its tag, the index has the same centroids, parameters and explain, answers the same,

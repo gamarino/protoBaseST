@@ -1,7 +1,7 @@
 "_qplants.st: the planted defects of the index contract (plan call IP4; proto_db
  tests/unit/test_index_contract.py at v2.0.0rc4, its broken ScanIndex variants), each a subclass of
  a correct index kind with one hook broken, used by tests/unit/idx_contract_plans.st (and, for the
- vector plants, tests/unit/vec_contract.st) to prove that
+ vector plants, tests/unit/vec_contract_ivf.st, through _vcontract.st) to prove that
  the contract has teeth: each must be rejected by the check aimed at its defect. A helper: nothing
  here runs on import but the registration of the plants' type names (tests.qplants.<class>), so
  a saved plant loads as itself. The class comments name proto_db's variant each one plants."
@@ -121,7 +121,7 @@ OrderClaimingIndex >> supportsOrder: aKeySpec
   ^ true.
 
 "The vector contract's teeth (test_vector_index.py:574-628, test_vector_contract_rejects_broken_variants),
- each caught by vec_contract.st's planMatchesScan.
+ each caught by vec_contract_ivf.st's planMatchesScan.
  OnceVectorIndex: plan: answers each member once, whatever its count."
 PBVectorIndex subclass: #OnceVectorIndex.
 

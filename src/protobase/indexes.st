@@ -1288,39 +1288,35 @@ PBVectorIndex class >> nearOracle: anElements keySpec: aKeySpec query: aQuery me
 
 "The entry of a store node, as PBVectorMath rank:query:metric:k:threshold: takes it: { member key.
  element. count. vector. the member key's order key } (the node caches its order key, the store
- key's, whose second item is the member key's)."
+ key's, whose second item is the member key's: read in place, since payload copies a tuple's)."
 PBVectorIndex >> _entryOf: aNode
   | key value |
   key := aNode key.
   value := aNode value.
-  ^ { key at: 2. value at: 1. value at: 2. value at: 3. aNode orderKey payload at: 2 }.
+  ^ { key at: 2. value at: 1. value at: 2. value at: 3. aNode orderKey _payload at: 2 }.
 
 "Evaluates aBlock with each store entry, in store key order (vector_backends.py iter_entries)."
 PBVectorIndex >> _entriesDo: aBlock
   PBAvl nodeDo: [:node | aBlock value: (self _entryOf: node)] over: self store
     fromOrderKey: nil inclusive: false toOrderKey: nil inclusive: false.
 
-"The entries of list aListNumber, in store key order: the store keys between the bounds of
- vector_backends.py list_bounds, both exclusive: (j) below every (j, member key), and (j, a key
- above every rank) above them."
+"The entries of list aListNumber, in store key order (empty for a list that holds no member): the
+ store keys (aListNumber, member key), the range of vector_backends.py list_bounds."
 PBVectorIndex >> _listEntries: aListNumber
   | out |
   out := OrderedCollection new.
   self _listNodesOf: aListNumber do: [:node | out addLast: (self _entryOf: node)].
   ^ out asArray.
 
-"Whether list aListNumber holds a member (the 'j in lists' of vector_backends.py:688): one bounded
- probe of its range."
-PBVectorIndex >> _holdsList: aListNumber
-  self _listNodesOf: aListNumber do: [:node | ^ true].
-  ^ false.
-
+"The store nodes of list aListNumber, in store key order. The store is ordered by (list number,
+ member key) and the list numbers are Integers (-1 to nlist - 1), whose Integer order is their
+ order keys' order, so the walk bounds on the key's list number, an Integer compare, and visits
+ the nodes that list_bounds' tuple order keys, (j) and (j, a key above every rank), both
+ exclusive, bound, in the same order (tests/unit/vec_ivf.st checks this node for node)."
 PBVectorIndex >> _listNodesOf: aListNumber do: aBlock
-  | j |
-  j := PBKeys orderKey: aListNumber.
-  PBAvl nodeDo: aBlock over: self store
-    fromOrderKey: (PBOrderKey rank: PBMemberKeys _tupleRank payload: { j }) inclusive: false
-    toOrderKey: (PBOrderKey rank: PBMemberKeys _tupleRank payload: { j. PBMemberKeys _aboveEveryRank }) inclusive: false.
+  PBAvl nodeDo: aBlock over: self store side: [:node | | j |
+    j := node key at: 1.
+    j < aListNumber ifTrue: [-1] ifFalse: [j > aListNumber ifTrue: [1] ifFalse: [0]]].
 
 "--- explain and validate (vector.py:323-425) ---"
 

@@ -266,7 +266,7 @@ test_vector_index.py::test_importing_the_vector_modules_does_not_import_hnswlib	
 test_vector_index.py::test_hnsw_recall_at_10_on_2000_random_vectors	n/a	deviation: DV1	It searches an hnsw index, and hnsw search is refused (ruling VQ1, DV1).
 test_vector_index.py::test_hnsw_index_contract_in_a_child_process	n/a	deviation: DV1	It searches an hnsw index, and hnsw search is refused (ruling VQ1, DV1).
 test_vector_index.py::test_hnsw_cache_under_eight_concurrent_readers_and_predicates	n/a	deviation: DV1	It searches an hnsw index, and hnsw search is refused (ruling VQ1, DV1).
-test_vector_index.py::test_vector_contract_rejects_broken_variants	ported	tests/unit/vec_contract.st	every planted vector defect is rejected by planMatchesScan
+test_vector_index.py::test_vector_contract_rejects_broken_variants	ported	tests/unit/vec_contract_ivf.st	every planted vector defect is rejected by planMatchesScan
 test_vector_index.py::test_closing_a_space_releases_its_derived_vector_structures	n/a	deviation: DV4	protoBaseST keeps no derived-structure cache to release (DV4, Addendum V section 4).
 test_query_cache.py::test_equal_queries_on_one_version_share_a_key_and_an_entry	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
 test_query_cache.py::test_a_commit_to_the_collection_changes_the_key_and_another_root_does_not	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.

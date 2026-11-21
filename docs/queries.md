@@ -927,7 +927,7 @@ the member key is the oid, so the order is the same in both implementations on t
 | Backend | Search | Persisted | Deterministic |
 |---|---|---|---|
 | `'exact'` (default) | Ranks every stored vector. `proto_db` screens with numpy and re-scores every candidate that could matter exactly, so its answer is the brute force answer bit for bit; protoBaseST computes the brute force directly (its `'numpy'` parameter is kept and written, with no effect, DV2). | The store. | Yes. |
-| `'ivf_flat'` | Probes the lists of the `'nprobe'` centroids nearest to the query (and list -1 when present), widens by doubling while fewer than k matching members are found, then ranks the candidates exactly (`vector_backends.py:663-721`). `'nprobe'` equal to `'nlist'` is exact. | The store and the centroids. | Training is: same data and seed, same centroids (R128). |
+| `'ivf_flat'` | Probes the `'nprobe'` non-empty lists whose centroids are nearest to the query (and list -1 when present; a list that removals emptied does not count), widens by doubling while fewer than k matching members are found, then ranks the candidates exactly (`vector_backends.py:663-721`). `'nprobe'` equal to `'nlist'` is exact. | The store and the centroids. | Training is: same data and seed, same centroids (R128). |
 | `'hnsw'` | **Refused** (`PBNotSupportedError` at the first execution of its plan; ruling VQ1, DV1). `proto_db` searches an hnswlib graph rebuilt in each process, never stored, and refuses the same way when hnswlib is not installed. | The store (list 0). | `proto_db`'s graph is not. |
 
 The parameters are `proto_db`'s and are written as it writes them, a tuple of `(name, value)` pairs

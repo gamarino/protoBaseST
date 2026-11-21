@@ -1170,31 +1170,43 @@ PBVectorExact class >> estimate: anIndex k: anInteger threshold: aThreshold filt
 "Probes the best nprobe non-empty lists by probeOrder:query: (list -1, the untrained vectors, is
  always probed in addition), and, with k, doubles the probe while fewer than k members match (the
  predicate and the threshold included); then ranks the accepted members of the probed lists
- exactly. With nprobe = nlist every list is probed and the answer is the exact one."
+ exactly. With nprobe = nlist every list is probed and the answer is the exact one.
+ proto_db filters the probe order to the non-empty lists first (vector_backends.py:688, 'j in
+ lists', over its per-version list cache); there is no cache here (DV4), so the walk reads the
+ lists in probe order and skips an empty one as it reaches it: it never counts toward the probe,
+ and the probe is exhausted when the probe order is. That is proto_db's loop, which reads the
+ filtered order only as a prefix and, at exhaustion, its length: the same lists are probed in the
+ same order (a doubled probe past the last non-empty list reads only empty ones), so the answer is
+ the same, with one bounded walk per list reached instead of one per list and query."
 PBVectorIvfFlat class >> search: anIndex query: aQuery k: anInteger threshold: aThreshold eligible: anEligible
-  | order probe floor done probed matching query metric |
-  order := (self probeOrder: anIndex query: aQuery) select: [:j | anIndex _holdsList: j].
-  probe := (anIndex paramAt: 'nprobe')
-    + ((order notEmpty and: [order first = self untrained]) ifTrue: [1] ifFalse: [0]).
+  | order next taken probe floor probed matching query metric |
+  order := self probeOrder: anIndex query: aQuery.
+  probe := anIndex paramAt: 'nprobe'.
   metric := anIndex metric.
   floor := PBVectorMath scoreFloor: metric threshold: aThreshold.
   query := PBVectorMath _primitiveOperand: aQuery.
-  done := 0.
+  next := 0.
+  taken := 0.
   probed := OrderedCollection new.
   matching := 0.
-  [done + 1 to: (probe min: order size) do: [:i | | entries |
-      entries := anIndex _listEntries: (order at: i).
-      probed addAll: entries.
-      (anInteger notNil and: [anEligible isNil and: [floor isNil]])
-        ifTrue: [matching := matching + entries size]
-        ifFalse: [anInteger isNil ifFalse: [
-          entries do: [:entry |
-            ((anEligible isNil or: [anEligible value: (entry at: 2)])
-                and: [floor isNil or: [(PBVectorMath score: metric query: query vector: (entry at: 4)) >= floor]])
-              ifTrue: [matching := matching + 1]]]]].
-    done := probe min: order size.
-    done >= order size or: [anInteger isNil or: [matching >= anInteger]]]
-      whileFalse: [probe := order size min: 2 * probe].
+  [[taken < probe and: [next < order size]] whileTrue: [| list entries |
+      next := next + 1.
+      list := order at: next.
+      entries := anIndex _listEntries: list.
+      entries isEmpty ifFalse: [
+        "List -1 first among the non-empty lists is probed in addition to nprobe."
+        (taken = 0 and: [list = self untrained]) ifTrue: [probe := probe + 1].
+        taken := taken + 1.
+        probed addAll: entries.
+        (anInteger notNil and: [anEligible isNil and: [floor isNil]])
+          ifTrue: [matching := matching + entries size]
+          ifFalse: [anInteger isNil ifFalse: [
+            entries do: [:entry |
+              ((anEligible isNil or: [anEligible value: (entry at: 2)])
+                  and: [floor isNil or: [(PBVectorMath score: metric query: query vector: (entry at: 4)) >= floor]])
+                ifTrue: [matching := matching + 1]]]]]].
+    next >= order size or: [anInteger isNil or: [matching >= anInteger]]]
+      whileFalse: [probe := 2 * probe].
   ^ PBVectorMath rank: (self _filtered: probed eligible: anEligible) query: aQuery metric: metric
     k: anInteger threshold: aThreshold.
 

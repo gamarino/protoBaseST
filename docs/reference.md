@@ -1011,6 +1011,10 @@ For tests, tools and readers of the format. An application does not need them.
   - `keyDo:over:fromOrderKey:inclusive:toOrderKey:inclusive:` evaluates a `[:key :value]`
     block over an order-key range, in key order (`avl.key_iter_okey_range`), and
     `keyReverseDo:over:` over the whole tree in descending order (`avl.key_iter_reversed`).
+    `nodeDo:over:fromOrderKey:inclusive:toOrderKey:inclusive:` evaluates a block with each node
+    of the range itself, and `nodeDo:over:side:` with each node of a contiguous range that a
+    block decides (negative below it, positive above it, 0 inside): the vector index reads a
+    list of its store by the list number, an Integer compare, through it.
   - `keyCountBelow:orderKey:inclusive:` answers the number of keys below an order key (or
     equal to it, when inclusive) in O(log n) (`avl.key_count_below`).
   - `keyFromSorted:nodeClass:` builds a balanced keyed tree from an Array of `{ key. value }`
