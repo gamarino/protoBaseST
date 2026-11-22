@@ -15,6 +15,10 @@
    naive      a plain left-to-right IEEE sum of each vector's products
    fsum       PBVectorMath fsum: of each vector's products (CPython's math.fsum)
    ip, l2, cosine   PBVectorMath score:query:vector: (proto_db's exact_score)
+   ip-scorer, l2-scorer, cosine-scorer
+                    the same scores through PBVectorMath scorerFor:query: (made once, timed),
+                    the call rank: and the IVF loops make (task V8, fix round 1); proto_db's side
+                    is exact_score again, so the checksums are the scores'
  so fsum against naive is the cost of correct rounding, and fsum against ip the share of an ip
  score spent in its sum. rows is n, queries 1, and the checksum the CRC-32 of the results'
  IEEE 754 binary64 big-endian bytes in vector order (a products result contributes its dim
@@ -211,7 +215,7 @@ emit := [:rows :queries :aChecksum :micros |
         , ' of=' , (10 * queries size) printString) displayNl].
     'query_workload ok' displayNl.
     Smalltalk exit: 0].
-(id = 'VB0' and: [(plan at: 1) = $d and: [#('products' 'naive' 'fsum' 'ip' 'l2' 'cosine') includes: op]])
+(id = 'VB0' and: [(plan at: 1) = $d and: [#('products' 'naive' 'fsum' 'ip' 'l2' 'cosine' 'ip-scorer' 'l2-scorer' 'cosine-scorer') includes: op]])
   ifFalse: [Error signal: 'vector_workload: unknown unit ' , unit].
 data := MessagePack decode: path asFileReference binaryContents.
 ((data at: 'n') = n and: [(data at: 'dim') = dim]) ifFalse: [
@@ -227,6 +231,9 @@ op = 'naive' ifTrue: [results := products collect: [:p | naive value: p]].
 op = 'fsum' ifTrue: [results := products collect: [:p | PBVectorMath fsum: p]].
 (#('ip' 'l2' 'cosine') includes: op) ifTrue: [
   results := vectors collect: [:v | PBVectorMath score: op query: q vector: v]].
+(#('ip-scorer' 'l2-scorer' 'cosine-scorer') includes: op) ifTrue: [ | scorer |
+  scorer := PBVectorMath scorerFor: (op copyFrom: 1 to: op size - 7) query: q.
+  results := vectors collect: [:v | scorer value: v]].
 us := Time microsecondClockValue - t0.
 w := WriteStream on: ByteArray new.
 results do: [:r |

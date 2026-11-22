@@ -42,7 +42,7 @@ from proto_db.indexing.vector import VectorIndex  # noqa: E402
 from proto_db import DBObject  # noqa: E402
 from proto_db.query.terms import NEAR, NearQuery, Term  # noqa: E402
 
-OPS = ("products", "naive", "fsum", "ip", "l2", "cosine")
+OPS = ("products", "naive", "fsum", "ip", "l2", "cosine", "ip-scorer", "l2-scorer", "cosine-scorer")
 
 
 def checksum(values) -> int:
@@ -313,7 +313,10 @@ def run(unit: str):
     elif op == "fsum":
         results = [math.fsum(p) for p in products]
     else:
-        results = [vb.exact_score(op, q, v) for v in vectors]
+        # The -scorer units are protoBaseST's scorerFor:query: of the same scores (task V8, fix
+        # round 1); proto_db has no such object, its side is exact_score again.
+        metric = op.removesuffix("-scorer")
+        results = [vb.exact_score(metric, q, v) for v in vectors]
     us = (time.perf_counter_ns() - t0) // 1000
     print(f"WORK id={id_} impl=py size={n} rows={len(results)} queries=1 plan={plan} checksum={checksum(results)}")
     print(f"TIME id={id_} impl=py size={n} plan={plan} us={us}")

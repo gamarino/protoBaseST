@@ -38,7 +38,8 @@
 #
 # VB0, the vector math kernel (vectors phase task V1, Addendum V 5.5, an input to ruling VQ2): units
 # VB0:<n>:d<dim>-<op> for n = QUERY_VB0_SIZE (default 10000), each dim of QUERY_VB0_DIMS (default
-# "8 32 128") and op products, naive, fsum, ip, l2, cosine (bench/vector_workload.st states them),
+# "8 32 128") and op products, naive, fsum, ip, l2, cosine, and ip-scorer, l2-scorer, cosine-scorer
+# (the same scores through scorerFor:query:, task V8 fix round 1; bench/vector_workload.st states them),
 # run by bench/vector_workload.st and bench/py_vector_workload.py instead of the query workloads.
 # Their data, proto_db's clustered benchmark set, is written once per dim and run of this script by
 # bench/py_vector_data.py to a new MessagePack file under QUERY_OUT/data, which both sides read
@@ -125,7 +126,7 @@ for id in "${@:-M1 M2 M3}"; do
             Q5) for n in ${QUERY_Q5_SIZES:-2000 10000}; do
                     for p in page-rank page-mat page-skip count-index count-scan; do units+=("Q5:$n:$p"); done; done ;;
             VB0) for d in ${QUERY_VB0_DIMS:-8 32 128}; do
-                    for p in products naive fsum ip l2 cosine; do units+=("VB0:${QUERY_VB0_SIZE:-10000}:d$d-$p"); done; done ;;
+                    for p in products naive fsum ip l2 cosine ip-scorer l2-scorer cosine-scorer; do units+=("VB0:${QUERY_VB0_SIZE:-10000}:d$d-$p"); done; done ;;
             VB3) for n in ${QUERY_VB3_SIZES:-600 5000}; do
                     for p in none exact ivf; do units+=("VB3:$n:d8-$p"); done; done ;;
             VB5) units+=(VB5:600:d8-exact VB5:600:d8-ivf VB5:600:d8-exact-c3 VB5:600:d8-ivf-c3) ;;
