@@ -144,7 +144,8 @@
   self-verified against `proto_db`'s answers (both modes for exact; the reference mode, centroids
   included, for IVF). On protoST 0.16.0 an exact query over 10^4 vectors takes 0.45 to 0.7 s (4.9
   to 7.0 times `proto_db`'s pure-Python search), the IVF build 164 s (2.9 times), a query at
-  nprobe 1 and 4 62 and 110 ms; recall 0.46, 0.85 and 1.0 in both implementations
+  nprobe 1 and 4 62 and 110 ms (19 and 54 ms after fix round 1, and 1.08 s at nprobe 100, 1.40
+  times an exact search); recall 0.46, 0.85 and 1.0 in both implementations
   (`docs/deviations.md`, Performance, "Vectors").
 ### Indexed queries
 

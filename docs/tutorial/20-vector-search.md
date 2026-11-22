@@ -101,7 +101,7 @@ on protoST 0.16.0 (bench VB1, 2026-11-21, `proto_db`'s clustered benchmark data,
 over 10^3 documents takes 42 to 64 ms and over 10^4 documents 0.45 to 0.7 s, and the first query
 costs what the others cost, since protoBaseST keeps no derived structure between searches (DV4).
 `proto_db` answers the same queries (verified, answer for answer) in 5 to 10 ms and 79 to 129 ms
-in pure Python, its first query 1.2 to 1.5 times a later one, and with numpy in about 1 ms or less per
+in pure Python, its first query 1.0 to 1.6 times a later one, and with numpy in about 1 ms or less per
 query once its matrix is built (the first query, which builds it, 2 to 28 ms). The full table is in
 [deviations.md](../deviations.md#vectors).
 
@@ -278,7 +278,7 @@ list, so exact) in the first run, 28, 7.6 and 10.7 times `proto_db`'s pure-Pytho
 twice an exact search at nprobe 100. The cause, measured, was the list walks: each compared every
 node it reached with tuple order keys, and every list was probed for emptiness before the first
 was read. After the fix (each list bounded on its Integer list number, empty lists skipped as the
-probe reaches them), a query took 0.19 s, 0.54 s and 1.08 s (8.2, 3.5 and 7.2 times `proto_db`'s;
+probe reaches them), a query took 19 ms, 54 ms and 1.08 s (8.2, 3.5 and 7.2 times `proto_db`'s;
 the full probe 1.40 times an exact search, on a busier machine). Recall at 10 against exact was 0.46, 0.85 and 1.0, the same in protoBaseST and in
 both of `proto_db`'s modes.
 

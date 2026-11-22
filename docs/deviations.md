@@ -2319,8 +2319,9 @@ interleaved runs; nothing is asserted about time.
 | VB2 | 10000 | d32-ivf-nprobe100 | 1362887 / 1393694 | 14563864 / 14671563 | 10.7x | 79 / 5089 | 21535 / 22158 |
 
 Observed: protoBaseST's first query costs what every later one costs (no derived cache, DV4),
-where `proto_db`'s first query builds its flat snapshot (1.2 to 1.5 times a later query in the
-reference mode; with numpy, its matrix too: 7 times at 10^3, about 40 times at 10^4). An exact
+where `proto_db`'s first query builds its flat snapshot (in the reference mode 1.0 to 1.2 times
+a later query at 10^3 and 1.3 to 1.6 times at 10^4; with numpy, its matrix too: 7.5 to 9 times at
+10^3, 28 to 43 times at 10^4). An exact
 query over 10^4 vectors takes about 0.45 to 0.7 s on protoST 0.16.0: 4.9 to 7.0 times
 `proto_db`'s pure-Python search (6.2 to 9.5 times at 10^3) and 500 to 1800 times its numpy
 search. The `ivf_flat` build is 2.9 times the pure-Python one, and its probes of 1 and 4
@@ -2335,7 +2336,7 @@ set of protoBaseST (about 5 GB at 10^4) is protoCore's heap budget being used, n
 **VB1 and VB2 after fix round 1 of task V6** (2026-11-22). The same command, data and
 implementations as the run above, measured 2026-11-21 23:40 to 2026-11-22 00:17 UTC on the same
 machine, load average 2.91 before and 4.20 after (the machine grew busier during the run: the
-exact rows are 5 to 16 per cent slower than in the run above, on both sides); protoBaseST `605d991`
+exact rows are up to 18 per cent slower than in the run above, on both sides, a few unchanged); protoBaseST `605d991`
 (the clean committed tree), protoST 0.16.0. The change: a list of the store is read by a walk
 bounded on the key's Integer list number instead of tuple order-key compares (the same nodes in
 the same order), and the probe order is walked lazily, an empty list skipped as it is reached
@@ -2364,15 +2365,19 @@ instead of every list probed for emptiness before the first is read. The runner 
 | VB2 | 10000 | d32-ivf-nprobe4 | 151692 / 167521 | 535111 / 681444 | 3.5x | 76 / 5087 | 11797 / 12852 |
 | VB2 | 10000 | d32-ivf-nprobe100 | 1499394 / 1588079 | 10769764 / 10789113 | 7.2x | 76 / 5087 | 25151 / 25316 |
 
-Observed: the IVF queries are cheaper; the exact ones do not use the bounded walk. A query at
-nprobe 1 takes 0.19 s instead of 0.62 s (8.2 times `proto_db`'s pure-Python search instead of
-28.2 times), at nprobe 4 0.54 s instead of 1.10 s (3.5 times instead of 7.6), and the full probe
-(nprobe 100) 1.08 s instead of 1.46 s. The full probe now costs 1.40 times an exact search of the
-same index size (10769764 against 7692983 microseconds for the 10 queries; it was 2.09 times),
-where `proto_db`'s costs 1.04 times its own: the remaining gap, not measured separately, is most
-likely the 101 bounded descents and the per-list entry Arrays, which `proto_db`'s per-version list cache (DV4) does not pay. What remains
-at nprobe 1 and 4 against `proto_db` (8.2 and 3.5 times) is the interpreted kernel and the store
-walk where `proto_db` reads its cached lists; neither was measured separately.
+Observed: the IVF queries are cheaper; the exact ones do not use the bounded walk. The table's
+microseconds cover the 10 queries of each unit; per query, nprobe 1 takes 19 ms instead of 62 ms
+(8.2 times `proto_db`'s pure-Python search instead of 28.2 times), nprobe 4 54 ms instead of
+110 ms (3.5 times instead of 7.6), and the full probe (nprobe 100) 1.08 s instead of 1.46 s. The
+full probe now costs 1.40 times an exact search of the same index size (10769764 against 7692983
+microseconds for the 10 queries; it was 2.09 times), where `proto_db`'s costs 1.04 times its own.
+The remaining gap is not measured. Candidates only: the per-list collections (one
+OrderedCollection per probed list, its `asArray`, and `probed addAll:`; the per-member entry
+Arrays are not one, since the exact search builds them too) and the 101 bounded descents (review 1
+measured the walks bounded on the list number at about 6 per cent of an exact search, too little
+alone for 40 per cent). Nor is what remains at nprobe 1 and 4 against `proto_db` (8.2 and 3.5
+times) measured; the interpreted kernel and the store walk, where `proto_db` reads its cached
+lists, are candidates only.
 
 ## Known protoST limits
 
