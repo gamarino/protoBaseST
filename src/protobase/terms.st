@@ -685,8 +685,10 @@ PBBlockPredicate >> evaluate: anElement
 PBBlockPredicate >> describe
   ^ PBFrozenDict withAssociations: { 'block' -> description }.
 
+"Refused (expressions.py PythonPredicate.to_list): the predicate quoted as proto_db's repr, 'a
+ block' where proto_db writes 'a Python callable' (docs/deviations.md, Block predicates)."
 PBBlockPredicate >> asList
-  ^ PBNotSupportedError signal: self printString , ' wraps a block and has no 0.1 list form'.
+  ^ PBNotSupportedError signal: (PBCodec _pyRepr: self) , ' wraps a block and has no 0.1 list form'.
 
 PBBlockPredicate >> termsDo: aBlock
   ^ self.

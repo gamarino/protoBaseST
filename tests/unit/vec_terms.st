@@ -250,7 +250,9 @@ fails := OrderedCollection new.
     -> 'And(Term(path=''a'', op=''=='', value=1), Or(Term(path=''b'', op=''<'', value=1e+16), Not(Term(path=''c'', op=''?T'', value=None))))'.
   (PBBlockPredicate block: [:r | true] description: 'block') -> 'PythonPredicate(''block'')' } do: [:pair |
     expect value: pair value value: (PBCodec _pyRepr: pair key) value: pair value].
-c that: 'a term or an expression quoted in a refusal is proto_db''s repr' is: fails asArray equals: #().
+expect value: 'asList of a block predicate' value: (msg value: [(PBBlockPredicate block: [:r | true] description: 'it''s') asList])
+  value: 'PBNotSupportedError: PythonPredicate("it''s") wraps a block and has no 0.1 list form'.
+c that: 'a term or an expression quoted in a refusal is proto_db''s repr, asList''s included' is: fails asArray equals: #().
 
 "planner.py normalize: a negated near[] term has no per-element complement (planner.py:114-116)"
 fails := OrderedCollection new.
