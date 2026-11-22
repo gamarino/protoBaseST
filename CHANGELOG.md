@@ -88,6 +88,14 @@
   `PBTuple` operands are copied to Arrays, which the primitives read directly (a net win, measured).
   VB0 on 0.15.0: a score 3.8 to 56.1 times faster than on 0.14.1, 2.5 to 18.3 times `proto_db`'s
   pure-Python one (`docs/deviations.md`, Performance, "Vectors").
+- **One scorer per query** (task V8, fix round 1; internal): `PBVectorMath scorerFor:query:`
+  answers a block that scores many vectors against one query, with the metric dispatch, the query's
+  copy and, for cosine, the query's norm done once (at the first score) instead of at every score,
+  and the primitives called directly under one error handler per score; any fsum failure falls back
+  to `score:query:vector:`, so every answer and refusal is the same, at the same score. `rank:`, the
+  IVF probe loop, `listFor:vector:` and `probeOrder:query:` use it. Pinned by
+  `tests/unit/vec_math.st` (case 17) and by every score case of `tests/conformance/vector_math.st`
+  through the scorer three ways, on both kernels.
 - **Collections holding vector indexes are written and merged** (task V5, ruling IQ5a): every
   mutator of `PBList`, `PBDictionary`, `PBHashDictionary`, `PBSet` and `PBCountedSet` maintains
   their vector indexes, `addIndex:` and `removeIndex:` of a vector index work, a format-3 vector

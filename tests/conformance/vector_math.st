@@ -10,7 +10,8 @@
  port's interface answers nil in proto_db's place: floatOf: of an Integer beyond the Float range
  (CPython's OverflowError, which canonical_vector turns into 'not a vector'). The groups:
  float_of (floatOf:), canonical (canonicalVector:dim:), fsum (fsum:), sum_nonnegative
- (sumNonNegative:), score (score:query:vector:), score_floor (scoreFloor:threshold:), rank
+ (sumNonNegative:), score (score:query:vector:, then the same cases through scorerFor:query:
+ three ways: a first score, a second score of the same scorer, PBTuple operands), score_floor (scoreFloor:threshold:), rank
  (rank:query:metric:k:threshold:), squares (raisedTo: 2 against libm pow, * against CPython's
  x * x; where CPython's ** raised OverflowError the pow answer is infinity, which _sum_nonnegative
  reads as the same distance), training_order (trainingOrderOf:: each vector's Integer equals its
@@ -106,6 +107,17 @@ group value: 'score' value: [:case :i |
   check value: 'score' value: i
     value: (res value: [PBVectorMath score: (case at: 1) query: (floats value: (case at: 2)) vector: (floats value: (case at: 3))])
     value: (expect value: (case at: 4))].
+"The same score cases through scorerFor:query: (task V8, fix round 1), three ways: the first
+ score of a fresh scorer, a second score of the same scorer (the cosine query norm reused), and a
+ fresh scorer over PBTuple operands."
+(data at: 'score') doWithIndex: [:case :i | | sc |
+  sc := PBVectorMath scorerFor: (case at: 1) query: (floats value: (case at: 2)).
+  check value: 'score (scorer, first)' value: i value: (res value: [sc value: (floats value: (case at: 3))]) value: (expect value: (case at: 4)).
+  check value: 'score (scorer, norm reused)' value: i value: (res value: [sc value: (floats value: (case at: 3))]) value: (expect value: (case at: 4)).
+  sc := PBVectorMath scorerFor: (case at: 1) query: (PBTuple withAll: (floats value: (case at: 2))).
+  check value: 'score (scorer, PBTuple operands)' value: i
+    value: (res value: [sc value: (PBTuple withAll: (floats value: (case at: 3)))]) value: (expect value: (case at: 4))].
+counts add: 'score through scorerFor:query: ' , (data at: 'score') size printString , ' x 3'.
 group value: 'score_floor' value: [:case :i |
   check value: 'score_floor' value: i
     value: (res value: [PBVectorMath scoreFloor: (case at: 1) threshold: (num value: (case at: 2))])

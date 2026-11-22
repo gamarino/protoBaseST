@@ -1,4 +1,4 @@
-"EXPECT: ok 16"
+"EXPECT: ok 17"
 "Vectors phase V1 (Addendum V, 2.2 and 5.1): PBVectorMath, the vector math kernel, against
  CPython and proto_db v2.0.0rc4 (proto_db/indexing/vector_backends.py). Every expected Float is
  written as its IEEE 754 binary64 bytes (big-endian hex) and every result is compared by its bytes,
@@ -29,13 +29,17 @@
  own probe selects it from 0.16.0 on, and only there (0.15.0 has fsum: but not it), the same
  test-only switch forces the Smalltalk loop, and both paths answer the same bytes: the libm pow
  half-way square of a positive and of a negative difference, an overflowing square (infinity), an overflowing sum (infinity, as
- sumNonNegative:), an Integer term, and k-means centroids over seeded data."
+ sumNonNegative:), an Integer term, and k-means centroids over seeded data. Then scorerFor:query:
+ (task V8, fix round 1), the per-query scorer that rank:, the IVF probe loop, listFor:vector: and
+ probeOrder:query: use: on both kernels it answers, score after score (the cosine query norm
+ computed at the first and reused), what score:query:vector: answers, the same bytes and the same
+ refusals, at the first score and never when the scorer is made."
 Import from: 'protobase'.
 Import from: '_check'.
 
 | c f hex hexes outcome tuple list pow2 bitsOf floatOfBits unitsOf nearest seed next decimals
   oracleFails half five entries ranked q x witness vs sorted hi lo yr version released paths
-  released16 seedPow nextPow data |
+  released16 seedPow nextPow data scorerCases viaScore viaScorer refusedAtCreation |
 c := Check new.
 "A Float from its big-endian hex bytes, and the hex bytes of a Float (nil answers 'nil')."
 f := [:h | (Check bytes: h) float64At: 1 bigEndian: true].
@@ -404,5 +408,39 @@ c that: 'the k-means distance answers the same bytes with the pow primitive and 
   is: { paths first = paths last. (paths last copyFrom: 1 to: 7). paths last last }
   equals: { true. #('434e3f9396099985' '434e3f9396099985' '434e3f9396099987' '7ff0000000000000' '7ff0000000000000' '4004000000000000' '3fa47ae147ae147a').
     {#('4197d2ed24000000' '419f873324000000'). #('418a96ea74000000' '418d3bc96c000000')} }.
+
+"--- 17. scorerFor:query: answers what score:query:vector: answers, score after score ---"
+scorerCases := {
+  {'cosine'. {1.0. 2.0. 3.0}. {{4.0. 5.0. 6.0}. {0.0. 0.0. 0.0}. {-1.0. 0.5. 2.0}. {7.0. 8.0}}}.
+  {'cosine'. {0.0. 0.0}. {{1.0. 2.0}. {3.0. 4.0}}}.
+  {'cosine'. {f value: '5fef06d5a4bf631f'. f value: '5fef06d5a4bf631f'}. {{1.0. 1.0}. {2.0. 3.0}}}.
+  {'cosine'. {1.0. 2.0}. {{f value: '5fef06d5a4bf631f'. 1.0}. {1.0. 3.0}}}.
+  {'cosine'. #(1 2). {#(3 4). {0.5. 0.25}}}.
+  {'cosine'. tuple value: {(f value: '3fe59ae0a7548546'). (f value: '3fbce794bb052320'). (f value: '3fd236b3a19999e0')}.
+    {tuple value: {(f value: 'bfe41a1c9af715d4'). (f value: '3fef85d4cdca033e'). (f value: '3fe7095d2a5f01ec')}. list value: {1.0. -0.0. 2.0}}}.
+  {'l2'. {1.0. 2.0}. {{4.0. 6.0}. {1.0}. {f value: '7fe1ccf385ebc8a0'. (f value: '7fe1ccf385ebc8a0') negated}}}.
+  {'l2'. tuple value: {0.0. 0.0}. {tuple value: {3.0. 4.0}. #(1 1)}}.
+  {'ip'. {1.0. 2.0}. {{3.0. 4.0}. {f value: '7fe1ccf385ebc8a0'. f value: '7fe1ccf385ebc8a0'}. {-0.0. 0.0}. {1.0. 1.0. 1.0}}}.
+  {'euclid'. {1.0}. {{1.0}. {2.0}}} }.
+viaScore := { false. true } collect: [:forced |
+  PBVectorMath _forceSmalltalkKernel: forced.
+  [scorerCases collect: [:case |
+    (case at: 3) collect: [:v | outcome value: [PBVectorMath score: (case at: 1) query: (case at: 2) vector: v]]]]
+    ensure: [PBVectorMath _forceSmalltalkKernel: false]].
+refusedAtCreation := false.
+viaScorer := { false. true } collect: [:forced |
+  PBVectorMath _forceSmalltalkKernel: forced.
+  [scorerCases collect: [:case | | scorer |
+    scorer := [PBVectorMath scorerFor: (case at: 1) query: (case at: 2)]
+      on: PBValidationError do: [:e | refusedAtCreation := true. e return: nil].
+    "Each vector twice: the second score reuses what the first computed."
+    (case at: 3) collect: [:v | | first second |
+      first := outcome value: [scorer value: v].
+      second := outcome value: [scorer value: v].
+      first = second ifTrue: [first] ifFalse: [{first. second}]]]]
+    ensure: [PBVectorMath _forceSmalltalkKernel: false]].
+c that: 'scorerFor:query: answers score:query:vector:''s bytes and refusals at every score, on both kernels; nothing is refused when it is made'
+  is: { viaScorer = viaScore. viaScore first = viaScore last. refusedAtCreation. (viaScore first at: 3) first. (viaScore first at: 10) first }
+  equals: { true. true. false. 'refused: intermediate overflow in fsum'. 'refused: Unknown metric ''euclid''; expected one of [''cosine'', ''l2'', ''ip'']' }.
 
 c report displayNl.

@@ -16,6 +16,8 @@ on them. PBNearQuery is the public value of a near[] term (terms.st).
     fsum: floats                    CPython's math.fsum (Shewchuk, with the half-way correction)
     sumNonNegative: floats          _sum_nonnegative: fsum, an overflowing sum is infinity
     score: metric query: q vector: v      exact_score ('cosine', 'l2', 'ip')
+    scorerFor: metric query: q      a block answering score: metric query: q vector: v for each v,
+                                    its per-query work done once (rank: and the IVF loops use it)
     scoreFloor: metric threshold: t       score_floor
     rank: entries query: q metric: m k: k threshold: t
                                     rank_entries: entries {memberKey. element. count. vector};
@@ -283,9 +285,9 @@ PBVectorMath class >> _fsum: aSequence overflow: anOverflowBlock
 "aSequence as the fsum primitives read it fastest: itself when it is an Array or an
  OrderedCollection, or when the kernel does not use the primitives; a fresh Array of its items
  otherwise (a PBTuple or a PBFrozenList, which the primitives would read through size and at:).
- The answer is never changed. Callers that score one query against many vectors (rank:, and
- PBVectorIvfFlat listFor:vector: and probeOrder:query:) convert the query once with it, so
- score:query:vector: finds an Array and copies nothing more for it."
+ The answer is never changed. Callers that score one query against many vectors do it through
+ scorerFor:query:, which converts the query once with it; each score then copies only the stored
+ vector."
 PBVectorMath class >> _primitiveOperand: aSequence
   self usesFsumPrimitive ifFalse: [^ aSequence].
   ((aSequence isKindOf: Array) or: [aSequence isKindOf: OrderedCollection]) ifTrue: [^ aSequence].
@@ -420,6 +422,60 @@ PBVectorMath class >> score: aMetric query: aQuery vector: aVector
   ^ PBValidationError signal: 'Unknown metric ' , (PBCodec repr: aMetric)
     , '; expected one of [''cosine'', ''l2'', ''ip'']'.
 
+"A one-argument block answering, for a vector, what score: aMetric query: aQuery vector: answers
+ (the same bytes and the same refusals, at the same score), for callers that score one query
+ against many vectors: rank:, and PBVectorIvfFlat's probe loop, listFor:vector: and
+ probeOrder:query:. Once per query instead of once per score: the metric dispatch, the query's
+ copy to an Array (_primitiveOperand:) and, for cosine, the query's norm. proto_db's exact_score
+ recomputes sqrt(fsum(a * a for a in q)) at every score; it is a pure function of q, so it is
+ computed at the first score and reused, and a refusal it raises is raised at that first score,
+ as proto_db raises it, never when the scorer is made nor without a score. With the primitives and
+ operands of one size, a score calls them directly under one handler (where score:query:vector:
+ wraps each call in its own, _primitive:overflow:otherwise:); any fsum failure, and operands of
+ unequal sizes, fall back to score:query:vector:, which answers or raises as proto_db does. The
+ sums, their order, sqrt and (dot / nq) / nv are score:query:vector:'s."
+PBVectorMath class >> scorerFor: aMetric query: aQuery
+  | q nq |
+  q := self _primitiveOperand: aQuery.
+  self usesFsumPrimitive ifFalse: [
+    aMetric = 'cosine' ifFalse: [^ [:aVector | self score: aMetric query: q vector: aVector]].
+    ^ [:aVector | | n nv |
+      n := q size min: aVector size.
+      nq isNil ifTrue: [nq := (self _fsumOfProducts: q with: q size: q size overflow: [self _overflow]) sqrt].
+      nv := (self _fsumOfProducts: aVector with: aVector size: aVector size overflow: [self _overflow]) sqrt.
+      (nq = 0.0 or: [nv = 0.0])
+        ifTrue: [0.0]
+        ifFalse: [(self _fsumOfProducts: q with: aVector size: n overflow: [self _overflow]) / nq / nv]]].
+  aMetric = 'ip' ifTrue: [
+    ^ [:aVector | | v r |
+      v := self _primitiveOperand: aVector.
+      r := q size = v size ifTrue: [self _unlessFsumFails: [Float fsumOfProducts: q with: v]].
+      r isNil ifTrue: [self score: aMetric query: q vector: v] ifFalse: [r]]].
+  aMetric = 'l2' ifTrue: [
+    ^ [:aVector | | v r |
+      v := self _primitiveOperand: aVector.
+      r := q size = v size ifTrue: [self _unlessFsumFails: [(Float fsumOfSquaredDifferences: q with: v) sqrt negated]].
+      r isNil ifTrue: [self score: aMetric query: q vector: v] ifFalse: [r]]].
+  aMetric = 'cosine' ifFalse: [^ [:aVector | self score: aMetric query: q vector: aVector]].
+  ^ [:aVector | | v r |
+    v := self _primitiveOperand: aVector.
+    r := q size = v size ifTrue: [
+      self _unlessFsumFails: [ | nv |
+        nq isNil ifTrue: [nq := (Float fsumOfProducts: q with: q) sqrt].
+        nv := (Float fsumOfProducts: v with: v) sqrt.
+        (nq = 0.0 or: [nv = 0.0])
+          ifTrue: [0.0]
+          ifFalse: [(Float fsumOfProducts: q with: v) / nq / nv]]].
+    r isNil ifTrue: [self score: aMetric query: q vector: v] ifFalse: [r]].
+
+"The value of aBlock (calls of the fsum primitives), or nil when one of them raises one of its own
+ errors (_fsumFailure:): the caller then computes the score with score:query:vector:, which turns
+ that error into the kernel's answer or refusal. Any other error passes."
+PBVectorMath class >> _unlessFsumFails: aBlock
+  ^ aBlock on: Error do: [:e |
+    (self _fsumFailure: e messageText) isNil ifTrue: [e pass].
+    e return: nil].
+
 "score_floor (vector_backends.py:140-144): the least score aThreshold admits (l2: minus the
  distance), or nil without a threshold."
 PBVectorMath class >> scoreFloor: aMetric threshold: aThreshold
@@ -436,11 +492,11 @@ PBVectorMath class >> scoreFloor: aMetric threshold: aThreshold
 PBVectorMath class >> rank: anEntries query: q metric: aMetric k: anInteger threshold: aThreshold
   | floor scored sorted query |
   floor := self scoreFloor: aMetric threshold: aThreshold.
-  "The query as the primitives read it, copied once per ranking, not once per entry."
-  query := self _primitiveOperand: q.
+  "The metric dispatch, the query's copy and its cosine norm once per ranking, not once per entry."
+  query := self scorerFor: aMetric query: q.
   scored := OrderedCollection new.
   anEntries do: [:entry | | s |
-    s := self score: aMetric query: query vector: (entry at: 4).
+    s := query value: (entry at: 4).
     (floor notNil and: [(s >= floor) not]) ifFalse: [
       scored add: {s negated. entry size > 4 ifTrue: [entry at: 5] ifFalse: [PBKeys orderKey: (entry at: 1)]. entry at: 2. entry at: 3}]].
   sorted := scored asArray sort: [:a :b |
@@ -1037,10 +1093,10 @@ PBVectorIvfFlat class >> listFor: anIndex vector: aVector
   metric := self _assignMetric: anIndex metric.
   best := 0.
   bestScore := nil.
-  "The vector as the fsum primitives read it, copied once, not once per centroid."
-  query := PBVectorMath _primitiveOperand: aVector.
+  "The vector as the query of one scorer: its copy (and its cosine norm) once, not once per centroid."
+  query := PBVectorMath scorerFor: metric query: aVector.
   1 to: centroids size do: [:j | | s |
-    s := PBVectorMath score: metric query: query vector: (centroids at: j).
+    s := query value: (centroids at: j).
     (bestScore isNil or: [s > bestScore]) ifTrue: [best := j - 1. bestScore := s]].
   ^ best.
 
@@ -1085,10 +1141,10 @@ PBVectorIvfFlat class >> probeOrder: anIndex query: aQuery
   centroids := anIndex centroids.
   centroids isEmpty ifTrue: [^ { self untrained }].
   metric := self _assignMetric: anIndex metric.
-  "The query as the fsum primitives read it, copied once, not once per centroid."
-  query := PBVectorMath _primitiveOperand: aQuery.
+  "One scorer: the query's copy (and its cosine norm) once, not once per centroid."
+  query := PBVectorMath scorerFor: metric query: aQuery.
   scored := (1 to: centroids size) asArray collect: [:j |
-    { (PBVectorMath score: metric query: query vector: (centroids at: j)) negated. j - 1 }].
+    { (query value: (centroids at: j)) negated. j - 1 }].
   scored := scored sort: [:a :b | (a at: 1) < (b at: 1) or: [(a at: 1) = (b at: 1) and: [(a at: 2) <= (b at: 2)]]].
   ^ { self untrained } , (scored collect: [:pair | pair at: 2]).
 
@@ -1194,7 +1250,7 @@ PBVectorIvfFlat class >> search: anIndex query: aQuery k: anInteger threshold: a
   probe := anIndex paramAt: 'nprobe'.
   metric := anIndex metric.
   floor := PBVectorMath scoreFloor: metric threshold: aThreshold.
-  query := PBVectorMath _primitiveOperand: aQuery.
+  query := PBVectorMath scorerFor: metric query: aQuery.
   next := 0.
   taken := 0.
   probed := OrderedCollection new.
@@ -1213,7 +1269,7 @@ PBVectorIvfFlat class >> search: anIndex query: aQuery k: anInteger threshold: a
           ifFalse: [anInteger isNil ifFalse: [
             entries do: [:entry |
               ((anEligible isNil or: [anEligible value: (entry at: 2)])
-                  and: [floor isNil or: [(PBVectorMath score: metric query: query vector: (entry at: 4)) >= floor]])
+                  and: [floor isNil or: [(query value: (entry at: 4)) >= floor]])
                 ifTrue: [matching := matching + 1]]]]]].
     next >= order size or: [anInteger isNil or: [matching >= anInteger]]]
       whileFalse: [probe := 2 * probe].
