@@ -2704,9 +2704,12 @@ the new source, one process each): the answers of exact (cosine, l2, ip) and IVF
 nlist 54, nprobe 1, 4 and 54) searches over the 10^4 VB vectors plus a zero vector and four scaled
 ones, dims 8 and 32, 11 queries each, the IVF centroids, 200 list assignments and every probe order:
 the same 251 lines; and the scorer against `score:query:vector:` over 720360 scores (zero query
-included): 0 byte differences. (A zero query ties every member; ties among these in-memory records
-are ordered by a member key that differs from process to process, with the old source as with the
-new, so that query is compared by its scores only.)
+included): 0 byte differences. (A zero query ties every member. Ties among atoms are ordered by the atom's oid, as in
+`proto_db`; a new atom's oid is a random version-4 UUID drawn on first need in both implementations
+(ProtoBase D21), so fresh records tie differently in every process in both, with the old source as
+with the new, and answers are the same on one database (Addendum V, 2.5). That query is therefore
+compared by its scores only; `tests/interop/vector_ties_identical.sh` pins the tie rule against
+`proto_db` with injected oids.)
 
 Two runs, serial, under the bench marker, each started with the 1-minute load below 3, on the same
 machine as above (load sampled at the ends only; not a quiet machine, other processes unknown):
@@ -2754,7 +2757,8 @@ VB0 (the second run):
 | VB0 | 10000 | d128-cosine-scorer | 218363 / 223379 | 277321 / 296324 | 1.3x | 131 / 2308 | - |
 
 VB1, VB2 and VB4 (the first run; its VB0 rows, without the scorer units, are left out: they repeat
-the second run's score rows within 8 per cent):
+the second run's score rows within 8.6 per cent on the protoBaseST side and 9.2 per cent on
+the `proto_db` side):
 
 | id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
 |---|---|---|---|---|---|---|---|
@@ -2829,12 +2833,13 @@ second run, VB1 from the first):
 The share is 22 to 33 per cent of a `-knn` query (22 to 34 per cent of a `-first` one): below one
 half on every VB1 unit, cosine (23 to 33) and l2 (22 to 28) alike; it was 38 to 61 per cent on
 0.16.0 before the fix and 72 to 118 per cent on 0.14.1. (The V8 run's formula with VB0's
-`score:query:vector:` unit would now give 40 to 98 per cent: that call is no longer what a search
-makes, so its figure overstates the kernel.) What is not the kernel, per query (the `-knn`
+`score:query:vector:` units, the second run's published rows above, would now give 40 to 91 per
+cent of a `-knn` query and 40 to 95 per cent of a `-first` one: that call is no longer what a
+search makes, so its figure overstates the kernel.) What is not the kernel, per query (the `-knn`
 minimum divided by 10, minus the kernel estimate), is 26.3 to 28.2 ms at 10^3 and 324 to 344 ms at
 10^4 (divided by n, about 26 to 34 us per member: the store walk, the entries and the ranking), now
-two thirds to three quarters of an exact query. The figures are one machine's, at a load average between
-2.0 and 3.2 at the run's ends; nothing is asserted about time.
+67 to 78 per cent of an exact query (`-knn`). The figures are one machine's, at a 1-minute load average
+between 1.98 and 2.63 at the two runs' ends; nothing is asserted about time.
 
 ## Known protoST limits
 
