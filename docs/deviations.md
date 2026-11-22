@@ -2457,7 +2457,9 @@ cent of the members (26 / 43): it does at 1 and 10 per cent, not at 50.
 VB0 VB1 VB2 VB3 VB4 VB5`, measured 2026-11-22 11:27 to 13:06 UTC on an AMD Ryzen 5 5500U (12 CPUs,
 Linux 7.0.0-43-generic), serially (nothing else of the task running; started with the 1-minute
 load below 3), load average 1.44 / 1.89 / 2.60 (1, 5 and 15 minutes) before and 3.05 / 2.85 / 2.91
-after; protoBaseST `a230436` (the clean committed tree), protoST 0.16.0
+after (sampled at the two ends only, not during the 100-minute run; a load of 1.4 to 3.1 on 12 CPUs
+is not the quiet machine plan Step 1 asks for, and what else ran on the machine is not known);
+protoBaseST `a230436` (the clean committed tree), protoST 0.16.0
 (`worktrees/pinned-0160/protoST/build_release/protost`, protoCore 3.6.1 of `worktrees/pinned-0160`
 per `ldd`, the benchmark binary: every score through the fsum primitives, every k-means distance
 through `fsumOfPowSquaredDifferences:with:`). `proto_db` `v2.0.0rc4` ran in both of its modes: the
@@ -2548,9 +2550,17 @@ Observed (each derived figure names its divisor):
   time in seconds): no index 34.5 (600) and 30.2 (5000) against `proto_db`'s 152.5 and 150.9; exact
   15.2 and 13.8 against 130.2 and 125.3; IVF 4.6 and 4.6 against 49.3 and 56.7 (numpy 66.7 and
   73.7). VB5: exact 15.4 against 131.0, IVF 4.3 against 49.6 (numpy 72.1); in a three-member
-  cluster 7.7 (exact) and 3.4 (IVF, 90 s lease). Each IVF rate is 0.1 to 0.4 below the V5 round-2
-  run's (5.0, 5.1, 4.7, 3.7), within this run's higher load; nothing in the maintenance path
-  changed since.
+  cluster 7.7 (exact) and 3.4 (IVF, 90 s lease). Each IVF rate is 0.35 to 0.5 below the V5 round-2
+  run's (4.61, 4.59, 4.28 and 3.35 against 5.0, 5.1, 4.7 and 3.7), at a similar load (that run:
+  1.62 before, 3.10 after). The maintenance path did change since (`keyspec.st` in V7's fix round 1,
+  `88c5eea`; `avl.st` and `indexes.st` in V6 and V7). An A/B of the sources, outside the bench
+  protocol and indicative (one protoST 0.16.0 binary, only the protoBaseST side, the trees
+  `6d72eb0`, the V5 round-2 commit, and `a230436`, alternated over 5 rounds, load 2.1 to 6.3), found
+  no regression: VB3 600 IVF 4.88 against 4.86 commits per second (200 commits over the minimum of
+  40.98 and 41.19 s), VB5 IVF 4.46 against 4.50 (120 over 26.91 and 26.67 s), with the same
+  checksums. `6d72eb0` itself ran at 4.88, not its recorded 5.0, so the difference against the V5
+  round-2 run is the machine's state on the two days, not the source; what in the machine's state
+  differs is not known.
 - **Filtered search** (VB4, divided by 10): the filtered search takes 399, 430 and 564 ms per query
   at 1, 10 and 50 per cent against 465 to 478 ms for the post-filter, as in V7's fix-round-1 run.
 - **Peak resident set** is mostly protoCore's heap budget (`QUERY_HEAP_LIMIT_CELLS`, about 5 GB),
@@ -2610,8 +2620,11 @@ search; on 0.16.0, 0.69 s and 0.50 s, 5.4 and 4.8 times.
 **Ruling VQ2's computation** (plan Task 10, Step 3; recorded as a measurement: the maintainer
 decided the primitive on 2026-11-20, ahead of this task, `docs/decisions.md`, VQ2). For each VB1
 unit: the kernel cost per scored vector is VB0's protoBaseST minimum for the same dim and metric
-divided by its 10^4 vectors (VB0 times `PBVectorMath score:query:vector:` on `PBTuple`s, the call an
-exact search makes once per member); an exact query scores every member, so the kernel's time per
+divided by its 10^4 vectors (VB0 times `PBVectorMath score:query:vector:` with a `PBTuple` query and
+`PBTuple` vectors; an exact search, `rank:`, made the same call once per member with the query
+already copied to an Array once per ranking, so per score only the stored vector was copied; the
+V8 review measured the two call shapes within noise of each other, 0 to 20 per cent either way);
+an exact query scores every member, so the kernel's time per
 query is that cost times n; the measured query time is VB1's `-knn` minimum divided by its 10
 queries (and, as a check, the `-first` minimum, one query). Share = kernel per query / measured per
 query. VB0 has no unit for n: the per-vector cost is taken at 10^4 for both sizes.
@@ -2646,23 +2659,32 @@ Outcome:
 
 - **On 0.14.1 the interpreted kernel dominates:** the share is 72 to 118 per cent of a `-knn` query
   (75 to 115 per cent of a `-first` one), above one half on every VB1 unit. The rule would have
-  triggered VP on its own, on all eight units. Shares above 100 per cent mean the model
-  overestimates: VB0's per-score cost, measured in its own process, exceeds what a score costs
-  inside the search at dim 32 (by up to 18 per cent at cosine, 10^4); it is an estimate of the
-  share, not a decomposition, and every unit is far enough above one half for the outcome not to
-  depend on it.
+  triggered VP on its own, on all eight units. Shares above 100 per cent (dim 32, up to 118 per
+  cent at cosine, 10^4) mean the estimate exceeds the measured query; why VB0's per-score cost
+  exceeds the in-search one there is not measured (on 0.14.1 no copy is made). It is an estimate of
+  the share, not a decomposition, and every unit is far enough above one half for the outcome not
+  to depend on it.
 - **On 0.16.0 the share falls to 38 to 61 per cent** (39 to 63 per cent of a `-first` query): below
   one half for every l2 unit (38 to 43), still above it for every cosine unit (54 to 61). What
-  stays above one half is not the interpreted sum: on 0.16.0 a score is one primitive call per sum
-  plus interpreted work around it (the dispatch on the metric, the copy of each `PBTuple` operand to
-  an Array, VP-adopt), and VB0's `fsum` unit (the primitive sum alone over Arrays of products) is
-  32, 33 and 46 per cent of an `ip` score at dim 8, 32 and 128 (on 0.14.1 the interpreted sum was 68,
-  82 and 86 per cent). A cosine score makes three sums, hence its larger share.
-- **What is not the kernel** (measured query minus kernel estimate, per query at 10^4, divided by
-  10^4 for a per-member figure) is about the same on both binaries where the model is not
-  overshooting: dim 8, l2, 298 ms on 0.14.1 and 283 ms on 0.16.0 (about 28 to 30 us per member:
-  the store walk, the entries and the ranking), which is consistent with the primitives changing
-  the kernel only.
+  stays above one half is not the interpreted sum: VB0's `fsum` unit (the primitive sum alone over
+  Arrays of products) is 32, 33 and 46 per cent of an `ip` score at dim 8, 32 and 128 (on 0.14.1 the
+  interpreted sum was 68, 82 and 86 per cent). The V8 review measured the rest (single-process
+  probes on 0.16.0, dim 8, the query already an Array, load about 2; not a bench): a cosine score
+  cost 26.4 us and an l2 score 11.5 us, of which the three raw primitive calls, two `sqrt` and the
+  stored vector's copy take 6.5 us (the copy 3.1 us); one primitive call through its error wrapper
+  (`_primitive:overflow:otherwise:`, an `on: Error do:` and three or four closures) cost 9.9 us
+  against 4.6 us for the raw call with the copy. So each wrapped call pays about 5 us, and a cosine
+  score makes three wrapped calls, about 15 of its 26 us; one of the three, the query's norm, is the
+  same for every score of a query and was recomputed at each (as `proto_db`'s `exact_score` also
+  recomputes it). The metric dispatch and the copy are small. Fix round 1 of task V8 removes both
+  costs with the same results (`PBVectorMath scorerFor:query:`, the run below).
+- **What is not the kernel** (the measured `-knn` query divided by 10, minus the kernel estimate,
+  per query): on 0.16.0 it is 23.1 to 27.1 ms at 10^3 and 283.4 to 311.5 ms at 10^4 over the eight
+  units (divided by n, about 23 to 31 us per member: the store walk, the entries and the ranking).
+  On 0.14.1 it is 30.8 to 39.0 ms at 10^3 except dim 32 cosine (-53.7 ms), and 213.0 and 298.3 ms
+  at 10^4, dim 8, against -1633.5 (cosine) and -68.3 ms (l2) at dim 32: negative where the estimate
+  overshoots. So it is not compared across the binaries, except at dim 8, l2, 10^4: 298.3 ms on
+  0.14.1 against 283.4 ms on 0.16.0.
 - The figures are one machine's, at a load average between 1.4 and 3.1; nothing is asserted about
   time.
 
