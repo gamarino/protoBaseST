@@ -157,14 +157,26 @@
   gains `near:`, `near:k:`, `near:threshold:`, `near:k:threshold:` and `near:k:threshold:metric:`,
   and `PBQuery` the mixing rule (`linq.py:53-58`): with exactly one bare `near(k)` term among the
   conditions of its leading `where:`/`orderBy:` run, a block given to those `where:` steps joins the
-  search's `'where'` (a `PBBlockPredicate`, described `{ 'block' -> description }`, DV5). The
+  search's `'where'` (a `PBBlockPredicate`, described `{ 'block' -> description }`, DV5); a
+  `near[]` term inside an OR or a NOT holding a block is refused by `where:` when it is sent
+  (`linq.py:344-353`, `PBNotSupportedError` with `proto_db`'s text). The
   interim refusal of a planned `near[]` (`PBValidationError` from the residual `PBFilter`) is gone.
   `examples/queries/vector_search.st` runs as a test. Pinned by `tests/unit/vec_planner.st`
   (`test_planner.py`'s four `near[]` tests), `tests/unit/vec_query.st` (`test_linq.py`'s and
   `test_vector_index.py`'s front-end tests, through a committed and reopened space), and 101 vector
   cases added to the query vectors (`tests/interop/py_query_vectors.py`,
   `tests/conformance/vectors-queries`, 415 cases: exact, IVF probing part and all of its lists,
-  and hnsw, alone and with conditions, orders, windows, counts and refusals; 0 near ties, DV6).
+  and hnsw, alone and with conditions, orders, windows, counts and refusals, the planning refusals
+  compared text for text; 0 near ties, DV6).
+- **Faster term evaluation, the same answers** (V7 fix round 1): `PBTerm >> matches:` reads its
+  operator once (its first character) instead of comparing it with up to a dozen Strings, an
+  Integer's order key is built directly (no handler, no fold), and a key path checks whether a
+  record may carry each of its names once, when the key spec is built, instead of on every record
+  (`PBKeySpec`; the check never signals, so no error moves). Every answer is unchanged: an
+  old-against-new comparison of 377223 evaluations (1633 terms, the term vector's and a grid of
+  every operator, path kind and operand kind, over 231 elements) printed the same bytes, and the
+  query and term vectors pass. `s < p` over a record costs about 26 microseconds instead of 47 on
+  protoST 0.16.0 (one probe, not a bench).
 - **Benchmark VB4** (`bench/run_query.sh VB4`): filtered kNN (near(k = 10) AND a condition keeping
   1, 10 and 50 per cent of 10^4 records, exact l2 index of dim 8) against the post-filter of the 10
   nearest, self-verified against `proto_db`'s answers. On protoST 0.16.0 the filtered search answers

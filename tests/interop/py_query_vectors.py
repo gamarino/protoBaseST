@@ -74,6 +74,7 @@ C library, platform.libc_ver()) and 'cases', an array of maps:
   error     (vector cases only) nil, or the class proto_db refuses the case with
             ('ProtoNotSupportedError'); error_at is then 'plan' (plan_query refused: plan is nil)
             or 'execute' (the plan was built and recorded, its execution refused); rows is empty
+  error_text (vector cases only) nil, or str() of proto_db's refusal
   recall    (vector cases over vec_ivf_part without a window or a wrap) [the rows the case shares
             with its oracle, the oracle's rows], for the record: an approximate answer is not
             checked against the oracle
@@ -591,13 +592,14 @@ def run_vector_cases(tr) -> list:
         metric = VEC_ROOTS[root][0] if root in VEC_ROOTS else "l2"
         record = {"id": case_id, "root": root, "source": source_kind, "where": wire_bytes(where),
                   "order": order, "limit": limit, "offset": offset, "wrap": wrap, "plan": None, "rows": [],
-                  "error": error, "error_at": error_at}
+                  "error": error, "error_at": error_at, "error_text": None}
         try:
             plan = plan_query(source, where, order_by=[tuple(k) for k in order] if order else None,
                               limit=limit, offset=offset)
-        except ProtoNotSupportedError:
+        except ProtoNotSupportedError as exc:
             if error_at != "plan":
                 raise
+            record["error_text"] = str(exc)
             out.append(record)
             continue
         if error_at == "plan":
@@ -608,7 +610,8 @@ def run_vector_cases(tr) -> list:
         if error_at == "execute":
             try:
                 list(plan.execute())
-            except ProtoNotSupportedError:
+            except ProtoNotSupportedError as exc:
+                record["error_text"] = str(exc)
                 out.append(record)
                 continue
             sys.exit(f"py_query_vectors: {case_id}: executed, where a refusal was expected; nothing written")

@@ -365,14 +365,16 @@ collection version: nothing is cached between calls, and the plan it answers is 
 Its argument errors are `proto_db`'s (`planner.py:278-343`): a source that is neither an indexed
 collection nor a plan, a condition that is not an expression or the list syntax, sort keys that are
 not a non-empty list of `PBSortKey`s, and a limit or an offset that is not an Integer >= 0 are each
-`PBValidationError`. Two kinds of index are never consulted: an index of a kind protoBaseST does not
-know (loaded as an opaque atom) and a `PBVectorIndex` (design spec 3.3); another index or a scan
-answers the query instead, exactly. Three properties are tested: the 38 behaviours of `proto_db`'s
-`test_planner.py` (`tests/unit/qry_planner.st`); a planned query answers what a scan answers, as a
+`PBValidationError`. An index of a kind protoBaseST does not know (loaded as an opaque atom) is
+never consulted; another index or a scan answers the query instead, exactly. A `PBVectorIndex` is
+consulted since the vectors phase's V7, for `near[]` terms only, which nothing else answers
+([Vector search](#vector-search)). Three properties are tested: the 38 behaviours of `proto_db`'s
+`test_planner.py` (`tests/unit/qry_planner.st`) and its four `near[]` behaviours
+(`tests/unit/vec_planner.st`); a planned query answers what a scan answers, as a
 multiset, and in the order of its keys, over random collections of every kind, random index sets
 and random conditions of every operator, read back from a file and by concurrent actors
-(`tests/unit/qry_prop_equals_scan.st`); and the plans of 314 recorded queries, node for node and
-cost for cost, are `proto_db`'s own (`tests/conformance/queries.st`, vectors written by
+(`tests/unit/qry_prop_equals_scan.st`); and the plans of 415 recorded queries (101 of them `near[]` queries over vector indexes,
+refusals included), node for node and cost for cost, are `proto_db`'s own (`tests/conformance/queries.st`, vectors written by
 `tests/interop/py_query_vectors.py`; 0 near ties).
 
 **1. Normalise** (`planner.py:98-126`). `&` and `|` are flattened; negations are pushed inward by De
@@ -1003,8 +1005,9 @@ The front end adds `proto_db`'s mixing rule: with exactly one bare `near[]` with
 conditions of the leading `where:` steps, a block given to those steps joins the search's `'where'`
 too (`linq.py:53-58`). The rule covers only the leading run of `where:` and `orderBy:` steps: a
 block given to a `where:` after `skip:` or `take:` filters that window's rows, as it does without
-`near[]`. A `near[]` term inside an OR or a NOT holding a block, which `proto_db` refuses, cannot be
-built here (`&`, `|` and `not` take expressions only). The program
+`near[]`. A `near[]` term inside an OR or a NOT holding a block (a `PBBlockPredicate`) has no
+per-element meaning: `where:` refuses it when it is sent, `PBNotSupportedError`, as `proto_db`
+refuses it (`linq.py:344-353`). The program
 ([vector_search.st](../examples/queries/vector_search.st)) checks each answer against a brute
 force:
 

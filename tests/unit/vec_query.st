@@ -9,8 +9,9 @@
  test_near_and_lambda_split_like_two_wheres), with protoST's names: proto_db's lambda is a block
  given to where:, which joins a where: run with AND (ruling CR5), so F.v.near(q, k=4) & lambda is
  (q where: near) where: aBlock; PythonPredicate is PBBlockPredicate, described as { 'block' -> ...
- } (deviation DV5). A near[] term combined with a block by OR or NOT cannot be built here (&, | and
- not take expressions only; CR5), so the parts of those tests that build one have no case. The
+ } (deviation DV5). A near[] term combined with a block by OR or NOT (a PBBlockPredicate, the
+ public node a block becomes) is refused by where: as proto_db's where refuses it (linq.py:344-353,
+ 940-943): proto_db's lambda there is a PBBlockPredicate here. The
  rule's scope (Addendum V 2.9) is checked too: only the leading run of where: and orderBy: steps
  is merged, so a block after a window step filters the window. Each check gathers its mismatches
  and requires none. The space of the commit-and-reopen test goes to out/vec_query (git ignores
@@ -176,25 +177,41 @@ expect value: 'a residual filter evaluates it'
 c that: 'a block predicate is an opaque, comparable expression node a filter evaluates' is: fails asArray equals: #().
 
 "test_near_without_a_vector_index_raises_instead_of_falling_back: with no vector index, a query
- holding near[] is PBNotSupportedError when it is planned, never a scan. (Its computed-value case,
- F.v.lower().near, is a computed value, deferred by spec 3.2; its OR with a lambda cannot be built
- here: CR5.)"
+ holding near[] is PBNotSupportedError when it is planned, never a scan; near[] OR a block is
+ PBNotSupportedError when where: is sent (test_linq.py:368-369, a lambda there). (Its
+ computed-value case, F.v.lower().near, is a computed value, deferred by spec 3.2.)"
 fails := OrderedCollection new.
 coll := (PBList new extend: (records value: (coords value: 10 value: 2 value: 16))) addIndex: (PBEqualityIndex name: 'by_g' path: 'g').
 expect value: 'refused' value: (refused value: [((PBQuery from: coll) where: (near near: #(1.0 0.0) k: 2)) asArray] value: 'near')
   value: #(#PBNotSupportedError true).
 expect value: 'and its count' value: (refused value: [((PBQuery from: coll) where: (near near: #(1.0 0.0) k: 2)) count] value: 'near')
   value: #(#PBNotSupportedError true).
-c that: 'near[] without a vector index is PBNotSupportedError, never a scan' is: fails asArray equals: #().
+expect value: 'near OR a block, at where:' value: (refused value: [(PBQuery from: coll)
+    where: (near near: #(1.0) k: 1) | (PBBlockPredicate block: [:r | true] description: 'block')] value: 'OR/NOT')
+  value: #(#PBNotSupportedError true).
+expect value: 'its text' value: ([(PBQuery from: coll)
+    where: (near near: #(1.0) k: 1) | (PBBlockPredicate block: [:r | true] description: 'block')]
+      on: PBNotSupportedError do: [:e | e return: e messageText])
+  value: 'A ''near[]'' term cannot run inside a Python predicate (it is combined with one by OR/NOT in (vec near[] PBNearQuery(vector=(1.0,), k=1, threshold=None, metric=None)) | (block)): it has no per-element semantics; AND it at the top level instead'.
+expect value: 'NOT (near AND a block), at where:' value: (refused value: [(PBQuery from: coll)
+    where: ((near near: #(1.0 0.0) k: 2) & (PBBlockPredicate block: [:r | true] description: 'block')) not] value: 'OR/NOT')
+  value: #(#PBNotSupportedError true).
+expect value: 'a near[] hidden in a later impure where:' value: (refused value: [((PBQuery from: coll) where: (near near: #(1.0 0.0) k: 2))
+    where: (near near: #(0.0 1.0) k: 2) | (PBBlockPredicate block: [:r | true] description: 'block')] value: 'OR/NOT')
+  value: #(#PBNotSupportedError true).
+c that: 'near[] without a vector index is PBNotSupportedError, never a scan, nor run inside a block' is: fails asArray equals: #().
 
 "test_near_and_lambda_split_like_two_wheres: near(k) and a block are accepted by where: (no error
  until the query is planned); without a vector index the planner refuses, its text naming the
- index. (Its near[] OR a lambda cannot be built here: &, | and not take expressions only, CR5.)"
+ index; near[] OR a block is refused by where:, its text naming OR/NOT (test_linq.py:749-750)."
 fails := OrderedCollection new.
 query := ((PBQuery from: coll) where: (near near: #(1.0 0.0) k: 2)) where: [:r | true].
 expect value: 'no error at where:' value: (query isKindOf: PBQuery) value: true.
 expect value: 'the planner refuses, naming the index' value: (refused value: [query asArray] value: 'index')
   value: #(#PBNotSupportedError true).
-c that: 'near(k) and a block: accepted by where:, refused by the planner without a vector index' is: fails asArray equals: #().
+expect value: 'near OR a block: OR/NOT' value: (refused value: [(PBQuery from: coll)
+    where: (near near: #(1.0) k: 1) | (PBBlockPredicate block: [:r | true] description: 'block')] value: 'OR/NOT')
+  value: #(#PBNotSupportedError true).
+c that: 'near(k) and a block: accepted by where:, refused by the planner without a vector index; near[] OR a block refused by where:' is: fails asArray equals: #().
 
 c report displayNl.

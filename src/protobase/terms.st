@@ -338,6 +338,9 @@ PBTerm class >> _isPair: anObject
 
 "The order key of aKey, or nil when it has none (terms.py is_orderable)."
 PBTerm class >> _orderKeyOrNil: aKey
+  "An Integer's key is built directly: it is what PBKeys _orderKeyLeaf: builds for one, which never
+   signals, without the handler and the fold."
+  (aKey isClassObject not and: [aKey isInteger]) ifTrue: [^ PBOrderKey basicNew _setRank: 3 payload: aKey].
   ^ [PBKeys orderKey: aKey] on: PBValidationError do: [:e | e return: nil].
 
 "Python's bool(aValue): nil, false, PBMissing, a zero number (a NaN is true), an empty String,
@@ -442,32 +445,41 @@ PBTerm >> keySpecObject
 
 "Whether anElement satisfies the term: the scan oracle (terms.py Term.matches, D28; the module
  comment). An extractor's exception passes through unwrapped. A near[] term is
- PBNotSupportedError: its answer depends on the index's metric and on the whole collection."
+ PBNotSupportedError: its answer depends on the index's metric and on the whole collection.
+ The operator is read once, by its first character, which tells every operator apart but '<' from
+ '<=' and '>' from '>=' (by its size), the four between operators (by their brackets) and the four
+ unary ones (by their second and last characters); each operator takes the steps of its own branch
+ in proto_db's order: near[] refused before the key is read, then the key, the unary operators
+ (MISSING and nil are none for ?N), MISSING false, contains, the order key (nil for an unorderable
+ key: != true, every other operator false), then the comparison, an ordered one false across
+ ranks."
 PBTerm >> matches: anElement
-  | key k low high |
-  op = self class nearOperator ifTrue: [
+  | c key k low high |
+  c := op at: 1.
+  c = $n ifTrue: [
     ^ PBNotSupportedError signal: '''near[]'' terms are answered by vector plans, not by a scan'].
   key := keySpecObject extract: anElement.
-  (op = '?N' or: [op = '?!N']) ifTrue: [^ (key == PBMissing default or: [key isNil]) = (op = '?N')].
+  c = $? ifTrue: [ | negated |
+    negated := (op at: 2) = $!.
+    (op at: op size) = $N ifTrue: [^ (key == PBMissing default or: [key isNil]) ~= negated].
+    key == PBMissing default ifTrue: [^ false].
+    ^ (self class _truthy: key) ~= negated].
   key == PBMissing default ifTrue: [^ false].
-  (op = '?T' or: [op = '?!T']) ifTrue: [^ (self class _truthy: key) = (op = '?T')].
-  op = 'contains' ifTrue: [^ self class _contains: key operand: value key: valueKey].
+  c = $c ifTrue: [^ self class _contains: key operand: value key: valueKey].
   k := self class _orderKeyOrNil: key.
-  op = '!=' ifTrue: [^ (k notNil and: [k = valueKey]) not].
+  c = $! ifTrue: [^ (k notNil and: [k = valueKey]) not].
   k isNil ifTrue: [^ false].
-  op = '==' ifTrue: [^ k = valueKey].
-  op = 'in' ifTrue: [^ operandKeys anySatisfy: [:each | k = each]].
-  (self class betweenOperators includes: op) ifTrue: [
+  c = $= ifTrue: [^ k = valueKey].
+  c = $i ifTrue: [^ operandKeys anySatisfy: [:each | k = each]].
+  c = $b ifTrue: [
     low := operandKeys at: 1.
     high := operandKeys at: 2.
     k rank = low rank ifFalse: [^ false].
-    ^ ((op = 'between[]' or: [op = 'between[)']) ifTrue: [low <= k] ifFalse: [low < k])
-      and: [(op = 'between[]' or: [op = 'between(]']) ifTrue: [k <= high] ifFalse: [k < high]]].
+    ^ ((op at: 8) = $[ ifTrue: [low <= k] ifFalse: [low < k])
+      and: [(op at: 9) = $] ifTrue: [k <= high] ifFalse: [k < high]]].
   k rank = valueKey rank ifFalse: [^ false].
-  op = '<' ifTrue: [^ k < valueKey].
-  op = '<=' ifTrue: [^ k <= valueKey].
-  op = '>' ifTrue: [^ k > valueKey].
-  ^ k >= valueKey.
+  c = $< ifTrue: [^ op size = 1 ifTrue: [k < valueKey] ifFalse: [k <= valueKey]].
+  ^ op size = 1 ifTrue: [k > valueKey] ifFalse: [k >= valueKey].
 
 PBTerm >> evaluate: anElement
   ^ self matches: anElement.

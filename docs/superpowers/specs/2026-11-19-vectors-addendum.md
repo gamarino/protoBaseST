@@ -535,9 +535,13 @@ order are already `proto_db`'s.
   steps becomes a `PBBlockPredicate` conjunct of the condition handed to the planner (so it joins
   `PBVectorSearch`'s `where`), instead of a `BlockFilter` on top. A `where:` after a window step
   filters the window's result, as it does today.
-- `linq.py:344-353` (`near[]` inside an OR/NOT holding a Python part) has no protoBaseST case:
-  `&`, `|` and `not` take expressions only and a block enters only through `where:` (CR5), so such
-  a condition cannot be built. Recorded in the checklist row, not as a deviation.
+- `linq.py:344-353` and `940-943` (`near[]` inside an OR/NOT holding a Python part) is ported:
+  `PBBlockPredicate` is a public `PBExpression`, so `&`, `|` and `not` accept it and such a
+  condition can be built (`near | aBlockPredicate`, `(near & aBlockPredicate) not`). `where:`
+  checks each impure part of its condition (`_split:`) and refuses one holding a `near[]` term
+  when it is sent, `PBNotSupportedError` with `proto_db`'s text (the part rendered as `render:`
+  renders it). Corrected in V7's fix round 1; the first draft assumed such a condition could not
+  be built.
 
 ### 2.10 Collections, merges, stale indexes, cluster
 

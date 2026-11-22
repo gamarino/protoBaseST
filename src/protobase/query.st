@@ -52,8 +52,10 @@ The exception is ruling R27 (linq.py:53-58): when the pure part of the leading r
 conjuncts join the condition handed to the planner as conjuncts (a PBBlockPredicate as it is, any
 other one as a PBBlockPredicate of its evaluation, described as render: renders it), so they are
 the PBVectorSearch's where: the k nearest among the elements they accept, not k nearest then
-filtered. A near[] term inside an OR or a NOT holding a block (linq.py:344-353) cannot be built
-here: &, | and not take expressions only, and a block enters only through where: (CR5).
+filtered. A near[] term inside an OR or a NOT holding a block (a PBBlockPredicate, a public
+PBExpression, so &, | and not accept it) has no per-element semantics: where: refuses it when it
+is sent, as proto_db's where does (linq.py:344-353, 940-943, _check_no_near), each impure part of
+its condition checked, PBNotSupportedError with proto_db's text.
 
 The plan (linq.py Queryable.plan, 'Placement'): the leading where: and orderBy:/thenBy: calls are
 merged (the conditions ANDed, the keys composed: orderBy: puts its key first, so earlier keys
@@ -283,9 +285,14 @@ PBQuery >> _with: anOp
 "=== PBQuery: operators =========================================================="
 
 "The rows satisfying anExpressionOrBlock: a PBExpression, or a block of one argument (an opaque
- PBBlockPredicate described as 'block'). Anything else is PBValidationError (ruling CR6)."
+ PBBlockPredicate described as 'block'). Anything else is PBValidationError (ruling CR6). An impure
+ part of the condition (a top-level conjunct holding a block, or the whole condition) holding a
+ near[] term is PBNotSupportedError (linq.py:940-943)."
 PBQuery >> where: anExpressionOrBlock
-  ^ self _with: { #where. self class _condition: anExpressionOrBlock }.
+  | condition |
+  condition := self class _condition: anExpressionOrBlock.
+  ((self class _split: condition) at: 2) do: [:part | self class _checkNoNear: part].
+  ^ self _with: { #where. condition }.
 
 "Rows sorted stably by aKey, ascending (linq.py order_by): a path String, a PBField or a block of
  one argument; a previous order only breaks the ties of this one."
@@ -514,6 +521,14 @@ PBQuery class >> _split: anExpression
   pure := operands select: [:each | self _isPure: each].
   ^ { pure isEmpty ifTrue: [nil] ifFalse: [PBPlanner conjunctionOf: pure].
     operands reject: [:each | self _isPure: each] }.
+
+"linq.py _check_no_near: anImpurePart, run per element by a BlockFilter, may not hold a near[]
+ term (it has no per-element semantics); the text names the part as render: renders it (linq.py
+ describe)."
+PBQuery class >> _checkNoNear: anImpurePart
+  (PBPlanner hasNear: anImpurePart) ifTrue: [
+    ^ PBNotSupportedError signal: 'A ''near[]'' term cannot run inside a Python predicate (it is combined with one by OR/NOT in '
+      , (self render: anImpurePart) , '): it has no per-element semantics; AND it at the top level instead'].
 
 "Whether anExpressionOrNil has exactly one conjunct holding near[], and it is a bare near[] term
  with k (linq.py _single_knn)."

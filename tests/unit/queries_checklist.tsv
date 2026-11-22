@@ -184,7 +184,7 @@ test_linq.py::test_mixed_and_with_several_parts	ported	tests/unit/qry_query.st	t
 test_linq.py::test_or_or_not_with_a_lambda_is_one_whole_python_filter	ported	tests/unit/qry_query.st	the mixing rule: a block is a BlockFilter; a top-level AND sends its pure conjuncts to the planner and each block to its own BlockFilter on top; an OR or NOT holding a block is one BlockFilter
 test_linq.py::test_untranslatable_field_extras_become_python_filters	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_computed_values_follow_missing_and_none_semantics	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
-test_linq.py::test_near_without_a_vector_index_raises_instead_of_falling_back	ported	tests/unit/vec_query.st	near[] without a vector index is PBNotSupportedError, never a scan
+test_linq.py::test_near_without_a_vector_index_raises_instead_of_falling_back	ported	tests/unit/vec_query.st	near[] without a vector index is PBNotSupportedError, never a scan, nor run inside a block
 test_linq.py::test_errors_raised_by_user_code_propagate	ported	tests/unit/qry_query.st	errors raised by user code propagate from where:, collect: and orderBy: blocks, through every terminal
 test_linq.py::test_between_inclusive_default	ported	tests/unit/qry_query.st	between:and: includes both bounds, betweenOpen:and: neither, the half-open forms one
 test_linq.py::test_between_exclusive	ported	tests/unit/qry_query.st	between:and: includes both bounds, betweenOpen:and: neither, the half-open forms one
@@ -216,7 +216,7 @@ test_linq.py::test_builder_names_are_child_fields_not_internals	n/a	deferred: sp
 test_linq.py::test_bound_builder_methods_are_rejected_as_keys_and_predicates	n/a	Python-only API	A Python bound method such as F.v.near passed as a key or predicate has no protoST counterpart: a selector is not a value, so PBField near: cannot be passed unsent, and every key or condition PBQuery takes is checked by its kind.
 test_linq.py::test_group_by_key_rename_keeps_any_aggregation_name	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_impure_leading_predicate_still_lets_the_planner_order	ported	tests/unit/qry_query.st	the mixing rule: a block is a BlockFilter; a top-level AND sends its pure conjuncts to the planner and each block to its own BlockFilter on top; an OR or NOT holding a block is one BlockFilter
-test_linq.py::test_near_and_lambda_split_like_two_wheres	ported	tests/unit/vec_query.st	near(k) and a block: accepted by where:, refused by the planner without a vector index
+test_linq.py::test_near_and_lambda_split_like_two_wheres	ported	tests/unit/vec_query.st	near(k) and a block: accepted by where:, refused by the planner without a vector index; near[] OR a block refused by where:
 test_linq.py::test_in_rejects_a_mapping	ported	tests/unit/qry_field.st	in: takes a collection of values, never a map or a String; any other collection is read as a sequence; a between needs bounds of one rank
 test_linq.py::test_queryable_of_a_queryable_keeps_its_operators	ported	tests/unit/qry_query.st	sources: a collection, its scan, another plan or a query (answered as is); anything else is PBValidationError; a query over a collection answers its rows
 test_pager.py::test_ranked_pages_equal_the_ordered_result	ported	tests/unit/qry_pager.st	ranked pages equal the ordered result
