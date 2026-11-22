@@ -2453,6 +2453,219 @@ is unchanged (5.5 times: it evaluates the condition on its 10 rows only). One pr
 a member, the filtered search saves more than it spends while it rejects more than about 60 per
 cent of the members (26 / 43): it does at 1 and 10 per cent, not at 50.
 
+**The full vector comparison (vectors phase task V8, 2026-11-22).** `RUNS=5 bench/run_query.sh
+VB0 VB1 VB2 VB3 VB4 VB5`, measured 2026-11-22 11:27 to 13:06 UTC on an AMD Ryzen 5 5500U (12 CPUs,
+Linux 7.0.0-43-generic), serially (nothing else of the task running; started with the 1-minute
+load below 3), load average 1.44 / 1.89 / 2.60 (1, 5 and 15 minutes) before and 3.05 / 2.85 / 2.91
+after; protoBaseST `a230436` (the clean committed tree), protoST 0.16.0
+(`worktrees/pinned-0160/protoST/build_release/protost`, protoCore 3.6.1 of `worktrees/pinned-0160`
+per `ldd`, the benchmark binary: every score through the fsum primitives, every k-means distance
+through `fsumOfPowSquaredDifferences:with:`). `proto_db` `v2.0.0rc4` ran in both of its modes: the
+reference mode (CPython 3.14.6, glibc 2.43, numpy and hnswlib blocked), whose work every
+protoBaseST run equals, and its default mode (column numpy: numpy 2.3.5, CPython 3.14.0,
+`tests/interop/.venv-numpy`) for VB1, VB2, VB3 and VB5, verified by its counts and, where no
+centroid is checksummed, its whole work (DV3). VB4 runs the reference mode only (an exact answer
+does not depend on numpy). The data, units and checksums are those of the runs above. The runner
+printed `verified`; VB2's recall at 10 was 46, 85 and 100 of 100 (nprobe 1, 4, 100) in all three
+implementations; VB5's IVF cluster unit ran with the 90 s lease and retried 0 times in 5 runs, the
+exact cluster unit (default lease) 32, 31, 23, 31 and 38 times per 120 commits. Times in
+microseconds **summed over the unit's work** (a VB0 unit: 10^4 scored vectors; a VB1 or VB4 `-knn`,
+`-filtered`, `-post` unit and a VB2 `-nprobe` unit: 10 queries; a `-first` unit: 1 query; a VB2
+`-build`: one build; a VB3 unit: 200 commits; a VB5 unit: 120 commits), minimum and median of 5
+interleaved runs; peak resident set per implementation is the largest over its runs; nothing is
+asserted about time.
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB0 | 10000 | d8-products | 6855 / 9056 | 173347 / 185071 | 25.3x | 34 / 414 | - |
+| VB0 | 10000 | d8-naive | 1980 / 2206 | 91056 / 98078 | 46.0x | 30 / 339 | - |
+| VB0 | 10000 | d8-fsum | 2161 / 2356 | 51472 / 53025 | 23.8x | 30 / 290 | - |
+| VB0 | 10000 | d8-ip | 8643 / 9924 | 159784 / 174946 | 18.5x | 30 / 335 | - |
+| VB0 | 10000 | d8-l2 | 10588 / 12265 | 172019 / 179988 | 16.2x | 30 / 331 | - |
+| VB0 | 10000 | d8-cosine | 21060 / 23654 | 340662 / 377007 | 16.2x | 30 / 435 | - |
+| VB0 | 10000 | d32-products | 24133 / 27218 | 480192 / 496874 | 19.9x | 68 / 1136 | - |
+| VB0 | 10000 | d32-naive | 5840 / 6155 | 286587 / 306270 | 49.1x | 51 / 868 | - |
+| VB0 | 10000 | d32-fsum | 7893 / 8362 | 63404 / 68214 | 8.0x | 51 / 672 | - |
+| VB0 | 10000 | d32-ip | 26039 / 27762 | 190930 / 197703 | 7.3x | 51 / 716 | - |
+| VB0 | 10000 | d32-l2 | 30057 / 30517 | 187570 / 201450 | 6.2x | 51 / 713 | - |
+| VB0 | 10000 | d32-cosine | 59433 / 66858 | 394966 / 404832 | 6.6x | 51 / 816 | - |
+| VB0 | 10000 | d128-products | 91424 / 97008 | 1679754 / 1696725 | 18.4x | 201 / 4156 | - |
+| VB0 | 10000 | d128-naive | 21827 / 23251 | 1049529 / 1089802 | 48.1x | 132 / 3097 | - |
+| VB0 | 10000 | d128-fsum | 29336 / 32288 | 134960 / 137851 | 4.6x | 132 / 2297 | - |
+| VB0 | 10000 | d128-ip | 92203 / 97824 | 294230 / 298258 | 3.2x | 132 / 2345 | - |
+| VB0 | 10000 | d128-l2 | 111195 / 116039 | 277493 / 302188 | 2.5x | 132 / 2337 | - |
+| VB0 | 10000 | d128-cosine | 220588 / 232417 | 582368 / 590891 | 2.6x | 132 / 2441 | - |
+| VB1 | 1000 | d8-cosine-first | 6627 / 7595 | 58895 / 63312 | 8.9x | 24 / 677 | 2057 / 2657 |
+| VB1 | 1000 | d8-cosine-knn | 61076 / 66685 | 611677 / 618955 | 10.0x | 24 / 677 | 2854 / 3173 |
+| VB1 | 1000 | d8-l2-first | 6040 / 6388 | 39154 / 40645 | 6.5x | 24 / 553 | 1908 / 2549 |
+| VB1 | 1000 | d8-l2-knn | 52853 / 58708 | 402780 / 425423 | 7.6x | 24 / 553 | 2599 / 3209 |
+| VB1 | 1000 | d32-cosine-first | 11115 / 11349 | 63110 / 65751 | 5.7x | 25 / 762 | 3040 / 3360 |
+| VB1 | 1000 | d32-cosine-knn | 104700 / 110367 | 644898 / 664002 | 6.2x | 25 / 762 | 3684 / 4184 |
+| VB1 | 1000 | d32-l2-first | 7758 / 8717 | 44198 / 48935 | 5.7x | 25 / 633 | 3358 / 3444 |
+| VB1 | 1000 | d32-l2-knn | 77473 / 78373 | 435317 / 494966 | 5.6x | 25 / 633 | 3574 / 3636 |
+| VB1 | 10000 | d8-cosine-first | 134973 / 137827 | 587929 / 693003 | 4.4x | 47 / 5091 | 15189 / 16750 |
+| VB1 | 10000 | d8-cosine-knn | 913885 / 948790 | 6330640 / 6383317 | 6.9x | 47 / 5091 | 3515 / 4039 |
+| VB1 | 10000 | d8-l2-first | 124094 / 128079 | 441921 / 475060 | 3.6x | 47 / 5091 | 16327 / 16450 |
+| VB1 | 10000 | d8-l2-knn | 800978 / 812562 | 4554625 / 4754050 | 5.7x | 47 / 5091 | 4458 / 4892 |
+| VB1 | 10000 | d32-cosine-first | 171209 / 183228 | 661035 / 686638 | 3.9x | 60 / 5087 | 26446 / 27316 |
+| VB1 | 10000 | d32-cosine-knn | 1287763 / 1378429 | 6924777 / 7027394 | 5.4x | 60 / 5087 | 6719 / 6794 |
+| VB1 | 10000 | d32-l2-first | 144414 / 151597 | 477665 / 489945 | 3.3x | 60 / 5088 | 28010 / 29481 |
+| VB1 | 10000 | d32-l2-knn | 1029813 / 1051106 | 4990833 / 5056483 | 4.8x | 60 / 5088 | 10473 / 11460 |
+| VB2 | 10000 | d32-ivf-build | 58082795 / 59559286 | 172819414 / 175993639 | 3.0x | 77 / 5088 | 1474684 / 1553441 |
+| VB2 | 10000 | d32-ivf-nprobe1 | 23046 / 24186 | 186563 / 234631 | 8.1x | 77 / 5088 | 11598 / 12131 |
+| VB2 | 10000 | d32-ivf-nprobe4 | 151531 / 155191 | 458393 / 563681 | 3.0x | 77 / 5088 | 11814 / 11869 |
+| VB2 | 10000 | d32-ivf-nprobe100 | 1397837 / 1482949 | 9648239 / 10164257 | 6.9x | 77 / 5088 | 22908 / 23191 |
+| VB3 | 600 | d8-none | 1311799 / 1332336 | 5797020 / 5854103 | 4.4x | 25 / 1109 | 1438574 / 1456327 |
+| VB3 | 600 | d8-exact | 1536511 / 1551914 | 13148741 / 13779561 | 8.6x | 34 / 5118 | 1717853 / 1906684 |
+| VB3 | 600 | d8-ivf | 4055560 / 4300202 | 43401866 / 44690271 | 10.7x | 44 / 5092 | 2998420 / 3160283 |
+| VB3 | 5000 | d8-none | 1325584 / 1349468 | 6623248 / 6679575 | 5.0x | 33 / 2483 | 1470955 / 1498538 |
+| VB3 | 5000 | d8-exact | 1596101 / 1602957 | 14492278 / 14627310 | 9.1x | 63 / 5135 | 1903748 / 1933483 |
+| VB3 | 5000 | d8-ivf | 3527658 / 3784142 | 43541052 / 43794666 | 12.3x | 82 / 5138 | 2713799 / 2778473 |
+| VB4 | 10000 | d8-s01-filtered | 203582 / 212442 | 3990058 / 4359389 | 19.6x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s01-post | 860295 / 888590 | 4775171 / 4854722 | 5.6x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s10-filtered | 325535 / 342113 | 4297609 / 4401339 | 13.2x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s10-post | 851094 / 893625 | 4651778 / 4802355 | 5.5x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s50-filtered | 638304 / 666439 | 5639049 / 5823765 | 8.8x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s50-post | 828853 / 849642 | 4692166 / 4784947 | 5.7x | 48 / 5093 | - |
+| VB5 | 600 | d8-exact | 916169 / 936031 | 7770469 / 7962942 | 8.5x | 31 / 3924 | 1049513 / 1070374 |
+| VB5 | 600 | d8-ivf | 2421297 / 2518957 | 28066516 / 28578355 | 11.6x | 38 / 5092 | 1663984 / 1701882 |
+| VB5 | 600 | d8-exact-c3 | - | 15625547 / 16229295 | - | - / 2074 (largest member) | - |
+| VB5 | 600 | d8-ivf-c3 | - | 35817441 / 37004420 | - | - / 2075 (largest member) | - |
+
+Observed (each derived figure names its divisor):
+
+- **Exact search** (VB1 `-knn`, divided by its 10 queries): over 10^4 vectors a query takes 633 ms
+  (dim 8, cosine), 455 ms (dim 8, l2), 692 ms (dim 32, cosine) and 499 ms (dim 32, l2): 4.8 to 6.9
+  times `proto_db`'s pure-Python search, 477 to 1801 times its numpy search (the ratio of the
+  minima). Over 10^3 vectors: 40 to 64 ms per query, 5.6 to 10.0 times. The figures agree with the
+  V6 run within the load's noise.
+- **IVF** (VB2): the `ivf_flat` build over 10^4 vectors of dim 32 takes 172.8 s (one build), 3.0
+  times the pure-Python build and 117 times numpy's 1.47 s. Per query (divided by 10): 18.7 ms at
+  nprobe 1, 45.8 ms at nprobe 4 and 965 ms for the full probe; the full probe is 1.39 times the
+  exact cosine search of the same size (9648239 against 6924777 us, both for 10 queries), where
+  `proto_db`'s is 1.09 times its own.
+- **Maintenance** (VB3, VB5; commits per second = the unit's commits, 200 or 120, over its minimum
+  time in seconds): no index 34.5 (600) and 30.2 (5000) against `proto_db`'s 152.5 and 150.9; exact
+  15.2 and 13.8 against 130.2 and 125.3; IVF 4.6 and 4.6 against 49.3 and 56.7 (numpy 66.7 and
+  73.7). VB5: exact 15.4 against 131.0, IVF 4.3 against 49.6 (numpy 72.1); in a three-member
+  cluster 7.7 (exact) and 3.4 (IVF, 90 s lease). Each IVF rate is 0.1 to 0.4 below the V5 round-2
+  run's (5.0, 5.1, 4.7, 3.7), within this run's higher load; nothing in the maintenance path
+  changed since.
+- **Filtered search** (VB4, divided by 10): the filtered search takes 399, 430 and 564 ms per query
+  at 1, 10 and 50 per cent against 465 to 478 ms for the post-filter, as in V7's fix-round-1 run.
+- **Peak resident set** is mostly protoCore's heap budget (`QUERY_HEAP_LIMIT_CELLS`, about 5 GB),
+  kept until needed; it is reported, not compared.
+
+**The same VB0 and VB1 on protoST 0.14.1 (no primitives, the Smalltalk kernel), for ruling VQ2.**
+`RUNS=5 bench/run_query.sh VB0 VB1` right after the run above, 2026-11-22 13:06 to 13:45 UTC, the
+same machine, load average 2.88 / 2.82 / 2.90 before and 2.24 / 2.87 / 3.07 after; protoBaseST
+`a230436`, protoST 0.14.1 (`worktrees/pinned-361/protoST/build_release/protost`, protoCore 3.6.1 of
+`worktrees/pinned-361` per `ldd`; `PBVectorMath`'s probes find no primitive, so every sum is the
+Smalltalk msum); `proto_db` in both modes as above. The runner printed `verified`: the same answers,
+scores and sums to the bit as on 0.16.0 and in `proto_db`. Units as in the table above.
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB0 | 10000 | d8-products | 7884 / 8533 | 174488 / 181186 | 22.1x | 35 / 414 | - |
+| VB0 | 10000 | d8-naive | 1976 / 2131 | 94936 / 97029 | 48.0x | 30 / 339 | - |
+| VB0 | 10000 | d8-fsum | 2226 / 2397 | 517899 / 535535 | 232.7x | 30 / 491 | - |
+| VB0 | 10000 | d8-ip | 8798 / 9371 | 763899 / 812207 | 86.8x | 30 / 599 | - |
+| VB0 | 10000 | d8-l2 | 10805 / 11273 | 811182 / 823195 | 75.1x | 30 / 615 | - |
+| VB0 | 10000 | d8-cosine | 20650 / 22354 | 2281766 / 2346671 | 110.5x | 30 / 1304 | - |
+| VB0 | 10000 | d32-products | 25847 / 26796 | 484883 / 494417 | 18.8x | 68 / 1136 | - |
+| VB0 | 10000 | d32-naive | 5830 / 6265 | 291590 / 297778 | 50.0x | 51 / 869 | - |
+| VB0 | 10000 | d32-fsum | 8170 / 8322 | 2641776 / 2684689 | 323.4x | 51 / 1868 | - |
+| VB0 | 10000 | d32-ip | 25011 / 26453 | 3226875 / 3312041 | 129.0x | 51 / 2072 | - |
+| VB0 | 10000 | d32-l2 | 29213 / 30626 | 3438690 / 3523756 | 117.7x | 51 / 2177 | - |
+| VB0 | 10000 | d32-cosine | 58417 / 60926 | 10814506 / 10962752 | 185.1x | 51 / 4947 | - |
+| VB0 | 10000 | d128-products | 94693 / 97662 | 1702489 / 1754935 | 18.0x | 201 / 4156 | - |
+| VB0 | 10000 | d128-naive | 21885 / 22639 | 1070816 / 1105887 | 48.9x | 132 / 3097 | - |
+| VB0 | 10000 | d128-fsum | 31001 / 31452 | 11158792 / 11307546 | 359.9x | 132 / 4964 | - |
+| VB0 | 10000 | d128-ip | 89876 / 90664 | 12900801 / 13042229 | 143.5x | 132 / 4967 | - |
+| VB0 | 10000 | d128-l2 | 107266 / 114453 | 14662298 / 14710796 | 136.7x | 132 / 4967 | - |
+| VB0 | 10000 | d128-cosine | 218616 / 228381 | 38601825 / 39508782 | 176.6x | 132 / 4967 | - |
+| VB1 | 1000 | d8-cosine-first | 6903 / 7272 | 243703 / 248055 | 35.3x | 24 / 1738 | 2284 / 2555 |
+| VB1 | 1000 | d8-cosine-knn | 62357 / 67147 | 2672173 / 2705446 | 42.9x | 24 / 1738 | 3097 / 3279 |
+| VB1 | 1000 | d8-l2-first | 5848 / 5952 | 107478 / 119900 | 18.4x | 24 / 929 | 2520 / 2880 |
+| VB1 | 1000 | d8-l2-knn | 55175 / 57825 | 1119541 / 1128776 | 20.3x | 24 / 929 | 3361 / 3808 |
+| VB1 | 1000 | d32-cosine-first | 10664 / 12186 | 1028079 / 1053133 | 96.4x | 25 / 4959 | 3141 / 3446 |
+| VB1 | 1000 | d32-cosine-knn | 101375 / 116696 | 10277285 / 10425575 | 101.4x | 25 / 4959 | 3991 / 4303 |
+| VB1 | 1000 | d32-l2-first | 8411 / 9112 | 376807 / 387984 | 44.8x | 25 / 2487 | 3353 / 3455 |
+| VB1 | 1000 | d32-l2-knn | 71307 / 79126 | 3825194 / 3961142 | 53.6x | 25 / 2487 | 3696 / 3793 |
+| VB1 | 10000 | d8-cosine-first | 134238 / 137294 | 2374214 / 2396825 | 17.7x | 47 / 5090 | 15511 / 16306 |
+| VB1 | 10000 | d8-cosine-knn | 912612 / 946962 | 24947190 / 25078922 | 27.3x | 47 / 5090 | 3643 / 3893 |
+| VB1 | 10000 | d8-l2-first | 125302 / 135844 | 1050843 / 1125433 | 8.4x | 47 / 5090 | 16087 / 16918 |
+| VB1 | 10000 | d8-l2-knn | 824294 / 843421 | 11094980 / 11216994 | 13.5x | 47 / 5090 | 4547 / 4710 |
+| VB1 | 10000 | d32-cosine-first | 177618 / 180722 | 9367209 / 9678755 | 52.7x | 60 / 5036 | 25792 / 26366 |
+| VB1 | 10000 | d32-cosine-knn | 1299858 / 1346467 | 91809858 / 92500821 | 70.6x | 60 / 5036 | 6323 / 6430 |
+| VB1 | 10000 | d32-l2-first | 143335 / 152740 | 3535229 / 3660160 | 24.7x | 60 / 5035 | 27710 / 28844 |
+| VB1 | 10000 | d32-l2-knn | 1022072 / 1051087 | 33703686 / 33973167 | 33.0x | 60 / 5035 | 10378 / 10513 |
+
+The primitives' effect, 0.14.1 over 0.16.0 (minima of the two tables): a VB0 score is 4.7 (l2, dim
+8) to 66.3 (cosine, dim 128) times faster; an exact query (VB1 `-knn`) 2.4 (l2, 10^4, dim 8) to 15.9
+(cosine, 10^3, dim 32) times faster. On 0.14.1 an exact query over 10^4 vectors of dim 32 took 9.18
+s (cosine) and 3.37 s (l2) per query (divided by 10), 70.6 and 33.0 times `proto_db`'s pure-Python
+search; on 0.16.0, 0.69 s and 0.50 s, 5.4 and 4.8 times.
+
+**Ruling VQ2's computation** (plan Task 10, Step 3; recorded as a measurement: the maintainer
+decided the primitive on 2026-11-20, ahead of this task, `docs/decisions.md`, VQ2). For each VB1
+unit: the kernel cost per scored vector is VB0's protoBaseST minimum for the same dim and metric
+divided by its 10^4 vectors (VB0 times `PBVectorMath score:query:vector:` on `PBTuple`s, the call an
+exact search makes once per member); an exact query scores every member, so the kernel's time per
+query is that cost times n; the measured query time is VB1's `-knn` minimum divided by its 10
+queries (and, as a check, the `-first` minimum, one query). Share = kernel per query / measured per
+query. VB0 has no unit for n: the per-vector cost is taken at 10^4 for both sizes.
+
+On protoST 0.14.1 (the Smalltalk kernel):
+
+| n | dim | metric | VB0 st score us/vector (min/10^4) | kernel us/query (x n) | VB1 -knn us/query (min/10) | share knn | VB1 -first us (min/1) | share first |
+|---|---|---|---|---|---|---|---|---|
+| 1000 | 8 | cosine | 228.2 | 228177 | 267217 | 85% | 243703 | 94% |
+| 1000 | 8 | l2 | 81.1 | 81118 | 111954 | 72% | 107478 | 75% |
+| 1000 | 32 | cosine | 1081.5 | 1081451 | 1027728 | 105% | 1028079 | 105% |
+| 1000 | 32 | l2 | 343.9 | 343869 | 382519 | 90% | 376807 | 91% |
+| 10000 | 8 | cosine | 228.2 | 2281766 | 2494719 | 91% | 2374214 | 96% |
+| 10000 | 8 | l2 | 81.1 | 811182 | 1109498 | 73% | 1050843 | 77% |
+| 10000 | 32 | cosine | 1081.5 | 10814506 | 9180986 | 118% | 9367209 | 115% |
+| 10000 | 32 | l2 | 343.9 | 3438690 | 3370369 | 102% | 3535229 | 97% |
+
+On protoST 0.16.0 (the primitives):
+
+| n | dim | metric | VB0 st score us/vector (min/10^4) | kernel us/query (x n) | VB1 -knn us/query (min/10) | share knn | VB1 -first us (min/1) | share first |
+|---|---|---|---|---|---|---|---|---|
+| 1000 | 8 | cosine | 34.1 | 34066 | 61168 | 56% | 58895 | 58% |
+| 1000 | 8 | l2 | 17.2 | 17202 | 40278 | 43% | 39154 | 44% |
+| 1000 | 32 | cosine | 39.5 | 39497 | 64490 | 61% | 63110 | 63% |
+| 1000 | 32 | l2 | 18.8 | 18757 | 43532 | 43% | 44198 | 42% |
+| 10000 | 8 | cosine | 34.1 | 340662 | 633064 | 54% | 587929 | 58% |
+| 10000 | 8 | l2 | 17.2 | 172019 | 455462 | 38% | 441921 | 39% |
+| 10000 | 32 | cosine | 39.5 | 394966 | 692478 | 57% | 661035 | 60% |
+| 10000 | 32 | l2 | 18.8 | 187570 | 499083 | 38% | 477665 | 39% |
+
+Outcome:
+
+- **On 0.14.1 the interpreted kernel dominates:** the share is 72 to 118 per cent of a `-knn` query
+  (75 to 115 per cent of a `-first` one), above one half on every VB1 unit. The rule would have
+  triggered VP on its own, on all eight units. Shares above 100 per cent mean the model
+  overestimates: VB0's per-score cost, measured in its own process, exceeds what a score costs
+  inside the search at dim 32 (by up to 18 per cent at cosine, 10^4); it is an estimate of the
+  share, not a decomposition, and every unit is far enough above one half for the outcome not to
+  depend on it.
+- **On 0.16.0 the share falls to 38 to 61 per cent** (39 to 63 per cent of a `-first` query): below
+  one half for every l2 unit (38 to 43), still above it for every cosine unit (54 to 61). What
+  stays above one half is not the interpreted sum: on 0.16.0 a score is one primitive call per sum
+  plus interpreted work around it (the dispatch on the metric, the copy of each `PBTuple` operand to
+  an Array, VP-adopt), and VB0's `fsum` unit (the primitive sum alone over Arrays of products) is
+  32, 33 and 46 per cent of an `ip` score at dim 8, 32 and 128 (on 0.14.1 the interpreted sum was 68,
+  82 and 86 per cent). A cosine score makes three sums, hence its larger share.
+- **What is not the kernel** (measured query minus kernel estimate, per query at 10^4, divided by
+  10^4 for a per-member figure) is about the same on both binaries where the model is not
+  overshooting: dim 8, l2, 298 ms on 0.14.1 and 283 ms on 0.16.0 (about 28 to 30 us per member:
+  the store walk, the entries and the ranking), which is consistent with the primitives changing
+  the kernel only.
+- The figures are one machine's, at a load average between 1.4 and 3.1; nothing is asserted about
+  time.
+
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded
