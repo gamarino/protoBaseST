@@ -2688,6 +2688,154 @@ Outcome:
 - The figures are one machine's, at a load average between 1.4 and 3.1; nothing is asserted about
   time.
 
+**After fix round 1 of task V8: one scorer per query** (2026-11-22). The change (`c3428c2`):
+`PBVectorMath scorerFor:query:` answers a block that scores many vectors against one query, with
+the metric dispatch, the query's copy and, for cosine, the query's norm done once (the norm at the
+first score, so a refusal comes at the score where it came before), and the primitives called
+directly under one error handler per score; any fsum failure, and operands of unequal sizes, fall
+back to `score:query:vector:`. The same sums in the same order, the same `sqrt` and the same
+`(dot / nq) / nv`. `rank:`, the IVF probe loop, `listFor:vector:` and `probeOrder:query:` use it.
+Evidence of the same results: `tests/unit/vec_math.st` case 17 (written first, and failing on
+`doesNotUnderstand: scorerFor:query:`); every one of the 418 score cases of
+`tests/conformance/vector_math.st` through the scorer three ways (a first score, a second score of
+the same scorer, `PBTuple` operands), with the primitives and with the Smalltalk kernel forced, on
+protoST 0.14.1 and 0.16.0; and an old-against-new comparison on protoST 0.16.0 (`a230436` against
+the new source, one process each): the answers of exact (cosine, l2, ip) and IVF (cosine, l2;
+nlist 54, nprobe 1, 4 and 54) searches over the 10^4 VB vectors plus a zero vector and four scaled
+ones, dims 8 and 32, 11 queries each, the IVF centroids, 200 list assignments and every probe order:
+the same 251 lines; and the scorer against `score:query:vector:` over 720360 scores (zero query
+included): 0 byte differences. (A zero query ties every member; ties among these in-memory records
+are ordered by a member key that differs from process to process, with the old source as with the
+new, so that query is compared by its scores only.)
+
+Two runs, serial, under the bench marker, each started with the 1-minute load below 3, on the same
+machine as above (load sampled at the ends only; not a quiet machine, other processes unknown):
+`RUNS=5 bench/run_query.sh VB0 VB1 VB2 VB4` on 2026-11-22 16:22 to 17:05 UTC, load 2.01 / 3.60 /
+4.36 before and 2.08 / 2.91 / 3.19 after, protoBaseST `6479330` (the clean committed tree: the fix
+and the rewording above); then, after VB0 gained the scorer units (`1af211c`: `ip-scorer`,
+`l2-scorer`, `cosine-scorer`, the same scores through one `scorerFor:query:` made once and timed;
+`proto_db`'s side is `exact_score` again, so the checksums are the same scores'), `RUNS=5
+bench/run_query.sh VB0` on 17:06 to 17:13 UTC, load 1.98 / 2.69 / 3.09 before and 2.63 / 2.81 /
+3.04 after, protoBaseST `1af211c` (clean; the same `src` as `6479330`). protoST 0.16.0
+(`worktrees/pinned-0160`), `proto_db` in both modes as above. Both runs printed `verified`; VB2's
+recall was again 46, 85 and 100 of 100 in all three implementations. Units as in the first table
+of the V8 run (microseconds summed over each unit's work).
+
+VB0 (the second run):
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB0 | 10000 | d8-products | 7410 / 7591 | 166308 / 190962 | 22.4x | 34 / 410 | - |
+| VB0 | 10000 | d8-naive | 2013 / 2097 | 92289 / 103131 | 45.8x | 30 / 338 | - |
+| VB0 | 10000 | d8-fsum | 2150 / 2201 | 46923 / 48460 | 21.8x | 30 / 290 | - |
+| VB0 | 10000 | d8-ip | 9105 / 10139 | 159054 / 174130 | 17.5x | 30 / 334 | - |
+| VB0 | 10000 | d8-l2 | 10340 / 10952 | 166501 / 180796 | 16.1x | 30 / 330 | - |
+| VB0 | 10000 | d8-cosine | 20726 / 21824 | 326906 / 343219 | 15.8x | 30 / 434 | - |
+| VB0 | 10000 | d8-ip-scorer | 9085 / 10283 | 82162 / 84431 | 9.0x | 30 / 294 | - |
+| VB0 | 10000 | d8-l2-scorer | 11189 / 11325 | 92860 / 99038 | 8.3x | 30 / 298 | - |
+| VB0 | 10000 | d8-cosine-scorer | 20264 / 21167 | 99136 / 107469 | 4.9x | 30 / 298 | - |
+| VB0 | 10000 | d32-products | 23698 / 25233 | 469351 / 500373 | 19.8x | 67 / 1115 | - |
+| VB0 | 10000 | d32-naive | 5802 / 5917 | 285354 / 295572 | 49.2x | 50 / 868 | - |
+| VB0 | 10000 | d32-fsum | 7634 / 7921 | 63309 / 74737 | 8.3x | 50 / 672 | - |
+| VB0 | 10000 | d32-ip | 25150 / 27924 | 202190 / 209618 | 8.0x | 50 / 716 | - |
+| VB0 | 10000 | d32-l2 | 29521 / 29879 | 185367 / 191367 | 6.3x | 50 / 712 | - |
+| VB0 | 10000 | d32-cosine | 59734 / 60679 | 381518 / 384155 | 6.4x | 50 / 816 | - |
+| VB0 | 10000 | d32-ip-scorer | 25967 / 26999 | 108716 / 118398 | 4.2x | 50 / 676 | - |
+| VB0 | 10000 | d32-l2-scorer | 29041 / 30810 | 108253 / 115398 | 3.7x | 50 / 680 | - |
+| VB0 | 10000 | d32-cosine-scorer | 57501 / 58832 | 136877 / 149816 | 2.4x | 50 / 680 | - |
+| VB0 | 10000 | d128-products | 90961 / 95344 | 1677509 / 1742987 | 18.4x | 200 / 4080 | - |
+| VB0 | 10000 | d128-naive | 22334 / 22559 | 1024827 / 1067026 | 45.9x | 131 / 3097 | - |
+| VB0 | 10000 | d128-fsum | 30315 / 30900 | 133693 / 138958 | 4.4x | 131 / 2297 | - |
+| VB0 | 10000 | d128-ip | 87812 / 94056 | 288611 / 304066 | 3.3x | 131 / 2344 | - |
+| VB0 | 10000 | d128-l2 | 108163 / 110328 | 287601 / 292645 | 2.7x | 131 / 2337 | - |
+| VB0 | 10000 | d128-cosine | 210202 / 220838 | 561811 / 619359 | 2.7x | 131 / 2440 | - |
+| VB0 | 10000 | d128-ip-scorer | 87957 / 90173 | 216972 / 238640 | 2.5x | 131 / 2305 | - |
+| VB0 | 10000 | d128-l2-scorer | 110284 / 115104 | 207740 / 214245 | 1.9x | 131 / 2304 | - |
+| VB0 | 10000 | d128-cosine-scorer | 218363 / 223379 | 277321 / 296324 | 1.3x | 131 / 2308 | - |
+
+VB1, VB2 and VB4 (the first run; its VB0 rows, without the scorer units, are left out: they repeat
+the second run's score rows within 8 per cent):
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB1 | 1000 | d8-cosine-first | 6974 / 7252 | 35354 / 36148 | 5.1x | 23 / 529 | 2041 / 2872 |
+| VB1 | 1000 | d8-cosine-knn | 64359 / 70631 | 378648 / 434425 | 5.9x | 23 / 529 | 2673 / 2750 |
+| VB1 | 1000 | d8-l2-first | 6331 / 6571 | 34068 / 38333 | 5.4x | 23 / 525 | 2508 / 2781 |
+| VB1 | 1000 | d8-l2-knn | 57290 / 60957 | 355686 / 386971 | 6.2x | 23 / 525 | 3448 / 3624 |
+| VB1 | 1000 | d32-cosine-first | 10734 / 11146 | 40112 / 41911 | 3.7x | 24 / 609 | 3205 / 3374 |
+| VB1 | 1000 | d32-cosine-knn | 105060 / 109385 | 418612 / 432796 | 4.0x | 24 / 609 | 3927 / 4177 |
+| VB1 | 1000 | d32-l2-first | 8022 / 8579 | 38141 / 39404 | 4.8x | 24 / 609 | 3315 / 3584 |
+| VB1 | 1000 | d32-l2-knn | 75077 / 78747 | 389218 / 417816 | 5.2x | 24 / 609 | 3523 / 3764 |
+| VB1 | 10000 | d8-cosine-first | 137678 / 145357 | 416156 / 438382 | 3.0x | 46 / 5091 | 15660 / 16136 |
+| VB1 | 10000 | d8-cosine-knn | 931361 / 974873 | 4293329 / 4493476 | 4.6x | 46 / 5091 | 3561 / 3828 |
+| VB1 | 10000 | d8-l2-first | 125450 / 132626 | 416388 / 430983 | 3.3x | 46 / 5091 | 15783 / 15914 |
+| VB1 | 10000 | d8-l2-knn | 816237 / 839234 | 4171258 / 4211577 | 5.1x | 46 / 5091 | 4494 / 4698 |
+| VB1 | 10000 | d32-cosine-first | 178004 / 182972 | 451420 / 460077 | 2.5x | 59 / 5087 | 26038 / 27557 |
+| VB1 | 10000 | d32-cosine-knn | 1386591 / 1416734 | 4661320 / 4877082 | 3.4x | 59 / 5087 | 6140 / 6584 |
+| VB1 | 10000 | d32-l2-first | 145400 / 149937 | 442929 / 447064 | 3.0x | 59 / 5087 | 26819 / 28566 |
+| VB1 | 10000 | d32-l2-knn | 1023704 / 1111224 | 4525471 / 4621082 | 4.4x | 59 / 5087 | 10226 / 10386 |
+| VB2 | 10000 | d32-ivf-build | 58424745 / 59365278 | 139670590 / 145109267 | 2.4x | 77 / 5095 | 1433512 / 1548172 |
+| VB2 | 10000 | d32-ivf-nprobe1 | 21959 / 22990 | 116127 / 132360 | 5.3x | 77 / 5095 | 12140 / 12832 |
+| VB2 | 10000 | d32-ivf-nprobe4 | 151235 / 153345 | 265997 / 322397 | 1.8x | 77 / 5095 | 11826 / 12419 |
+| VB2 | 10000 | d32-ivf-nprobe100 | 1398321 / 1484371 | 5764022 / 6100883 | 4.1x | 77 / 5095 | 22698 / 23695 |
+| VB4 | 10000 | d8-s01-filtered | 207332 / 214099 | 4099428 / 4250791 | 19.8x | 47 / 5093 | - |
+| VB4 | 10000 | d8-s01-post | 883985 / 907817 | 4238205 / 4276800 | 4.8x | 47 / 5093 | - |
+| VB4 | 10000 | d8-s10-filtered | 341450 / 351832 | 4262626 / 4457897 | 12.5x | 47 / 5093 | - |
+| VB4 | 10000 | d8-s10-post | 842926 / 877615 | 4205058 / 4372436 | 5.0x | 47 / 5093 | - |
+| VB4 | 10000 | d8-s50-filtered | 649864 / 668718 | 5346801 / 5467586 | 8.2x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s50-post | 850094 / 898323 | 4255117 / 4408285 | 5.0x | 48 / 5093 | - |
+
+Observed (each derived figure names its divisor):
+
+- **Exact search** (VB1 `-knn`, divided by its 10 queries): over 10^4 vectors a query takes 429 ms
+  (dim 8, cosine), 417 ms (dim 8, l2), 466 ms (dim 32, cosine) and 453 ms (dim 32, l2), against
+  633, 455, 692 and 499 ms in the V8 run: cosine 1.47 to 1.49 times faster, l2 1.09 to 1.10 times
+  (l2 gained only the hoisted dispatch and the single handler); 3.4 to 5.1 times `proto_db`'s
+  pure-Python search (4.8 to 6.9 before), 443 to 1206 times its numpy search. Over 10^3 vectors:
+  36 to 42 ms per query, 1.54 to 1.62 times faster at cosine and 1.12 to 1.13 at l2. Cosine queries
+  now cost about what l2 queries cost.
+- **IVF** (VB2): the build takes 139.7 s (one build; 172.8 s in the V8 run: its member assignment,
+  `listFor:vector:`, scores every member against the 100 centroids by cosine), 2.4 times
+  `proto_db`'s pure-Python build. Per query (divided by 10): 11.6 ms at nprobe 1, 26.6 ms at nprobe
+  4 and 576 ms for the full probe (18.7, 45.8 and 965 ms before); the full probe is 1.24 times the
+  exact cosine search of the same size (5764022 against 4661320 us, both for 10 queries), where
+  `proto_db`'s is 1.01 times its own.
+- **Filtered search** (VB4, l2, divided by 10): 410, 426 and 535 ms per query at 1, 10 and 50 per
+  cent against 421 to 426 ms for the post-filter (399, 430 and 564 against 465 to 478 before).
+- **VB0:** a score through the scorer costs, per vector (the minimum divided by 10^4), 8.2, 9.3 and
+  9.9 us (`ip`, `l2`, cosine) at dim 8, 10.9, 10.8 and 13.7 us at dim 32, 21.7, 20.8 and 27.7 us at
+  dim 128, against 15.9, 16.7 and 32.7 us at dim 8 through `score:query:vector:` in the same run; a
+  cosine score is 2.4 times `proto_db`'s pure-Python one at dim 32 and 4.9 at dim 8.
+- **Maintenance** (VB3, VB5) is not re-run: the bench's indexes are l2, where the scorer only
+  hoists the dispatch, and the indicative A/B above measured the new tree at 4.93 (VB3 600 IVF) and
+  4.48 (VB5 IVF) commits per second against 4.86 and 4.50 for `a230436`, with the same checksums.
+
+**VQ2's share after the fix** (the same computation as in the V8 run, with the kernel cost taken
+from VB0's `-scorer` unit, the call an exact search now makes once per member: its minimum divided
+by 10^4, times n, over VB1's `-knn` minimum divided by 10 and the `-first` minimum; VB0 from the
+second run, VB1 from the first):
+
+| n | dim | metric | VB0 st scorer us/vector (min/10^4) | kernel us/query (x n) | VB1 -knn us/query (min/10) | share knn | VB1 -first us (min/1) | share first |
+|---|---|---|---|---|---|---|---|---|
+| 1000 | 8 | cosine | 9.9 | 9914 | 37865 | 26% | 35354 | 28% |
+| 1000 | 8 | l2 | 9.3 | 9286 | 35569 | 26% | 34068 | 27% |
+| 1000 | 32 | cosine | 13.7 | 13688 | 41861 | 33% | 40112 | 34% |
+| 1000 | 32 | l2 | 10.8 | 10825 | 38922 | 28% | 38141 | 28% |
+| 10000 | 8 | cosine | 9.9 | 99136 | 429333 | 23% | 416156 | 24% |
+| 10000 | 8 | l2 | 9.3 | 92860 | 417126 | 22% | 416388 | 22% |
+| 10000 | 32 | cosine | 13.7 | 136877 | 466132 | 29% | 451420 | 30% |
+| 10000 | 32 | l2 | 10.8 | 108253 | 452547 | 24% | 442929 | 24% |
+
+The share is 22 to 33 per cent of a `-knn` query (22 to 34 per cent of a `-first` one): below one
+half on every VB1 unit, cosine (23 to 33) and l2 (22 to 28) alike; it was 38 to 61 per cent on
+0.16.0 before the fix and 72 to 118 per cent on 0.14.1. (The V8 run's formula with VB0's
+`score:query:vector:` unit would now give 40 to 98 per cent: that call is no longer what a search
+makes, so its figure overstates the kernel.) What is not the kernel, per query (the `-knn`
+minimum divided by 10, minus the kernel estimate), is 26.3 to 28.2 ms at 10^3 and 324 to 344 ms at
+10^4 (divided by n, about 26 to 34 us per member: the store walk, the entries and the ranking), now
+two thirds to three quarters of an exact query. The figures are one machine's, at a load average between
+2.0 and 3.2 at the run's ends; nothing is asserted about time.
+
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded
