@@ -192,7 +192,7 @@ expect value: 'near OR a block, at where:' value: (refused value: [(PBQuery from
 expect value: 'its text' value: ([(PBQuery from: coll)
     where: (near near: #(1.0) k: 1) | (PBBlockPredicate block: [:r | true] description: 'block')]
       on: PBNotSupportedError do: [:e | e return: e messageText])
-  value: 'A ''near[]'' term cannot run inside a Python predicate (it is combined with one by OR/NOT in (vec near[] PBNearQuery(vector=(1.0,), k=1, threshold=None, metric=None)) | (block)): it has no per-element semantics; AND it at the top level instead'.
+  value: 'A ''near[]'' term cannot run inside a Python predicate (it is combined with one by OR/NOT in (vec near[] NearQuery(vector=(1.0,), k=1, threshold=None, metric=None)) | (block)): it has no per-element semantics; AND it at the top level instead'.
 expect value: 'NOT (near AND a block), at where:' value: (refused value: [(PBQuery from: coll)
     where: ((near near: #(1.0 0.0) k: 2) & (PBBlockPredicate block: [:r | true] description: 'block')) not] value: 'OR/NOT')
   value: #(#PBNotSupportedError true).

@@ -811,6 +811,16 @@ PBNearQuery >> printOn: aStream
     nextPutAll: ', threshold='; nextPutAll: (PBCodec _pyRepr: threshold);
     nextPutAll: ', metric='; nextPutAll: (PBCodec _pyRepr: metric); nextPut: $).
 
+"The parts of proto_db's repr (PBCodec _pyRepr:): the four fields."
+PBNearQuery >> _pyReprParts
+  ^ { vector. k. threshold. metric }.
+
+"NearQuery(vector=..., k=..., threshold=..., metric=...): the dataclass repr of terms.py NearQuery,
+ anArray the reprs of _pyReprParts."
+PBNearQuery >> _pyReprWith: anArray
+  ^ 'NearQuery(vector=' , (anArray at: 1) , ', k=' , (anArray at: 2) , ', threshold=' , (anArray at: 3)
+    , ', metric=' , (anArray at: 4) , ')'.
+
 "=== PBVectorBackend: the backends of PBVectorIndex (vector_backends.py:305-333, 338-383, 480-524,
      566-734, 751-832) ===========================================================================
 

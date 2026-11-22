@@ -143,7 +143,7 @@ PBPlanner class >> _normalize: anExpression negate: aBoolean
     anExpression op = '?N' ifTrue: [^ PBTerm path: anExpression path op: '?!N'].
     anExpression op = '?!N' ifTrue: [^ PBTerm path: anExpression path op: '?N'].
     anExpression op = PBTerm nearOperator ifTrue: [
-      ^ PBNotSupportedError signal: 'A negated ''near[]'' term cannot be planned (' , anExpression printString
+      ^ PBNotSupportedError signal: 'A negated ''near[]'' term cannot be planned (' , (PBCodec _pyRepr: anExpression)
         , '): there is no per-element semantics to complement a vector search'].
     ^ PBNot of: anExpression].
   (anExpression isKindOf: PBBlockPredicate) ifTrue: [
@@ -287,7 +287,7 @@ PBPlanner >> conjunction: anArray requireIndex: aBoolean
   forced := (1 to: conjuncts size) asArray select: [:i | self class hasNear: (conjuncts at: i)].
   forced do: [:i |
     (access at: i) isNil ifTrue: [
-      ^ PBNotSupportedError signal: 'No index supports the ''near[]'' term in ' , (conjuncts at: i) printString
+      ^ PBNotSupportedError signal: 'No index supports the ''near[]'' term in ' , (PBCodec _pyRepr: (conjuncts at: i))
         , ', and a ''near[]'' term cannot be evaluated by a filter; add a vector index on its path']].
   forced notEmpty ifTrue: [
     rest := ((1 to: conjuncts size) asArray reject: [:i | forced includes: i]) collect: [:i | conjuncts at: i].
@@ -322,7 +322,7 @@ PBPlanner >> filteredKnn: aTerm rest: anArray
       _PBCandidate plan: (PBVectorSearch index: (pair at: 2) term: aTerm where: where) names: { pair at: 1 } scans: false].
   options isEmpty ifTrue: [
     ^ PBNotSupportedError signal: '''near[]'' with k combined with other conjuncts means the k nearest among the elements '
-      , 'satisfying them, but no index supporting ' , aTerm printString , ' can restrict its search to a predicate'].
+      , 'satisfying them, but no index supporting ' , (PBCodec _pyRepr: aTerm) , ' can restrict its search to a predicate'].
   ^ self class best: options.
 
 "The cheapest access path answering aConjunct exactly without a full scan, else nil (planner.py

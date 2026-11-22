@@ -1,4 +1,4 @@
-"EXPECT: ok 10"
+"EXPECT: ok 11"
 "Vectors phase V2 (Addendum V, 2.6 to 2.8 and 5.1): PBNearQuery, near[] terms and their refusals,
  against proto_db v2.0.0rc4 (proto_db/query/terms.py:92-137, 197-219, 259-279, 304-325;
  expressions.py:20-21, 352-356; plans.py:452-462; planner.py:114-116). The behaviours of
@@ -221,7 +221,7 @@ people := { rec value: { 'name' -> 'ann'. 'city' -> 'Rome' }. rec value: { 'name
 scan := (PBList new extend: people) asQueryPlan.
 expect value: 'a prefix list' value: (PBFilter source: scan terms: #('city' '==' 'Oslo')) execute asArray value: { people at: 2. people at: 4 }.
 expect value: 'a near[] term' value: (msg value: [PBFilter source: scan terms: { t value: 'v' value: 'near[]' value: (PBNearQuery vector: #(1.0) k: 1) }])
-  value: 'PBValidationError: A Filter cannot evaluate ''near[]'' terms (PBTerm(''v'', ''near[]'', PBNearQuery(vector=(1.0,), k=1, threshold=None, metric=None))); use a VectorSearch plan'.
+  value: 'PBValidationError: A Filter cannot evaluate ''near[]'' terms (Term(path=''v'', op=''near[]'', value=NearQuery(vector=(1.0,), k=1, threshold=None, metric=None))); use a VectorSearch plan'.
 { { 'v'. 'near[]'. #(1). 0.5 }. { a1. { '!'. 'v'. 'near[]'. #(1). 0.5 } }. { '|'. a1. { 'v'. 'near[]'. #(1). 0.5 } } } do: [:tokens |
   expect value: 'a near[] inside ' , tokens printString value: (refused value: [PBFilter source: scan terms: tokens]) value: PBValidationError].
 expect value: 'a String' value: (refused value: [PBFilter source: scan terms: 'city == ''Oslo''']) value: PBValidationError.
@@ -235,13 +235,29 @@ expect value: 'a source that is not a plan' value: ((msg value: [PBFilter source
   value: true.
 c that: 'PBFilter takes prefix lists and refuses near[]' is: fails asArray equals: #().
 
+"A term, a near query, an expression node and a block predicate quoted in a refusal text are
+ proto_db's repr of them, byte for byte (PBCodec _pyRepr:; the expected texts are CPython 3.14's
+ repr of the same proto_db v2.0.0rc4 objects)."
+fails := OrderedCollection new.
+{ (t value: 'a' value: '==' value: 1) -> 'Term(path=''a'', op=''=='', value=1)'.
+  (PBTerm path: nil op: '?N') -> 'Term(path=None, op=''?N'', value=None)'.
+  (t value: 'a.b' value: 'in' value: { 1. 'x'. 2.5 }) -> 'Term(path=''a.b'', op=''in'', value=(1, ''x'', 2.5))'.
+  (t value: 'a' value: 'between[)' value: { 1. Decimal fromString: '2.5' }) -> 'Term(path=''a'', op=''between[)'', value=(1, Decimal(''2.5'')))'.
+  (t value: 'v' value: 'near[]' value: (PBNearQuery vector: #(1 2.0) k: 3 threshold: nil metric: 'l2'))
+    -> 'Term(path=''v'', op=''near[]'', value=NearQuery(vector=(1.0, 2.0), k=3, threshold=None, metric=''l2''))'.
+  (t value: 's' value: 'contains' value: 'it''s') -> 'Term(path=''s'', op=''contains'', value="it''s")'.
+  ((t value: 'a' value: '==' value: 1) & ((t value: 'b' value: '<' value: 1.0e16) | (PBTerm path: 'c' op: '?T') not))
+    -> 'And(Term(path=''a'', op=''=='', value=1), Or(Term(path=''b'', op=''<'', value=1e+16), Not(Term(path=''c'', op=''?T'', value=None))))'.
+  (PBBlockPredicate block: [:r | true] description: 'block') -> 'PythonPredicate(''block'')' } do: [:pair |
+    expect value: pair value value: (PBCodec _pyRepr: pair key) value: pair value].
+c that: 'a term or an expression quoted in a refusal is proto_db''s repr' is: fails asArray equals: #().
+
 "planner.py normalize: a negated near[] term has no per-element complement (planner.py:114-116)"
 fails := OrderedCollection new.
 near := t value: 'v' value: 'near[]' value: (PBNearQuery vector: #(1.0) k: 1).
 { near not. (near | a1) not. (a1 & near) not. ((near not) | a1) } do: [:each |
   expect value: each printString value: (msg value: [PBPlanner normalize: each])
-    value: 'PBNotSupportedError: A negated ''near[]'' term cannot be planned (' , near printString
-      , '): there is no per-element semantics to complement a vector search'].
+    value: 'PBNotSupportedError: A negated ''near[]'' term cannot be planned (Term(path=''v'', op=''near[]'', value=NearQuery(vector=(1.0,), k=1, threshold=None, metric=None))): there is no per-element semantics to complement a vector search'].
 expect value: 'a near[] term' value: (PBPlanner normalize: near) == near value: true.
 expect value: 'a double negation' value: (PBPlanner normalize: (PBNot of: (PBNot of: near))) == near value: true.
 expect value: 'in a conjunction' value: (PBPlanner normalize: (near & a1 not) not not) value: near & a1 not.

@@ -562,7 +562,7 @@ PBQuery class >> render: anExpression
   (anExpression isKindOf: PBTerm) ifTrue: [
     path := anExpression path isNil ifTrue: ['element'] ifFalse: [anExpression path].
     (PBTerm unaryOperators includes: anExpression op) ifTrue: [^ path , ' ' , anExpression op].
-    ^ path , ' ' , anExpression op , ' ' , (PBKeySpec _repr: anExpression value)].
+    ^ path , ' ' , anExpression op , ' ' , (PBCodec _pyRepr: anExpression value)].
   (anExpression isKindOf: PBNot) ifTrue: [^ '~(' , (self render: anExpression operand) , ')'].
   ^ ((anExpression isKindOf: PBAnd) ifTrue: [' & '] ifFalse: [' | '])
     join: (anExpression operands collect: [:each | '(' , (self render: each) , ')']).

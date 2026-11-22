@@ -1216,7 +1216,7 @@ PBVectorIndex >> filteredPlan: aTerm where: aWhere
   near := false.
   expr termsDo: [:each | each op = PBTerm nearOperator ifTrue: [near := true]].
   near ifTrue: [
-    ^ PBValidationError signal: 'A residual predicate cannot hold a ''near[]'' term (' , expr printString , ')'].
+    ^ PBValidationError signal: 'A residual predicate cannot hold a ''near[]'' term (' , (PBCodec _pyRepr: expr) , ')'].
   ^ self _plan: aTerm where: expr.
 
 "vector.py _plan: the plan's producer runs the backend's search on this version, the estimate is

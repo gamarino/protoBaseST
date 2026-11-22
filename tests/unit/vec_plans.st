@@ -103,15 +103,15 @@ expect value: 'refusals' value: {
     refused value: [PBVectorSearch index: idx term: (PBTerm path: 'w' op: 'near[]' value: (PBNearQuery vector: #(1.0) k: 1)) where: nil].
     msg value: [PBVectorSearch index: idx term: term where: (PBTerm path: 'w' op: 'near[]' value: (PBNearQuery vector: #(1.0) k: 1))].
     msg value: [PBVectorSearch index: (PBVectorIndex name: 'h' path: 'v' dim: 2 metric: 'l2') term: term where: nil] }
-  value: { 'PBValidationError: VectorSearch needs a ''near[]'' term, not PBTerm(''v'', ''=='', 1)'. PBNotSupportedError.
-    'PBValidationError: A VectorSearch residual predicate cannot hold ''near[]'' terms (PBTerm(''w'', ''near[]'', PBNearQuery(vector=(1.0,), k=1, threshold=None, metric=None)))'.
+  value: { 'PBValidationError: VectorSearch needs a ''near[]'' term, not Term(path=''v'', op=''=='', value=1)'. PBNotSupportedError.
+    'PBValidationError: A VectorSearch residual predicate cannot hold ''near[]'' terms (Term(path=''w'', op=''near[]'', value=NearQuery(vector=(1.0,), k=1, threshold=None, metric=None)))'.
     'no error' }.
 expect value: 'an index without supportsFiltered: (Python: AttributeError)'
   value: (refused value: [PBVectorSearch index: idx term: term where: (PBTerm path: 'id' op: '==' value: 1)])
   value: MessageNotUnderstood.
 expect value: 'an index that restricts nothing' value: (msg value: [PBVectorSearch index: (((PBList new extend: items)
     addIndex: (PBEqualityIndex name: 'e' path: 'id')) getIndex: 'e') term: term where: nil])
-  value: 'PBNotSupportedError: Index ''e'' does not support PBTerm(''v'', ''near[]'', PBNearQuery(vector=(3.2, 0.0), k=3, threshold=None, metric=None))'.
+  value: 'PBNotSupportedError: Index ''e'' does not support Term(path=''v'', op=''near[]'', value=NearQuery(vector=(3.2, 0.0), k=3, threshold=None, metric=None))'.
 estimates := OrderedCollection new.
 { { 'exact'. nil. 7 }. { 'ivf_flat'. { 'nlist' -> 7. 'nprobe' -> 3 }. 50 }. { 'ivf_flat'. { 'nlist' -> 7. 'nprobe' -> 3 }. 5 }.
   { 'hnsw'. nil. 5 }. { 'hnsw'. nil. 1000 }. { 'exact'. nil. 0 } } do: [:case | | d vi |

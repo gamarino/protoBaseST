@@ -29,12 +29,10 @@
      PBPlanner refuses it (no supporting index for its metric, a negated near[], a plan source
      without indexes); when it is 'execute', the plan is built, its tree is proto_db's as above,
      and its execution is refused (the hnsw root: deviation DV1, proto_db's refusal without
-     hnswlib). A planning refusal's text ('error_text') is proto_db's too, once each term it quotes
-     is written as protoBaseST prints it: proto_db quotes a term by its dataclass repr,
-     Term(path='vec', op='near[]', value=NearQuery(...)), and protoBaseST by its printString,
-     PBTerm('vec', 'near[]', PBNearQuery(...)), the values inside both Python's repr
-     (PBCodec _pyRepr:; docs/deviations.md, the row Terms quoted in refusal texts). An execution
-     refusal's text is not compared: the hnsw text is rewritten for protoST (DV8);
+     hnswlib). A planning refusal's text ('error_text') is proto_db's, byte for byte: a term or a
+     near query it quotes is written as proto_db's repr writes it, Term(path='vec', op='near[]',
+     value=NearQuery(...)) (PBCodec _pyRepr:). An execution refusal's text is not compared: the
+     hnsw text is rewritten for protoST (DV8);
    - a different tree is a near tie only when it is a different choice (the sequence of node
      names and index names differs: a node that differs in anything else is a defect) and the root
      costs agree within IP8 but are not bit-equal (ruling IQ4, deviation R2: a log2 that differs in
@@ -53,7 +51,7 @@ NoAtoms >> refTo: aSegmentBytes offset: anInteger tag: aTag
   ^ Error signal: 'the query vectors hold no atom references'.
 
 | dir manifest blob data space db snap roots extractor fails nearTies tree closeTo nodeBytes rowBytes sameTree
-  decode keysOf count atomRef out choicesOf theirChoicesOf allowedTies expectedNearTies refusalClasses refusals planOf theirText |
+  decode keysOf count atomRef out choicesOf theirChoicesOf allowedTies expectedNearTies refusalClasses refusals planOf |
 dir := 'vectors-queries'.
 fails := OrderedCollection new.
 nearTies := OrderedCollection new.
@@ -137,15 +135,6 @@ rowBytes := [:row :counted |
 decode := [:bytes | PBCodec fromWire: (MessagePack decodeOrdered: bytes strictKeys: false) resolver: NoAtoms new].
 keysOf := [:order | order isNil ifTrue: [nil] ifFalse: [order asArray collect: [:pair | PBSortKey key: (pair at: 1) descending: (pair at: 2)]]].
 "proto_db's refusal classes, as protoBaseST names them."
-"proto_db's text of a refusal, each near[] term of aCondition it quotes as protoBaseST prints it."
-theirText := [:aText :aCondition | | text |
-  text := aText.
-  aCondition isNil ifFalse: [(PBExpression compile: aCondition) termsDo: [:t |
-    t op = PBTerm nearOperator ifTrue: [
-      text := text copyReplaceAll: 'Term(path=' , (PBCodec _pyRepr: t path) , ', op=' , (PBCodec _pyRepr: t op)
-          , ', value=' , (t value printString copyFrom: 3 to: t value printString size) , ')'
-        with: t printString]]].
-  text].
 refusalClasses := Dictionary new.
 refusalClasses at: 'ProtoNotSupportedError' put: PBNotSupportedError; at: 'ProtoValidationError' put: PBValidationError.
 refusals := 0.
@@ -170,7 +159,7 @@ count := 0.
        refusedBy := [planOf value. nil] on: Error do: [:e | e return: { e class. e messageText }].
        (refusedBy notNil and: [(refusedBy at: 1) == errorClass])
          ifFalse: [fails add: id , ': planning answered ' , refusedBy printString , ', proto_db refused it with ' , (case at: 'error')]
-         ifTrue: [(refusedBy at: 2) = (theirText value: (case at: 'error_text') value: where) ifFalse: [
+         ifTrue: [(refusedBy at: 2) = (case at: 'error_text') ifFalse: [
            fails add: id , ': the refusal text ' , (refusedBy at: 2) printString , ' is not proto_db''s '
              , (case at: 'error_text') printString]].
        refusals := refusals + 1.

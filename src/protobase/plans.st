@@ -518,20 +518,20 @@ PBIndexPlan >> sortedRank: aKeySpec descending: aBoolean
 PBVectorSearch class >> index: anIndex term: aTerm where: aWhere
   | expr near inner |
   ((aTerm isClassObject not and: [aTerm isKindOf: PBTerm]) and: [aTerm op = PBTerm nearOperator]) ifFalse: [
-    ^ PBValidationError signal: 'VectorSearch needs a ''near[]'' term, not ' , aTerm printString].
+    ^ PBValidationError signal: 'VectorSearch needs a ''near[]'' term, not ' , (PBCodec _pyRepr: aTerm)].
   (anIndex supports: aTerm) ifFalse: [
     ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: (anIndex explain at: 'index' ifAbsent: [nil]))
-      , ' does not support ' , aTerm printString].
+      , ' does not support ' , (PBCodec _pyRepr: aTerm)].
   expr := nil.
   aWhere isNil ifFalse: [
     expr := PBExpression compile: aWhere.
     near := nil.
     expr termsDo: [:each | (near isNil and: [each op = PBTerm nearOperator]) ifTrue: [near := each]].
     near isNil ifFalse: [
-      ^ PBValidationError signal: 'A VectorSearch residual predicate cannot hold ''near[]'' terms (' , near printString , ')'].
+      ^ PBValidationError signal: 'A VectorSearch residual predicate cannot hold ''near[]'' terms (' , (PBCodec _pyRepr: near) , ')'].
     (anIndex supportsFiltered: aTerm) ifFalse: [
       ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: (anIndex explain at: 'index' ifAbsent: [nil]))
-        , ' cannot answer ' , aTerm printString , ' restricted to a predicate']].
+        , ' cannot answer ' , (PBCodec _pyRepr: aTerm) , ' restricted to a predicate']].
   inner := expr isNil ifTrue: [anIndex plan: aTerm] ifFalse: [anIndex filteredPlan: aTerm where: expr].
   ^ self basicNew _setIndex: anIndex term: aTerm where: expr inner: (PBQueryPlan _check: inner owner: 'VectorSearch').
 
@@ -599,7 +599,7 @@ PBFilter class >> source: aPlan terms: anArray
   near := nil.
   expr termsDo: [:each | (near isNil and: [each op = PBTerm nearOperator]) ifTrue: [near := each]].
   near isNil ifFalse: [
-    ^ PBValidationError signal: 'A Filter cannot evaluate ''near[]'' terms (' , near printString , '); use a VectorSearch plan'].
+    ^ PBValidationError signal: 'A Filter cannot evaluate ''near[]'' terms (' , (PBCodec _pyRepr: near) , '); use a VectorSearch plan'].
   PBQueryPlan _check: aPlan owner: 'PBFilter'.
   ^ (self basicNew _setSource: aPlan) _setPredicate: expr.
 

@@ -98,7 +98,7 @@ expect value: 'over a Limit' value: (refused value: [plan value: (PBLimit source
     value: (near value: 3 value: 4.1)] value: 'near')
   value: #(#PBNotSupportedError true).
 expect value: 'the text' value: ([plan value: coll value: (near value: 3 value: 4.1)] on: PBNotSupportedError do: [:e | e return: e messageText])
-  value: 'No index supports the ''near[]'' term in PBTerm(''v'', ''near[]'', PBNearQuery(vector=(4.1, 0.0), k=3, threshold=None, metric=None)), and a ''near[]'' term cannot be evaluated by a filter; add a vector index on its path'.
+  value: 'No index supports the ''near[]'' term in Term(path=''v'', op=''near[]'', value=NearQuery(vector=(4.1, 0.0), k=3, threshold=None, metric=None)), and a ''near[]'' term cannot be evaluated by a filter; add a vector index on its path'.
 c that: 'a near[] term no index supports is PBNotSupportedError, never a filtered scan' is: fails asArray equals: #().
 
 "test_near_with_index_uses_vector_search_never_a_filter: near(k) alone is a VectorSearch; near(k)
@@ -115,7 +115,7 @@ expect value: 'an index that cannot restrict refuses'
   value: #(#PBNotSupportedError true).
 expect value: 'its text' value: ([plan value: coll value: (t value: 'z' value: '==' value: 1) & (near value: 3 value: 4.1)]
     on: PBNotSupportedError do: [:e | e return: e messageText])
-  value: '''near[]'' with k combined with other conjuncts means the k nearest among the elements satisfying them, but no index supporting PBTerm(''v'', ''near[]'', PBNearQuery(vector=(4.1, 0.0), k=3, threshold=None, metric=None)) can restrict its search to a predicate'.
+  value: '''near[]'' with k combined with other conjuncts means the k nearest among the elements satisfying them, but no index supporting Term(path=''v'', op=''near[]'', value=NearQuery(vector=(4.1, 0.0), k=3, threshold=None, metric=None)) can restrict its search to a predicate'.
 filtered := list addIndex: (FilteredNearScanIndex name: 'vec' keySpec: (PBKeySpec path: 'v')).
 info := plan value: filtered value: (t value: 'z' value: '==' value: 1) & (near value: 3 value: 4.1).
 expect value: 'near(k) AND P' value: { names value: info explain. (info explain at: 'where') = (t value: 'z' value: '==' value: 1) describe.

@@ -484,6 +484,16 @@ PBTerm >> matches: anElement
 PBTerm >> evaluate: anElement
   ^ self matches: anElement.
 
+"The parts of proto_db's repr (PBCodec _pyRepr:): path, operator and value (nil for a unary
+ operator, as proto_db stores it)."
+PBTerm >> _pyReprParts
+  ^ { path. op. (self class unaryOperators includes: op) ifTrue: [nil] ifFalse: [value] }.
+
+"Term(path=..., op=..., value=...): the dataclass repr of terms.py Term (its key_spec is
+ repr=False), anArray the reprs of _pyReprParts."
+PBTerm >> _pyReprWith: anArray
+  ^ 'Term(path=' , (anArray at: 1) , ', op=' , (anArray at: 2) , ', value=' , (anArray at: 3) , ')'.
+
 "{ 'path'. 'op'. 'value' } as a PBFrozenDict, the value as proto_db's display_value renders it."
 PBTerm >> describe
   ^ PBFrozenDict withAssociations: { 'path' -> path. 'op' -> op. 'value' -> (self class displayValue: value) }.
@@ -548,6 +558,15 @@ _PBNode >> hash
   h := self class name hash.
   operands do: [:each | h := (h * 31 + each hash) \\ 1073741824].
   ^ h.
+
+"The parts of proto_db's repr (PBCodec _pyRepr:): the operands."
+_PBNode >> _pyReprParts
+  ^ operands asArray.
+
+"And(...), Or(...), Not(...): expressions.py _Node.__repr__, the class's proto_db name and the
+ operands' reprs (anArray)."
+_PBNode >> _pyReprWith: anArray
+  ^ (self class name copyFrom: 3 to: self class name size) , '(' , (', ' join: anArray) , ')'.
 
 _PBNode >> printOn: aStream
   aStream nextPutAll: self class name; nextPut: $(.
@@ -679,6 +698,15 @@ PBBlockPredicate >> = anObject
 
 PBBlockPredicate >> hash
   ^ description hash.
+
+"The parts of proto_db's repr (PBCodec _pyRepr:): the description."
+PBBlockPredicate >> _pyReprParts
+  ^ { description }.
+
+"PythonPredicate('...'): expressions.py PythonPredicate.__repr__ (the class protoBaseST ports as
+ PBBlockPredicate), anArray the repr of the description."
+PBBlockPredicate >> _pyReprWith: anArray
+  ^ 'PythonPredicate(' , (anArray at: 1) , ')'.
 
 PBBlockPredicate >> printOn: aStream
   aStream nextPutAll: 'PBBlockPredicate('; print: description; nextPut: $).

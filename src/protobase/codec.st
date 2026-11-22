@@ -1039,13 +1039,25 @@ PBCodec class >> _pyStr: aValue
 "Python's repr(aValue), for the values proto_db's messages and display_value render with repr:
  None, True, False, a str quoted as Python quotes it (repr:), an int, a float (_pyFloatRepr:), a
  tuple (its items' reprs, '(x,)' for one item), a list (a PBFrozenList, an Array or an
- OrderedCollection), a map (a PBFrozenDict, '{k: v, ...}' in its order), and every other value as
- _pyLeafRepr: renders it. Any depth: an explicit stack (_PBValueFrame fold:), never recursion."
+ OrderedCollection), a map (a PBFrozenDict, '{k: v, ...}' in its order), a value that answers
+ _pyReprParts (a term, a near query, an AND, OR or NOT, a block predicate: proto_db's dataclass
+ or class repr, built from the reprs of the parts it answers by its _pyReprWith:), and every
+ other value as _pyLeafRepr: renders it. Any depth: an explicit stack (_PBValueFrame fold:),
+ never recursion."
 PBCodec class >> _pyRepr: aValue
   ^ _PBValueFrame fold: aValue
-    children: [:v | self _pyItems: v]
+    children: [:v | self _pyReprItems: v]
     leaf: [:v | self _pyLeaf: v]
-    node: [:v :texts | self _pyContainer: v texts: texts].
+    node: [:v :texts |
+      (v isClassObject not and: [v respondsTo: #_pyReprWith:])
+        ifTrue: [v _pyReprWith: texts]
+        ifFalse: [self _pyContainer: v texts: texts]].
+
+"The parts whose reprs aValue's repr shows: those it answers to _pyReprParts (a term, a near query,
+ an expression node, a block predicate), else its items as a container (_pyItems:), or nil."
+PBCodec class >> _pyReprItems: aValue
+  (aValue isClassObject not and: [aValue respondsTo: #_pyReprParts]) ifTrue: [^ aValue _pyReprParts].
+  ^ self _pyItems: aValue.
 
 "The items a container's repr shows, in order (a map's keys and values alternate), or nil for a
  value that is not a container."

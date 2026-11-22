@@ -167,7 +167,9 @@
   cases added to the query vectors (`tests/interop/py_query_vectors.py`,
   `tests/conformance/vectors-queries`, 415 cases: exact, IVF probing part and all of its lists,
   and hnsw, alone and with conditions, orders, windows, counts and refusals, the planning refusals
-  compared text for text; 0 near ties, DV6).
+  compared text for text; 0 near ties, DV6). A refusal text quotes a term, a near query or an
+  expression as `proto_db`'s repr does, byte for byte (`Term(path='vec', op='near[]',
+  value=NearQuery(...))`, `PBCodec _pyRepr:`), where it quoted protoBaseST's `printString`.
 - **Faster term evaluation, the same answers** (V7 fix round 1): `PBTerm >> matches:` reads its
   operator once (its first character) instead of comparing it with up to a dozen Strings, an
   Integer's order key is built directly (no handler, no fold), and a key path checks whether a
