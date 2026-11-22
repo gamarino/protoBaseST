@@ -2408,16 +2408,49 @@ median of 5 interleaved runs; nothing is asserted about time.
 
 Observed, per query (the table's figures divided by 10): the filtered search answers 10 rows at
 every selectivity, the post-filter 0.1, 1.7 and 6 on average, so the two do not answer the same
-question, and only the filtered one answers near(k) AND P. In `proto_db` the filtered search is
-also the cheaper: 21, 33 and 68 ms against 86 to 89 ms for the post-filter, since it scores only
-the members the condition accepts. In protoBaseST it is the dearer: 640, 663 and 794 ms against
-479 to 490 ms, 1.3 to 1.7 times the post-filter, and 11.7 to 30.5 times `proto_db`'s filtered
-search (the post-filter is 5.4 to 5.7 times). Its cost hardly falls with the selectivity, so the
-work that dominates is done for every member, not for the scored ones. Not measured as a bench;
-one unrepeated probe on protoST 0.16.0 (a scratch program, not committed) took 670 ms to evaluate
-`s < 1` (`PBExpression evaluate:`) over the 10^4 records alone, about 67 microseconds per element,
-and 214 ms to walk the index's 10^4 store entries: the condition's evaluation, not the scoring, is
-the candidate. Faster term evaluation is not part of this phase.
+question, and only the filtered one answers near(k) AND P. Both implementations do the same work
+for each: the filtered search evaluates the condition on every member of the index and scores
+only the members it accepts (`ExactBackend.search`, `PBVectorExact search:`), the post-filter
+scores every member. Which is cheaper depends on the ratio of the two costs. In `proto_db` the
+filtered search is the cheaper: 21, 33 and 68 ms against 86 to 89 ms for the post-filter. In
+protoBaseST it was the dearer: 640, 663 and 794 ms against 479 to 490 ms, 1.3 to 1.7 times the
+post-filter, and 11.7 to 30.5 times `proto_db`'s filtered search (the post-filter is 5.4 to 5.7
+times). Review 1 of task V7 decomposed the cost per member in single-process probes (load 3 to 5,
+figures within about 20 per cent; not a bench): walking the store about 15 microseconds in
+protoBaseST (about 0 in `proto_db`, which reads a cached snapshot, DV4), evaluating `s < p` about
+47 to 55 against 1.8 (about 28 times), ranking about 43 against 8.6 (about 5 times: the scores
+have a primitive, the term evaluator was generic interpreted code). The filtered search wins when
+evaluating one member costs less than ranking the members it rejects: 1.8 < 8.6 in `proto_db`, 50
+> 43 here, so here it lost at every selectivity. Fix round 1 of task V7 made the term evaluator
+cheaper with the same answers (the run below).
+
+**VB4 after fix round 1 of task V7** (2026-11-22). The same command, data and implementations as
+the run above, measured 2026-11-22 09:58 to 10:05 UTC on the same machine, load average 2.19
+before and 3.13 after; protoBaseST `88c5eea` (the clean committed tree), protoST 0.16.0. The
+change: `PBTerm >> matches:` reads its operator once, an Integer's order key is built without a
+handler or a fold, and a key path checks the names a record may carry once, when it is built;
+every answer is the same (an old-against-new comparison of 377223 evaluations printed the same
+bytes). The runner printed `verified`, with the run above's rows and checksums.
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB4 | 10000 | d8-s01-filtered | 203490 / 212512 | 3957297 / 4251096 | 19.4x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s01-post | 857910 / 890668 | 4698480 / 4823124 | 5.5x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s10-filtered | 314379 / 341253 | 4279142 / 4351815 | 13.6x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s10-post | 849991 / 875895 | 4660537 / 4705372 | 5.5x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s50-filtered | 651796 / 672604 | 5574189 / 5679563 | 8.6x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s50-post | 829676 / 847748 | 4583279 / 4677532 | 5.5x | 48 / 5093 | - |
+
+Observed, per query (the table's figures divided by 10): the filtered search takes 396, 428 and
+557 ms against 466 to 470 ms for the post-filter (458 at 50 per cent), so it is now the cheaper at
+1 and 10 per cent (0.84 and 0.92 times the post-filter) and still the dearer at 50 (1.22 times),
+where it evaluates every member and scores half of them; it was 640, 663 and 794 ms. Against
+`proto_db`'s filtered search (20, 31 and 65 ms) it is 19.4, 13.6 and 8.6 times; the post-filter
+is unchanged (5.5 times: it evaluates the condition on its 10 rows only). One probe on protoST
+0.16.0 (not a bench): evaluating `s < 1` over the 10^4 records took 260 ms instead of 470 ms, about
+26 microseconds per member, still about 14 times `proto_db`'s 1.8. With 26 against about 43 to rank
+a member, the filtered search saves more than it spends while it rejects more than about 60 per
+cent of the members (26 / 43): it does at 1 and 10 per cent, not at 50.
 
 ## Known protoST limits
 

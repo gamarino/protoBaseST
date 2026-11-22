@@ -180,9 +180,12 @@
 - **Benchmark VB4** (`bench/run_query.sh VB4`): filtered kNN (near(k = 10) AND a condition keeping
   1, 10 and 50 per cent of 10^4 records, exact l2 index of dim 8) against the post-filter of the 10
   nearest, self-verified against `proto_db`'s answers. On protoST 0.16.0 the filtered search answers
-  10 rows per query where the post-filter answers 0.1 to 6, and takes 640 to 794 ms per query, 1.3
-  to 1.7 times the post-filter (`proto_db`: 21 to 68 ms, cheaper than its post-filter); the
-  condition's evaluation over every member is the candidate cause, not measured as a bench (`docs/deviations.md`, Performance, "Vectors").
+  10 rows per query where the post-filter answers 0.1 to 6, and, with the faster term evaluation
+  above, takes 396, 428 and 557 ms per query against 458 to 470 ms for the post-filter (640 to 794
+  ms before it); `proto_db`'s takes 20 to 65 ms against 83 to 86 ms. Both evaluate the condition on
+  every member and score only the accepted ones, so the filtered search wins where evaluating a
+  member costs less than scoring the members it rejects (`docs/deviations.md`, Performance,
+  "Vectors").
 
 ## 0.3.0 (2026-11-20)
 

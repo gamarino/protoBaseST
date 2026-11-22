@@ -150,11 +150,14 @@ What the condition inside the search costs against the obvious post-filter, whic
 rows (bench VB4, 10^4 vectors of dim 8 under an exact index, k = 10, protoST 0.16.0,
 [deviations.md](../deviations.md#vectors)): over 10 queries the filtered search answered 10 rows
 per query at every selectivity, the post-filter 0.1, 1.7 and 6 on average when the condition keeps
-1, 10 and 50 per cent of the records. Here the filtered search is the dearer, 640 to 794 ms per
-query against 479 to 490 ms for the post-filter: the condition is evaluated for every member,
-and one probe (not a bench) points at that evaluation, not the scoring, as the cost; in `proto_db` it is the cheaper (21 to 68 ms against 86 to 89 ms), since there it scores
-only the members the condition accepts. The post-filter is cheaper here only because it answers
-another question.
+1, 10 and 50 per cent of the records. Both implementations do the same work for each: the
+filtered search evaluates the condition on every member and scores only those it accepts, the
+post-filter scores every member. Here the filtered search takes 396, 428 and 557 ms per query
+against 458 to 470 ms for the post-filter: cheaper at 1 and 10 per cent, dearer at 50, since
+evaluating the condition on a member (about 26 microseconds, one probe) costs less than scoring
+one (about 43) and only pays off when most members are rejected. In `proto_db`, whose evaluation
+is far cheaper than its scoring, the filtered search is the cheaper at every selectivity (20 to
+65 ms against 83 to 86 ms). Either way the post-filter answers another question.
 
 ## Thresholds, and both
 
