@@ -2326,10 +2326,53 @@ query over 10^4 vectors takes about 0.45 to 0.7 s on protoST 0.16.0: 4.9 to 7.0 
 search. The `ivf_flat` build is 2.9 times the pure-Python one, and its probes of 1 and 4
 lists take 0.06 and 0.11 s per query. A full probe (nprobe 100) takes about twice an exact search
 of the same index size (1.46 s against 0.70 s per query), where `proto_db`'s costs about the same
-as its exact search: the 100 bounded range walks compare every node they reach with their bounds,
-which the exact walk does not; this is the likely cost, not measured separately. The peak resident
+as its exact search. (Review I1 of task V6 measured the cause: every node a bounded range walk
+reached was compared with tuple order keys, and before the first list was read every list was
+probed for emptiness; the run below follows the fix.) The peak resident
 set of protoBaseST (about 5 GB at 10^4) is protoCore's heap budget being used, not a working set
 (memory figures are not a headline).
+
+**VB1 and VB2 after fix round 1 of task V6** (2026-11-22). The same command, data and
+implementations as the run above, measured 2026-11-21 23:40 to 2026-11-22 00:17 UTC on the same
+machine, load average 2.91 before and 4.20 after (the machine grew busier during the run: the
+exact rows are 5 to 16 per cent slower than in the run above, on both sides); protoBaseST `605d991`
+(the clean committed tree), protoST 0.16.0. The change: a list of the store is read by a walk
+bounded on the key's Integer list number instead of tuple order-key compares (the same nodes in
+the same order), and the probe order is walked lazily, an empty list skipped as it is reached
+instead of every list probed for emptiness before the first is read. The runner printed
+`verified`; recall was again 46, 85 and 100 of 100 in all three implementations.
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+| VB1 | 1000 | d8-cosine-first | 7206 / 7830 | 65412 / 72164 | 9.1x | 23 / 677 | 2125 / 2426 |
+| VB1 | 1000 | d8-cosine-knn | 64601 / 71960 | 649090 / 687743 | 10.0x | 23 / 677 | 2964 / 3283 |
+| VB1 | 1000 | d8-l2-first | 5920 / 6751 | 41772 / 50358 | 7.1x | 23 / 552 | 2478 / 2539 |
+| VB1 | 1000 | d8-l2-knn | 56116 / 57051 | 445971 / 497645 | 7.9x | 23 / 552 | 2909 / 3233 |
+| VB1 | 1000 | d32-cosine-first | 11409 / 12758 | 71043 / 80317 | 6.2x | 24 / 761 | 3403 / 3528 |
+| VB1 | 1000 | d32-cosine-knn | 117568 / 120242 | 737200 / 762394 | 6.3x | 24 / 761 | 4179 / 4439 |
+| VB1 | 1000 | d32-l2-first | 8848 / 9236 | 41987 / 44891 | 4.7x | 24 / 637 | 3075 / 3858 |
+| VB1 | 1000 | d32-l2-knn | 80905 / 88394 | 447870 / 506858 | 5.5x | 24 / 637 | 3536 / 3946 |
+| VB1 | 10000 | d8-cosine-first | 145916 / 159315 | 637732 / 678338 | 4.4x | 46 / 5090 | 17523 / 18679 |
+| VB1 | 10000 | d8-cosine-knn | 991296 / 1064982 | 7178765 / 7598329 | 7.2x | 46 / 5090 | 4202 / 4415 |
+| VB1 | 10000 | d8-l2-first | 133622 / 156345 | 477171 / 499942 | 3.6x | 46 / 5090 | 17264 / 20089 |
+| VB1 | 10000 | d8-l2-knn | 913492 / 929489 | 5012334 / 5256932 | 5.5x | 46 / 5090 | 5145 / 6494 |
+| VB1 | 10000 | d32-cosine-first | 191877 / 198957 | 715685 / 738710 | 3.7x | 59 / 5087 | 28399 / 28975 |
+| VB1 | 10000 | d32-cosine-knn | 1442574 / 1467884 | 7692983 / 7865632 | 5.3x | 59 / 5087 | 7258 / 7565 |
+| VB1 | 10000 | d32-l2-first | 161067 / 168489 | 526005 / 549272 | 3.3x | 59 / 5087 | 30944 / 32275 |
+| VB1 | 10000 | d32-l2-knn | 1116438 / 1154995 | 5361926 / 5497977 | 4.8x | 59 / 5087 | 11874 / 12719 |
+| VB2 | 10000 | d32-ivf-build | 62846341 / 64271246 | 191839295 / 196962247 | 3.1x | 76 / 5087 | 1627480 / 1730075 |
+| VB2 | 10000 | d32-ivf-nprobe1 | 23766 / 25579 | 194128 / 240887 | 8.2x | 76 / 5087 | 12183 / 13260 |
+| VB2 | 10000 | d32-ivf-nprobe4 | 151692 / 167521 | 535111 / 681444 | 3.5x | 76 / 5087 | 11797 / 12852 |
+| VB2 | 10000 | d32-ivf-nprobe100 | 1499394 / 1588079 | 10769764 / 10789113 | 7.2x | 76 / 5087 | 25151 / 25316 |
+
+Observed: the IVF queries are cheaper; the exact ones do not use the bounded walk. A query at
+nprobe 1 takes 0.19 s instead of 0.62 s (8.2 times `proto_db`'s pure-Python search instead of
+28.2 times), at nprobe 4 0.54 s instead of 1.10 s (3.5 times instead of 7.6), and the full probe
+(nprobe 100) 1.08 s instead of 1.46 s. The full probe now costs 1.40 times an exact search of the
+same index size (10769764 against 7692983 microseconds for the 10 queries; it was 2.09 times),
+where `proto_db`'s costs 1.04 times its own: the remaining gap, not measured separately, is most
+likely the 101 bounded descents and the per-list entry Arrays, which `proto_db`'s per-version list cache (DV4) does not pay. What remains
+at nprobe 1 and 4 against `proto_db` (8.2 and 3.5 times) is the interpreted kernel and the store
+walk where `proto_db` reads its cached lists; neither was measured separately.
 
 ## Known protoST limits
 

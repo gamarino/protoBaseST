@@ -274,8 +274,12 @@ ports both: the byte order, and CPython's Mersenne Twister seeding and `random.s
 on 10^4 documents of 32 dimensions with nlist 100 (bench VB2, protoST 0.16.0), the build
 (k-means) took 164 s (`proto_db` 57 s in pure Python, 1.2 s with numpy, whose centroids are its
 own, DV3); a query took 62 ms at nprobe 1, 110 ms at nprobe 4 and 1.46 s at nprobe 100 (every
-list, so exact; about twice an exact search, since each list is read by a bounded walk of the
-store tree); recall at 10 against exact was 0.46, 0.85 and 1.0, the same in protoBaseST and in
+list, so exact) in the first run, 28, 7.6 and 10.7 times `proto_db`'s pure-Python query, and about
+twice an exact search at nprobe 100. The cause, measured, was the list walks: each compared every
+node it reached with tuple order keys, and every list was probed for emptiness before the first
+was read. After the fix (each list bounded on its Integer list number, empty lists skipped as the
+probe reaches them), a query took 0.19 s, 0.54 s and 1.08 s (8.2, 3.5 and 7.2 times `proto_db`'s;
+the full probe 1.40 times an exact search, on a busier machine). Recall at 10 against exact was 0.46, 0.85 and 1.0, the same in protoBaseST and in
 both of `proto_db`'s modes.
 
 An index trained by either implementation is valid for the other: the format leaves training to
