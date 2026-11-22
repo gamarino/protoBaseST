@@ -254,8 +254,8 @@ lesson check: 'nprobe = nlist is exact' is: (recall value: 16) equals: 1.0.
 Recall at 1 and 4 probes of 16 lists, on these random vectors (which have no cluster structure for
 the index to exploit), over the block's 40 queries: **0.5625 at nprobe 1 (225 of 400) and 0.93 at
 nprobe 4 (372 of 400)**, and 1.0 at nprobe 16. That is what the block's search observed on
-2026-11-21, with the index built in memory and searched through `PBVectorSearch` (the planner's
-`near:` rule is the vectors phase's V7): six runs of protoBaseST (three on protoST 0.14.1, three on
+2026-11-21, with the index built in memory and searched through a `PBVectorSearch` the block builds (the
+plan the planner builds for `near:` since the vectors phase's V7): six runs of protoBaseST (three on protoST 0.14.1, three on
 0.16.0) and the same block in `proto_db` v2.0.0rc4 on the same data, three runs in its reference
 mode (numpy blocked) and three with numpy, all gave these same counts, query for query the same
 sets. `proto_db`'s own tutorial says its partial-probe recall varied between runs on identical data,

@@ -9,8 +9,9 @@ Usage: python py_vector_workload.py <unit>      (QUERY_VECTOR_DATA names the dat
                                                  VB3 and VB5 also need QUERY_DATA, a new directory
                                                  for their spaces)
 
-VB3 and VB5 (task V5), VB1 and VB2 (task V6) are vector_workload.st's; the indexes, the starting
-collections and the checksums are bench/_vector_bench.st's, computed here with the same formulas.
+VB3 and VB5 (task V5), VB1 and VB2 (task V6) and VB4 (task V7) are vector_workload.st's; the
+indexes, the starting collections and the checksums are bench/_vector_bench.st's, computed here with
+the same formulas.
 """
 import math
 import os
@@ -191,8 +192,8 @@ def answers_checksum(answers) -> int:
 
 
 def search(index, q, k: int = 10) -> list:
-    """VectorBench search:query:k:, a VectorSearch over the index's plan (the planner's near[] rules
-    are task V7's; proto_db's plan for near(k) on an indexed collection is this one)."""
+    """VectorBench search:query:k:, a VectorSearch over the index's plan (the plan proto_db's planner
+    builds for near(k) on a collection indexed by it)."""
     from proto_db.query.plans import VectorSearch
     return [e.i for e in VectorSearch(index, Term("vec", NEAR, NearQuery(q, k=k))).execute()]
 
@@ -246,6 +247,35 @@ def knn(id_: str, n: int, plan: str, dim: int, op: str, path: str):
         print(f"TIME id={id_} impl={IMPL} size={n} plan={label} us={us}")
 
 
+def filtered(id_: str, n: int, plan: str, dim: int, op: str, path: str):
+    """VB4; see vector_workload.st."""
+    from proto_db.query.planner import plan_query
+    from proto_db.query.plans import VectorSearch
+    percent = int(op[1:])
+    vectors = read_vectors(path, n, dim)
+    queries = read_queries(path, dim)
+    recs = [DBObject(i=i, s=i % 100, vec=v) for i, v in enumerate(vectors)]
+    coll = List().extend(recs).add_index(VectorIndex("by_vec", KeySpec.path("vec"), dim, "l2", "exact"))
+    cond = Term("s", "<", percent)
+
+    def knn(q):
+        return Term("vec", NEAR, NearQuery(q, k=10))
+
+    shape = plan_query(coll, [knn(queries[0]), cond])
+    if not isinstance(shape, VectorSearch) or shape.explain().get("where") != cond.describe():
+        raise SystemExit(f"{id_}: near(k) AND s < {percent} is not one VectorSearch with its where: {shape.explain()}")
+    t0 = time.perf_counter_ns()
+    inside = [[e.i for e in plan_query(coll, [knn(q), cond]).execute()] for q in queries]
+    us_inside = (time.perf_counter_ns() - t0) // 1000
+    t0 = time.perf_counter_ns()
+    post = [[e.i for e in plan_query(coll, knn(q)).execute() if e.s < percent] for q in queries]
+    us_post = (time.perf_counter_ns() - t0) // 1000
+    for label, answers, us in ((f"{plan}-filtered", inside, us_inside), (f"{plan}-post", post, us_post)):
+        print(f"WORK id={id_} impl={IMPL} size={n} rows={sum(map(len, answers))} queries={len(queries)} plan={label} "
+              f"checksum={answers_checksum(answers)}")
+        print(f"TIME id={id_} impl={IMPL} size={n} plan={label} us={us}")
+
+
 def run(unit: str):
     id_, n, plan = unit.split(":")
     n = int(n)
@@ -258,6 +288,10 @@ def run(unit: str):
         if dim < 1:
             raise SystemExit(f"py_vector_workload: unknown unit {unit}")
         return knn(id_, n, plan, dim, op, path)
+    if id_ == "VB4" and op in ("s01", "s10", "s50"):
+        if dim < 1:
+            raise SystemExit(f"py_vector_workload: unknown unit {unit}")
+        return filtered(id_, n, plan, dim, op, path)
     if (id_ == "VB3" and op in ("none", "exact", "ivf")) or (id_ == "VB5" and op in ("exact", "ivf")):
         if dim < 1:
             raise SystemExit(f"py_vector_workload: unknown unit {unit}")

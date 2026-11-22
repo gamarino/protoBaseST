@@ -41,7 +41,7 @@
   when built; `PBExpression compile:` and `asList` read and write both list forms, `describe` renders
   the query as `proto_db` does; `matches:` (so `evaluate:`) is `PBNotSupportedError`, a `PBFilter`
   holding a `near[]` term is `PBValidationError`, and `PBPlanner normalize:` refuses a negated one.
-  No plan answers `near[]` yet (V6, V7). Pinned by `tests/unit/vec_terms.st` and 42 `near[]` cases
+  Plans answer `near[]` since V6 and V7. Pinned by `tests/unit/vec_terms.st` and 42 `near[]` cases
   added to the term vector (`tests/interop/py_term_cases.py`,
   `tests/conformance/vectors-index-keys/terms.msgpack`).
 - **Vector indexes, exact and hnsw** (task V3): `PBVectorIndex` (`src/protobase/indexes.st`) is a
@@ -114,8 +114,6 @@
   `proto_db`'s default mode (numpy, `tests/interop/.venv-numpy`) is a column of the VB3 and VB5
   tables: its counts are verified, its centroids are numpy's (DV3) and not compared.
 
-## 0.3.0 (2026-11-20)
-
 - **Vector search** (task V6): `PBVectorIndex` answers `near[]` on its own key spec, of its
   dimension, with its metric or none (`supports:`, `supportsFiltered:`, `estimate:`, `plan:`,
   `filteredPlan:where:`, `vector.py:272-319`), and `PBVectorSearch index:term:where:`
@@ -129,8 +127,8 @@
   and hnsw is `PBNotSupportedError` at the first execution, never at planning (ruling VQ1, DV1; its
   text rewritten for protoST, DV8). Every score is `PBVectorMath`'s; the estimates are Python's
   arithmetic, bit for bit (S30). `PBVectorIndex nearOracle:keySpec:query:metric:predicate:` is
-  `near_oracle`. The planner's near[] rules are V7's: until then a planned query naming `near[]` is
-  still refused, and a program builds the `PBVectorSearch` itself. Pinned by
+  `near_oracle`. The planner chooses these plans since V7 (below); a program may still build the
+  `PBVectorSearch` itself. Pinned by
   `tests/unit/vec_exact.st`, the search rows of `tests/unit/vec_ivf.st`, `tests/unit/vec_plans.st`
   (proto_db's estimates by their IEEE bytes; eight actors on one version and its loaded stub) and
   `tests/unit/vec_contract_exact.st`, `vec_contract_ivf.st` and `vec_contract_coll_cosine.st`,
@@ -147,6 +145,29 @@
   nprobe 1 and 4 62 and 110 ms (19 and 54 ms after fix round 1, and 1.08 s at nprobe 100, 1.40
   times an exact search); recall 0.46, 0.85 and 1.0 in both implementations
   (`docs/deviations.md`, Performance, "Vectors").
+- **The planner's `near[]` rules and `PBField near:`** (task V7): `PBPlanner` has `proto_db`'s
+  `near[]` rules (`planner.py:98-135`, `194-275`): a `near[]` conjunct is always answered by an
+  index (`PBVectorSearch` over the cheapest that supports it), never by a filter, and is
+  `PBNotSupportedError` with `proto_db`'s text when none supports it; one bare `near(k)` with other
+  conjuncts is the k nearest among the elements satisfying them, the others the search's `'where'`
+  (ruling R27), refused when no supporting index can restrict its search; several `near[]`
+  conjuncts are intersected; a disjunction holding one is always a `PBUnion`, its branches without
+  an index filtered scans; an order over a condition holding one sorts the search, never an ordered
+  index scan. A `PBVectorIndex` is consulted for `near[]` terms only (`_consults:`). `PBField`
+  gains `near:`, `near:k:`, `near:threshold:`, `near:k:threshold:` and `near:k:threshold:metric:`,
+  and `PBQuery` the mixing rule (`linq.py:53-58`): with exactly one bare `near(k)` term among the
+  conditions of its leading `where:`/`orderBy:` run, a block given to those `where:` steps joins the
+  search's `'where'` (a `PBBlockPredicate`, described `{ 'block' -> description }`, DV5). The
+  interim refusal of a planned `near[]` (`PBValidationError` from the residual `PBFilter`) is gone.
+  `examples/queries/vector_search.st` runs as a test. Pinned by `tests/unit/vec_planner.st`
+  (`test_planner.py`'s four `near[]` tests), `tests/unit/vec_query.st` (`test_linq.py`'s and
+  `test_vector_index.py`'s front-end tests, through a committed and reopened space), and 101 vector
+  cases added to the query vectors (`tests/interop/py_query_vectors.py`,
+  `tests/conformance/vectors-queries`, 415 cases: exact, IVF probing part and all of its lists,
+  and hnsw, alone and with conditions, orders, windows, counts and refusals; 0 near ties, DV6).
+
+## 0.3.0 (2026-11-20)
+
 ### Indexed queries
 
 - **AVL functions for indexes and rank access** (`PBAvl`, class side, ports of `proto_db`'s

@@ -46,8 +46,8 @@ VectorBench class >> queriesFrom: aPath dim: d
 VectorBench class >> records: vectors
   ^ (1 to: vectors size) asArray collect: [:i | PBObject withAll: { 'i' -> (i - 1). 'vec' -> (vectors at: i) }].
 
-"The 'i' of the k nearest records to aQuery: a PBVectorSearch over anIndex's plan (the planner's
- near[] rules are task V7's; proto_db's plan for near(k) on an indexed collection is this one)."
+"The 'i' of the k nearest records to aQuery: a PBVectorSearch over anIndex's plan, the plan both
+ planners build for near(k) on a collection indexed by it."
 VectorBench class >> search: anIndex query: aQuery k: k
   ^ (PBVectorSearch index: anIndex term: (PBTerm path: 'vec' op: 'near[]' value: (PBNearQuery vector: aQuery k: k)) where: nil)
     execute collect: [:e | e at: 'i'].

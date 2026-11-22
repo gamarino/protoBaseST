@@ -3,9 +3,10 @@
  conditions. A port of proto_db's examples/vector_search.py (v2.0.0rc4, lines 1-85). Quoted by
  docs/queries.md, 'Vector search'.
 
- DRAFT (vectors task V0): written against the API of Addendum V
+ Written by the vectors task V0 against the API of Addendum V
  (docs/superpowers/specs/2026-11-19-vectors-addendum.md, sections 2.3 to 2.9) before that API
- exists. It has never run. Task V7 moves it to examples/queries/vector_search.st and makes it run.
+ existed; moved here from examples/queries/pending/ by task V7, which built the last of it (the
+ planner's near[] rules and PBField near:), and run as a test since, unchanged.
 
  300 documents carry a small embedding. One collection holds an exact vector index, another the
  same documents with an IVF-Flat index whose nprobe equals its nlist (so it probes every list and
@@ -14,7 +15,7 @@
  seeded generator written here (Park and Miller's): protoST's Random is not Python's, so the data
  is not the Python example's, and the program checks the answers, not the Python example's ids.
 
- Run it (from examples/queries, once moved): STPATH=<repository>/src protost vector_search.st"
+ Run it from examples/queries: STPATH=<repository>/src protost vector_search.st"
 Import from: 'protobase'.
 Import from: '../tutorial/_lesson'.
 

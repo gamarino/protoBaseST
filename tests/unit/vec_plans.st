@@ -12,11 +12,11 @@
  plus the estimates of the three backends in Python's arithmetic (S30), compared by their IEEE 754
  bytes with the figures proto_db's own estimate functions answer for the same indexes (computed
  with CPython 3.14, numpy and hnswlib blocked; the hnsw descent log2(1002) is the same Float as
- PBCost log2:, so deviation DV6 does not show here). The planner's near[] rules are the vectors
- phase's V7: until then a planner that reaches near[] refuses it, so the plans proto_db's planner
- builds for these tests (VectorSearch with a residual predicate, a Filter over a VectorSearch, an
- Intersect and a Union of them) are built here by hand, node for node, and their answers checked
- as proto_db's tests check them. Each check gathers its mismatches and requires none, so one label
+ PBCost log2:, so deviation DV6 does not show here). The plans proto_db's planner builds for these
+ tests (VectorSearch with a residual predicate, a Filter over a VectorSearch, an Intersect and a
+ Union of them) are built here by hand, node for node, so these checks pin the plan nodes apart
+ from the planner, whose near[] rules (vectors phase V7) tests/unit/vec_planner.st and
+ tests/conformance/queries.st check; their answers are checked as proto_db's tests check them. Each check gathers its mismatches and requires none, so one label
  covers one behaviour."
 Import from: 'protobase'.
 Import from: '_check'.

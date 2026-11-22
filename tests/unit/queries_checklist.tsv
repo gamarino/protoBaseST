@@ -152,10 +152,10 @@ test_planner.py::test_order_by_two_keys_sorts_even_with_an_index_on_the_first	po
 test_planner.py::test_selective_where_then_sort_beats_ordered_scan	ported	tests/unit/qry_planner.st	a selective condition then a Sort beats an ordered scan; on one key, the cost decides
 test_planner.py::test_range_and_order_on_the_same_key_picks_by_cost	ported	tests/unit/qry_planner.st	a selective condition then a Sort beats an ordered scan; on one key, the cost decides
 test_planner.py::test_limit_and_offset_apply_after_ordering	ported	tests/unit/qry_planner.st	limit and offset apply after the order
-test_planner.py::test_near_without_index_raises	deferred	V7	The planner near[] rules of planner.py are ported in V7 (Addendum V, 2.8).
-test_planner.py::test_near_with_index_uses_vector_search_never_a_filter	deferred	V7	The planner near[] rules of planner.py are ported in V7 (Addendum V, 2.8).
-test_planner.py::test_near_in_a_disjunction_forces_a_union_with_a_filtered_scan_branch	deferred	V7	The planner near[] rules of planner.py are ported in V7 (Addendum V, 2.8).
-test_planner.py::test_near_where_with_order_by_never_filters_on_the_ordered_scan	deferred	V7	The planner near[] rules of planner.py are ported in V7 (Addendum V, 2.8).
+test_planner.py::test_near_without_index_raises	ported	tests/unit/vec_planner.st	a near[] term no index supports is PBNotSupportedError, never a filtered scan
+test_planner.py::test_near_with_index_uses_vector_search_never_a_filter	ported	tests/unit/vec_planner.st	near[] is answered by a VectorSearch, near(k) AND P inside it, never by a filter
+test_planner.py::test_near_in_a_disjunction_forces_a_union_with_a_filtered_scan_branch	ported	tests/unit/vec_planner.st	near[] in a disjunction forces a Union; a negated near[] is PBNotSupportedError
+test_planner.py::test_near_where_with_order_by_never_filters_on_the_ordered_scan	ported	tests/unit/vec_planner.st	an order over near[] sorts the VectorSearch, never an ordered index scan
 test_planner.py::test_explain_is_exactly_the_executed_node_tree	ported	tests/unit/qry_planner.st	explain is exactly the node tree the plan runs, and is deterministic
 test_planner.py::test_planning_is_per_version	ported	tests/unit/qry_planner.st	planning is per version: a plan keeps answering for its version
 test_planner.py::test_property_planned_result_equals_the_scan	ported	tests/unit/qry_prop_equals_scan.st	the planned result equals the scan, as a multiset and sorted by the order keys, over every collection kind, reloaded and read by concurrent actors
@@ -168,7 +168,7 @@ test_linq.py::test_sources_collection_plan_iterable_and_queryable	ported	tests/u
 test_linq.py::test_invalid_sources_raise	ported	tests/unit/qry_query.st	sources: a collection, its scan, another plan or a query (answered as is); anything else is PBValidationError; a query over a collection answers its rows
 test_linq.py::test_queryable_is_immutable	ported	tests/unit/qry_query.st	a query is immutable: every message answers a new query and leaves the receiver and its explain unchanged
 test_linq.py::test_field_paths	ported	tests/unit/qry_field.st	a field names a dotted path, the element or an extractor; malformed names are PBValidationError
-test_linq.py::test_field_predicates_are_pure_terms	deferred	V7	Reopened (Addendum V 5.4): ported in tests/unit/qry_field.st ('every builder message answers the pure term of its operator') less its near[] sub-case at line 195-197 of the tag, which V7 adds with PBField near:.
+test_linq.py::test_field_predicates_are_pure_terms	ported	tests/unit/qry_field.st	every builder message answers the pure term of its operator
 test_linq.py::test_combinators_build_expressions	ported	tests/unit/qry_field.st	& | and not build PBAnd, PBOr and PBNot over expressions only
 test_linq.py::test_predicates_evaluate_like_the_scan_oracle	ported	tests/unit/qry_field.st	built predicates evaluate as the scan oracle: an absent age satisfies no comparison and its negation does
 test_linq.py::test_indexed_equality_uses_the_index	ported	tests/unit/qry_query.st	equality, in:, a between, an AND and an OR use their indexes and answer the scan's rows
@@ -184,7 +184,7 @@ test_linq.py::test_mixed_and_with_several_parts	ported	tests/unit/qry_query.st	t
 test_linq.py::test_or_or_not_with_a_lambda_is_one_whole_python_filter	ported	tests/unit/qry_query.st	the mixing rule: a block is a BlockFilter; a top-level AND sends its pure conjuncts to the planner and each block to its own BlockFilter on top; an OR or NOT holding a block is one BlockFilter
 test_linq.py::test_untranslatable_field_extras_become_python_filters	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_computed_values_follow_missing_and_none_semantics	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
-test_linq.py::test_near_without_a_vector_index_raises_instead_of_falling_back	deferred	V7	PBField near: and the R27 mixing rule of the front end are ported in V7 (Addendum V, 2.9).
+test_linq.py::test_near_without_a_vector_index_raises_instead_of_falling_back	ported	tests/unit/vec_query.st	near[] without a vector index is PBNotSupportedError, never a scan
 test_linq.py::test_errors_raised_by_user_code_propagate	ported	tests/unit/qry_query.st	errors raised by user code propagate from where:, collect: and orderBy: blocks, through every terminal
 test_linq.py::test_between_inclusive_default	ported	tests/unit/qry_query.st	between:and: includes both bounds, betweenOpen:and: neither, the half-open forms one
 test_linq.py::test_between_exclusive	ported	tests/unit/qry_query.st	between:and: includes both bounds, betweenOpen:and: neither, the half-open forms one
@@ -213,10 +213,10 @@ test_linq.py::test_iteration_executes_the_explained_plan	ported	tests/unit/qry_q
 test_linq.py::test_values_scan_and_distinct_nodes	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_missing_is_public_api	n/a	Python-only API	Checks Python module exports or bound-method misuse, with no protoST equivalent.
 test_linq.py::test_builder_names_are_child_fields_not_internals	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
-test_linq.py::test_bound_builder_methods_are_rejected_as_keys_and_predicates	deferred	V7	Reopened (Addendum V 5.4): n/a as Python-only bound-method misuse, except its F.v.near sub-case at line 716 of the tag, which V7 re-examines with PBField near:.
+test_linq.py::test_bound_builder_methods_are_rejected_as_keys_and_predicates	n/a	Python-only API	A Python bound method such as F.v.near passed as a key or predicate has no protoST counterpart: a selector is not a value, so PBField near: cannot be passed unsent, and every key or condition PBQuery takes is checked by its kind.
 test_linq.py::test_group_by_key_rename_keeps_any_aggregation_name	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_impure_leading_predicate_still_lets_the_planner_order	ported	tests/unit/qry_query.st	the mixing rule: a block is a BlockFilter; a top-level AND sends its pure conjuncts to the planner and each block to its own BlockFilter on top; an OR or NOT holding a block is one BlockFilter
-test_linq.py::test_near_and_lambda_split_like_two_wheres	deferred	V7	PBField near: and the R27 mixing rule of the front end are ported in V7 (Addendum V, 2.9).
+test_linq.py::test_near_and_lambda_split_like_two_wheres	ported	tests/unit/vec_query.st	near(k) and a block: accepted by where:, refused by the planner without a vector index
 test_linq.py::test_in_rejects_a_mapping	ported	tests/unit/qry_field.st	in: takes a collection of values, never a map or a String; any other collection is read as a sequence; a between needs bounds of one rank
 test_linq.py::test_queryable_of_a_queryable_keeps_its_operators	ported	tests/unit/qry_query.st	sources: a collection, its scan, another plan or a query (answered as is); anything else is PBValidationError; a query over a collection answers its rows
 test_pager.py::test_ranked_pages_equal_the_ordered_result	ported	tests/unit/qry_pager.st	ranked pages equal the ordered result
@@ -257,9 +257,9 @@ test_vector_index.py::test_near_k_and_predicate_returns_k_among_the_matching	por
 test_vector_index.py::test_near_k_with_threshold_and_predicate_and_threshold_only_post_filter	ported	tests/unit/vec_plans.st	a threshold with a predicate, and a threshold-only search under a Filter, answer the oracle
 test_vector_index.py::test_several_near_terms_and_disjunctions_keep_set_semantics	ported	tests/unit/vec_plans.st	several near[] terms and disjunctions keep set semantics
 test_vector_index.py::test_oracle_with_predicate_callable_and_expression_agree	ported	tests/unit/vec_plans.st	the oracle restricted by an expression, the list syntax or a block agrees
-test_vector_index.py::test_commit_through_a_transaction_and_query_after_reopen	deferred	V7	It queries through the planner or the front end, whose near[] rules are ported in V7.
-test_vector_index.py::test_linq_near_k_and_lambda_is_k_nearest_among_the_lambda_matches	deferred	V7	It queries through the planner or the front end, whose near[] rules are ported in V7.
-test_vector_index.py::test_python_predicate_expression_node	deferred	V7	It queries through the planner or the front end, whose near[] rules are ported in V7.
+test_vector_index.py::test_commit_through_a_transaction_and_query_after_reopen	ported	tests/unit/vec_query.st	a vector-indexed list committed, reopened and queried through the planner and the front end
+test_vector_index.py::test_linq_near_k_and_lambda_is_k_nearest_among_the_lambda_matches	ported	tests/unit/vec_query.st	near(k) and a block in the leading where: steps is the k nearest among the block's matches
+test_vector_index.py::test_python_predicate_expression_node	ported	tests/unit/vec_query.st	a block predicate is an opaque, comparable expression node a filter evaluates
 test_vector_index.py::test_eight_threads_query_one_version	ported	tests/unit/vec_plans.st	eight actors reading one version, and its loaded stub, get the twin's answers
 test_vector_index.py::test_missing_hnswlib_raises_not_supported_at_first_use	ported	tests/unit/vec_plans.st	an hnsw search is refused at its first execution, not before
 test_vector_index.py::test_importing_the_vector_modules_does_not_import_hnswlib	n/a	Python-only API	Python import mechanics and the GIL state of CPython 3.14t have no protoST counterpart.

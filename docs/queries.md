@@ -138,9 +138,9 @@ written by another `proto_db` program
 it, and its collection refuses changes. `proto_db`'s index contract is ported as tests of the two
 built-in kinds (`tests/unit/idx_contract.st`, `tests/unit/idx_contract_plans.st`), not as an
 extension point for new kinds. Vector search (`near[]`) is answered by a vector index's plans and
-by `PBVectorSearch` since the vectors phase's V6; the planner chooses them in V7, so until then a
-query naming `near[]` is refused when it is planned (`PBValidationError`, from the residual
-`PBFilter`), and a program builds the `PBVectorSearch` itself.
+by `PBVectorSearch` (the vectors phase's V6), which the planner builds with `proto_db`'s `near[]`
+rules (V7; [Vector search](#vector-search)): a query naming `near[]` that no index supports is
+refused when it is planned (`PBNotSupportedError`), never answered by a scan.
 
 ## Key specs, MISSING and nil
 
@@ -840,21 +840,18 @@ Indexes change nothing in cluster mode's protocol (spec 5.8):
 
 ## Vector search
 
-<!-- example: examples/queries/pending/vector_search.st.pending -->
+<!-- example: examples/queries/vector_search.st -->
 
-> **Draft for protoBaseST 0.4.0: not implemented.** This section describes
+> **Draft for protoBaseST 0.4.0: implemented, figures pending.** This section describes
 > [Addendum V](superpowers/specs/2026-11-19-vectors-addendum.md) to the indexed-queries spec, which
 > ports `proto_db`'s vector indexes and vector search (`proto_db/indexing/vector.py`,
 > `vector_backends.py`; the `near[]` parts of `proto_db/query/terms.py`, `plans.py`, `planner.py`
-> and `linq.py`, all at `v2.0.0rc4`). Its code blocks come from
-> [vector_search.st.pending](../examples/queries/pending/vector_search.st.pending), a port of
-> `proto_db`'s `examples/vector_search.py` that **has never run**; the vectors tasks V1 to V7 build
-> the API and V7 makes the program run; V1 (the kernel), V2 (`near[]` terms) and V3 (the index's
-> definition, hooks, `validate:` and `explain`, exact and hnsw) are done. Until V7 everything above
-> this section holds as written:
-> a collection holding a vector index refuses changes, and a `near[]` term (built since V2) is
-> refused when a query is planned. Figures
-> marked `[measured in V<n>: ...]` do not exist yet. The tutorial is
+> and `linq.py`, all at `v2.0.0rc4`). The vectors tasks V1 to V7 built the API: the kernel (V1),
+> `near[]` terms (V2), the index (V3, V4), its collections written and merged (V5), vector search
+> (V6), and the planner's `near[]` rules with `PBField near:` (V7). Its code blocks come from
+> [vector_search.st](../examples/queries/vector_search.st), a port of `proto_db`'s
+> `examples/vector_search.py` that runs as a test since V7. Figures marked
+> `[measured in V<n>: ...]` do not exist yet. The tutorial is
 > [chapter 20](tutorial/20-vector-search.md).
 
 **The obvious solution, and why it fails.** "The five documents nearest to this one" can be
@@ -989,11 +986,14 @@ index's, and whose vector is valid for the index's `dim` (`vector.py:272-282`).
 
 `proto_db`'s planner (`planner.py:15-26`, `98-135`, `194-275`), ported rule by rule:
 
-1. A negated `near[]` term is refused. So is a `near[]` conjunct that no index supports: there is no
-   scan to fall back to.
+1. A negated `near[]` term is refused, directly or through De Morgan (`not (near and P)`). So is a
+   `near[]` conjunct that no index supports: there is no scan to fall back to. Both are
+   `PBNotSupportedError` with `proto_db`'s texts, when the query is planned.
 2. **One bare `near[]` with k, and other conjuncts**: the k nearest among the elements that satisfy
    the others (ruling R27 of `proto_db`). The other conjuncts become the `'where'` of the
-   `VectorSearch`, never a post-filter, which would answer fewer than k.
+   `VectorSearch`, never a post-filter, which would answer fewer than k; among the indexes that
+   support the term, the cheapest that can restrict its search (`supportsFiltered:`, every
+   `PBVectorIndex`) answers it, and when none can, the query is refused.
 3. A `near[]` with only a threshold keeps a post-filter (both readings agree); several `near[]`
    conjuncts intersect their searches (`Intersect`); a `near[]` in a disjunction forces a `Union`,
    whose other branches may be filtered scans.
@@ -1001,8 +1001,12 @@ index's, and whose vector is valid for the index's `dim` (`vector.py:272-282`).
 
 The front end adds `proto_db`'s mixing rule: with exactly one bare `near[]` with k among the
 conditions of the leading `where:` steps, a block given to those steps joins the search's `'where'`
-too (`linq.py:53-58`). The program ([vector_search.st.pending](../examples/queries/pending/vector_search.st.pending))
-checks each answer against a brute force:
+too (`linq.py:53-58`). The rule covers only the leading run of `where:` and `orderBy:` steps: a
+block given to a `where:` after `skip:` or `take:` filters that window's rows, as it does without
+`near[]`. A `near[]` term inside an OR or a NOT holding a block, which `proto_db` refuses, cannot be
+built here (`&`, `|` and `not` take expressions only). The program
+([vector_search.st](../examples/queries/vector_search.st)) checks each answer against a brute
+force:
 
 ```smalltalk
     nearest := (PBQuery from: coll) where: ((PBField path: 'vec') near: query k: 5).

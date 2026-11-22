@@ -195,8 +195,8 @@ SmallInteger milliseconds, not float seconds.
 | `KeySpec`, `Term`, `And`, `Or`, `Not`, `PythonPredicate` | `PBKeySpec`, `PBTerm`, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate` |
 | `F`, `Field`; `Queryable` | `PBField`; `PBQuery` |
 | `PythonFilter` (an `explain` node) | `BlockFilter` (`PBBlockFilter`) |
-| `NearQuery`, `VectorSearch` **(0.4.0, draft)** | `PBNearQuery`, `PBVectorSearch` (not implemented yet; [Addendum V](docs/superpowers/specs/2026-11-19-vectors-addendum.md)) |
-| `F.vec.near(v, k=5)` **(0.4.0, draft)** | `(PBField path: 'vec') near: v k: 5` (not implemented yet) |
+| `NearQuery`, `VectorSearch` **(0.4.0, draft)** | `PBNearQuery`, `PBVectorSearch` (implemented, chosen by the planner; [Addendum V](docs/superpowers/specs/2026-11-19-vectors-addendum.md)) |
+| `F.vec.near(v, k=5)` **(0.4.0, draft)** | `(PBField path: 'vec') near: v k: 5` (implemented in 0.4.0) |
 | `ProtoValidationError`, `ProtoCorruptionError`, `ProtoNotSupportedError`, `ProtoConflictError`, `ProtoTimeoutError`, `ProtoOutcomeUnknownError`, `ProtoUserError`, `ProtoClosedError` | `PBValidationError`, `PBCorruptionError`, `PBNotSupportedError`, `PBConflictError`, `PBTimeoutError`, `PBOutcomeUnknownError`, `PBUserError`, `PBClosedError` |
 
 ### Messages
@@ -259,7 +259,7 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 | [examples/tutorial/](examples/tutorial/README.md) | Small programs, one concept each, each checking its own results; run by the tests. |
 | [docs/reference.md](docs/reference.md) | Every public class and message, the indexed-query API and pagers included. |
 | [docs/queries.md](docs/queries.md) | **0.3.0:** indexed queries and the query planner, the conceptual guide, including how to read `explain`; a draft section on vector search (0.4.0). |
-| [examples/queries/](examples/queries/README.md) | **0.3.0:** the programs of the guide, run as tests; `pending/` holds the two vector-search programs of 0.4.0, written before their API. |
+| [examples/queries/](examples/queries/README.md) | **0.3.0:** the programs of the guide, run as tests; `vector_search.st` (0.4.0) runs; `pending/` holds chapter 20's program, written before its API. |
 | [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from `proto_db`. |
 | [docs/not-done.md](docs/not-done.md) | What is not done, and what is not proven. |
 | [docs/decisions.md](docs/decisions.md) | The choices, with what each costs if it is wrong. |

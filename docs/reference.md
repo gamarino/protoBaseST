@@ -1161,9 +1161,8 @@ filed under its member key, the `PBTuple` `((0, element) | (1, surrogate), exact
 | `PBEqualityIndex` | `'=='`, `'in'`, `'!='`, `'?N'`, `'?!N'` |
 | `PBRangeIndex` | the same, and `'<'`, `'<='`, `'>'`, `'>='`, `'between[]'`, `'between()'`, `'between(]'`, `'between[)'` |
 
-`PBVectorIndex` answers `near[]` on its own key spec (task V6; [Vector indexes](#vector-indexes));
-the planner does not choose it before the vectors phase's V7, so a near[] term reaches it through
-`PBVectorSearch` or the index's own `plan:`. Its hooks, `validate:` and `explain` work as an index's ([Vector indexes](#vector-indexes), task V3),
+`PBVectorIndex` answers `near[]` on its own key spec (task V6; [Vector indexes](#vector-indexes)),
+and the planner chooses it, through a `PBVectorSearch`, for a query's `near[]` terms (task V7). Its hooks, `validate:` and `explain` work as an index's ([Vector indexes](#vector-indexes), task V3),
 and every mutator of a collection holding one runs them (task V5; a merge onto it too, a
 format-3 one rebuilt at the first change).
 An index of a kind protoBaseST does not know refuses every hook, through the `PBIndexSet` hooks.
@@ -1212,6 +1211,7 @@ the vector parts). Every condition is a frozen value: no message changes it.
 | `betweenClosed: a and: b`, `between: a and: b inclusive: { includeLow. includeHigh }` | `'between[]'` (`F.a.between_closed(a, b)`); the between of that bound inclusion (`F.a.between(a, b, inclusive=(lo, hi))`): the pair is an `Array` of two Booleans, anything else `PBValidationError`. |
 | `range: a to: b`, `range: a to: b bounds: aString` | The between of the bounds `'[]'` (the default), `'()'`, `'(]'` or `'[)'`, blanks around them ignored (`F.a.range(a, b, bounds)`); other bounds are `PBValidationError`. |
 | `isNone`, `notNone`, `isTrue`, `notTrue`, `contains: v` | `'?N'`, `'?!N'`, `'?T'`, `'?!T'`, `'contains'`. |
+| `near: aPBNearQuery`, `near: aVector k: anInteger`, `near: aVector threshold: aNumber`, `near: aVector k: anInteger threshold: aNumber`, `near: aVector k: anIntegerOrNil threshold: aNumberOrNil metric: aStringOrNil` | `'near[]'` (`F.v.near(vector, k=, threshold=, metric=)`; vectors task V7): its value the `PBNearQuery` of those fields, validated as `PBNearQuery` validates them (`PBValidationError`); `near:` takes a `PBNearQuery` or a mapping of its fields. Only a vector index answers it ([Near queries](#near-queries)). |
 
 ### Queries
 
@@ -1244,8 +1244,15 @@ answers a condition with negations pushed inward and the one exact rewrite (`not
 `notNone`); a negated `near[]` term is `PBNotSupportedError` (`planner.py:114-116`). Malformed arguments are `PBValidationError` (`proto_db`'s `planner.py:278-343`: the
 source, the condition, the sort keys, and a limit or offset that is not an Integer >= 0). The source
 is a `PBIndexedCollection` (its indexes are consulted in sorted name order, less an index of an
-unknown kind and a `PBVectorIndex`), its `asQueryPlan` (the same), or any other `PBQueryPlan` (no
-index; a `Filter` on top). Implemented (Task 7).
+unknown kind), its `asQueryPlan` (the same), or any other `PBQueryPlan` (no
+index; a `Filter` on top). Implemented (Task 7). Since the vectors phase's V7 it has `proto_db`'s
+`near[]` rules (`planner.py:194-275`; [queries.md](queries.md#the-planners-rules-for-near)): a
+`near[]` term is answered by a `PBVectorSearch` over the cheapest index that supports it, never by
+a filter; `near(k)` with other conjuncts is the k nearest among the elements satisfying them (they
+are the search's `'where'`, ruling R27); several `near[]` conjuncts are intersected, a disjunction
+holding one is always a `PBUnion`, and an order over a condition holding one is a `PBSort`. A
+`near[]` term no index supports, and `near(k)` with other conjuncts when no supporting index can
+restrict its search, are `PBNotSupportedError` with `proto_db`'s texts.
 
 ### Plans and explain
 
@@ -1304,10 +1311,8 @@ The meaning of every node, field and estimate, with three worked plans, is
 #### PBVectorSearch (0.4.0, draft)
 
 **`PBVectorSearch`** (`src/protobase/plans.st`, task V6, done), `proto_db`'s `VectorSearch`, joins
-the nodes above. It works with any index whose `supports:` accepts the term. Until the vectors
-phase's V7 the planner does not build it: a query whose conditions hold a `near[]` term is still
-refused when it is planned (`PBValidationError`, from the residual `PBFilter`), so a program builds
-the node itself, as below and in [chapter 20](tutorial/20-vector-search.md).
+the nodes above. It works with any index whose `supports:` accepts the term. The planner builds it
+for a query's `near[]` terms (task V7, done); a program may also build it itself, as below.
 
 | Message | Meaning |
 |---|---|
@@ -1343,9 +1348,8 @@ and what a page costs, are in [queries.md](queries.md#ordered-reads-windows-and-
 > before the code; V1 (the kernel), V2 (near queries) and V3 (the vector index's definition,
 > hooks, `validate:` and `explain`, for the exact and hnsw backends), V4 (ivf_flat), V5
 > (collections holding vector indexes written and merged) and V6 (vector search: the index's
-> plans, `PBVectorSearch`, `nearOracle:...`) are done. `tests/docs/pending_selectors.tsv` names, for each selector below that does not
-> exist yet, the vectors task that builds it (V1 to V7); each task moves its part of this section
-> from draft to fact. A collection holding a `PBVectorIndex` is written and merged like any other
+> plans, `PBVectorSearch`, `nearOracle:...`) and V7 (the planner's `near[]` rules, `PBField near:`)
+> are done: every selector below exists. Their figures are the remaining tasks' (V8, V9). A collection holding a `PBVectorIndex` is written and merged like any other
 > (V5, ruling IQ5a). The concepts are in
 > [queries.md, Vector search](queries.md#vector-search); the tutorial is
 > [chapter 20](tutorial/20-vector-search.md).
@@ -1409,11 +1413,14 @@ reads both of `proto_db`'s list forms, `{ path. 'near[]'. vector. threshold }` (
 query) and `{ path. 'near[]'. aNearQueryOrMapping }`, and `asList` writes them back. A `PBFilter`
 over a `near[]` term is `PBValidationError`.
 
-**`PBField`** gains (task V7): `near: aPBNearQuery`, `near: aVector k: anInteger`,
+**`PBField`** gains (task V7, done): `near: aPBNearQuery`, `near: aVector k: anInteger`,
 `near:threshold:`, `near:k:threshold:` and `near:k:threshold:metric:` (nil allowed for k, threshold
-and metric), each answering the `near[]` term. In a `PBQuery`, with exactly one bare `near[]` term
-with k among the conditions of the leading `where:` steps, a block given to those steps joins the
-search's `'where'` (`proto_db`'s mixing rule, R27).
+and metric), each answering the `near[]` term ([Terms and expressions](#terms-and-expressions)). In a `PBQuery`,
+with exactly one bare `near[]` term with k among the conditions of the leading run of `where:` and
+`orderBy:` steps, a block given to those `where:` steps joins the search's `'where'`
+(`proto_db`'s mixing rule, R27): the k nearest among the elements it accepts, not the k nearest then
+filtered. A `where:` after `skip:`, `take:` or any other step filters that step's rows, as without
+`near[]`. A query whose `near[]` term no index supports is `PBNotSupportedError` when it runs.
 
 The plan node, `PBVectorSearch`, is listed with the other nodes, under
 [Plans and explain](#pbvectorsearch-040-draft).

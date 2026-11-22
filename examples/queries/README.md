@@ -1,8 +1,8 @@
 # The query examples
 
-> **protoBaseST 0.3.0.** Every program of this directory runs as a test;
-> [pending/](pending/README.md) holds the two vector-search programs of 0.4.0 (Addendum V), written
-> before their API and not run yet.
+> **protoBaseST 0.3.0, and vector search for 0.4.0.** Every program of this directory runs as a
+> test; [pending/](pending/README.md) holds chapter 20's program (0.4.0, Addendum V), written
+> before its chapter's figures and not run yet.
 
 Programs for indexed queries: the guide [docs/queries.md](../../docs/queries.md) quotes the ones
 in this directory, and the query chapters of the tutorial (17-19, and chapter 11's section
@@ -28,6 +28,7 @@ Each program was written by the plan task named (the indexed-queries plan,
 | [ranges.st](ranges.st) | ranges, ordered reads and windows by rank | "Ordered reads, windows and pages" | Task 8 |
 | [merge_indexed.st](merge_indexed.st) | blind writes merged onto an indexed root; a concurrent index creation | "Merges of blind writes" | Task 8 |
 | [paging.st](paging.st) | pagers, by rank and materialised | "Ordered reads, windows and pages" | Task 9 |
+| [vector_search.st](vector_search.st) | vector indexes, near queries alone and with a condition, checked against a brute force | "Vector search" | vectors task V7 (moved from `pending/`) |
 
 Run one with `STPATH=<repository>/src protost <program>` from this directory, or all of them with
 `tests/run_tests.sh examples/queries`.

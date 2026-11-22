@@ -22,8 +22,9 @@ design (spec section 2) or a cut made while building, with its reason.
   maintained by its hooks, validated and explained, node for node as `proto_db` does, and since V5
   the collections holding one are written and merged like any other (a collection holding an
   index of a kind protoBaseST does not know stays read only); since V6 a vector index answers
-  `near[]` through its own plans and `PBVectorSearch` (hnsw search refused, DV1), but the planner
-  does not choose them yet: a query naming `near[]` is refused when it is planned (until V7).
+  `near[]` through its own plans and `PBVectorSearch` (hnsw search refused, DV1), and since V7 the
+  planner chooses them with `proto_db`'s `near[]` rules (a `near[]` term no index supports is
+  refused, as `proto_db` refuses it).
   Equality and range indexes are maintained by every write and by merges onto indexed
   collections, queried through `PBQuery` and a cost-based planner, and paged in process (0.3.0;
   [chapters 17-19](tutorial/17-indexes.md), [queries.md](queries.md)).

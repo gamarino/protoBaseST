@@ -3,7 +3,7 @@
 # the interop venv) on the same workloads, verifies the work and prints the timings (spec 7.3).
 #
 # Usage: bench/run_query.sh [ids...]          (default: M1 M2 M3; the planner workloads P1 P2 P3, the query workloads Q1-Q5
-#                                              and the vector workloads VB0, VB1, VB2, VB3 and VB5 by name)
+#                                              and the vector workloads VB0 to VB5 by name)
 #
 # A workload is split into units, <id>:<size>:<plan> (M1: 600:idx0, 600:idx1, 600:idx3; M2: <n>:build
 # and <n>:fold for each size of QUERY_M2_SIZES, default "100 1000 10000 100000"), and every unit runs
@@ -76,6 +76,14 @@
 # verified in both of proto_db's modes; VB2's in its reference mode (answers and centroids), its
 # numpy mode reported by recall and verified by its COUNTS lines only (DV3).
 #
+# VB4, filtered kNN (vectors phase task V7; bench/vector_workload.st states it): VB4:10000:d8-s01,
+# -s10 and -s50, near(k = 10) AND a condition that 1, 10 and 50 percent of the 10^4 records satisfy,
+# over an exact l2 index, timed as '-filtered' (the planner's VectorSearch with the condition as
+# its where, ruling R27) and '-post' (the obvious post-filter of the 10 nearest), the data file's 10
+# queries each; the rows each answers are the WORK lines' rows, printed with the work. Verified in
+# proto_db's reference mode (an exact answer does not depend on numpy, so its numpy mode adds
+# nothing here and is not run).
+#
 # M3's cluster units (plan Task 4b) run bench/run_cluster.sh once per round (RUNS=1, MODES=3, the
 # profile m3-<plan>, KEEP_TMP=1, CLUSTER_TMPDIR a new directory under QUERY_OUT/data, so nothing
 # is removed): three protost member processes, each with the heap budget
@@ -124,6 +132,7 @@ for id in "${@:-M1 M2 M3}"; do
             VB1) for n in ${QUERY_VB1_SIZES:-1000 10000}; do
                     for d in 8 32; do for m in cosine l2; do units+=("VB1:$n:d$d-$m"); done; done; done ;;
             VB2) units+=(VB2:10000:d32-ivf) ;;
+            VB4) for p in s01 s10 s50; do units+=("VB4:10000:d8-$p"); done ;;
             *) fail "unknown workload $one" ;;
         esac
     done

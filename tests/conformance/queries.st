@@ -16,7 +16,20 @@
      'BlockFilter'), and each node's estimate rows and cost equal proto_db's within plan call IP8
      (|a - b| <= 1e-12 * max(|a|, |b|)); so the access path, the index chosen and every cost agree;
    - the rows, in order, are proto_db's (a record by its id, a Count's row by its number, any other
-     value by its wire form);
+     value by its wire form). This holds for the vector cases too (vectors phase V7, Addendum V
+     5.3: near[] alone, with k, a threshold or both; with a condition, as a VectorSearch's where or
+     a Filter over it; two near[] terms, an Intersect; near[] in a disjunction, a forced Union; an
+     order, a window, a count), and is stricter than the rule of 5.3, which needs the order only
+     where proto_db defines one (a VectorSearch and a Filter directly over one): the other nodes
+     (Intersect, Union, a Sort's ties) are deterministic ports, so their order is checked too.
+     Over the IVF root probing fewer lists than it has (approximate by design) the rows must be
+     proto_db's exactly as well: both read the same stored centroids;
+   - a refused vector case (its 'error', the class proto_db refused it with) is refused with the
+     same class (ProtoNotSupportedError is PBNotSupportedError): when its 'error_at' is 'plan',
+     PBPlanner refuses it (no supporting index for its metric, a negated near[], a plan source
+     without indexes); when it is 'execute', the plan is built, its tree is proto_db's as above,
+     and its execution is refused (the hnsw root: deviation DV1, proto_db's refusal without
+     hnswlib);
    - a different tree is a near tie only when it is a different choice (the sequence of node
      names and index names differs: a node that differs in anything else is a defect) and the root
      costs agree within IP8 but are not bit-equal (ruling IQ4, deviation R2: a log2 that differs in
@@ -24,7 +37,8 @@
      are a tie-break defect and fail); a near tie fails unless its case is in the allowlist below
      with its reason, and the number of near ties must be the expected one (0); it is reported by name, and its rows must still be proto_db's as a multiset (or, with a
      window, as many); any other difference fails.
- It prints 'near ties: N', then 'query vectors ok'."
+ It prints proto_db's mode (numpy and hnswlib blocked, its CPython and C library), the refusals,
+ 'near ties: N', the case count, then 'query vectors ok'."
 Import from: 'protobase'.
 
 "Refuses atoms: the cases' values have none."
@@ -34,7 +48,7 @@ NoAtoms >> refTo: aSegmentBytes offset: anInteger tag: aTag
   ^ Error signal: 'the query vectors hold no atom references'.
 
 | dir manifest blob data space db snap roots extractor fails nearTies tree closeTo nodeBytes rowBytes sameTree
-  decode keysOf count atomRef out choicesOf theirChoicesOf allowedTies expectedNearTies |
+  decode keysOf count atomRef out choicesOf theirChoicesOf allowedTies expectedNearTies refusalClasses refusals planOf |
 dir := 'vectors-queries'.
 fails := OrderedCollection new.
 nearTies := OrderedCollection new.
@@ -117,6 +131,10 @@ rowBytes := [:row :counted |
       ifFalse: [MessagePack encode: { 'v'. PBCodec toWire: row atomRef: atomRef }]]].
 decode := [:bytes | PBCodec fromWire: (MessagePack decodeOrdered: bytes strictKeys: false) resolver: NoAtoms new].
 keysOf := [:order | order isNil ifTrue: [nil] ifFalse: [order asArray collect: [:pair | PBSortKey key: (pair at: 1) descending: (pair at: 2)]]].
+"proto_db's refusal classes, as protoBaseST names them."
+refusalClasses := Dictionary new.
+refusalClasses at: 'ProtoNotSupportedError' put: PBNotSupportedError; at: 'ProtoValidationError' put: PBValidationError.
+refusals := 0.
 "The near ties this vector set is known to have, each case id with its reason (ruling IQ4,
  deviation R2); any other near tie fails, and so does a change of their number. Measured at Task 7:
  none."
@@ -124,43 +142,62 @@ allowedTies := Dictionary new.
 expectedNearTies := 0.
 count := 0.
 (data at: 'cases') do: [:case |
-  | id coll source where plan wrap mine problems rootCost theirCost got want |
+  | id coll source where plan wrap mine problems rootCost theirCost got want errorClass errorAt refusedBy |
   id := case at: 'id'.
   [coll := roots at: (case at: 'root') ifAbsentPut: [snap getRootObject: (case at: 'root')].
    source := (case at: 'source') = 'collection' ifTrue: [coll] ifFalse: [
      (case at: 'source') = 'scan' ifTrue: [coll asQueryPlan] ifFalse: [PBDistinct source: coll asQueryPlan]].
    where := (case at: 'where') isNil ifTrue: [nil] ifFalse: [decode value: (case at: 'where')].
-   plan := PBPlanner plan: source where: where orderBy: (keysOf value: (case at: 'order')) limit: (case at: 'limit') offset: (case at: 'offset').
+   errorClass := (case at: 'error' ifAbsent: [nil]) isNil ifTrue: [nil] ifFalse: [refusalClasses at: (case at: 'error')].
+   errorAt := case at: 'error_at' ifAbsent: [nil].
+   planOf := [PBPlanner plan: source where: where orderBy: (keysOf value: (case at: 'order')) limit: (case at: 'limit') offset: (case at: 'offset')].
+   errorAt = 'plan'
+     ifTrue: [
+       refusedBy := [planOf value. nil] on: Error do: [:e | e return: e class].
+       refusedBy == errorClass ifFalse: [
+         fails add: id , ': planning answered ' , refusedBy printString , ', proto_db refused it with ' , (case at: 'error')].
+       refusals := refusals + 1.
+       plan := nil]
+     ifFalse: [plan := planOf value].
    wrap := case at: 'wrap'.
-   wrap = 'count' ifTrue: [plan := PBCountPlan source: plan].
-   wrap = 'distinct' ifTrue: [plan := PBDistinct source: plan].
-   wrap = 'block_even' ifTrue: [plan := PBBlockFilter source: plan predicate: (PBBlockPredicate block: [:e | (e at: 'id') even] description: 'even id')].
-   (wrap isString not and: [wrap notNil]) ifTrue: [
-     (wrap at: 1) = 'project' ifTrue: [plan := PBProject source: plan fields: (wrap at: 2) asArray].
-     (wrap at: 1) = 'project_map' ifTrue: [plan := PBProject source: plan fields: (PBFrozenDict withAssociations: ((wrap at: 2) asArray collect: [:pair | (pair at: 1) -> (pair at: 2)]))].
-     (wrap at: 1) = 'intersect' ifTrue: [plan := PBIntersect withAll: { plan. PBPlanner plan: coll where: (decode value: (wrap at: 2)) orderBy: nil limit: nil offset: 0 }]].
-   got := plan execute collect: [:row | rowBytes value: row value: wrap = 'count'].
-   want := (case at: 'rows') asArray.
+   plan isNil ifFalse: [
+     wrap = 'count' ifTrue: [plan := PBCountPlan source: plan].
+     wrap = 'distinct' ifTrue: [plan := PBDistinct source: plan].
+     wrap = 'block_even' ifTrue: [plan := PBBlockFilter source: plan predicate: (PBBlockPredicate block: [:e | (e at: 'id') even] description: 'even id')].
+     (wrap isString not and: [wrap notNil]) ifTrue: [
+       (wrap at: 1) = 'project' ifTrue: [plan := PBProject source: plan fields: (wrap at: 2) asArray].
+       (wrap at: 1) = 'project_map' ifTrue: [plan := PBProject source: plan fields: (PBFrozenDict withAssociations: ((wrap at: 2) asArray collect: [:pair | (pair at: 1) -> (pair at: 2)]))].
+       (wrap at: 1) = 'intersect' ifTrue: [plan := PBIntersect withAll: { plan. PBPlanner plan: coll where: (decode value: (wrap at: 2)) orderBy: nil limit: nil offset: 0 }]]].
    problems := OrderedCollection new.
-   (sameTree value: plan explain value: (case at: 'plan') value: problems)
-     ifTrue: [got = want ifFalse: [fails add: id , ': the rows differ from proto_db''s']]
-     ifFalse: [
-       rootCost := plan estimate cost.
-       theirCost := ((case at: 'plan') at: 'estimate') at: 2.
-       ((closeTo value: rootCost value: theirCost)
-           and: [(choicesOf value: plan explain) ~= (theirChoicesOf value: (case at: 'plan'))])
-         ifTrue: [
-           nearTies add: id.
-           rootCost = theirCost ifTrue: [
-             fails add: id , ': another plan at a bit-equal cost (' , rootCost printString
-               , '): R2 cannot explain it, only a tie-break defect can'].
-           (allowedTies includesKey: id) ifFalse: [
-             fails add: id , ': a near tie not in the allowlist (proto_db chose ' , (theirChoicesOf value: (case at: 'plan')) printString , ')'].
-           ((case at: 'limit') isNil and: [(case at: 'offset') = 0])
-             ifTrue: [(got asSortedCollection: [:a :b | a hex <= b hex]) asArray = (want asSortedCollection: [:a :b | a hex <= b hex]) asArray
-               ifFalse: [fails add: id , ': a near tie whose rows differ from proto_db''s']]
-             ifFalse: [got size = want size ifFalse: [fails add: id , ': a near tie whose window differs in size']]]
-         ifFalse: [fails add: id , ': ' , problems first , ' (root cost ' , rootCost printString , ', proto_db ' , theirCost printString , ')']].
+   errorAt = 'execute' ifTrue: [
+     (sameTree value: plan explain value: (case at: 'plan') value: problems) ifFalse: [
+       fails add: id , ': ' , problems first].
+     refusedBy := [plan execute. nil] on: Error do: [:e | e return: e class].
+     refusedBy == errorClass ifFalse: [
+       fails add: id , ': its execution answered ' , refusedBy printString , ', proto_db refused it with ' , (case at: 'error')].
+     refusals := refusals + 1].
+   (errorAt = 'plan' or: [errorAt = 'execute']) ifFalse: [
+     got := plan execute collect: [:row | rowBytes value: row value: wrap = 'count'].
+     want := (case at: 'rows') asArray.
+     (sameTree value: plan explain value: (case at: 'plan') value: problems)
+       ifTrue: [got = want ifFalse: [fails add: id , ': the rows differ from proto_db''s']]
+       ifFalse: [
+         rootCost := plan estimate cost.
+         theirCost := ((case at: 'plan') at: 'estimate') at: 2.
+         ((closeTo value: rootCost value: theirCost)
+             and: [(choicesOf value: plan explain) ~= (theirChoicesOf value: (case at: 'plan'))])
+           ifTrue: [
+             nearTies add: id.
+             rootCost = theirCost ifTrue: [
+               fails add: id , ': another plan at a bit-equal cost (' , rootCost printString
+                 , '): R2 cannot explain it, only a tie-break defect can'].
+             (allowedTies includesKey: id) ifFalse: [
+               fails add: id , ': a near tie not in the allowlist (proto_db chose ' , (theirChoicesOf value: (case at: 'plan')) printString , ')'].
+             ((case at: 'limit') isNil and: [(case at: 'offset') = 0])
+               ifTrue: [(got asSortedCollection: [:a :b | a hex <= b hex]) asArray = (want asSortedCollection: [:a :b | a hex <= b hex]) asArray
+                 ifFalse: [fails add: id , ': a near tie whose rows differ from proto_db''s']]
+               ifFalse: [got size = want size ifFalse: [fails add: id , ': a near tie whose window differs in size']]]
+           ifFalse: [fails add: id , ': ' , problems first , ' (root cost ' , rootCost printString , ', proto_db ' , theirCost printString , ')']]].
    count := count + 1]
     on: Error do: [:e | fails add: id , ': ' , e class name , ': ' , e messageText printString. e return: nil]].
 space close.
@@ -169,6 +206,8 @@ nearTies size = expectedNearTies ifFalse: [
   fails add: nearTies size printString , ' near ties, ' , expectedNearTies printString , ' expected'].
 (allowedTies keys reject: [:each | nearTies includes: each]) do: [:each |
   fails add: 'the allowed near tie ' , each , ' did not occur (a stale allowlist entry)'].
+('proto_db mode: ' , (', ' join: (data at: 'mode' ifAbsent: [#('unrecorded')]))) displayNl.
+('refusals: ' , refusals printString) displayNl.
 nearTies do: [:each | ('near tie: ' , each) displayNl].
 ('near ties: ' , nearTies size printString) displayNl.
 ('cases: ' , count printString) displayNl.

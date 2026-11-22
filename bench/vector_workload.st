@@ -54,7 +54,19 @@
  nlist, the built index with that nprobe (the same store and centroids: training does not read
  nprobe), one untimed warm query, and '-nprobe<p>', the 10 queries, with a RECALL line: the
  positions it shares with the truth, of 10 per query. A TIME line per timing, each a row of the
- runner's table."
+ runner's table.
+
+ VB4, filtered kNN (task V7): units VB4:10000:d8-s<p> for p 01, 10 and 50, the selectivity in
+ percent. The records { 'i'. 's' -> i mod 100. 'vec' } of the 10^4 vectors of dim 8 in a PBList
+ with an exact l2 index on 'vec' (addIndex:, untimed), and the condition s < p, which p percent of
+ the records satisfy. Two timings over the file's 10 query points: '-filtered', near(k = 10) AND s
+ < p planned by PBPlanner (the plan is checked first, untimed: one VectorSearch whose where is the
+ condition, ruling R27) and executed, the 10 nearest among the records the condition accepts; and
+ '-post', the obvious post-filter: near(k = 10) planned and executed alone, then the condition
+ applied to its answer, which keeps fewer than 10 rows when fewer of the 10 nearest satisfy it.
+ Each WORK line's rows is the rows the 10 queries answered (100 for '-filtered' at every
+ selectivity; the post-filter's own count), its checksum the CRC-32 of the answers' positions, so
+ the runner verifies both answers against proto_db's. The timings include planning."
 Import from: 'protobase'.
 Import from: '_vector_bench'.
 
@@ -113,6 +125,36 @@ emit := [:rows :queries :aChecksum :micros |
     tx abort.
     space close.
     emit valueWithArguments: { count. commits. checksum. us }.
+    'query_workload ok' displayNl.
+    Smalltalk exit: 0].
+(id = 'VB4' and: [plan = ('d' , dim printString , '-' , op) and: [#('s01' 's10' 's50') includes: op]])
+  ifTrue: [ | percent queries records knn cond shape inside post emitOne |
+    percent := (op copyFrom: 2 to: op size) asNumber.
+    vectors := VectorBench vectorsFrom: path n: n dim: dim.
+    queries := VectorBench queriesFrom: path dim: dim.
+    records := (1 to: vectors size) asArray collect: [:i |
+      PBObject withAll: { 'i' -> (i - 1). 's' -> (i - 1 \\ 100). 'vec' -> (vectors at: i) }].
+    coll := (PBList new extend: records) addIndex: (PBVectorIndex name: 'by_vec' path: 'vec' dim: dim metric: 'l2').
+    cond := (PBField path: 's') < percent.
+    knn := [:aQuery | (PBField path: 'vec') near: aQuery k: 10].
+    shape := PBPlanner plan: coll where: (knn value: queries first) & cond orderBy: nil limit: nil offset: 0.
+    ((shape isKindOf: PBVectorSearch) and: [(shape explain at: 'where' ifAbsent: [nil]) = (PBQueryPlan _frozen: cond describe)])
+      ifFalse: [Error signal: id , ': near(k) AND s < ' , percent printString , ' is not one VectorSearch with its where'].
+    emitOne := [:label :answers :micros |
+      ('WORK id=' , id , ' impl=st size=' , n printString , ' rows=' , (answers inject: 0 into: [:s :a | s + a size]) printString
+        , ' queries=' , queries size printString , ' plan=' , label , ' checksum=' , (VectorBench answersChecksum: answers) printString) displayNl.
+      ('TIME id=' , id , ' impl=st size=' , n printString , ' plan=' , label , ' us=' , micros printString) displayNl].
+    t0 := Time microsecondClockValue.
+    inside := queries collect: [:aQuery |
+      (PBPlanner plan: coll where: (knn value: aQuery) & cond orderBy: nil limit: nil offset: 0) execute collect: [:e | e at: 'i']].
+    us := Time microsecondClockValue - t0.
+    emitOne value: plan , '-filtered' value: inside value: us.
+    t0 := Time microsecondClockValue.
+    post := queries collect: [:aQuery |
+      ((PBPlanner plan: coll where: (knn value: aQuery) orderBy: nil limit: nil offset: 0) execute
+        select: [:e | (e at: 's') < percent]) collect: [:e | e at: 'i']].
+    us := Time microsecondClockValue - t0.
+    emitOne value: plan , '-post' value: post value: us.
     'query_workload ok' displayNl.
     Smalltalk exit: 0].
 ((id = 'VB1' and: [plan = ('d' , dim printString , '-' , op) and: [#('cosine' 'l2') includes: op]])

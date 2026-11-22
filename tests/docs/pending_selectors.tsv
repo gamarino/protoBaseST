@@ -12,8 +12,3 @@
 # Vectors phase (Addendum V, docs/superpowers/specs/2026-11-19-vectors-addendum.md), drafted by V0.
 # V6: vector search plans
 # V7: the front end
-near:	V7
-near:k:	V7
-near:threshold:	V7
-near:k:threshold:	V7
-near:k:threshold:metric:	V7
