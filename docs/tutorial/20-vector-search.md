@@ -146,8 +146,15 @@ leading `where:` steps hold exactly one bare `near[]` term with a k, a block amo
 the vector search's condition instead of filtering its result. Anywhere else (after a `take:`, for
 instance) a block filters what it receives, as in chapter 18.
 
-What the condition inside the search costs against the obvious post-filter, which is cheaper and
-returns fewer rows: [measured in V7: bench VB4, filtered kNN against the post-filter at selectivity 1, 10 and 50 percent, with the rows each returns].
+What the condition inside the search costs against the obvious post-filter, which returns fewer
+rows (bench VB4, 10^4 vectors of dim 8 under an exact index, k = 10, protoST 0.16.0,
+[deviations.md](../deviations.md#vectors)): over 10 queries the filtered search answered 10 rows
+per query at every selectivity, the post-filter 0.1, 1.7 and 6 on average when the condition keeps
+1, 10 and 50 per cent of the records. Here the filtered search is the dearer, 640 to 794 ms per
+query against 479 to 490 ms for the post-filter: the condition is evaluated for every member,
+and one probe (not a bench) points at that evaluation, not the scoring, as the cost; in `proto_db` it is the cheaper (21 to 68 ms against 86 to 89 ms), since there it scores
+only the members the condition accepts. The post-filter is cheaper here only because it answers
+another question.
 
 ## Thresholds, and both
 

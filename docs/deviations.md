@@ -2378,6 +2378,46 @@ alone for 40 per cent). Nor is what remains at nprobe 1 and 4 against `proto_db`
 times) measured; the interpreted kernel and the store walk, where `proto_db` reads its cached
 lists, are candidates only.
 
+**VB4, filtered kNN** (vectors phase task V7). `RUNS=5 bench/run_query.sh VB4`, measured
+2026-11-22 08:23 to 08:32 UTC on an AMD Ryzen 5 5500U (12 CPUs, Linux 7.0.0-43-generic), load
+average 2.57 before and 3.41 after (4.02 a moment later: the machine grew busier during the run);
+protoBaseST `1fd30d8` (the clean committed tree), protoST 0.16.0
+(`worktrees/pinned-0160/protoST/build_release/protost`), `proto_db` `v2.0.0rc4` in its reference
+mode (CPython 3.14.6, glibc 2.43, numpy and hnswlib blocked; an exact answer does not depend on
+numpy, so its default mode is not run). Data: `proto_db`'s clustered benchmark set (seed 51, 16
+centres), 10^4 vectors of dim 8 and its 10 query points (`bench/py_vector_data.py`), as the
+records `{ 'i'. 's' -> i mod 100. 'vec' }` under an exact l2 index; the condition `s < p` keeps p
+per cent of them. `-filtered` is near(k = 10) AND `s < p` planned by each planner (checked first,
+untimed, to be one `VectorSearch` whose `'where'` is the condition, ruling R27) and executed;
+`-post` is near(k = 10) planned and executed alone, then the condition applied to its 10 rows.
+Planning is timed with the execution. The runner printed `verified`: every run of both sides
+reported the same rows and the same CRC-32 of the answers' positions, so both answers are
+`proto_db`'s. The rows of the 10 queries: 100 for `-filtered` at every selectivity, and 1, 17 and
+60 for `-post` at 1, 10 and 50 per cent. Times in microseconds for the 10 queries, minimum and
+median of 5 interleaved runs; nothing is asserted about time.
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB4 | 10000 | d8-s01-filtered | 209863 / 214527 | 6401987 / 6539876 | 30.5x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s01-post | 894956 / 925393 | 4793909 / 4975721 | 5.4x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s10-filtered | 328825 / 343666 | 6632641 / 6883538 | 20.2x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s10-post | 864738 / 872740 | 4896461 / 4936969 | 5.7x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s50-filtered | 677686 / 698571 | 7943173 / 8400157 | 11.7x | 47 / 5093 | - |
+| VB4 | 10000 | d8-s50-post | 865546 / 882906 | 4795003 / 5098400 | 5.5x | 47 / 5093 | - |
+
+Observed, per query (the table's figures divided by 10): the filtered search answers 10 rows at
+every selectivity, the post-filter 0.1, 1.7 and 6 on average, so the two do not answer the same
+question, and only the filtered one answers near(k) AND P. In `proto_db` the filtered search is
+also the cheaper: 21, 33 and 68 ms against 86 to 89 ms for the post-filter, since it scores only
+the members the condition accepts. In protoBaseST it is the dearer: 640, 663 and 794 ms against
+479 to 490 ms, 1.3 to 1.7 times the post-filter, and 11.7 to 30.5 times `proto_db`'s filtered
+search (the post-filter is 5.4 to 5.7 times). Its cost hardly falls with the selectivity, so the
+work that dominates is done for every member, not for the scored ones. Not measured as a bench;
+one unrepeated probe on protoST 0.16.0 (a scratch program, not committed) took 670 ms to evaluate
+`s < 1` (`PBExpression evaluate:`) over the 10^4 records alone, about 67 microseconds per element,
+and 214 ms to walk the index's 10^4 store entries: the condition's evaluation, not the scoring, is
+the candidate. Faster term evaluation is not part of this phase.
+
 ## Known protoST limits
 
 Defects found in protoST while building this were fixed in protoST, with a test, and are recorded
