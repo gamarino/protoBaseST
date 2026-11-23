@@ -139,7 +139,7 @@ _PBInProcessInbox>>_setTransport:nodeId:key:handler:
 PBTcpTransport>>_setListener:port:requestTimeout:run:inbound:counters:
 _PBInbound>>_setClosed:entries:
 _PBTcpListener>>_setTransport:server:proxy:ended:
-_PBTcpReader>>_setTransport:socket:nodeId:key:handler:proxy:partial:ended:
+_PBTcpReader>>_setTransport:socket:nodeId:key:handler:proxy:partial:ended:closing:
 _PBTcpSender>>_setTransport:peer:queue:link:writing:proxy:ended:
 _PBSendQueue>>_setFrames:bytes:draining:closed:
 PBLogDetached>>_setLog:

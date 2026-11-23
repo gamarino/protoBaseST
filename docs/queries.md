@@ -1120,7 +1120,11 @@ retryable conflict), so an IVF index retrained in a cluster needs a longer lease
 third of the lease, less a twelfth kept to send). The cost per member grows with the size, 2.5 ms
 at 631 members rising to 3.7 ms at 5150 on protoST 0.16.0 at dim 8, so over that range count up
 to about 4 ms per member: a lease above 16 ms per member, about 11 s for 700 members and 80 s for
-5000; VB5's IVF cluster unit runs with 90 s. The longer lease
+5000; VB5's IVF cluster unit runs with 90 s. That rule is the break-even point, a lower bound with
+no margin (a retrain of a quarter of the lease leaves nothing over, and retrains slow by about half
+as a process ages, [deviations.md](deviations.md#vectors)): size the lease at twice it, 32 ms per
+member (22 s for 700 members, 160 s for 5000). Only liveness is at stake: a refused commit is a
+retryable conflict that writes nothing (`tests/unit/cluster_vector_retrain.st`). The longer lease
 costs availability: when the permission's holder dies, no member writes until its lease and
 drift margin have passed. A
 format-3 vector index (written before member tokens existed) is rebuilt at the first change of its

@@ -109,6 +109,7 @@ never kept in a class or instance variable. The kernel's one class variable is s
 module loads: SmalltalkForced, an Atom whose value only the tests change (_forceSmalltalkKernel:)."
 
 Import from: 'protobase/errors'.
+Import from: 'protobase/floor'.
 Import from: 'protobase/keys'.
 Import from: 'protobase/values'.
 Import from: 'protobase/codec'.
@@ -116,7 +117,7 @@ Import from: 'protobase/keyspec'.
 Import from: 'decimal'.
 
 Object subclass: #PBVectorMath classVariableNames: 'SmalltalkForced'.
-PBVectorMath comment: 'The vector math kernel of the vector indexes (class side only): CPython''s float(), math.fsum and proto_db v2.0.0rc4''s scores, ranking and pure-Python k-means, bit for bit; protoST 0.15.0''s Float fsum primitives and 0.16.0''s k-means distance primitive where their feature probes find them, the Smalltalk kernel as their oracle and fallback. Not public API.'.
+PBVectorMath comment: 'The vector math kernel of the vector indexes (class side only): CPython''s float(), math.fsum and proto_db v2.0.0rc4''s scores, ranking and pure-Python k-means, bit for bit; protoST 0.15.0''s Float fsum primitives and 0.16.0''s k-means distance primitive, which the protoST floor (0.16.1, checked when the package loads: PBFloor) always has, the Smalltalk kernel as their oracle. Not public API.'.
 
 Object subclass: #PBNearQuery instanceVariableNames: 'vector k threshold metric'.
 PBNearQuery comment: 'proto_db''s NearQuery: the frozen value of a near[] term, a query vector of finite Floats with k nearest members and/or a threshold, and a metric or nil.'.
@@ -206,7 +207,7 @@ PBVectorMath class >> canonicalVector: aKey dim: anInteger
 
 "=== PBVectorMath: the fsum primitives and the test-only switch ============"
 
-"protoST 0.16.1 is the floor, so Float fsum:, fsumOfProducts:with: and
+"protoST 0.16.1 is the floor (checked when the package loads: PBFloor), so Float fsum:, fsumOfProducts:with: and
  fsumOfSquaredDifferences:with: (protoST 0.15.0) and Float fsumOfPowSquaredDifferences:with: (0.16.0)
  always exist; the feature probes that chose them while the floor was 0.14.1 could no longer choose
  anything else and are gone. Made once when the module loads: the Atom of the test-only switch,
@@ -314,7 +315,8 @@ PBVectorMath class >> sumNonNegative: aSequence
   ^ self _fsum: aSequence overflow: [Float infinity].
 
 "math_fsum in Smalltalk, answering the value of anOverflowBlock where CPython raises OverflowError:
- the kernel's reference implementation, the fsum primitives' oracle and fallback."
+ the kernel's reference implementation and the fsum primitives' oracle (_forceSmalltalkKernel:), and
+ the sum of the terms the primitives do not take (an Integer term, see _primitive:overflow:otherwise:)."
 PBVectorMath class >> _smalltalkFsum: aSequence overflow: anOverflowBlock
   | p n count x y t hi yr lo xsave specialSum infSum done |
   count := aSequence size.

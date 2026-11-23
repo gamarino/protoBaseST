@@ -18,7 +18,7 @@
  test_ivf_flat_with_full_probe_equals_exact, the search halves of the two tests above,
  test_ivf_flat_partial_probe_has_good_recall_and_widens_for_k and
  test_ivf_flat_round_trip_through_file_storage_keeps_centroids, on fewer vectors than proto_db's
- (the interpreted kernel of protoST 0.14.1 is the floor); the list walk and the probe loop against
+ (sizes chosen when the floor, protoST 0.14.1, had only the interpreted kernel; it is now 0.16.1); the list walk and the probe loop against
  the forms they replaced (review I1 of task V6); and the non-empty lists rule of the probe against
  answers computed by proto_db itself (review I3). Each check gathers its mismatches and requires
  none, so one label covers one behaviour."

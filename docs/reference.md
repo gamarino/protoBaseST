@@ -1462,7 +1462,8 @@ per call, so the query is copied to an Array once per call, not once per scored 
 
 ## The module and its files
 
-`Import from: 'protobase'.` loads, in order, `errors`, `keys`, `values`, `registry`, `codec`, `keyspec`,
-`notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `avl`, `keygroups`, `collections`, `records`, `indexes`, `vectors`, `terms`, `plans`, `planner`, `query`, `pager`, `roots`, `publisher`,
-`round`, `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
-`zonekeys`. The protoST libraries it uses are `decimal`, `calendar`, `uuid` and `net`.
+`Import from: 'protobase'.` loads, in order, `errors`, `floor`, `keys`, `values`, `registry`, `codec`, `keyspec`, `notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `cluster/holder`, `cluster/rejoin`, `cluster/coordinator`, `avl`, `keygroups`, `collections`, `records`, `indexes`, `vectors`, `terms`, `plans`, `planner`, `query`, `pager`, `roots`, `publisher`, `cluster/round`, `round`, `cluster/tier`, `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
+`zonekeys`. `floor` checks the protoST floor when it loads, before any module after it: on a
+protoST below 0.16.1 the import signals `PBNotSupportedError` naming the floor and each missing
+capability (`PBFloor check`, `missing`, `probes`, `requirement` and `refusalFor:`; see the
+README's Requirements). The protoST libraries it uses are `decimal`, `calendar`, `uuid` and `net`.

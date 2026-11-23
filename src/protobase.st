@@ -1,11 +1,14 @@
 "-- protobase.st: protoBaseST, a perennial object database for protoST --
 
 Imports every submodule in layer order. Modules import each other as
-Import from: 'protobase/<name>'. Applications import this one:
+Import from: 'protobase/<name>'. The floor check (protobase/floor) runs right after the errors,
+before any other module: on a protoST below the floor the import signals PBNotSupportedError naming
+it. Applications import this one:
 
   Import from: 'protobase'.
 "
 Import from: 'protobase/errors'.
+Import from: 'protobase/floor'.
 Import from: 'protobase/keys'.
 Import from: 'protobase/values'.
 Import from: 'protobase/registry'.

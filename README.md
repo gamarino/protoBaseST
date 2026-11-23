@@ -123,7 +123,10 @@ lease longer than four times its retrain. Start with
 | protoIO | v0.7.1 | https://github.com/gamarino/protoIO |
 | protoST | v0.16.1 | https://github.com/gamarino/protoST |
 
-These are the minimum versions: protoST 0.16.1 is the floor. A TCP cluster needs it: its helping
+These are the minimum versions: protoST 0.16.1 is the floor, and it is checked when the package
+loads: on an older protoST, `Import from: 'protobase'` signals `PBNotSupportedError` ("protoBaseST
+0.4.0 requires protoST 0.16.1 or later (protoIO 0.7.1)", with the missing capabilities;
+`src/protobase/floor.st`). A TCP cluster needs it: its helping
 waits run one message at a time (protoST S48), and protoIO 0.7.1 bounds a whole socket write by its
 timeout and reports how many bytes it wrote (S49), which together let `PBTcpTransport` end every
 turn, so an actor that waits while a connection is open is never buried under it (CHANGELOG,

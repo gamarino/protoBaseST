@@ -211,7 +211,7 @@ sum rounded once, whatever the order of the terms (`vector_backends.py:12-13`, `
 `docs/source/format-spec.rst:1432-1437`). protoBaseST ports CPython's `math.fsum` line for line
 (Shewchuk's algorithm) on IEEE doubles, so both implementations compute the same score for the
 same vectors, bit for bit, and rank and file them alike. The cost of the correctly rounded sum
-against the plain loop: on 10^4 vectors of dim 8, 32 and 128, the interpreted fsum costs 4.9, 8.8 and 10.0 times the plain loop, and most of a score (68% to 87% of an inner-product score) is the sum, not the products (bench VB0, [Performance, Vectors](../deviations.md#vectors)). Correctness is what is paid for. protoST 0.15.0 adds the sum as primitives (Float fsum:, fsumOfProducts:with: and fsumOfSquaredDifferences:with:, the same algorithm in C++), and protoBaseST uses them when it finds them: the same answers, bit for bit, with the sum 9 to 76 times faster and a score 4 to 56 times faster than on 0.14.1 (bench VB0 on 0.15.0, same section). On 0.14.1 the Smalltalk port runs alone.
+against the plain loop: on 10^4 vectors of dim 8, 32 and 128, the interpreted fsum costs 4.9, 8.8 and 10.0 times the plain loop, and most of a score (68% to 87% of an inner-product score) is the sum, not the products (bench VB0, [Performance, Vectors](../deviations.md#vectors)). Correctness is what is paid for. protoST 0.15.0 adds the sum as primitives (Float fsum:, fsumOfProducts:with: and fsumOfSquaredDifferences:with:, the same algorithm in C++), and protoBaseST always calls them, since its floor is protoST 0.16.1 (an older protoST is refused when the package loads): the same answers, bit for bit, with the sum 9 to 76 times faster and a score 4 to 56 times faster than the Smalltalk port alone on protoST 0.14.1, the floor when it was measured (bench VB0 on 0.15.0, same section). The Smalltalk port stays as the tests' oracle.
 
 ## Why `x ** 2` is not `x * x`
 
@@ -345,8 +345,12 @@ lesson check: 'its search is refused' signals: PBNotSupportedError containing: '
   protoST 0.16.0, longer than the 667 ms a write permission lasts under the default lease, so an
   IVF index retrained in a cluster needs a longer `leaseDuration`, more than four times the
   measured retrain for its size; the cost per member grows, 2.5 ms at 631 to 3.7 ms at 5150, so
-  count up to about 4 ms per member: about 11 s for 700 members, 80 s for 5000 (VB5 used 90 s). With the
-  default lease such a commit never succeeds. The longer lease has a cost: if the member holding
+  count up to about 4 ms per member: about 11 s for 700 members, 80 s for 5000 (VB5 used 90 s). That
+  is the break-even point, not a safe size: a retrain that takes a quarter of the lease leaves
+  nothing of the permission over, and retrains slow by about half as a process ages, so size the
+  lease at twice it, eight times the measured retrain (22 s for 700 members, 160 s for 5000). With the
+  default lease such a commit never succeeds: it is refused, retryably, naming `leaseDuration`,
+  and writes nothing. The longer lease has a cost: if the member holding
   the permission dies, nobody writes until its lease and drift margin have passed
   ([deviations.md](../deviations.md#vectors)).
 - **A dedicated vector database** is the better tool when vector search is the whole workload: such

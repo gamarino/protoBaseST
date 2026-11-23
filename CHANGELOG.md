@@ -14,6 +14,21 @@
   a time (S48) and, with protoIO 0.7.1, bounds a whole socket write by its timeout and reports the
   bytes written (S49), which the TCP transport's fix needs ("Fixed" below). The README
   Requirements table, the tutorial and the examples state the floor.
+- **The floor is checked when the package loads** (final review I1; `src/protobase/floor.st`).
+  `Import from: 'protobase'` probes, right after the errors and before any other module, for what
+  protoBaseST calls of the floor: `ConnectionTimedOut >> bytesWritten` (protoST 0.16.1, protoIO
+  0.7.1) and the four `Float` primitives of the vector kernel (`fsum:`, `fsumOfProducts:with:`,
+  `fsumOfSquaredDifferences:with:`, 0.15.0; `fsumOfPowSquaredDifferences:with:`, 0.16.0). On a
+  protoST that lacks one it signals `PBNotSupportedError`: "protoBaseST 0.4.0 requires protoST
+  0.16.1 or later (protoIO 0.7.1); this protoST lacks ...", naming each missing capability.
+  Before, the floor was stated but not checked: on protoST 0.16.0 the TCP sender's write timeout
+  asked `ConnectionTimedOut` for `bytesWritten`, a `MessageNotUnderstood` its drain caught as a
+  stray error, so a frame under back-pressure was dropped with no word naming the cause (the
+  review measured `cluster_transport_tcp_slow_reader.st` on 0.16.0: exit 124); below 0.15.0 the
+  first vector score signalled `MessageNotUnderstood`. Checked by hand on 2026-11-23: protoST
+  0.16.0 and 0.8.1 refuse with that text; tests `floor_check.st`,
+  `floor_refuses_without_bytes_written.st` and `floor_refuses_without_kmeans_primitive.st` (the
+  last two simulate the missing capability in the test file only).
 - **The floor moved during the cycle.** The vectors phase ran on a 0.14.1 floor, with each
   primitive behind a feature probe and the Smalltalk kernel as the fallback; the TCP fix then
   moved the floor to 0.16.1 (a split floor, 0.14.1 standalone and 0.16.1 for TCP clusters, would
@@ -121,11 +136,19 @@
   committed to a vector-indexed list of 600 and 5000, and blind writes merged onto a
   vector-indexed dictionary, standalone and in a three-member cluster, self-verified against
   `proto_db`'s checksums (the IVF centroids included). On protoST 0.16.0 an IVF retrain dominates:
-  5.0 commits per second against 16.2 with an exact index and 35.9 with none (3.3, 16.6 and 36.7
-  on 0.15.0); a retrain over 630 to 700 members takes 1.6 to 1.9 s, so in a cluster, where a retrain
+  5.0 commits per second against 16.2 with an exact index and 35.9 with none (the run of task V5's
+  fix round 2, 2026-11-21; 3.3, 16.6 and 36.7 on 0.15.0; the full comparison of 2026-11-22, which
+  chapter 20 cites, measured 4.6, 15.2 and 34.5); a retrain over 630 to 700 members takes 1.6 to 1.9 s, so in a cluster, where a retrain
   longer than the write permission (667 ms with the default lease) never commits, an IVF index
   needs a lease of more than four times the measured retrain for its size (2.5 ms per member at
-  631 rising to 3.7 at 5150: count up to about 4 ms, so 11 s for 700 members, 80 s for 5000); VB5's IVF
+  631 rising to 3.7 at 5150: count up to about 4 ms, so 11 s for 700 members, 80 s for 5000). That
+  rule is the break-even point, a lower bound with no margin (final review M6): the permission is a
+  third of the lease less sendReserve, a twelfth by default, so a retrain that takes a quarter of
+  the lease leaves nothing over, and retrains slow by about half as a process ages (deviations,
+  "Vectors"); size the lease at twice the rule, eight times the measured retrain (about 32 ms per
+  member: 22 s for 700 members, 160 s for 5000). Only liveness is at stake: a commit whose retrain
+  outlasts the permission is refused, retryably, naming `leaseDuration`, and writes nothing
+  (`tests/unit/cluster_vector_retrain.st`, final review M7). VB5's IVF
   cluster unit runs with a 90 s lease, which lengthens the write outage when a member dies
   (`docs/deviations.md`, Performance, "Vectors").
   `proto_db`'s default mode (numpy, `tests/interop/.venv-numpy`) is a column of the VB3 and VB5
@@ -298,7 +321,12 @@ predicates, the unknown index kinds and the plan near ties (R2) were extended to
   protoST 0.14.1, and at one worker and the default pool on 0.16.0. Every turn of the transport's actors now ends: the listener's after
   one accept that waits at most `pollInterval` (50 ms), a reader's after reads of at most that
   long (a frame read in part is kept for the next turn), a sender's after writes of at most that
-  long (the rest of a frame continues in the next turn); each actor then sends itself the next
+  long (the rest of a frame continues in the next turn), or after one connect, which waits up to
+  `requestTimeout` (1 s by default) for a peer that does not answer (final review M3: with a
+  black-holed peer, whose dropped SYN is never refused, the connect is retried after every
+  back-off of 0.1 to 0.2 s, so a waiting actor can stay buried for up to `requestTimeout` again and
+  again; no test exercises that wait, the tests' unreachable peer being a closed loopback port,
+  which refuses at once; `docs/not-done.md`); each actor then sends itself the next
   turn, and `stop` chains on a Future each actor settles when its last turn ends. The bytes, their
   order, the counters, the errors, the reconnects and the timeouts are unchanged; a frame's write
   still fails after `requestTimeout` of writing, now counted over its writes. The fix needs protoST
@@ -312,6 +340,16 @@ predicates, the unknown index kinds and the plan near ties (R2) were extended to
   progress at one worker while connections poll), `cluster_transport_tcp_partial_frame.st` and
   `cluster_transport_tcp_slow_reader.st` (a timed-out write keeps the unwritten rest, or the
   attempt fails exactly as before), each with a one-worker script.
+  **What the finite reads cost** (final review M4; `bench/run_tcp_frames.sh`, 2026-11-23, protoST
+  0.16.1, three rounds, five frames per size, a frame offered already encoded so only the transport
+  is timed): a reader reads a body 1 KiB at a time (`readChunk`, which bounds how long a peer that
+  trickles bytes keeps a reader's turn, see `docs/not-done.md`), against one read per body in
+  0.3.0. The minimum delivery time of each round: 3 to 4 ms for a 64 KiB frame (1 to 2 with one
+  read per body), 7 to 8 ms for 256 KiB (4), 27 to 32 ms for 1 MiB (11 to 13) and 58 to 67 ms for
+  2 MiB (20 to 24): the 1 KiB reads cost about 2 to 3 times the one-read delivery from 256 KiB up.
+  A cluster's frames are small except for large records in replication, and the encoding of a
+  large message costs more than its transport (the review's end-to-end figures, encoding included:
+  1.1 to 1.4 times 0.3.0's at 1 and 2 MiB). Indicative, one machine.
   **Upgrade note for programs on protoBaseST 0.2.0 to 0.3.0** (or on a protoST older than 0.16.1):
   on a node with a TCP transport, do not wait with no deadline for an actor that waits inside a
   block (an actor that commits) while the transport runs: stop the transport first (`stop`, and
@@ -319,8 +357,36 @@ predicates, the unknown index kinds and the plan near ties (R2) were extended to
   which signals `TimeoutError` instead of hanging. Committing from the program thread is not
   exposed.
 
+- **`stop` could wait for ever after a close that signalled** (final review M1; new in this
+  cycle's transport). A reader's last turn, a sender's drain and `stop` settled their `ended`
+  Future after closing the socket, in the same block, so a close that signalled (protoST signals
+  on closing a Socket without a descriptor) left `ended`, and so `stop`'s Future, unsettled. Each
+  `ended` now settles in an `ensure:` around the close, and a close that fails is written to
+  stderr and goes no further (`PBClusterTransport _close:`); `MessageNotUnderstood` still passes.
+  Test: `cluster_transport_tcp_failures.st` (1) to (4).
+- **A socket of the TCP transport could be closed twice** (final review M9; 0.2.0 onward). `stop`
+  closed every accepted socket from the caller's thread while the connection's reader could close
+  it too, and a sender's connection likewise; `IOStream >> close` is not atomic (its `closed` flag
+  is a plain instance variable), so both could release the descriptor, the second perhaps after the
+  number was given to another descriptor. Each socket is now closed exactly once, by whichever
+  closer wins a compare-and-set (`_PBTcpReader >> closeSocket`, `_PBTcpSender >> _closeLink`).
+  The non-atomic close is protoST's (and protoIO's close of a descriptor never read or written
+  through a state); it is recorded for them in `docs/not-done.md`. Test:
+  `cluster_transport_tcp_failures.st` (5) and (6).
+- **The listener spun when an accept failed at once** (final review M10; as in 0.3.0 and
+  `proto_db`'s `_accept` loop). An accept that fails at once (`EMFILE`, for example) was written to
+  stderr and the next turn sent at once, one line per turn without a pause. The next turn now
+  follows a timer of `pollInterval`; the turn itself still ends at once. Test:
+  `cluster_transport_tcp_failures.st` (7) and (8).
+
 ### Tests
 
+- **New in the final review's fixes:** `floor_check.st` and the two `floor_refuses_*.st` (I1),
+  `cluster_transport_tcp_failures.st` (M1, M9, M10), `cluster_vector_retrain.st` (M7: a blind write
+  that crosses an IVF retrain threshold, merged in a cluster round's build, is refused with the
+  CC18 text and writes nothing when the build outlasts the permission, and commits, retrained, when
+  the permission is long enough) and `tests/docs/floor_statements.sh` (M2: no document states a
+  floor older than the README's as current).
 - **The pager stability test no longer hangs** (`1763c2c`, `bdbc32b`, `20633c0`; a test-design
   fix, no library change). `tests/unit/qry_pager_stability.st` timed out once (600 s) in a full run
   on protoST 0.14.1. The cause was the test: its actor messages waited inside blocks for endless

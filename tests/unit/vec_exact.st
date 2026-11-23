@@ -7,8 +7,8 @@
  test_results_are_nearest_first_and_ties_follow_the_member_key,
  test_duplicates_are_counted_and_equal_values_come_back_exactly and
  test_invalid_vectors_are_kept_aside_and_never_returned (mapped in tests/unit/queries_checklist.tsv),
- on fewer elements and queries than proto_db's (the interpreted kernel of protoST 0.14.1 is the
- floor): every answer of the index equals PBVectorIndex nearOracle:keySpec:query:metric:predicate:
+ on fewer elements and queries than proto_db's (the sizes were chosen when the floor, protoST 0.14.1,
+ had only the interpreted kernel; the floor is now 0.16.1): every answer of the index equals PBVectorIndex nearOracle:keySpec:query:metric:predicate:
  (near_oracle, the brute-force definition), compared in order (nearest first, ties by member key)
  and as the stored elements themselves (exact token and identity). proto_db runs the exact test
  with and without numpy; protoBaseST has no numpy screening (deviation DV2), so it has one mode.

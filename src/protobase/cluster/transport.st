@@ -66,8 +66,9 @@ delivered in arrival order, the same counters, errors, reconnects and timeouts (
 still fails after requestTimeout of writing, see _PBTcpSender >> _advance:).
 
 This module is a shell, not part of the core: the sender reads the monotonic clock for its
-reconnection back-off and the time its writes take, and every TCP actor the length of its turns
-(plan, 'Time': the shells
+reconnection back-off and the time its writes take, every TCP actor the length of its turns, and
+the listener waits on a timer (Future after:) before the turn that follows a failed accept (plan,
+'Time': the shells
 read Time microsecondClockValue).
 
 Every value here is immutable; the transports keep their state in Atoms created by their
@@ -75,6 +76,7 @@ initialisers (a reader's frame read so far and a sender's frame being written in
 
 Import from: 'net'.
 Import from: 'protobase/errors'.
+Import from: 'protobase/floor'.
 Import from: 'protobase/cluster/members'.
 Import from: 'protobase/cluster/protocol'.
 
@@ -105,6 +107,17 @@ PBClusterTransport class >> _checkNode: aNodeId peers: aMembership key: aKeyOrNi
  PBFramedLog _warn: for a recoverable condition)."
 PBClusterTransport class >> _warn: aString
   [Stdio stderr nextPutAll: self name , ': ' , aString; lf; flush] on: Error do: [:e | nil].
+
+"Closes aSocketOrNil (a Socket or a ServerSocket); never signals for a failed close, which is
+ written to stderr: a close that fails holds nothing the transport could still release (protoST
+ signals on closing a Socket without a descriptor, see _PBTcpListener >> _acceptOne).
+ MessageNotUnderstood passes, as everywhere in this file. The callers settle their ended Futures
+ in an ensure: around it, so not even that error leaves stop waiting (final review M1)."
+PBClusterTransport class >> _close: aSocketOrNil
+  aSocketOrNil isNil ifTrue: [^ self].
+  [aSocketOrNil close] on: Error do: [:e |
+    (e isKindOf: MessageNotUnderstood) ifTrue: [e pass].
+    self _warn: 'closing a connection failed: ' , e messageText].
 
 "A Future that resolves (with true) once aFuture settles, whether it resolves or is rejected."
 PBClusterTransport class >> _settled: aFuture
@@ -496,7 +509,8 @@ PBTcpTransport >> send: aMessage to: aNodeId
   sender offer: frame.
 
 "See PBClusterTransport. Closes the listening socket and every accepted connection (which wakes
- the readers), closes each sender's queue and connection (which wakes a sender blocked in a
+ the readers; each connection is closed once, by stop or by its reader, _PBTcpReader >>
+ closeSocket), closes each sender's queue and connection (which wakes a sender blocked in a
  write), then answers a Future that settles once the listener, every reader it started and
  every sender have finished. Each of those actors settles its own Future, ended, when its last
  turn ends; stop chains on them and never waits. The listener's last turn ends only after the
@@ -511,10 +525,10 @@ PBTcpTransport >> stop
    (current isKindOf: Future) ifTrue: [^ current].
    done := Future new.
    run value: done ifCurrent: current] whileFalse.
-  current isNil ifTrue: [listener close. done resolve: true. ^ done].
+  current isNil ifTrue: [[self class _close: listener] ensure: [done resolve: true]. ^ done].
   closed := inbound swap: [:old | old closed].
-  listener close.
-  closed sockets do: [:each | each close].
+  self class _close: listener.
+  closed readers do: [:each | each closeSocket].
   senders := current senders values asArray collect: [:each | each stop].
   (self class _settled: current listener ended) thenDo: [:x |
     (self class _allSettled: (inbound value readers collect: [:each | each ended]) , senders)
@@ -534,14 +548,14 @@ PBTcpTransport >> isRunning
 PBTcpTransport >> _admit: aSocket
   | current old reader |
   current := run value.
-  (self _isRunning: current) ifFalse: [aSocket close. ^ self].
+  (self _isRunning: current) ifFalse: [self class _close: aSocket. ^ self].
   [aSocket timeout: self class pollInterval] on: Error do: [:e |
     (e isKindOf: MessageNotUnderstood) ifTrue: [e pass].
-    aSocket close.
+    self class _close: aSocket.
     ^ self class _warn: 'admitting a connection failed: ' , e messageText].
   reader := _PBTcpReader transport: self socket: aSocket nodeId: current nodeId key: current key handler: current handler.
   [old := inbound value.
-   old isClosed ifTrue: [aSocket close. ^ self].
+   old isClosed ifTrue: [self class _close: aSocket. ^ self].
    inbound value: (old with: aSocket reader: reader) ifCurrent: old] whileFalse.
   reader begin.
 
@@ -623,20 +637,26 @@ _PBTcpListener >> ended
 "One turn of the listener (an actor method): one accept, waiting at most pollInterval, then the
  next turn sent to the proxy while the transport runs, as proto_db's _accept loop. stop closes the
  listening socket, which wakes the accept; an accept that fails while the transport runs is
- written to stderr and the next turn tries again (proto_db _accept). ended settles when no next
- turn is sent, also when this one ends by an error."
+ written to stderr and the next turn tries again (proto_db _accept), pollInterval later: an
+ accept that fails at once (EMFILE, for example) would otherwise make the listener spin, one
+ stderr line per turn without a pause (final review M10). The pause is a timer, not a wait inside
+ the turn, so the turn still ends at once. ended settles when no next turn is due, also when this
+ one ends by an error."
 _PBTcpListener >> run
-  | again |
-  again := false.
-  [again := self _acceptOne] ensure: [again ifFalse: [ended resolve: true]].
-  again ifTrue: [proxy run].
+  | step |
+  step := #stopped.
+  [step := self _acceptOne] ensure: [step == #stopped ifTrue: [ended resolve: true]].
+  step == #failed ifTrue: [(Future after: PBTcpTransport pollInterval) thenDo: [:x | proxy run]. ^ true].
+  step == #stopped ifFalse: [proxy run].
   ^ true.
 
-"Accepts one connection, if one comes within pollInterval, and hands it to the transport;
- answers whether the transport still runs (another turn is due)."
+"Accepts one connection, if one comes within pollInterval, and hands it to the transport.
+ Answers #accepted (a connection was handed on), #idle (none came within pollInterval), #failed
+ (the accept failed while the transport runs; written to stderr) or #stopped (the transport no
+ longer runs: no next turn)."
 _PBTcpListener >> _acceptOne
   | socket failure |
-  transport isRunning ifFalse: [^ false].
+  transport isRunning ifFalse: [^ #stopped].
   failure := nil.
   socket := [server acceptTimeout: PBTcpTransport pollInterval] on: Error do: [:e |
     (e isKindOf: MessageNotUnderstood) ifTrue: [e pass].
@@ -648,29 +668,31 @@ _PBTcpListener >> _acceptOne
     socket isNil ifFalse: [[socket close] on: Error do: [:e |
       (e isKindOf: MessageNotUnderstood) ifTrue: [e pass].
       nil]].
-    ^ false].
+    ^ #stopped].
   failure isNil ifFalse: [
     transport class _warn: 'accepting a connection failed: ' , failure printString.
-    ^ true].
+    ^ #failed].
   "nil: no connection within pollInterval."
-  socket isNil ifFalse: [transport _admit: socket].
-  ^ true.
+  socket isNil ifTrue: [^ #idle].
+  transport _admit: socket.
+  ^ #accepted.
 
 "=== the reader actor (one per accepted connection) ======================="
 
-Object subclass: #_PBTcpReader instanceVariableNames: 'transport socket nodeId key handler proxy partial ended'.
+Object subclass: #_PBTcpReader instanceVariableNames: 'transport socket nodeId key handler proxy partial ended closing'.
 
 "The reader of aSocket: its actor proxy (high band), partial (an Atom on the frame read so far,
  kept from one turn to the next) and ended, the Future its last turn settles. partial holds
  { length or nil while the 4 length bytes are read. bytes read of the length or of the body.
- pieces }, where pieces is nil or { the last ByteArray read. the pieces before it }."
+ pieces }, where pieces is nil or { the last ByteArray read. the pieces before it }; closing, an
+ Atom that becomes true when the connection is closed (closeSocket)."
 _PBTcpReader class >> transport: aTransport socket: aSocket nodeId: anId key: aKeyOrNil handler: aBlock
   | reader |
   reader := self basicNew.
   ^ reader _setTransport: aTransport socket: aSocket nodeId: anId key: aKeyOrNil handler: aBlock
-    proxy: reader asHighPriorityActor partial: (Atom on: #(nil 0 nil)) ended: Future new.
+    proxy: reader asHighPriorityActor partial: (Atom on: #(nil 0 nil)) ended: Future new closing: (Atom on: false).
 
-_PBTcpReader >> _setTransport: aTransport socket: aSocket nodeId: anId key: aKeyOrNil handler: aBlock proxy: aProxy partial: aPartialAtom ended: aFuture
+_PBTcpReader >> _setTransport: aTransport socket: aSocket nodeId: anId key: aKeyOrNil handler: aBlock proxy: aProxy partial: aPartialAtom ended: aFuture closing: aClosingAtom
   "Runs once, on a fresh instance."
   transport isNil ifFalse: [^ PBUserError signal: '_PBTcpReader is immutable'].
   transport := aTransport.
@@ -681,6 +703,7 @@ _PBTcpReader >> _setTransport: aTransport socket: aSocket nodeId: anId key: aKey
   proxy := aProxy.
   partial := aPartialAtom.
   ended := aFuture.
+  closing := aClosingAtom.
   ^ self.
 
 "Sends the first turn (once, from _admit:)."
@@ -701,11 +724,19 @@ _PBTcpReader >> run
   | again |
   again := false.
   [again := self _readTurn] ensure: [again ifFalse: [
-    socket close.
-    transport _retire: socket.
-    ended resolve: true]].
+    [self closeSocket.
+     transport _retire: socket] ensure: [ended resolve: true]]].
   again ifTrue: [proxy run].
   ^ true.
+
+"Closes the connection, once, whoever asks first: the reader's last turn or stop. IOStream >>
+ close is not atomic (its closed flag is a plain instance variable), so two threads closing one
+ socket could both release its descriptor, the second perhaps after the number was given to
+ another descriptor (final review M9); the compare-and-set of closing lets exactly one of them
+ close it. A close that fails is written to stderr (PBClusterTransport _close:)."
+_PBTcpReader >> closeSocket
+  (closing value: true ifCurrent: false) ifFalse: [^ self].
+  transport class _close: socket.
 
 "Reads until a read waits pollInterval in vain or pollInterval has passed since the turn began;
  answers whether the connection goes on."
@@ -807,6 +838,10 @@ _PBTcpSender >> _setTransport: aTransport peer: aPeer queue: aQueueAtom link: aL
   ended := aFuture.
   ^ self.
 
+"A Future that settles (with true) once the sender has finished after stop."
+_PBTcpSender >> ended
+  ^ ended.
+
 "Queues aFrame (called on the sender's thread, never blocks). The queue holds at most
  PBClusterFrame maxFrameBytes bytes: older frames are dropped, and counted, to make room; the
  newest is always kept. Starts the actor's drain unless it is draining."
@@ -840,7 +875,7 @@ _PBTcpSender >> _drainTurn
   | deadline step |
   deadline := Time microsecondClockValue + (PBTcpTransport pollInterval * 1000).
   [step := self _drainStep.
-   step == #closed ifTrue: [self _closeLink. ended resolve: true. ^ false].
+   step == #closed ifTrue: [[self _closeLink] ensure: [ended resolve: true]. ^ false].
    step == #empty ifTrue: [^ false].
    Time microsecondClockValue < deadline] whileTrue.
   ^ true.
@@ -942,11 +977,16 @@ _PBTcpSender >> _put: aBytes on: aSocket timeout: aMillis
       ifFalse: [#failed]].
   ^ #written.
 
-"Closes aSocketOrNil after a failed write and forgets the connection, keeping the back-off of an
- earlier failed connect (proto_db keeps failed_at)."
+"Forgets the connection aSocketOrNil after a failed write and closes it, keeping the back-off of
+ an earlier failed connect (proto_db keeps failed_at). Only while it is still the connection in
+ link: stop may have taken it out and closed it already (_closeLink), and a socket is closed once."
 _PBTcpSender >> _discard: aSocketOrNil
-  aSocketOrNil isNil ifFalse: [aSocketOrNil close].
-  link swap: [:old | { nil. old last }].
+  | current |
+  aSocketOrNil isNil ifTrue: [^ self].
+  [current := link value.
+   current first == aSocketOrNil ifFalse: [^ self].
+   link value: { nil. current last } ifCurrent: current] whileFalse.
+  transport class _close: aSocketOrNil.
 
 "The open connection to the peer, connecting when there is none and the back-off is over; nil
  when there is no connection to write on."
@@ -960,7 +1000,9 @@ _PBTcpSender >> _connection
     (e isKindOf: MessageNotUnderstood) ifTrue: [e pass].
     nil].
   socket isNil ifTrue: [self _failConnect. ^ nil].
-  link value: { socket. nil } ifCurrent: current.
+  "Only this actor sets a connection in link, and stop takes one out only when there is one, so
+   this compare-and-set cannot lose; were it to, the socket is closed and not used."
+  (link value: { socket. nil } ifCurrent: current) ifFalse: [transport class _close: socket. ^ nil].
   "stop closes the queue, then the socket in link: either it saw this socket, or this sees the
    closed queue."
   queue value isClosed ifTrue: [self _closeLink. ^ nil].
@@ -975,10 +1017,16 @@ _PBTcpSender >> _failConnect
   link swap: [:old | { nil. Time microsecondClockValue + PBTcpTransport backoffBase
     + (PBTcpTransport backoffBase * jitter // 65536) }].
 
+"Takes the connection out of link and closes it, if there is one. Both the drain and stop (from
+ the caller's thread) call this; the compare-and-set lets exactly one of them close a connection,
+ as _PBTcpReader >> closeSocket does for an accepted one (final review M9). A close that fails is
+ written to stderr (PBClusterTransport _close:)."
 _PBTcpSender >> _closeLink
-  | socket |
-  socket := link value first.
-  socket isNil ifFalse: [socket close].
+  | current |
+  [current := link value.
+   current first isNil ifTrue: [^ self].
+   link value: { nil. current last } ifCurrent: current] whileFalse.
+  transport class _close: current first.
 
 "After a drain turn that an uncaught error ended: the queue no longer counts as draining, so the
  next offer starts a drain (the frame being written, if any, goes on then); when the queue is
@@ -986,9 +1034,7 @@ _PBTcpSender >> _closeLink
 _PBTcpSender >> _drainFailed
   | now |
   now := queue swap: [:old | old notDraining].
-  now isClosed ifTrue: [
-    self _closeLink.
-    ended resolve: true].
+  now isClosed ifTrue: [[self _closeLink] ensure: [ended resolve: true]].
 
 "Closes the queue (its frames are discarded) and the connection, which wakes a write in
  progress; answers ended, a Future that settles once the actor has finished: at once when no
@@ -997,8 +1043,7 @@ _PBTcpSender >> _drainFailed
 _PBTcpSender >> stop
   | now |
   now := queue swap: [:old | old closed].
-  self _closeLink.
-  now isDraining ifFalse: [ended resolve: true].
+  [self _closeLink] ensure: [now isDraining ifFalse: [ended resolve: true]].
   ^ ended.
 
 "=== the queue of a sender ================================================"

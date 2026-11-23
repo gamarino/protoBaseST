@@ -10,8 +10,8 @@
  near_oracle as the oracle of near[] (near[] has no per-element semantics, so a scan cannot answer
  it). The records' key spec is one of proto_db's three, 'vec', 'emb.v' and the reversing
  extractor, taken by the seed (proto_db runs each seed on each; unsupportedRaises runs all three),
- which keeps the run within the interpreted floor (protoST 0.14.1); the 'values' registration and
- the collections check use the value_vector extractor (proto_db's VALUE_VECTOR_SPEC).
+ which keeps the run short (chosen when the floor, protoST 0.14.1, had only the interpreted
+ kernel; the floor is now 0.16.1); the 'values' registration and the collections check use the value_vector extractor (proto_db's VALUE_VECTOR_SPEC).
    planMatchesScan     (a) every term of the strategy that the index supports (near[] with k, a
                        threshold and both, a stored vector half the time, so exact ties occur;
                        and with the index's own metric named) answers what near_oracle answers,
