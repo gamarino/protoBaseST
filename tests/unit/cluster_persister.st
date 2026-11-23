@@ -9,7 +9,8 @@
  (1) After commits on every node and sync: 10000 on the last committer, space.root holds the
  root that node committed: the root the read path reads back (PBSharedTier readPersisted, what
  Task 24's snapshot reads when recovery fails) is the node's committed root, label, epoch and
- pointer; no storage holds the root lock.
+ pointer; once every persister is idle (no write in flight, nothing behind), no storage holds the
+ root lock.
  (2) The checklist row: persistedEpoch >= committedEpoch >= the commits (an epoch floor, rc4:
  a base re-commit adds an epoch), the persisted counter is exact, and only the persisters
  publish space.root (persistence::test_commits_are_persisted_asynchronously_and_sync_waits_for_them).
@@ -48,7 +49,7 @@ Import from: '_check'.
 Import from: '_cluster_commit'.
 Import from: '_cluster_persist'.
 
-| c base kit out r1 r2 holder hold push w runnerN1 written publishes e epoch tr accepted s mark n1Writes n1Mark cycles |
+| c base kit out r1 r2 holder hold push w runnerN1 written publishes e epoch tr accepted s mark n1Writes n1Mark cycles idle |
 c := Check new.
 base := FileSystem temp / ('pbst-cluster-persister-' , Smalltalk pid printString).
 base deleteAll.
@@ -66,11 +67,18 @@ s := Persist create: kit on: 'n0' counter: 0.
 out := (Persist commits: 12 over: #('n0' 'n1' 'n2') kit: kit) copyWith: s.
 r1 := Persist sync: (kit space: 'n2') within: 10000.
 r2 := (kit space: 'n2') _tier readPersisted.
+"sync: on n2 waits for n2's persister only: n0's and n1's may still be writing the roots they
+ committed (a write that finds a newer root takes the root lock too, then answers behind). The
+ root locks are checked once every persister is idle: no write in flight and nothing behind, after
+ which, with no more commits, none writes again."
+idle := kit waitUntil: [kit ids allSatisfy: [:id | | p |
+  p := (kit space: id) _persister.
+  ((p instVarNamed: 'busy') value not) and: [(p _behind: (kit node: id) committedRoot) not]]].
 c that: 'after commits and sync: 10000, space.root holds the root the node committed, as the read path reads it back'
   is: { out asSet asArray. r1. r2 key = (kit node: 'n2') committedRoot key. r2 epoch = (kit space: 'n2') committedEpoch.
     r2 label = (kit node: 'n2') committedRoot label. r2 record version.
-    kit ids collect: [:id | (kit storage: id) holdsRootLock] }
-  equals: { #(#ok). nil. true. true. true. 4. #(false false false) }.
+    idle. kit ids collect: [:id | (kit storage: id) holdsRootLock] }
+  equals: { #(#ok). nil. true. true. true. 4. true. #(false false false) }.
 
 written := (kit ids collect: [:id | (kit space: id) _persister stats at: 'roots_written']) inject: 0 into: [:a :b | a + b].
 publishes := (kit ids collect: [:id | ((kit storage: id) instVarNamed: 'trace') value count: [:x | x = 'publish']])
