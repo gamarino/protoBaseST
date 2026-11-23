@@ -1,0 +1,6 @@
+a confirmó: saldo 110
+b: PBConflictError — Root 'saldo' of database 'banco' was changed by a concurrent commit
+saldo final: 110
+interés: PBConflictError — Root 'tasa' of database 'banco' was changed by a concurrent commit
+contador: 40 de 40
+versiones: 44 (1 vacía + 1 inicial + 1 de a + 1 de la tasa + 40)

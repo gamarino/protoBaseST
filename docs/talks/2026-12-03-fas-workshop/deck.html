@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>protoBaseST — FAST 3/12/2026</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+</head>
+<body>
+<section id="cover" data-transition="fade" style="background:#14213D;color:#F7F5F0;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;justify-content:space-between">
+
+<p style="font-size:28px;letter-spacing:3px;text-transform:uppercase;color:#F2B45A;font-weight:600">Fundación Argentina de Smalltalk · 3 de diciembre de 2026</p>
+<div style="display:flex;flex-direction:column;gap:32px">
+<h1 style="font-size:120px;font-weight:700;line-height:1.05;color:#F7F5F0">protoBaseST</h1>
+<p style="font-size:44px;line-height:1.3;color:#C9D6E8;width:1500px">Una base de objetos perenne para protoST, en la tradición que abrió GemStone. Las mismas respuestas, los mismos planes y los mismos bytes que <span style="font-family:'JetBrains Mono', 'Courier New', monospace">proto_db</span>, sobre un modelo inmutable.</p>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:end">
+<p style="font-size:30px;color:#C9D6E8">protoBaseST 0.4.0 · protoST 0.16.1 · protoCore 3.6.1</p>
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:26px;color:#C9D6E8">github.com/gamarino/protoBaseST</p>
+</div>
+<aside>La segunda mitad del taller. La primera fue protoST, el lenguaje; esta es lo que se construyó encima para ponerlo a prueba: una base de objetos. La frase del subtítulo es la promesa entera y no hay otra: mismas respuestas, mismos planes, mismos bytes que proto_db. No hay promesa de velocidad, y lo voy a decir con cifras antes de que me lo pregunten. Todo lo que muestro está en el repositorio, con fecha.</aside>
+</section>
+<section id="agenda" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">La tarde</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Mitad protoST, mitad protoBaseST, y al final un menú de proyectos</h2>
+<table style="font-size:28px;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif">
+<tr><th style="width:12%">Hora</th><th style="width:30%">Bloque</th><th style="width:58%">Qué se ve</th></tr>
+<tr><td>0:00</td><td>Apertura</td><td>La apuesta: valores inmutables debajo de un lenguaje con estado</td></tr>
+<tr style="background:#ECE8DF"><td>0:05</td><td>protoST</td><td>El lenguaje y su núcleo, con su laboratorio (slides y ejercicios de protoST)</td></tr>
+<tr><td>1:10</td><td>Corte</td><td>10 minutos</td></tr>
+<tr style="background:#ECE8DF"><td>1:20</td><td>protoBaseST</td><td>Modelo, transacciones, cluster, consultas, vectores, una historia honesta</td></tr>
+<tr><td>1:55</td><td>Laboratorio</td><td>Ejercicios 1 a 6 en sus máquinas</td></tr>
+<tr style="background:#ECE8DF"><td>2:30</td><td>Proyectos</td><td>El menú de proyectos para voluntarios: elegir uno</td></tr>
+<tr><td>2:50</td><td>Cierre</td><td>Preguntas difíciles y preguntas</td></tr>
+</table>
+<p style="font-size:26px;line-height:1.4;color:#4A5568">Las slides y los ejercicios de protoST están en <span style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px">gamarino/protoST</span>, <span style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px">docs/talks/2026-12-03-fas-workshop/</span>.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">protoBaseST · FAST · 3/12/2026 · 2</p>
+<aside>La mitad de protoST usa sus propias slides y ejercicios (en el repositorio de protoST, docs/talks/2026-12-03-fas-workshop). Esta parte empieza después del corte. Pedirles otra vez que anoten la predicción antes de correr cada ejercicio. El bloque de proyectos es la razón del taller: salir con dos o tres personas que tomen uno.</aside>
+</section>
+<section id="tesis" data-transition="fade" style="background:#B45309;color:#F7F5F0;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;justify-content:center;gap:40px">
+
+<p style="font-size:28px;letter-spacing:3px;text-transform:uppercase;color:#F7F5F0;font-weight:600">La promesa, y la única</p>
+<h2 style="font-size:76px;font-weight:700;line-height:1.12;color:#F7F5F0;width:1640px">Las mismas respuestas, los mismos planes y los mismos bytes que proto_db, sobre un modelo inmutable.</h2>
+<p style="font-size:36px;line-height:1.4;color:#FDE7C8;width:1560px">No es más rápido: es varias veces más lento, y les muestro cuánto. Lo que muestra es que el modelo inmutable alcanza para ser exacto, bit a bit, frente a una implementación que nadie diseñó para eso.</p>
+<aside>Tres cosas iguales y verificables: las respuestas de cada consulta, los planes del planificador (nodo por nodo y costo por costo) y los bytes del archivo. Lo que no se promete: velocidad, escala, producción. Las cifras de velocidad están en la slide de costos y en las preguntas difíciles; decirlo acá también, antes de que alguien lo pregunte.</aside>
+</section>
+<section id="queeses" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Qué es</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Una biblioteca: un programa protoST abre un directorio y es el motor</h2>
+<div style="display:flex;gap:40px">
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">Lo que es</h3><ul style="font-size:28px;line-height:1.45;color:#14213D"><li>objetos que persisten alcanzables desde raíces con nombre</li><li>registros y colecciones inmutables: cada cambio responde una versión nueva</li><li>celdas mutables con nombre, que un commit mueve de versión en versión</li><li>historia perenne: toda versión confirmada se puede leer</li><li>el formato de disco de <span style='font-family:JetBrains Mono, monospace'>proto_db</span>, formato 4</li></ul></div>
+<div style="flex:1;background:#FDF3E3;border:1px solid #EBC48A;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#B45309">Lo que no es</h3><ul style="font-size:28px;line-height:1.45;color:#14213D"><li>un producto: es un prototipo para discutir</li><li>un servidor: no hay proceso aparte, ni código guardado en la base</li><li>un GemStone nuevo: está en la tradición que GemStone abrió, no es su sucesor</li><li>rápido, ni probado a escala</li></ul></div>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#4A5568;">Sin locks en la capa Smalltalk: actores, Futures y átomos. El único lock es el <span style='font-family:JetBrains Mono, monospace'>flock</span> del sistema operativo sobre <span style='font-family:JetBrains Mono, monospace'>space.lock</span>, el protocolo del formato.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">README.md · docs/tutorial/gemstone.md · docs/not-done.md · 4</p>
+<aside>GemStone abrió la idea de que los objetos persisten como objetos, alcanzables desde raíces. protoBaseST toma esa parte y nada más. El capítulo 'Coming from GemStone/S' del tutorial compara concepto por concepto y dice dónde GemStone es más fuerte: granularidad de conflictos (objetos, no raíces), índices, escala, herramientas, migración de clases. Si alguien en la sala trabajó con GemStone, preguntarle qué le faltaría primero.</aside>
+</section>
+<section id="dosleng" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Un directorio, dos lenguajes</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Python y Smalltalk abren el mismo directorio y ven lo mismo</h2>
+<div style="display:flex;align-items:center;gap:24px;justify-content:center">
+<div style="width:460px;background:#FFFFFF;border:2px solid #2F6F9F;border-radius:16px;padding:28px;display:flex;flex-direction:column;gap:10px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">protoST</h3><p style="font-size:26px;line-height:1.4;color:#4A5568;">protoBaseST: <span style='font-family:JetBrains Mono, monospace'>PBObjectSpace</span>, <span style='font-family:JetBrains Mono, monospace'>run:</span>, <span style='font-family:JetBrains Mono, monospace'>PBQuery</span></p></div>
+<x-shape kind="arrow-right" style="width:72px;height:36px;background:#B45309"></x-shape>
+<div style="width:420px;background:#FFFFFF;border:2px solid #B45309;border-radius:16px;padding:28px;display:flex;flex-direction:column;gap:10px"><h3 style="font-size:34px;font-weight:600;color:#B45309">el directorio</h3><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px;line-height:1.5;color:#2F6F9F">space.root<br>&lt;uuid&gt;.seg<br>space.lock</p></div>
+<x-shape kind="arrow-right" style="width:72px;height:36px;background:#B45309;transform:scaleX(-1)"></x-shape>
+<div style="width:460px;background:#FFFFFF;border:2px solid #2F6F9F;border-radius:16px;padding:28px;display:flex;flex-direction:column;gap:10px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">Python</h3><p style="font-size:26px;line-height:1.4;color:#4A5568;"><span style='font-family:JetBrains Mono, monospace'>proto_db</span> v2.0.0rc4: <span style='font-family:JetBrains Mono, monospace'>ObjectSpace</span>, <span style='font-family:JetBrains Mono, monospace'>db.run</span>, <span style='font-family:JetBrains Mono, monospace'>from_collection</span></p></div>
+</div>
+<ul style="font-size:28px;line-height:1.45;color:#14213D"><li><span style='font-family:JetBrains Mono, monospace'>proto_db</span> es la base de objetos en Python del repositorio protoBase; protoBaseST es su port: la API traducida a Smalltalk, la semántica de transacciones y los mismos bytes</li><li>ida y vuelta verificada: lo que escribe uno, el otro lo vuelca idéntico, y el verificador de <span style='font-family:JetBrains Mono, monospace'>proto_db</span> lo acepta</li><li>un registro guarda un nombre de tipo neutral (<span style='font-family:JetBrains Mono, monospace'>taller.Socio</span>), no código: cada lenguaje pone su clase</li></ul>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">README.md (Status) · docs/tutorial/11-python-interop.md · ejercicios/06-python-y-smalltalk.sh · 5</p>
+<aside>El ejercicio 6 lo hace en vivo: protoST escribe 40 socios con un índice, Python los lee, consulta por ese índice (IndexLookup), confirma un socio y una etiqueta, el verificador de proto_db acepta el directorio, y protoST lee lo de Python y combina su propia etiqueta. Si en la sala hay quien usa Python, este es el gancho. Formato 4: el de proto_db 2.0.0rc1, congelado; el formato 5 de rc4 se conoce y se rechaza con PBNotSupportedError.</aside>
+</section>
+<section id="versiones" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Cuatro versiones en diez días</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">De un proceso a un cluster, a consultas, a vectores</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:28px">
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">0.1.0 <span style="font-size:24px;color:#5B6576;font-weight:400">· 13/11</span></h3><p style="font-size:27px;line-height:1.4;color:#14213D;font-weight:600">Un proceso</p><p style="font-size:25px;line-height:1.4;color:#4A5568;">valores y el codec del formato 4, transacciones con conjunto de lectura, escrituras ciegas que se combinan, celdas mutables, historia</p></div>
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">0.2.0 <span style="font-size:24px;color:#5B6576;font-weight:400">· 19/11</span></h3><p style="font-size:27px;line-height:1.4;color:#14213D;font-weight:600">Cluster</p><p style="font-size:25px;line-height:1.4;color:#4A5568;">el protocolo 14 de proto_db regla por regla: lease por mayoría con términos numerados, permisos de escritura, punto de commit por mayoría</p></div>
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">0.3.0 <span style="font-size:24px;color:#5B6576;font-weight:400">· 20/11</span></h3><p style="font-size:27px;line-height:1.4;color:#14213D;font-weight:600">Consultas indexadas</p><p style="font-size:25px;line-height:1.4;color:#4A5568;">índices de igualdad y rango dentro de la versión de la colección, el planificador por costos de proto_db, orden, páginas y conteos por rango</p></div>
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">0.4.0 <span style="font-size:24px;color:#5B6576;font-weight:400">· 23/11</span></h3><p style="font-size:27px;line-height:1.4;color:#14213D;font-weight:600">Vectores</p><p style="font-size:25px;line-height:1.4;color:#4A5568;">índices exact e ivf_flat, consultas near[] solas o con condiciones, puntajes con fsum, k-means idéntico al de proto_db</p></div>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#4A5568;">Un implementador, revisado tarea por tarea. Sin revisión externa: para eso es este taller.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">CHANGELOG.md · docs/changelog-0.2.0-development.md · 6</p>
+<aside>Las fechas son las del CHANGELOG. Diez días es rápido, y eso es un argumento para desconfiar: por eso cada versión vino con su verificación contra proto_db y con su lista de lo que no se probó. La frase de abajo es la de docs/not-done.md: 'The whole thing is one implementer's work, reviewed task by task. It has not had outside review. That is what the workshop is for.'</aside>
+</section>
+<section id="codigo" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Primer contacto · ejercicio 1</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Un espacio, una base, dos commits</h2>
+<div style="display:flex;gap:40px;align-items:start">
+<div style="background:#14213D;border-radius:16px;padding:32px;flex:1.35"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px;line-height:1.5;color:#F7F5F0">Import from: 'protobase'.<br><br>space := PBObjectSpace storage:<br>&nbsp;&nbsp;&nbsp;&nbsp;(PBFileStorage path: dir pathString).<br>db := space newDatabase: 'biblioteca'.<br>db newTransactionDo: [:t |<br>&nbsp;&nbsp;&nbsp;&nbsp;t setRootObject: 'titulo' value: 'Mi biblioteca'].<br>db run: [:t |<br>&nbsp;&nbsp;&nbsp;&nbsp;t setRootObject: 'titulo' value: 'La de FAST'].<br>(db snapshotAt: (db history at: 2))<br>&nbsp;&nbsp;&nbsp;&nbsp;getRootObject: 'titulo'.&nbsp;&nbsp; "=&gt; 'Mi biblioteca'"<br>db history size.&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"=&gt; 3"</p></div>
+<div style="flex:1;display:flex;flex-direction:column;gap:20px">
+<p style="font-size:28px;line-height:1.4;color:#4A5568;"><span style='font-family:JetBrains Mono, monospace'>newTransactionDo:</span> confirma al final del bloque; una excepción aborta.</p>
+<p style="font-size:28px;line-height:1.4;color:#4A5568;"><span style='font-family:JetBrains Mono, monospace'>run:</span> es el bucle leer, calcular, publicar: ante un conflicto corre el bloque otra vez.</p>
+<p style="font-size:28px;line-height:1.4;color:#4A5568;">La versión 0 es la base vacía. Ninguna versión se borra.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">README.md (Quick start) · examples/tutorial/01_first_commit.st · ejercicios/01-primer-commit.st · 7</p>
+<aside>La API es la de proto_db traducida: new_transaction es newTransaction, set_root_object es setRootObject:value:, db.run(fn) es run:. Timeouts en milisegundos enteros. El ejercicio 1 además lista el directorio: un segmento, space.root y space.lock, nada propio de Smalltalk.</aside>
+</section>
+<section id="trampa" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Lo primero para discutir</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Cada mensaje de una colección responde una colección nueva</h2>
+<div style="display:flex;gap:40px;align-items:start">
+<div style="background:#14213D;border-radius:16px;padding:32px;flex:1"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:26px;line-height:1.5;color:#F7F5F0">tags := PBSet new.<br>tags add: 'urgente'.<br>tags count.&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; "=&gt; 0"<br>tags := tags add: 'urgente'.<br>tags count.&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; "=&gt; 1"</p></div>
+<div style="flex:1.25">
+<table style="font-size:25px;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif">
+<tr><th style="width:30%">Mensaje</th><th style="width:35%">Pharo</th><th style="width:35%">protoBaseST</th></tr>
+<tr><td><span style='font-family:JetBrains Mono, monospace'>Set &gt;&gt; add:</span></td><td>agrega, responde el elemento</td><td>responde un set nuevo</td></tr>
+<tr style="background:#ECE8DF"><td><span style='font-family:JetBrains Mono, monospace'>Set &gt;&gt; remove:</span></td><td>quita; si falta, señala</td><td>set nuevo; si falta, nada</td></tr>
+<tr><td><span style='font-family:JetBrains Mono, monospace'>List &gt;&gt; removeAt:</span></td><td>quita, responde el elemento</td><td>responde una lista nueva</td></tr>
+</table>
+</div>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#4A5568;">Son los nombres de <span style='font-family:JetBrains Mono, monospace'>proto_db</span>, a propósito: un solo documento explica los dos lenguajes. Y <span style='font-family:JetBrains Mono, monospace'>PBList</span> cuenta desde 0, como Python: el precio de compartir el formato.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">README.md (Every collection message answers a new version) · docs/decisions.md · 8</p>
+<aside>Esto es lo que más va a doler a un smalltalker, y lo pongo primero a propósito: un add: cuya respuesta se descarta no cambia nada y no falla. Las alternativas que se consideraron (copyWith:, copyWithout:, copyWithoutIndex:) están en docs/decisions.md con su costo. Preguntar a la sala: ¿preferirían los nombres de Pharo con otra semántica, o nombres nuevos? Es una discusión abierta.</aside>
+</section>
+<section id="patron" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Un solo patrón</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Del atributo al commit: leer, calcular sin efectos, publicar si sigue vigente, si no, otra vez</h2>
+<table style="font-size:26px;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif">
+<tr><th style="width:18%">Nivel</th><th style="width:20%">Leer</th><th style="width:18%">Calcular</th><th style="width:22%">Publicar si sigue vigente</th><th style="width:22%">Ante un conflicto</th></tr>
+<tr><td>atributo (protoCore)</td><td>la instantánea del objeto</td><td>una versión nueva</td><td>CAS sobre la tabla de mutables</td><td>reintenta</td></tr>
+<tr style="background:#ECE8DF"><td><span style='font-family:JetBrains Mono, monospace'>Atom</span> (protoST)</td><td><span style='font-family:JetBrains Mono, monospace'>value</span></td><td>un bloque puro</td><td><span style='font-family:JetBrains Mono, monospace'>swap:</span></td><td>corre el bloque otra vez</td></tr>
+<tr><td>base (protoBaseST)</td><td>la instantánea al empezar</td><td>el bloque de <span style='font-family:JetBrains Mono, monospace'>run:</span></td><td><span style='font-family:JetBrains Mono, monospace'>commit</span></td><td><span style='font-family:JetBrains Mono, monospace'>PBConflictError</span>; <span style='font-family:JetBrains Mono, monospace'>run:</span> reintenta</td></tr>
+</table>
+<p style="font-size:28px;line-height:1.4;color:#4A5568;">El mismo razonamiento que en protoST, una escala más arriba. Por eso el bloque de <span style='font-family:JetBrains Mono, monospace'>run:</span>, como el de <span style='font-family:JetBrains Mono, monospace'>swap:</span>, no puede tener efectos fuera de la transacción: puede correr más de una vez.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">Especificación de estado explícito §1.1 y §9 (protoST PR #25, borrador) · docs/tutorial/05-transactions-and-conflicts.md · 9</p>
+<aside>Esta tabla es el puente entre las dos mitades del taller. En protoST vieron el CAS de los atributos y el Atom; acá es lo mismo con un commit. La especificación de estado explícito (borrador, PR #25 de protoST) agrega filas intermedias (update:with:, una invariante como un valor en una variable atómica) y propone enseñar el patrón una sola vez, con esta tabla.</aside>
+</section>
+<section id="transacciones" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Ejercicio 2 · el incremento que protoST perdía</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">En una base, un incremento no se pierde: se rechaza</h2>
+<div style="display:flex;gap:40px;align-items:start">
+<div style="flex:1;display:flex;flex-direction:column;gap:16px">
+<ul style="font-size:28px;line-height:1.45;color:#14213D"><li>una transacción lee una instantánea: lo que otros confirman después no lo ve</li><li>cada raíz y celda que <b>lee</b> queda en su conjunto de lectura</li><li>al confirmar, si alguna cambió: <span style='font-family:JetBrains Mono, monospace'>PBConflictError</span></li><li>las escrituras ciegas de colecciones nuevas se combinan, también con Python</li></ul>
+</div>
+<div style="background:#14213D;border-radius:16px;padding:32px;flex:1"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:23px;line-height:1.5;color:#F7F5F0">b: PBConflictError — Root 'saldo' of<br>&nbsp;&nbsp; database 'banco' was changed by a<br>&nbsp;&nbsp; concurrent commit<br>interés: PBConflictError — Root 'tasa'…<br>contador: 40 de 40<br>~ los bloques corrieron 63 veces<br>&nbsp;&nbsp;(23 reintentos)</p></div>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#4A5568;">Cuatro actores, diez <span style='font-family:JetBrains Mono, monospace'>run:</span> cada uno, un contador: 40 de 40 siempre. Los reintentos cambian de corrida en corrida; el resultado no.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">examples/tutorial/05_transactions_and_conflicts.st · 09_actors.st · ejercicios/02-conflicto-y-reintento.st · 10</p>
+<aside>En el ejercicio 2 de protoST, ocho actores sobre un objeto común perdían la mayoría de los incrementos: el objeto nunca quedaba roto, pero gana la última escritura. Acá el segundo commit que leyó un saldo viejo es rechazado, y run: lo corre otra vez sobre el valor nuevo. La interés que solo leyó la tasa también conflicta: leer alcanza para quedar protegido. Granularidad honesta: los conflictos son por raíz o celda, no por objeto; GemStone es más fino ahí.</aside>
+</section>
+<section id="cluster" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">0.2.0 · cluster</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Varios procesos, un directorio, una mayoría</h2>
+<div style="display:flex;gap:48px;align-items:start">
+<div style="flex:1.15;display:flex;flex-direction:column;gap:18px">
+<div style="display:flex;gap:20px;align-items:center"><div style="background:#FFFFFF;border:2px solid #2F6F9F;border-radius:16px;padding:18px 28px"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:28px;color:#2F6F9F">n0</p></div><div style="background:#FFFFFF;border:2px solid #2F6F9F;border-radius:16px;padding:18px 28px"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:28px;color:#2F6F9F">n1</p></div><div style="background:#FFFFFF;border:2px solid #2F6F9F;border-radius:16px;padding:18px 28px"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:28px;color:#2F6F9F">n2</p></div><p style="font-size:26px;color:#4A5568">→ un directorio compartido</p></div>
+<ol style="font-size:27px;line-height:1.45;color:#14213D"><li>un permiso de escritura del dueño del término (lease de mayoría, términos numerados)</li><li>la raíz se construye bajo el permiso</li><li>aceptaciones sincronizadas de una mayoría: el punto de commit</li><li>un permiso por vez en todo el cluster</li></ol>
+</div>
+<div style="flex:1;background:#14213D;border-radius:16px;padding:36px;display:flex;flex-direction:column;gap:18px">
+<p style="font-size:26px;color:#C9D6E8">Tres finales posibles de un commit</p>
+<p style="font-size:27px;line-height:1.4;color:#F7F5F0"><b>confirmado</b></p>
+<p style="font-size:27px;line-height:1.4;color:#F7F5F0"><span style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px">PBConflictError</span>: nada salió del nodo; <span style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px">run:</span> reintenta</p>
+<p style="font-size:27px;line-height:1.4;color:#F7F5F0"><span style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px">PBOutcomeUnknownError</span>: la raíz salió y no se supo su suerte; <span style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px">run:</span> nunca lo reintenta</p>
+</div>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#4A5568;">El protocolo 14 de <span style='font-family:JetBrains Mono, monospace'>proto_db</span> 2.0.0rc4, regla por regla. Sobre un solo directorio compartido, en una red de confianza.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">docs/tutorial/13-cluster-concepts.md · 14-a-three-node-cluster.md · ejercicios/05-cluster-dos-nodos.st · 11</p>
+<aside>El ejercicio 5 arma dos nodos en un proceso (la misma red de mensajes, sin sockets), confirma 20 incrementos, y mata a n1. El primer intento de n0 solo termina en PBOutcomeUnknownError: su raíz salió con el permiso que tenía, llegó 1 de 2 confirmaciones. El segundo, en PBTimeoutError: sin mayoría no hay permiso. Cuando n1 vuelve, el contador vale 20 o 21, nunca otra cosa: en nuestra corrida, 21. Un desconocido quiere decir eso. La pregunta para la sala: ¿un cluster de dos nodos es más o menos disponible que un proceso solo?</aside>
+</section>
+<section id="clusterevid" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Cluster · evidencia y costo</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Verificado en un simulador y con kill -9; no probado</h2>
+<div style="display:flex;gap:40px">
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">Lo que corrió</h3><ul style="font-size:26px;line-height:1.45;color:#14213D"><li>12 familias del simulador, de 100 a 5000 semillas cada una, todas pasan (commit 02d9826)</li><li>la auditoría de timers: 81 partes, 3420 corridas, 0 violaciones, 2 h 22 min (7cbac4a)</li><li><span style='font-family:JetBrains Mono, monospace'>kill -9</span> del dueño, de un votante, del portador en tres puntos, del cluster entero</li><li>los 298 tests de cluster de <span style='font-family:JetBrains Mono, monospace'>proto_db</span>, portados o justificados</li></ul></div>
+<div style="flex:1;background:#FDF3E3;border:1px solid #EBC48A;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#B45309">Lo que cuesta</h3><ul style="font-size:26px;line-height:1.45;color:#14213D"><li>tres miembros: 25,9 commits/s chicos contra 46,3 de un proceso solo (0,56×)</li><li>en una clave caliente: 17,1 contra 51,3 (0,33×)</li><li>agregar miembros no agrega throughput: un permiso por vez</li><li>nunca corrió en varias máquinas, ni con más de cinco miembros, ni por horas</li></ul></div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">docs/not-done.md · docs/deviations.md (Cluster mode: commits per second: 16/11/2026, Ryzen 5 5500U, protoST 0.12.0, mínimo de 5 corridas de 120 transacciones) · 12</p>
+<aside>Commits por segundo = 120 transacciones sobre el tiempo mínimo de cinco corridas, de que arranca el primer proceso a que termina el último. Indicativo, una máquina. La frase del simulador es la de not-done: evidencia de un simulador y una máquina, no una prueba. Lo que falta y es un buen proyecto: un test de pausa con procesos reales (kill -STOP, kill -CONT), proyecto 9 del menú.</aside>
+</section>
+<section id="consultas" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">0.3.0 · consultas · ejercicio 3</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Los mismos planes y los mismos costos que proto_db</h2>
+<div style="display:flex;gap:40px;align-items:start">
+<div style="background:#14213D;border-radius:16px;padding:32px;flex:1.1"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px;line-height:1.5;color:#F7F5F0">q := PBQuery from: people.<br>city := PBField path: 'city'.<br>age := PBField path: 'age'.<br>both := q where:<br>&nbsp;&nbsp;&nbsp;&nbsp;((city eq: 'Oslo') &amp; (age &gt; 70)).<br>both explain.<br>"Filter &lt;- IndexRange<br> el filtro prueba city<br> estimadas 35.0, encontradas 20"</p></div>
+<div style="flex:1;display:flex;flex-direction:column;gap:16px">
+<ul style="font-size:26px;line-height:1.45;color:#14213D"><li>los índices son parte de la versión de la colección; cada mutador y cada combinación los mantiene</li><li>314 consultas grabadas en <span style='font-family:JetBrains Mono, monospace'>proto_db</span>: el mismo plan nodo por nodo, el mismo costo, 0 empates cercanos</li><li>plan igual a recorrido en 5000 semillas: 250 000 consultas</li><li>353 tests de <span style='font-family:JetBrains Mono, monospace'>proto_db</span>: 284 portados, 69 no aplican, 0 diferidos</li></ul>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">docs/queries.md · docs/tutorial/18-queries-and-plans.md · docs/not-done.md · CHANGELOG.md 0.4.0 · 13</p>
+<aside>Un índice nunca cambia una respuesta: el ejercicio 3 corre la misma consulta sin índices y compara las filas. La aritmética de costos es la de Python, bit por bit, por eso los planes coinciden hasta en los empates. Una trampa que muestra el ejercicio: city = 'Oslo' es un Boolean (no se redefine =); la condición es city eq: 'Oslo'. Y un bloque como condición es opaco: corre elemento por elemento y nunca usa un índice.</aside>
+</section>
+<section id="vectores" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">0.4.0 · vectores · ejercicio 4</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Los mismos vecinos y los mismos bytes del índice</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:28px">
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">fsum</h3><p style="font-size:26px;line-height:1.4;color:#4A5568;">La suma correctamente redondeada de CPython, portada línea por línea. (1, 1, 1) · (1e16, 1, −1e16) es 1; un bucle de + da 0 y ordena mal.</p></div>
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">pow, no *</h3><p style="font-size:26px;line-height:1.4;color:#4A5568;">El <span style='font-family:JetBrains Mono, monospace'>x ** 2</span> de Python es <span style='font-family:JetBrains Mono, monospace'>pow</span> de libm: 130492547² redondea distinto que el producto. <span style='font-family:JetBrains Mono, monospace'>raisedTo: 2</span> también es <span style='font-family:JetBrains Mono, monospace'>pow</span>.</p></div>
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">k-means</h3><p style="font-size:26px;line-height:1.4;color:#4A5568;">El k-means puro Python de <span style='font-family:JetBrains Mono, monospace'>proto_db</span>, operación por operación, con su Mersenne Twister: los mismos centroides, los mismos bytes.</p></div>
+</div>
+<ul style="font-size:27px;line-height:1.45;color:#14213D"><li>4021 casos de matemática vectorial, bit a bit; 101 índices nodo por nodo, cada entrenamiento de cinco historias de crecimiento</li><li>101 consultas vectoriales entre las 415 grabadas, 0 empates cercanos; <span style='font-family:JetBrains Mono, monospace'>hnsw</span> se mantiene, su búsqueda se rechaza</li></ul>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">docs/tutorial/20-vector-search.md · CHANGELOG.md 0.4.0 (Vectors) · docs/deviations.md (DV1, DV3) · 14</p>
+<aside>Por qué tanta obsesión con el último bit: si los puntajes no son idénticos, los empates se rompen distinto y los vecinos cambian; si el k-means no es idéntico, los centroides cambian y con ellos el árbol del índice, y dejan de ser los mismos bytes. Los centroides coinciden con el entrenamiento puro Python de proto_db sobre la misma biblioteca C; con numpy pueden diferir en los últimos bits (DV3), y cada lado valida el índice del otro. hnsw: el grafo es de hnswlib, nativo y no determinista, ni en proto_db (DV1).</aside>
+</section>
+<section id="correccion" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">El titular</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">La corrección, medida contra la otra implementación</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:28px">
+<div style="background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:30px;display:flex;flex-direction:column;gap:10px"><h3 style="font-size:56px;font-weight:700;color:#B45309">317 de 317</h3><p style="font-size:25px;line-height:1.35;color:#4A5568">tests de la suite completa, dos corridas sobre el árbol final, 23/11, protoST 0.16.1</p></div>
+<div style="background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:30px;display:flex;flex-direction:column;gap:10px"><h3 style="font-size:56px;font-weight:700;color:#B45309">27 × 2</h3><p style="font-size:25px;line-height:1.35;color:#4A5568">escenarios de commits concurrentes, con cada lenguaje como primero y como segundo</p></div>
+<div style="background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:30px;display:flex;flex-direction:column;gap:10px"><h3 style="font-size:56px;font-weight:700;color:#B45309">4021</h3><p style="font-size:25px;line-height:1.35;color:#4A5568">casos de matemática vectorial de <span style='font-family:JetBrains Mono, monospace'>proto_db</span>, bit a bit</p></div>
+<div style="background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:30px;display:flex;flex-direction:column;gap:10px"><h3 style="font-size:56px;font-weight:700;color:#B45309">415</h3><p style="font-size:25px;line-height:1.35;color:#4A5568">consultas grabadas: el mismo plan, el mismo costo, 0 empates cercanos</p></div>
+<div style="background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:30px;display:flex;flex-direction:column;gap:10px"><h3 style="font-size:56px;font-weight:700;color:#B45309">101</h3><p style="font-size:25px;line-height:1.35;color:#4A5568">índices vectoriales, nodo por nodo y byte por byte</p></div>
+<div style="background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:30px;display:flex;flex-direction:column;gap:10px"><h3 style="font-size:56px;font-weight:700;color:#B45309">3420</h3><p style="font-size:25px;line-height:1.35;color:#4A5568">corridas del simulador en la auditoría de timers, 0 violaciones</p></div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">CHANGELOG.md 0.4.0 (Final verification) · README.md (Status) · docs/not-done.md (What was tested) · 15</p>
+<aside>Esto es lo que vale la pena discutir, no la velocidad. Cada número tiene su test en el repositorio. Lo que no está probado está en la misma página de not-done: nada fuera de esos escenarios, ningún fuzzing del codec más allá de los vectores y las secuencias con semilla, nada de escala ni corridas largas, ninguna revisión externa.</aside>
+</section>
+<section id="tcp1" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Una historia honesta · 1 de 3</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">El nodo TCP que enterraba actores</h2>
+<div style="display:flex;gap:48px;align-items:start">
+<div style="width:640px;display:flex;flex-direction:column;gap:8px">
+<p style="font-size:24px;color:#4A5568">la pila de un worker</p>
+<div style="background:#B45309;border-radius:12px;padding:22px 28px;"><p style="font-size:26px;line-height:1.35;color:#F7F5F0">el turno de un lector TCP: dura lo que dure la conexión</p></div>
+<div style="background:#2F6F9F;border-radius:12px;padding:22px 28px;"><p style="font-size:26px;line-height:1.35;color:#F7F5F0">un actor que confirma, esperando dentro de <span style='font-family:JetBrains Mono, monospace'>ensure:</span></p></div>
+<div style="background:#DCE7F0;border-radius:12px;padding:22px 28px;"><p style="font-size:26px;line-height:1.35;color:#14213D">el worker (un hilo nativo)</p></div>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:18px">
+<p style="font-size:28px;line-height:1.4;color:#14213D;">En protoST, un actor que espera dentro de un bloque presta su worker: corre mensajes de otros actores encima de la espera (LANGUAGE §10.4).</p>
+<p style="font-size:28px;line-height:1.4;color:#14213D;">El commit ya se había decidido. Pero el actor no volvía hasta que el transporte se detuviera, y un programa que lo esperaba sin plazo se colgaba.</p>
+<p style="font-size:26px;line-height:1.4;color:#4A5568;">De 0.2.0 a 0.3.0. Reproducido con 5 transportes y 8 actores: los 8 enterrados, con 1 worker, con 2 y con el pool por omisión.</p>
+</div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">CHANGELOG.md 0.4.0 (Fixed) · docs/not-done.md (Fixed issues) · 16</p>
+<aside>Lo encontramos auditando la biblioteca después de que un test de páginas se colgó una vez en una corrida completa (qry_pager_stability.st): la causa de ese test era el mismo patrón, mensajes de actores que esperaban dentro de bloques mientras otros mensajes no terminaban nunca. El escucha del transporte y cada lector de conexión eran un solo mensaje que duraba lo que el transporte o la conexión. Un commit espera dentro de ensure:, así que cualquier actor que confirmaba en un nodo TCP estaba expuesto cuando se aceptaba una conexión durante su commit.</aside>
+</section>
+<section id="tcp2" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Una historia honesta · 2 de 3</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">El arreglo necesitó tres repositorios</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:28px">
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">protoBaseST 0.4.0</h3><p style="font-size:25px;line-height:1.4;color:#4A5568;">Cada turno del escucha, de cada lector y de cada emisor termina después de esperar a lo sumo <span style='font-family:JetBrains Mono, monospace'>pollInterval</span> (50 ms); un marco a medias queda para el turno siguiente, que el actor se manda a sí mismo.</p></div>
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#B45309">protoST 0.16.1 · S48</h3><p style="font-size:25px;line-height:1.4;color:#4A5568;">El primer intento no alcanzó: la espera que ayuda drenaba el buzón entero del actor, incluidos los mensajes que se mandaba a sí mismo. Ahora corre un mensaje y vuelve a mirar su Future.</p></div>
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#B45309">protoIO 0.7.1 · S49</h3><p style="font-size:25px;line-height:1.4;color:#4A5568;">El timeout de un socket no acotaba una escritura grande: 8 MiB a un par que no lee quedaban bloqueados más de 30 s con 1 s de timeout. Ahora acota la escritura entera y dice cuántos bytes escribió.</p></div>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#4A5568;">El test que lo reproduce, <span style='font-family:JetBrains Mono, monospace'>cluster_transport_tcp_burial.st</span>, se cuelga con protoST 0.16.0 y pasa con 0.16.1: 20 de 20 con un worker y 20 de 20 con el pool por omisión.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">CHANGELOG.md 0.4.0 (Fixed, Requirements) · protoST docs/STATUS.md S48 · tests/unit/cluster_transport_tcp_burial.st · 17</p>
+<aside>Lo interesante para un implementador de VMs: el bug era de protoBaseST, pero el arreglo no se podía escribir sin cambiar el scheduler de protoST y la escritura de protoIO. Por eso protoBaseST 0.4.0 exige protoST 0.16.1 y lo verifica al cargar (floor.st): con una versión anterior, Import from: 'protobase' señala PBNotSupportedError nombrando lo que falta. Un piso dividido (0.14.1 sin cluster TCP, 0.16.1 con) habría sido una trampa.</aside>
+</section>
+<section id="tcp3" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Una historia honesta · 3 de 3</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Lo que enseña: con actores que ayudan, un turno tiene que terminar</h2>
+<div style="display:flex;gap:40px">
+<div style="flex:1;background:#FDF3E3;border:1px solid #EBC48A;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#B45309">Lo que cuesta</h3><ul style="font-size:25px;line-height:1.45;color:#14213D"><li>el lector lee de a 1 KiB: un marco de 1 MiB tarda 27 a 32 ms en llegar, contra 11 a 13 leyendo el cuerpo de una vez</li><li>2 MiB: 58 a 67 ms contra 20 a 24</li><li>la codificación de un mensaje grande cuesta más que su transporte</li></ul></div>
+<div style="flex:1;background:#FFFFFF;border:1px solid #D9D4C7;border-radius:16px;padding:32px;display:flex;flex-direction:column;gap:14px"><h3 style="font-size:34px;font-weight:600;color:#2F6F9F">Lo que queda abierto</h3><ul style="font-size:25px;line-height:1.45;color:#14213D"><li>un <span style='font-family:JetBrains Mono, monospace'>connect</span> a un par cuyo SYN se descarta espera hasta 1 s, una y otra vez → proyecto 1</li><li>un par que gotea bytes retiene un lector hasta unos 51 s → proyecto 2</li><li><span style='font-family:JetBrains Mono, monospace'>IOStream &gt;&gt; close</span> no es atómico → proyecto 3</li><li>un actor que se reenvía mensajes retiene su worker (D59) → proyecto 4</li></ul></div>
+</div>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">bench/run_tcp_frames.sh: 23/11/2026, protoST 0.16.1, mínimo de tres rondas de cinco marcos por tamaño, solo el transporte · docs/not-done.md (M3, M4, M5, M9) · 18</p>
+<aside>La lección general: en un sistema de actores donde una espera presta su worker, un mensaje que no termina no es solo lento, entierra a quien espera debajo. 'Turnos finitos' pasa a ser un contrato de cada actor de servicio. Lo que queda abierto está escrito en not-done con lo que lo cerraría, y cada cosa es un proyecto del menú. Indicativo: una máquina.</aside>
+</section>
+<section id="costo" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:32px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Lo que cuesta</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Varias veces más lento que proto_db, con fecha</h2>
+<table style="font-size:23px;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif">
+<tr><th style="width:44%">Medición (unidad y divisor)</th><th style="width:34%">protoBaseST frente a proto_db</th><th style="width:22%">Corrida</th></tr>
+<tr><td>commits por segundo, una clave por transacción (100 transacciones ÷ tiempo mínimo de 5 rondas)</td><td>54,1 contra 163,9: 0,33×</td><td>20/11, protoST 0.14.1</td></tr>
+<tr style="background:#ECE8DF"><td>commits por segundo, lotes de 100 claves (10 transacciones ÷ mínimo)</td><td>8,9 contra 75,7: 0,12×</td><td>20/11, protoST 0.14.1</td></tr>
+<tr><td>operaciones AVL (µs por operación, mínimo de 5)</td><td>7× a 30× el tiempo</td><td>20/11, protoST 0.14.1</td></tr>
+<tr style="background:#ECE8DF"><td>consultas, mantenimiento de índices y planificador (µs por unidad, mínimo de 5)</td><td>3,5× a 35×</td><td>20/11, protoST 0.12.0</td></tr>
+<tr><td>búsqueda exacta sobre 10⁴ vectores (ms por consulta: la unidad ÷ 10 consultas)</td><td>417 a 466 ms: 3,4× a 5,1× (443× a 1206× con numpy)</td><td>22/11, protoST 0.16.0</td></tr>
+<tr style="background:#ECE8DF"><td>commit a una colección con índice vectorial (µs por unidad de 200 o 120 commits)</td><td>8,5× a 12,3×</td><td>22/11, protoST 0.16.0</td></tr>
+</table>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">docs/deviations.md (Performance): AMD Ryzen 5 5500U, una máquina, indicativo; proto_db v2.0.0rc4 puro Python salvo donde dice numpy · 19</p>
+<aside>La pregunta va a venir: ¿por qué, si Python también es interpretado? La diferencia es CPU, no disco: la entrada y salida es la misma en los dos (unos 2,4 KB y tres fsync por commit chico), y en la medición de instrucciones del 13/11 un commit chico costaba 53 millones de instrucciones de usuario contra 3,6 millones de proto_db. Es el intérprete de protoST, la construcción de nodos y la codificación de registros: trabajo de VM más que de biblioteca. Ningún número de esta tabla es un titular; están para que nadie tenga que adivinarlos.</aside>
+</section>
+<section id="nohace" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:36px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Lo que no hace</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Un prototipo para discutir, no un producto</h2>
+<div style="display:flex;gap:40px">
+<ul style="font-size:26px;line-height:1.45;color:#14213D"><li>cluster sobre un solo directorio compartido: sin almacenamiento por niveles, sin permisos en tubería, sin TLS (un HMAC opcional autentica)</li><li>sin clusters mixtos con nodos <span style='font-family:JetBrains Mono, monospace'>proto_db</span> (no es un objetivo)</li><li><span style='font-family:JetBrains Mono, monospace'>hnsw</span>: se mantiene, su búsqueda se rechaza</li><li>sin zonas horarias IANA: no hay hora de pared</li></ul>
+<ul style="font-size:26px;line-height:1.45;color:#14213D"><li>sin tokens de página portables, sin caché de resultados, sin <span style='font-family:JetBrains Mono, monospace'>GroupBy</span>, <span style='font-family:JetBrains Mono, monospace'>Join</span> ni <span style='font-family:JetBrains Mono, monospace'>Unnest</span></li><li>sin escrituras en <span style='font-family:JetBrains Mono, monospace'>RepeatedKeysDictionary</span></li><li>sin instancias congeladas: la inmutabilidad es una convención, verificada por un test</li><li>sin compactación: toda versión se guarda para siempre</li></ul>
+</div>
+<p style="font-size:27px;line-height:1.4;color:#4A5568;">Lo que rechaza, lo rechaza con un error que lo nombra: un <span style='font-family:JetBrains Mono, monospace'>Symbol</span> de más de seis bytes, un <span style='font-family:JetBrains Mono, monospace'>Dictionary</span> de protoST, una <span style='font-family:JetBrains Mono, monospace'>Fraction</span>. Nunca guarda otra cosa en su lugar.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">docs/not-done.md (The slide, The cuts) · docs/deviations.md · README.md (What it refuses) · 20</p>
+<aside>Cada rechazo protege una propiedad del archivo: un Dictionary de protoST no tiene orden especificado, así que no se puede escribir de forma canónica; una Fraction no existe en el formato. Las instancias congeladas son el puente a la slide siguiente: hoy un test busca := en el código contra una lista de excepciones. La especificación de estado explícito lo vuelve lenguaje.</aside>
+</section>
+<section id="estado" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:40px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Hacia dónde · borrador en revisión</p>
+<h2 style="font-size:60px;font-weight:600;line-height:1.1;color:#14213D">Estado explícito: lo que protoBaseST hoy dice por convención</h2>
+<div style="display:flex;gap:40px;align-items:start">
+<div style="background:#14213D;border-radius:16px;padding:32px;flex:1"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px;line-height:1.5;color:#F7F5F0">Object subclass: #Account<br>&nbsp;&nbsp;instanceVariableNames: 'history'<br>&nbsp;&nbsp;constantNames: 'number owner'<br>&nbsp;&nbsp;writeOnceNames: 'oid'<br>&nbsp;&nbsp;atomicNames: 'balance'.<br><br>Object valueSubclass: #Point<br>&nbsp;&nbsp;instanceVariableNames: 'x y'.</p></div>
+<div style="flex:1.05;display:flex;flex-direction:column;gap:16px">
+<ul style="font-size:26px;line-height:1.45;color:#14213D"><li>hoy: un test que busca <span style='font-family:JetBrains Mono, monospace'>:=</span> contra 59 excepciones, y cinco <span style='font-family:JetBrains Mono, monospace'>_publish…:</span> escritos a mano</li><li><span style='font-family:JetBrains Mono, monospace'>writeOnce</span>: asignar es un CAS desde nil que responde el valor instalado</li><li>clases de valor: nacen completas, se cambian con <span style='font-family:JetBrains Mono, monospace'>withX:</span></li><li>protoST 0.17.0 (modificadores), 0.18.0 (valores), y protoBaseST 0.5.0 migra</li></ul>
+</div>
+</div>
+<p style="font-size:27px;line-height:1.4;color:#4A5568;">No se promete ninguna versión para hoy: la especificación es un borrador que el mantenedor todavía revisa.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">protoST PR #25: docs/superpowers/specs/2026-11-23-explicit-state-design.md (§5, §6, §13.2, §15) · 21</p>
+<aside>La migración de protoBaseST 0.5.0 (§13.2 de la especificación): los valores pasan a clases de valor, los _publishOid:, _publishSaved: y compañía pasan a variables writeOnce, los Atom pasan a variables atómicas, y el test con la lista de excepciones pasa a ser un test reflexivo. Criterio de aceptación: toda la suite pasa sobre el protoST nuevo, y se vuelven a medir las celdas por nodo de índice. Dos proyectos del menú salen de acá: los programas de conformidad primero (5) y writeOnce/constant (6).</aside>
+</section>
+<section id="croquet" data-transition="fade" style="background:#14213D;color:#F7F5F0;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;justify-content:center;gap:36px">
+
+<p style="font-size:28px;letter-spacing:3px;text-transform:uppercase;color:#F2B45A;font-weight:600">Una dirección, no una promesa</p>
+<h2 style="font-size:64px;font-weight:700;line-height:1.12;color:#F7F5F0;width:1600px">Reed, 1978: un objeto es una sucesión de versiones inmutables</h2>
+<div style="display:flex;gap:40px">
+<div style="flex:1;display:flex;flex-direction:column;gap:14px">
+<p style="font-size:30px;color:#F2B45A;font-weight:600">Lo que protoCore ya da</p>
+<ul style="font-size:28px;line-height:1.45;color:#F7F5F0"><li>versiones: cada objeto mutable apunta a su versión actual</li><li>instantáneas: referencias guardadas</li><li>historias que comparten estructura, y protoBaseST que las persiste</li></ul>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:14px">
+<p style="font-size:30px;color:#F2B45A;font-weight:600">Lo que es trabajo de verdad</p>
+<ul style="font-size:28px;line-height:1.45;color:#F7F5F0"><li>ejecución determinista entre réplicas (D58: pow; D59: el scheduler)</li><li>un reflector que estampa y ordena los mensajes externos</li><li>tiempo de mensaje en lugar de reloj de pared; nombres entre réplicas</li></ul>
+</div>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#C9D6E8">De la tesis de David Reed desciende TeaTime, la replicación de Croquet. Un mundo replicado sobre protoST y protoBaseST es el proyecto 7.</p>
+<aside>Esto es §19 de la especificación de estado explícito, y lo presento como dirección: no está en ninguna versión planeada. Para quien conoce Croquet, la pregunta es cuánto de TeaTime se vuelve barato cuando cada objeto ya es una sucesión de versiones inmutables, y qué sigue siendo difícil. El determinismo es lo más duro: protoST ya registra un caso donde los Float difieren entre plataformas (D58, el pow de MSVC).</aside>
+</section>
+<section id="lab" data-transition="fade" style="background:#B45309;color:#F7F5F0;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:32px">
+
+<p style="font-size:28px;letter-spacing:3px;text-transform:uppercase;color:#F7F5F0;font-weight:600">Laboratorio · 35 minutos</p>
+<h2 style="font-size:68px;font-weight:700;line-height:1.1;color:#F7F5F0">Seis ejercicios, una base cada uno</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px">
+<div style="background:#F7F5F0;border-radius:16px;padding:26px;display:flex;flex-direction:column;gap:8px"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:23px;color:#B45309">01-primer-commit.st</p><p style="font-size:25px;line-height:1.35;color:#14213D">un espacio, dos commits, la historia, el directorio</p></div>
+<div style="background:#F7F5F0;border-radius:16px;padding:26px;display:flex;flex-direction:column;gap:8px"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:23px;color:#B45309">02-conflicto-y-reintento.st</p><p style="font-size:25px;line-height:1.35;color:#14213D">instantáneas, conjunto de lectura, run: con cuatro actores</p></div>
+<div style="background:#F7F5F0;border-radius:16px;padding:26px;display:flex;flex-direction:column;gap:8px"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:23px;color:#B45309">03-indices-y-explain.st</p><p style="font-size:25px;line-height:1.35;color:#14213D">igualdad, rango, filtros residuales, uniones, bloques</p></div>
+<div style="background:#F7F5F0;border-radius:16px;padding:26px;display:flex;flex-direction:column;gap:8px"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:23px;color:#B45309">04-busqueda-vectorial.st</p><p style="font-size:25px;line-height:1.35;color:#14213D">near:k:, la condición adentro, fsum, pow, IVF</p></div>
+<div style="background:#F7F5F0;border-radius:16px;padding:26px;display:flex;flex-direction:column;gap:8px"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:23px;color:#B45309">05-cluster-dos-nodos.st</p><p style="font-size:25px;line-height:1.35;color:#14213D">dos nodos, uno se cae: desconocido, timeout, vuelve</p></div>
+<div style="background:#F7F5F0;border-radius:16px;padding:26px;display:flex;flex-direction:column;gap:8px"><p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:23px;color:#B45309">06-python-y-smalltalk.sh</p><p style="font-size:25px;line-height:1.35;color:#14213D">protoST escribe, Python lee y confirma, protoST lee</p></div>
+</div>
+<p style="font-size:28px;line-height:1.4;color:#FDE7C8">Anoten la predicción antes de correr. <span style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:24px">ejercicios/verificar.sh</span> compara cada salida con la esperada.</p>
+<aside>Si falta tiempo: 2, 3 y 5. El 6 necesita Python 3.12 o más y el venv de tests/interop/setup_venv.sh con un clon de protoBase; sin él, verificar.sh lo saltea. El 4 tarda unos 15 segundos: arma un índice IVF sobre 600 vectores. Todos dejan su base en el directorio temporal para que la miren con ls.</aside>
+</section>
+<section id="preguntas1" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:32px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Preguntas difíciles · 1</p>
+<h2 style="font-size:56px;font-weight:600;line-height:1.1;color:#14213D">Las que van a venir, contestadas antes</h2>
+<table style="font-size:24px;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif">
+<tr><th style="width:36%">Pregunta</th><th style="width:64%">Respuesta corta</th></tr>
+<tr><td>¿Qué tan lento es?</td><td>Varias veces: 0,33× los commits por segundo de <span style='font-family:JetBrains Mono, monospace'>proto_db</span> en commits chicos, de 3,5× a 35× el tiempo en consultas, 8,5× a 12,3× en commits con índice vectorial. Fechas y divisores en la slide de costos.</td></tr>
+<tr style="background:#ECE8DF"><td>¿Por qué, si Python también interpreta?</td><td>La entrada y salida es la misma. Es CPU: 53 millones de instrucciones de usuario por commit chico contra 3,6 millones (13/11). Intérprete, nodos, codificación.</td></tr>
+<tr><td>¿Es un GemStone?</td><td>No. Está en la tradición que GemStone abrió. GemStone es más fino en conflictos, más rico en índices y migración, y de otra escala.</td></tr>
+<tr style="background:#ECE8DF"><td>¿Entonces para qué sirve?</td><td>Para mostrar que un modelo inmutable alcanza para ser exacto frente a otra implementación, y para poner a prueba protoST con una aplicación de verdad.</td></tr>
+</table>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">docs/deviations.md (Performance, Commits per second) · docs/tutorial/gemstone.md · 24</p>
+<aside>La segunda respuesta sale de bench/run_tx_instr.sh (13/11/2026): tiny 53 M instrucciones de usuario por transacción después del trabajo de commit, 3,6 M para proto_db. La medición es vieja (protoST 0.10.0); los commits por segundo se volvieron a medir el 20/11 con 0.14.1 y dieron 0,33×. No inventar una cifra más nueva. Si preguntan si va a ser rápido: la mayor parte es trabajo de la VM de protoST, no de la biblioteca, y nadie lo promete.</aside>
+</section>
+<section id="preguntas2" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:32px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Preguntas difíciles · 2</p>
+<h2 style="font-size:56px;font-weight:600;line-height:1.1;color:#14213D">Las incómodas</h2>
+<table style="font-size:24px;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif">
+<tr><th style="width:36%">Pregunta</th><th style="width:64%">Respuesta corta</th></tr>
+<tr><td>¿Alguien lo usa en producción?</td><td>No. Es un prototipo de un implementador, revisado tarea por tarea, sin revisión externa.</td></tr>
+<tr style="background:#ECE8DF"><td>¿El cluster está probado?</td><td>Verificado en un simulador con defectos plantados y con <span style='font-family:JetBrains Mono, monospace'>kill -9</span> en una máquina. Evidencia fuerte, no una prueba. Nunca corrió en varias máquinas.</td></tr>
+<tr><td>¿Por qué <span style='font-family:JetBrains Mono, monospace'>add:</span> no agrega y la lista cuenta desde 0?</td><td>Para compartir el formato y un solo documento con <span style='font-family:JetBrains Mono, monospace'>proto_db</span>. Es lo primero que les pido que discutan.</td></tr>
+<tr style="background:#ECE8DF"><td>¿Por qué rechaza una <span style='font-family:JetBrains Mono, monospace'>Fraction</span> o un <span style='font-family:JetBrains Mono, monospace'>Dictionary</span> de protoST?</td><td>Porque no se pueden guardar de forma exacta y canónica en el formato. Rechazar con un error que lo nombra es mejor que guardar otra cosa.</td></tr>
+</table>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">docs/not-done.md · README.md (What it refuses) · docs/decisions.md · 25</p>
+<aside>La del cluster: citar la frase de not-done, 'strong evidence, not a proof'. La de producción: decirlo sin vueltas. Si alguien pregunta por la licencia: MIT. Si preguntan por qué no se usan los objetos mutables de Smalltalk directamente: porque el archivo guarda valores, y una celda mutable con nombre (PBMutableObject) es el único lugar donde hay 'el estado actual de una entidad'; el resto son versiones.</aside>
+</section>
+<section id="proyectos" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:30px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Dónde meterse</p>
+<h2 style="font-size:54px;font-weight:600;line-height:1.1;color:#14213D">Catorce proyectos, cada uno con un issue y un primer paso</h2>
+<table style="font-size:23px;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif">
+<tr><th style="width:5%">#</th><th style="width:63%">Proyecto</th><th style="width:18%">Repo</th><th style="width:14%">Tamaño</th></tr>
+<tr><td>1</td><td>un <span style='font-family:JetBrains Mono, monospace'>connect</span> que no bloquea</td><td>protoIO</td><td>M</td></tr>
+<tr style="background:#ECE8DF"><td>2</td><td>una lectura que responde lo que llegó</td><td>protoIO</td><td>M</td></tr>
+<tr><td>3</td><td>cerrar un stream de forma atómica · primer issue</td><td>protoST, protoIO</td><td>S–M</td></tr>
+<tr style="background:#ECE8DF"><td>4</td><td>D59: turnos justos entre actores</td><td>protoST</td><td>L</td></tr>
+<tr><td>5</td><td>estado explícito: los programas de conformidad primero · primer issue</td><td>protoST</td><td>M</td></tr>
+<tr style="background:#ECE8DF"><td>6</td><td>estado explícito: <span style='font-family:JetBrains Mono, monospace'>writeOnce</span> y <span style='font-family:JetBrains Mono, monospace'>constant</span></td><td>protoST</td><td>L</td></tr>
+<tr><td>7</td><td>un mundo replicado sobre protoST y protoBaseST</td><td>protoST</td><td>L</td></tr>
+</table>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">proyectos-voluntarios.md · issues con la etiqueta «voluntarios» en gamarino/protoBaseST, protoST y protoIO · 26</p>
+<aside>El menú completo está en proyectos-voluntarios.md, en esta misma carpeta, con el porqué, el tamaño, los requisitos y el primer paso de cada uno: un archivo para leer y un comando para correr. S es de horas a dos días, M de una a tres semanas de tardes, L de uno a tres meses. Los issues están en inglés porque los repositorios lo están.</aside>
+</section>
+<section id="proyectos2" data-transition="fade" style="background:#F7F5F0;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px 128px 160px;display:flex;flex-direction:column;gap:30px">
+
+<p style="font-size:24px;letter-spacing:2px;text-transform:uppercase;color:#B45309;font-weight:600">Dónde meterse · sigue</p>
+<h2 style="font-size:54px;font-weight:600;line-height:1.1;color:#14213D">Los de protoBaseST, y los dos para entrar</h2>
+<table style="font-size:23px;color:#14213D;font-family:'IBM Plex Sans', Arial, sans-serif">
+<tr><th style="width:5%">#</th><th style="width:63%">Proyecto</th><th style="width:18%">Repo</th><th style="width:14%">Tamaño</th></tr>
+<tr><td>8</td><td>un reentrenamiento de IVF más rápido</td><td>protoBaseST</td><td>M</td></tr>
+<tr style="background:#ECE8DF"><td>9</td><td>un test de pausa con procesos reales</td><td>protoBaseST</td><td>S–M</td></tr>
+<tr><td>10</td><td>los timers del persistidor a un décimo y a diez veces · primer issue</td><td>protoBaseST</td><td>S</td></tr>
+<tr style="background:#ECE8DF"><td>11</td><td>portar <span style='font-family:JetBrains Mono, monospace'>GroupBy</span> y los agregados de <span style='font-family:JetBrains Mono, monospace'>proto_db</span></td><td>protoBaseST</td><td>M</td></tr>
+<tr><td>12</td><td>escrituras en <span style='font-family:JetBrains Mono, monospace'>RepeatedKeysDictionary</span></td><td>protoBaseST</td><td>M</td></tr>
+<tr style="background:#ECE8DF"><td>13</td><td>el tutorial en castellano, capítulos 1 a 7 · primer issue</td><td>protoBaseST</td><td>S–M</td></tr>
+<tr><td>14</td><td>un ejemplo completo: el padrón de un club · primer issue</td><td>protoBaseST</td><td>M</td></tr>
+</table>
+<p style="font-size:28px;line-height:1.4;color:#4A5568;">Elijan uno, hagan el primer paso esta semana y comenten en el issue. El mentor se asigna ahí.</p>
+<p style="position:absolute;left:128px;bottom:64px;width:1664px;font-size:22px;color:#5B6576">proyectos-voluntarios.md · 27</p>
+<aside>Pedir que cada uno elija antes de irse, aunque sea tentativamente, y que lo diga en voz alta: dos personas en el mismo proyecto es mejor que una sola. Los de primer issue tienen el camino escrito: un test en un archivo con andamiaje, programas de conformidad, una traducción, un ejemplo.</aside>
+</section>
+<section id="cierre" data-transition="fade" style="background:#14213D;color:#F7F5F0;font-family:'IBM Plex Sans', Arial, sans-serif;padding:128px;display:flex;flex-direction:column;gap:40px">
+
+<p style="font-size:24px;letter-spacing:3px;text-transform:uppercase;color:#F2B45A;font-weight:600">Gracias</p>
+<h2 style="font-size:64px;font-weight:700;line-height:1.1;color:#F7F5F0;width:1600px">Las mismas respuestas, los mismos planes y los mismos bytes. Lo que falta, lo que cuesta y lo que no sé, también está escrito.</h2>
+<table style="font-size:27px;color:#F7F5F0;font-family:'IBM Plex Sans', Arial, sans-serif">
+<tr><th style="width:32%">Qué</th><th style="width:68%">Dónde</th></tr>
+<tr><td>protoBaseST</td><td>github.com/gamarino/protoBaseST · docs/tutorial/ · docs/not-done.md</td></tr>
+<tr style="background:#1D2B4A"><td>protoST</td><td>github.com/gamarino/protoST · docs/STATUS.md</td></tr>
+<tr><td>Este taller</td><td>docs/talks/2026-12-03-fas-workshop/ en los dos repositorios</td></tr>
+<tr style="background:#1D2B4A"><td>Los proyectos</td><td>proyectos-voluntarios.md · issues «voluntarios»</td></tr>
+</table>
+<p style="font-family:'JetBrains Mono', 'Courier New', monospace;font-size:26px;color:#C9D6E8">MIT · Gustavo Marino · las preguntas, mejor en un issue</p>
+<aside>Cerrar con el método como invitación: medir, escribir el test, arreglar; y cuando algo no se sabe, escribirlo. La historia del transporte TCP es un buen ejemplo de los tres. Pedir a cada uno que elija un proyecto, o que traiga un programa propio que quiera ver sobre una base que comparte con Python.</aside>
+</section>
+</body>
+</html>

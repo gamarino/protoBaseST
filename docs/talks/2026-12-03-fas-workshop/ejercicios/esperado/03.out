@@ -1,0 +1,11 @@
+índices: #('by_age' 'by_city')
+city = 'Oslo' es false; la condición es city eq: 'Oslo'
+a) IndexLookup sobre by_city, estimadas 150.0 filas, encontradas 150
+b) Filter <- IndexRange; el filtro prueba city; estimadas 35.0, encontradas 20
+c) Filter <- CollectionScan; las mismas filas: true
+   people sigue teniendo 2 índices: removeIndex: respondió otra colección
+d) Union <- IndexLookup
+   Filter <- CollectionScan
+e) BlockFilter <- CollectionScan
+   BlockFilter <- IndexLookup, 20 filas
+orden: Limit <- Sort <- IndexLookup → #(75 75 75)

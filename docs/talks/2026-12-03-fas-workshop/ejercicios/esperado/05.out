@@ -1,0 +1,6 @@
+a) votantes: #('n0' 'n1'), mayoría: 2
+b) contador leído en n1: 20 de 20
+c) intento 1 de n0 solo: no confirma
+c) intento 2 de n0 solo: no confirma
+d) n1 volvió; n0 confirma otra vez: true
+   contador: 20 o 21 (nunca otro valor): true
