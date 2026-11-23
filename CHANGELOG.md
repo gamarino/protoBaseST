@@ -19,8 +19,8 @@
   fsum primitives but not this one) and keeps the Smalltalk loop as its oracle and fallback, the
   centroids byte-identical on both paths. The vector benchmarks run on 0.16.0.
 - **The final suite** (task V9) ran on protoST 0.14.1 (the floor), 0.14.2 and 0.16.0, each on
-  protoCore 3.6.1 and protoIO 0.7.0, with both interop venvs present and the vector property seeds
-  at the large setting; the results are under "Final verification" below.
+  protoCore 3.6.1 and protoIO 0.7.0, with both interop venvs present, and the vector contract files
+  again at 32 property seeds; the results are under "Final verification" below.
 
 ### Vectors
 
@@ -290,6 +290,16 @@ predicates, the unknown index kinds and the plan near ties (R2) were extended to
   script) restores what the old test covered and the new one dropped: pagers open while three
   writers race, retry and commit in forced groups. The audit of the library for the same pattern
   found the TCP transport's endless turns ("Known issues").
+- **The index merge test no longer fails at random** (a test fix, no library change).
+  `tests/interop/index_ops_identical.sh` failed in about one run in eight, on protoST 0.14.1, 0.14.2
+  and 0.16.0 alike: "the planted wrong replay order went unnoticed in merged_bag". The records got
+  random version-4 oids (ProtoBase D21), and the counted set's trees order members by oid, so for
+  some oids the planted fault (index ops replayed before element ops) built the same merged counted
+  set as the right order. ProtoBase's and protoBaseST's dumps were equal in every run; only the
+  check that the comparison can catch a wrong order depended on chance. Reproduced
+  deterministically by injecting the oids of a failing run (it failed on all three binaries);
+  `py_index_replay.py` now gives the records fixed oids, with which the planted fault changes all
+  three merged dumps in every run (soak below). The helping scheduler plays no part.
 
 ### Known issues
 
@@ -309,6 +319,25 @@ predicates, the unknown index kinds and the plan near ties (R2) were extended to
   and the TCP tests commit from the program thread).
 
 ### Final verification
+
+The full default suite ran on the tree of `d7125b1`, sequentially, once per binary, with both
+interop venvs present and `PROTOBASE_REPO` set (2026-11-23):
+
+- protoST 0.14.1: passed 304, failed 0, skipped 0 (53 min).
+- protoST 0.14.2: passed 303, failed 1, skipped 0 (61 min). The failure was
+  `index_ops_identical.sh`, a test that depended on random oids ("Tests" above); fixed after the
+  run, and passed 30 runs of 30 on each of the three binaries, with the same merged trees in all
+  90.
+- protoST 0.16.0: passed 304, failed 0, skipped 0 (49 min).
+
+No vector test was skipped. The five vector contract files also ran at 32 property seeds
+(`PBST_PROP_SEEDS=32`, against the default 8), the five in parallel, once per binary, and all
+passed; each took longer than the runner's default 600 s timeout, so `RUN_TIMEOUT` was raised to
+3600 s for these runs only, and the default suite keeps 600 s at its default seeds. Seconds per file
+(`exact`, `ivf`, `coll_cosine`, `coll_l2`, `coll_ip`): 1337, 1031, 1235, 1090, 1157 on 0.14.1;
+1716, 1434, 1692, 1490, 1605 on 0.14.2 (with other test runs on the machine at the same time); 1081,
+856, 935, 904, 985 on 0.16.0. With `PENDING_FINAL=1`, `MARKERS_FINAL=1` and `CHECKLIST_FINAL=1`, the
+documentation checks and `tests/unit/queries_checklist.sh` pass.
 
 ## 0.3.0 (2026-11-20)
 

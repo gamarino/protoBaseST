@@ -281,8 +281,9 @@ documents one by one, so the index trained at 16 members and retrained at 64 and
 `'retrain_growth'`, 4.0); 600 members are below the next threshold, 1024, so its centroids are those
 of the first 256 documents. Built in bulk over the 600 (`addIndex:` on the full collection), the
 same index trains on all of them and answers 225 of 400 at nprobe 1 (372 at nprobe 4), in both
-implementations (in memory, on protoST 0.16.0 and in `proto_db`'s reference mode, 2026-11-23). Neither number says much about another data set: measure recall on your
-own data, as the block does.
+implementations (in memory, on protoST 0.16.0 and in `proto_db`'s reference mode, 2026-11-23).
+Neither number says much about another data set: measure recall on your own data, as the block
+does.
 
 Training is reproducible from the data and the seed. The obvious way to pick the initial centroids
 is to sample the members in stored order, and that is what `proto_db` first did; it failed because
