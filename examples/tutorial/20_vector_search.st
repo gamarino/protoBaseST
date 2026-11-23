@@ -2,10 +2,10 @@
 "Lesson 20: vector search.
  Tutorial chapter: docs/tutorial/20-vector-search.md
 
- DRAFT (vectors task V0): written against the API of Addendum V
+ Written by the vectors task V0 against the API of Addendum V
  (docs/superpowers/specs/2026-11-19-vectors-addendum.md, sections 2.3 to 2.9) before that API
- exists. It has never run. Task V9 moves it to examples/tutorial/20_vector_search.st and makes it
- run; until then the .pending suffix keeps it out of tests/run_tests.sh.
+ existed, in examples/queries/pending/; moved here by task V9, which ran it for the first time,
+ unchanged, and runs as a test since.
 
  What it teaches:
  - a vector index is an index like the others: part of the collection version, maintained by
@@ -23,7 +23,7 @@
  - IVF-Flat: recall against nprobe; nprobe = nlist is exact;
  - an hnsw index is maintained, but its search is refused (ruling VQ1).
 
- Run it (from examples/tutorial, once moved): STPATH=<repository>/src protost 20_vector_search.st"
+ Run it from examples/tutorial: STPATH=<repository>/src protost 20_vector_search.st"
 Import from: 'protobase'.
 Import from: '_lesson'.
 

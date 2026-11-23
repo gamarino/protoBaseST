@@ -16,15 +16,16 @@ design (spec section 2) or a cut made while building, with its reason.
   barrier, no notify. A three-member cluster commits about half as many small transactions per
   second as one standalone process on disjoint roots, and a third as many on one hot key ([deviations.md](deviations.md#cluster-mode-commits-per-second)).
 - No cloud or tiered storage, no durability mode other than `fsync`, no Windows.
-- No planned vector search yet: since the vectors phase's V3 a `PBVectorIndex` with the exact or hnsw
-  backend, and since V4 one with the `ivf_flat` backend (its lists, training and retraining, the
-  centroids byte for byte those of `proto_db` without numpy on the same host, DV3), is defined,
-  maintained by its hooks, validated and explained, node for node as `proto_db` does, and since V5
-  the collections holding one are written and merged like any other (a collection holding an
-  index of a kind protoBaseST does not know stays read only); since V6 a vector index answers
-  `near[]` through its own plans and `PBVectorSearch` (hnsw search refused, DV1), and since V7 the
-  planner chooses them with `proto_db`'s `near[]` rules (a `near[]` term no index supports is
-  refused, as `proto_db` refuses it).
+- Vector search (0.4.0, [chapter 20](tutorial/20-vector-search.md)) searches `'exact'` and
+  `'ivf_flat'` indexes; an `'hnsw'` index is maintained but **its search is refused** (DV1: the
+  graph is hnswlib's, native and not deterministic). No derived-structure cache (DV4). IVF centroids
+  equal `proto_db`'s only for its pure-Python training on the same C library (DV3). An IVF index
+  retrained in a cluster needs a lease longer than four times its retrain, about 4 ms per member
+  at dim 8 on protoST 0.16.0. A collection holding an index of a kind protoBaseST does not know
+  stays read only.
+- **A known hang on TCP cluster nodes** (0.2.0 onwards, open): a program that waits with no
+  deadline for a committing actor before it stops the node's TCP transport can hang
+  ([Known issues](#known-issues)).
   Equality and range indexes are maintained by every write and by merges onto indexed
   collections, queried through `PBQuery` and a cost-based planner, and paged in process (0.3.0;
   [chapters 17-19](tutorial/17-indexes.md), [queries.md](queries.md)).
@@ -66,7 +67,15 @@ cluster branch):
   index contract over 200 seeds and the planned-equals-scan property over 5000 seeds (250,000
   queries over every collection kind, saved, reloaded and read by concurrent actors); `proto_db`'s
   query, index and planner tests, 301 in all: 202 ported, 99 not applicable, 0 deferred
-  (`tests/unit/queries_checklist.tsv`).
+  (`tests/unit/queries_checklist.tsv`);
+- vector indexes and vector search (0.4.0), against `proto_db` `v2.0.0rc4`: 4021 vector-math cases
+  bit for bit (fsum, scores, Python's `float()`, the Mersenne Twister, `random.sample`, k-means, on
+  both kernels); index trees node by node and refusal texts byte for byte (101 indexes, every
+  training of five growth histories); every collection mutator and merge node for node; spaces
+  handed both ways with `proto_db` in its numpy mode; 101 vector cases among the 415 recorded
+  queries, 0 near ties; the index contract for eight vector registrations; tie order with injected
+  oids; and the queries checklist, now 353 test functions: 284 ported, 69 not applicable, 0
+  deferred.
 
 Not tested, or not proven:
 
@@ -84,7 +93,11 @@ Not tested, or not proven:
   whose records are on no reachable peer abandons the term).
 - **Speed.** The AVL workload is many times slower than `proto_db`'s, and the indexed-query
   workloads are 3.5 to 35 times slower on every unit, an indexed commit spending most of its time
-  on index work ([the final comparison](deviations.md#the-final-comparison-plan-task-10)). The
+  on index work ([the final comparison](deviations.md#the-final-comparison-plan-task-10)). On
+  protoST 0.16.0 an exact vector query over 10^4 vectors takes 3.4 to 5.1 times `proto_db`'s
+  pure-Python search and 443 to 1206 times its numpy search, an IVF build 2.4 times its pure-Python
+  build and about 100 times numpy's, and a commit to a vector-indexed collection 8.5 to 12.3 times
+  ([Vectors](deviations.md#vectors)). The
   dated figures, and how they were measured, are in [deviations.md](deviations.md#performance);
   they are indicative only.
 - **Memory and long runs.** A segment rolls over at 256 MiB as `proto_db`'s does; nothing was run
@@ -138,7 +151,52 @@ Not tested, or not proven:
 | Computed values, `startswith` / `endswith`, field-to-field comparison | Deferred (spec 3.2, ruling IQ3) | In `proto_db` they are not terms: they always become a `PythonFilter` (`linq.py:37-46`). | A block predicate through `where:` does the same job, as a `BlockFilter` that never uses an index. |
 | `RepeatedKeysDictionary` writes | Not a goal (unchanged) | A non-goal of the prototype; an indexed one is refused as before. | Its own task. |
 | Collection `rebuilt` (misfiled format-3 repair) | Deferred (spec 3.2) | A repair tool for damage format 3 left; `validate` reports it (`PBMisfiledError`). | Nothing repairs a misfiled collection. What would close it: a port with `validate`'s misfiled checks, if a real format-3 database needs it. |
-| Vector indexes and vector search | Excluded from 0.3.0 (spec 3.3) | `near[]`, `PBVectorIndex` writes and training, `VectorSearch` and the planner's kNN rules were out of this feature's scope; maintaining a collection's other indexes and not its vector one would write a stale index. | In 0.3.0 a collection with a vector index was read only from protoST. The vectors phase (0.4.0) lifts it: such collections are written and merged since its task V5; vector search is its V6 and V7. |
+| Vector indexes and vector search | **Done** in 0.4.0 (Addendum V); excluded from 0.3.0 (spec 3.3) | In 0.3.0 a collection with a vector index was read only from protoST. | Such collections are written and merged, and searched, since 0.4.0 ([chapter 20](tutorial/20-vector-search.md)). |
+| hnsw search | Refused (ruling VQ1, DV1) | The graph is hnswlib's: native C++, rebuilt per process, not stored and not deterministic in `proto_db` either. A Smalltalk graph would be new and unreproducible against hnswlib. | A program searching an hnsw index from protoST gets `PBNotSupportedError`; the index is still maintained, merged and validated. Use `'exact'` or `'ivf_flat'`. |
+| The derived-structure cache (`DERIVED`) | Not ported (DV4) | No process-wide mutable state in the Smalltalk layer (spec 5.1); the store tree already gives per-list access. | Every exact search re-reads the tree (no first-query build either); measured in VB1. |
+| A faster IVF retrain | Not done | A retrain is k-means plus a rebuild of every member's store entry; on protoST 0.16.0 about half of it is k-means, most of the rest the store walk and rebuild (indicative). | A cluster with a large IVF index needs a long lease (above). What would come first: the store walk (its order-key recomputation), measured. |
+| The TCP transport's endless turns (a hang, below) | Open | The fix needs a protoST or protoIO change ([Known issues](#known-issues)). | Programs on TCP cluster nodes follow the workaround. |
+
+## Known issues
+
+**A TCP cluster node can hang a program that waits on its actors** (0.2.0 onwards; open, found
+during the vectors phase's final checks). On a cluster node whose transport is `PBTcpTransport`,
+each accepted connection is read by one actor turn that lasts as long as the connection
+(`_PBTcpReader >> run`; the listener's `run` lasts as long as the transport). protoST lets an actor
+that waits inside a block help while it waits: its worker runs other actors' turns on top of the
+wait (protoST LANGUAGE 10.4, D56). When such a worker picks up a reader's turn, the waiting actor
+stays buried under it, after what it waited for has settled, until the connection closes, which is
+normally when the transport stops. A commit waits inside a block (`PBTransaction commit` waits
+inside `ensure:`), so an actor that commits on a TCP node is exposed whenever a connection is
+accepted during its commit: at a peer's first message and after every reconnect. The cluster keeps
+working (the blocked reader's I/O makes the pool add a worker) and the commit itself is decided;
+what does not happen is the actor's return. A program that waits for that actor with no deadline
+before it stops the transport hangs.
+
+- **Evidence.** A probe with five TCP transports and eight actors waiting inside `ensure:` while 20
+  connections are accepted: all eight buried after their Future was resolved, at one worker, two
+  and the default pool on protoST 0.14.1 and at one worker and the default pool on 0.16.0; all
+  eight returned once the transports stopped. Without the connections none was buried. No test of
+  the suite is affected: its cluster tests with actors use the in-process transport, whose turns
+  are finite, and its TCP tests commit from the program thread, which never helps.
+- **The cause is below protoBaseST.** Rewriting the transport's turns as finite ones that re-send
+  themselves does not help: protoST's helping drains an actor's whole mailbox, the messages it
+  sends itself included, before the helping waiter checks its own Future, so a self-re-sending
+  reader still buries it (at one worker such an actor freezes the whole program, timers included).
+  And a protoIO socket timeout does not bound a large write (an 8 MiB write to a peer that does not
+  read stayed blocked for more than 30 s with a 1 s timeout), so a sender cannot be made finite
+  either. The fix needs one of: a bounded drain when helping, a yield, or actors that helping never
+  runs, in protoST, and a write that reports partial progress, in protoIO. The maintainer is
+  deciding; `src/protobase/cluster/transport.st` is unchanged in 0.4.0.
+- **Workaround.** On a node with a TCP transport, do not wait with no deadline for an actor that
+  waits inside a block (an actor that commits, for example) while the transport runs: stop the
+  transport first (`stop`, and wait on its Future), then wait for the actor, which then returns.
+  Or wait with a deadline (`waitWithin:`), which signals `TimeoutError` instead of hanging, though
+  the actor may still be buried. Committing from the program thread, as the TCP tests do, is not
+  exposed: the program thread's waits block it and run no actor turn. Checked on 2026-11-23 against
+  the probe: stopping the transports first, then waiting with no deadline, all eight actors returned
+  in every run (three runs each at one worker and at the default pool, on protoST 0.14.1 and
+  0.16.0), where the same wait before the stop hung.
 
 ## What would come next, if the workshop wants it
 

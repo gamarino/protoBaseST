@@ -1,15 +1,13 @@
 # 20. Vector search
 
-<!-- example: examples/queries/pending/20_vector_search.st.pending -->
-Program, pending: [examples/queries/pending/20_vector_search.st.pending](../../examples/queries/pending/20_vector_search.st.pending).
+<!-- example: examples/tutorial/20_vector_search.st -->
+Program: [examples/tutorial/20_vector_search.st](../../examples/tutorial/20_vector_search.st).
 Previous: [19. Ordered reads and pages](19-ordered-reads-and-pages.md). Back to the [index](README.md).
 
-> **Draft: the API in this chapter is not implemented.** It is planned for protoBaseST 0.4.0 by
-> [Addendum V](../superpowers/specs/2026-11-19-vectors-addendum.md) to the indexed-queries spec
-> (sections 2.3 to 2.9). Every block below comes from a program written against the addendum's
-> API that **has never run**; task V9 makes it run and removes this banner. The vector feature
-> is `proto_db`'s, read from its code at `v2.0.0rc4` and cited. Figures marked
-> `[measured in V<n>: ...]` do not exist yet.
+> **protoBaseST 0.4.0** ([Addendum V](../superpowers/specs/2026-11-19-vectors-addendum.md) to the
+> indexed-queries spec, sections 2.3 to 2.9). Every block below comes from the chapter's program,
+> which runs as a test. The vector feature is `proto_db`'s, read from its code at `v2.0.0rc4` and
+> cited.
 
 A vector index finds the elements whose embedding is nearest to a query vector. It is the third
 index kind, after chapter 17's equality and range indexes, and it works like them: it belongs to a
@@ -97,12 +95,13 @@ score come in the order of their member keys, which for records is their oids
 the same database.
 
 What an exact search costs here, per query and for the first query after opening a database:
-on protoST 0.16.0 (bench VB1, 2026-11-21, `proto_db`'s clustered benchmark data, k = 10), a query
-over 10^3 documents takes 42 to 64 ms and over 10^4 documents 0.45 to 0.7 s, and the first query
-costs what the others cost, since protoBaseST keeps no derived structure between searches (DV4).
-`proto_db` answers the same queries (verified, answer for answer) in 5 to 10 ms and 79 to 129 ms
-in pure Python, its first query 1.0 to 1.6 times a later one, and with numpy in about 1 ms or less per
-query once its matrix is built (the first query, which builds it, 2 to 28 ms). The full table is in
+on protoST 0.16.0 (bench VB1, the last run of the vectors phase, 2026-11-22, `proto_db`'s clustered
+benchmark data, k = 10, each unit's time divided by its 10 queries), a query over 10^3 documents
+takes 36 to 42 ms and over 10^4 documents 417 to 466 ms, and the first query costs what the others
+cost, since protoBaseST keeps no derived structure between searches (DV4). `proto_db` answers the
+same queries (verified, answer for answer) in 5.7 to 10.5 ms and 82 to 139 ms in pure Python, its
+first query 1.0 to 1.5 times a later one, and with numpy in about 1 ms or less per query once its
+matrix is built (the first query, which builds it, 2 to 27 ms). The full table is in
 [deviations.md](../deviations.md#vectors).
 
 ## Combining `near:` with conditions
@@ -152,12 +151,14 @@ rows (bench VB4, 10^4 vectors of dim 8 under an exact index, k = 10, protoST 0.1
 per query at every selectivity, the post-filter 0.1, 1.7 and 6 on average when the condition keeps
 1, 10 and 50 per cent of the records. Both implementations do the same work for each: the
 filtered search evaluates the condition on every member and scores only those it accepts, the
-post-filter scores every member. Here the filtered search takes 396, 428 and 557 ms per query
-against 458 to 470 ms for the post-filter: cheaper at 1 and 10 per cent, dearer at 50, since
-evaluating the condition on a member (about 26 microseconds, one probe) costs less than scoring
-one (about 43) and only pays off when most members are rejected. In `proto_db`, whose evaluation
-is far cheaper than its scoring, the filtered search is the cheaper at every selectivity (20 to
-65 ms against 83 to 86 ms). Either way the post-filter answers another question.
+post-filter scores every member. Here (the last run, 2026-11-22, each unit's time divided by its
+10 queries) the filtered search takes 410, 426 and 535 ms per query against 421 to 426 ms for the
+post-filter: a little cheaper at 1 per cent, the same within the run's noise at 10, dearer at 50.
+Since a filtered search that keeps 1 per cent of the members takes about what scoring all of them
+takes, evaluating the condition on a member costs here about what scoring it costs, so restricting
+the search pays off only when most members are rejected. In `proto_db`, whose evaluation is far
+cheaper than its scoring, the filtered search is the cheaper at every selectivity (21 to 65 ms
+against 84 to 88 ms). Either way the post-filter answers another question.
 
 ## Thresholds, and both
 
@@ -234,7 +235,9 @@ of a million uniform doubles in [-1000, 1000], on 845 (Addendum V, section 2.5).
 multiplies would pick another nearest centroid on a near tie, and the stored centroids would not be
 `proto_db`'s.
 
-So protoBaseST squares with protoST's `raisedTo: 2`, which calls the same pow function, and its tests pin
+So protoBaseST squares with protoST's `raisedTo: 2`, which calls the same pow function (on protoST
+0.16.0, Float fsumOfPowSquaredDifferences:with: computes a whole distance in one primitive, with the
+same pow and the same correctly rounded sum, behind its own feature probe), and its tests pin
 half-way cases computed by CPython, so that a change in either fails loudly instead of moving a
 centroid. It also means "the same bytes" has a precise scope for IVF training: the same history,
 `proto_db` training without numpy (numpy has its own arithmetic), and the same C library on the same
@@ -262,17 +265,24 @@ lesson check: 'nprobe = nlist is exact' is: (recall value: 16) equals: 1.0.
 ```
 
 Recall at 1 and 4 probes of 16 lists, on these random vectors (which have no cluster structure for
-the index to exploit), over the block's 40 queries: **0.5625 at nprobe 1 (225 of 400) and 0.93 at
-nprobe 4 (372 of 400)**, and 1.0 at nprobe 16. That is what the block's search observed on
-2026-11-21, with the index built in memory and searched through a `PBVectorSearch` the block builds (the
-plan the planner builds for `near:` since the vectors phase's V7): six runs of protoBaseST (three on protoST 0.14.1, three on
-0.16.0) and the same block in `proto_db` v2.0.0rc4 on the same data, three runs in its reference
-mode (numpy blocked) and three with numpy, all gave these same counts, query for query the same
-sets. `proto_db`'s own tutorial says its partial-probe recall varied between runs on identical data,
-while its code records the cause as fixed (R128, below). On its own tutorial's data
-(`random.Random(7)`, `uniform(-1, 1)`), the same check gave 240, 360 and 400 of 400 in all six
-`proto_db` runs: no variation was observed. What was not observed here is the tutorial's path
-through a database and a transaction, whose fresh oids are what R128 fixed.
+the index to exploit), over the block's 40 queries: **0.585 at nprobe 1 (234 of 400) and 0.93 at
+nprobe 4 (372 of 400)**, and 1.0 at nprobe 16. That is what the program printed on 2026-11-23 in
+six runs (three on protoST 0.14.1, three on 0.16.0), and what the same block, ported to `proto_db`
+v2.0.0rc4 through a database and a transaction as here (`tests/interop/py_chapter20_recall.py`),
+gave in six runs (three in its reference mode, three with numpy): the same counts every time,
+though every run gives the records fresh oids.
+`proto_db`'s own tutorial says its partial-probe recall varied between runs on identical data,
+while its code records the cause as fixed (R128, below); no variation was observed here, nor on that
+tutorial's own data (`random.Random(7)`, `uniform(-1, 1)`: 240, 360 and 400 of 400 in six
+`proto_db` runs, during task V6).
+
+The figures depend on the history of the index, not only on its members. The block appends the
+documents one by one, so the index trained at 16 members and retrained at 64 and 256 (its
+`'retrain_growth'`, 4.0); 600 members are below the next threshold, 1024, so its centroids are those
+of the first 256 documents. Built in bulk over the 600 (`addIndex:` on the full collection), the
+same index trains on all of them and answers 225 of 400 at nprobe 1 (372 at nprobe 4), in both
+implementations (in memory, on protoST 0.16.0 and in `proto_db`'s reference mode, 2026-11-23). Neither number says much about another data set: measure recall on your
+own data, as the block does.
 
 Training is reproducible from the data and the seed. The obvious way to pick the initial centroids
 is to sample the members in stored order, and that is what `proto_db` first did; it failed because
@@ -289,8 +299,12 @@ twice an exact search at nprobe 100. The cause, measured, was the list walks: ea
 node it reached with tuple order keys, and every list was probed for emptiness before the first
 was read. After the fix (each list bounded on its Integer list number, empty lists skipped as the
 probe reaches them), a query took 19 ms, 54 ms and 1.08 s (8.2, 3.5 and 7.2 times `proto_db`'s;
-the full probe 1.40 times an exact search, on a busier machine). Recall at 10 against exact was 0.46, 0.85 and 1.0, the same in protoBaseST and in
-both of `proto_db`'s modes.
+the full probe 1.40 times an exact search, on a busier machine). In the last run of the phase
+(2026-11-22, after task V8 made one scorer per query instead of one dispatch per score), the build
+took 139.7 s (`proto_db` 58.4 s in pure Python, 1.43 s with numpy) and a query 11.6 ms, 26.6 ms and
+576 ms (5.3, 1.8 and 4.1 times `proto_db`'s pure-Python query; the full probe 1.24 times an exact
+search, `proto_db`'s 1.01 times its own). Recall at 10 against exact was 0.46, 0.85 and 1.0 in
+every run, the same in protoBaseST and in both of `proto_db`'s modes.
 
 An index trained by either implementation is valid for the other: the format leaves training to
 the writer, and list numbers, probes and rankings are computed from the stored centroids, whoever
@@ -319,13 +333,13 @@ lesson check: 'its search is refused' signals: PBNotSupportedError containing: '
 - **Every write pays for the index.** A vector index is part of the collection version, so every
   commit that adds a document adds it to the index, and a commit that crosses a retrain threshold
   of an IVF index runs k-means inside that commit, in the merge of a blind write too:
-  appending to a list of 600 vectors commits 35.9 times per second with no index, 16.2 with an
-  exact index and 5.0 with an IVF index retraining at every 3 % of growth (5000 vectors: 32.1,
-  15.1 and 5.1; bench VB3, protoST 0.16.0, where `proto_db` commits 156, 133 and 52 times, 142,
-  119 and 70 with numpy). In a cluster, that k-means runs in the round's build, under the
-  cluster-wide write permission: 120 blind writes onto a vector-indexed dictionary commit 8.1
-  times per second with an exact index and 3.7 with an IVF index in a three-member cluster (16.1
-  and 4.7 standalone; bench VB5). A retrain takes about 1.6 to 1.9 s for 630 to 700 members on
+  appending to a list of 600 vectors commits 34.5 times per second with no index, 15.2 with an
+  exact index and 4.6 with an IVF index retraining at every 3 % of growth (5000 vectors: 30.2,
+  13.8 and 4.6; bench VB3 in the full comparison of 2026-11-22, protoST 0.16.0, where `proto_db`
+  commits 152.5, 130.2 and 49.3 times, 139.0, 116.4 and 66.7 with numpy). In a cluster, that k-means
+  runs in the round's build, under the cluster-wide write permission: 120 blind writes onto a
+  vector-indexed dictionary commit 7.7 times per second with an exact index and 3.4 with an IVF
+  index in a three-member cluster (15.4 and 4.3 standalone; bench VB5, the same run). A retrain takes about 1.6 to 1.9 s for 630 to 700 members on
   protoST 0.16.0, longer than the 667 ms a write permission lasts under the default lease, so an
   IVF index retrained in a cluster needs a longer `leaseDuration`, more than four times the
   measured retrain for its size; the cost per member grows, 2.5 ms at 631 to 3.7 ms at 5150, so

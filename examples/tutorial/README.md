@@ -8,7 +8,8 @@ teaches and which chapter explains it. Each one **proves what it shows**: it pri
 
 protoBaseST is a proposal prototype for the FAST Smalltalk workshop (2026-12-03), not a product.
 Lessons 01 to 12 use only what v0.1.0 does; lessons 17 to 19 and lesson 11's indexed part use the
-indexed-query API of 0.3.0. Where something is not supported, the example says so and
+indexed-query API of 0.3.0; lesson 20, and the vector index of lesson 11's indexed part, use the
+vector search of 0.4.0. Where something is not supported, the example says so and
 checks the refusal.
 
 ## Run them
@@ -43,10 +44,11 @@ check; a lesson that stops on an unexpected error leaves that directory behind.
 | 10 | [10_crash_recovery.st](10_crash_recovery.st) | A torn tail, a torn `space.root.tmp`, and a writer killed with `SIGKILL` | [10](../../docs/tutorial/10-crash-recovery.md) |
 | 11 | [11_python_interop.sh](11_python_interop.sh) | protoST and Python's `proto_db` on one directory | [11](../../docs/tutorial/11-python-interop.md) |
 | 12 | [12_refusals.st](12_refusals.st) | What is refused, and what each refusal protects | [12](../../docs/tutorial/12-refusals.md) |
-| 11 | [11_indexed_interop.sh](11_indexed_interop.sh) | Indexes written by Python, changed and merged onto by protoST, validated by Python (0.3.0) | [11](../../docs/tutorial/11-python-interop.md#indexes-from-both-sides) |
+| 11 | [11_indexed_interop.sh](11_indexed_interop.sh) | Indexes written by Python, changed and merged onto by protoST, validated by Python (0.3.0); a vector index the same way, queried by Python (0.4.0) | [11](../../docs/tutorial/11-python-interop.md#indexes-from-both-sides) |
 | 17 | [17_indexes.st](17_indexes.st) | Indexes are part of the collection version; key specs; extractors (0.3.0) | [17](../../docs/tutorial/17-indexes.md) |
 | 18 | [18_queries_and_plans.st](18_queries_and_plans.st) | `PBQuery`, `PBField`, `explain`, and why the planner sometimes scans (0.3.0) | [18](../../docs/tutorial/18-queries-and-plans.md) |
 | 19 | [19_ordered_reads_and_pages.st](19_ordered_reads_and_pages.st) | Ordered reads, windows by rank, the obvious paging against a pager, stable pages over one snapshot (0.3.0) | [19](../../docs/tutorial/19-ordered-reads-and-pages.md) |
+| 20 | [20_vector_search.st](20_vector_search.st) | Vector indexes, nearest neighbours with and without conditions, thresholds, correctly rounded scores, `x ** 2` against `x * x`, IVF-Flat recall, hnsw refused (0.4.0) | [20](../../docs/tutorial/20-vector-search.md) |
 
 Helpers (never run as tests, because their names start with `_`): `_lesson.st` (the checks),
 `_crash_writer.st` (the process lesson 10 kills), `_interop_write.st` and `_interop_read.st` (the

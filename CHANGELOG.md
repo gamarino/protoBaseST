@@ -18,6 +18,9 @@
   2.0)`, then the msum of `fsum:`); protoBaseST finds it by its own feature probe (0.15.0 has the
   fsum primitives but not this one) and keeps the Smalltalk loop as its oracle and fallback, the
   centroids byte-identical on both paths. The vector benchmarks run on 0.16.0.
+- **The final suite** (task V9) ran on protoST 0.14.1 (the floor), 0.14.2 and 0.16.0, each on
+  protoCore 3.6.1 and protoIO 0.7.0, with both interop venvs present and the vector property seeds
+  at the large setting; the results are under "Final verification" below.
 
 ### Vectors
 
@@ -148,10 +151,13 @@
   vectors of dim 8 and 32, cosine and l2, the first query and ten; an `ivf_flat` index of nlist 100
   over 10^4 vectors of dim 32, its build and its queries at nprobe 1, 4 and 100 with their recall;
   self-verified against `proto_db`'s answers (both modes for exact; the reference mode, centroids
-  included, for IVF). On protoST 0.16.0 an exact query over 10^4 vectors takes 0.45 to 0.7 s (4.9
-  to 7.0 times `proto_db`'s pure-Python search), the IVF build 164 s (2.9 times), a query at
-  nprobe 1 and 4 62 and 110 ms (19 and 54 ms after fix round 1, and 1.08 s at nprobe 100, 1.40
-  times an exact search); recall 0.46, 0.85 and 1.0 in both implementations
+  included, for IVF). On protoST 0.16.0, in the V6 run (per query: each unit's time divided by its
+  10 queries), an exact query over 10^4 vectors took 0.45 to 0.7 s (4.9 to 7.0 times `proto_db`'s
+  pure-Python search), the IVF build 164 s (2.9 times), a query at nprobe 1 and 4 62 and 110 ms
+  (19 and 54 ms after fix round 1, and 1.08 s at nprobe 100, 1.40 times an exact search); recall
+  0.46, 0.85 and 1.0 in both implementations. The last run of the phase (V8 fix round 1, below):
+  417 to 466 ms per exact query over 10^4 vectors (3.4 to 5.1 times), the IVF build 139.7 s (2.4
+  times), 11.6, 26.6 and 576 ms per IVF query at nprobe 1, 4 and 100, the same recall
   (`docs/deviations.md`, Performance, "Vectors").
 - **The planner's `near[]` rules and `PBField near:`** (task V7): `PBPlanner` has `proto_db`'s
   `near[]` rules (`planner.py:98-135`, `194-275`): a `near[]` conjunct is always answered by an
@@ -194,8 +200,115 @@
   above, takes 396, 428 and 557 ms per query against 458 to 470 ms for the post-filter (640 to 794
   ms before it); `proto_db`'s takes 20 to 65 ms against 83 to 86 ms. Both evaluate the condition on
   every member and score only the accepted ones, so the filtered search wins where evaluating a
-  member costs less than scoring the members it rejects (`docs/deviations.md`, Performance,
-  "Vectors").
+  member costs less than scoring the members it rejects. In the last run of the phase (V8 fix round
+  1, divided by its 10 queries): 410, 426 and 535 ms against 421 to 426 ms (`docs/deviations.md`,
+  Performance, "Vectors").
+- **The full vector comparison and ruling VQ2** (task V8): `RUNS=5 bench/run_query.sh VB0 VB1 VB2
+  VB3 VB4 VB5` on protoST 0.16.0, every unit verified against `proto_db` in its reference mode and,
+  for VB1, VB2, VB3 and VB5, its numpy mode; VB0 and VB1 again on 0.14.1. VQ2 is recorded as
+  decided by the maintainer (the primitives were built ahead of V8, protoST 0.15.0 and 0.16.0), and
+  its computation as a measurement: the kernel's share of an exact query (VB0's per-score cost
+  times n, over VB1's per-query time) was 72 to 118 per cent on 0.14.1, 38 to 61 per cent on 0.16.0
+  with the primitives, and 22 to 33 per cent after the one-scorer change (fix round 1, above:
+  cosine queries 1.47 to 1.49 times faster, l2 1.09 to 1.10). Maintenance on 0.16.0 (commits per
+  second, the unit's commits over its minimum time): appends to a list of 600 with no index, an
+  exact and an IVF index 34.5, 15.2 and 4.6 (`proto_db` 152.5, 130.2 and 49.3); blind writes merged
+  onto a dictionary of 600, exact and IVF, 15.4 and 4.3 standalone, 7.7 and 3.4 in a three-member
+  cluster (`proto_db` standalone 131.0 and 49.6). An A/B of the sources found no maintenance
+  regression against the V5 run. `docs/deviations.md`, Performance, "Vectors", has every table, its
+  divisor named in each derived figure; `docs/decisions.md`, VQ2, the decision.
+- **The lease-sizing rule for IVF indexes in a cluster** (tasks V5 and V8): a retrain runs inside
+  the commit that crosses its threshold, and in a cluster inside the round's build, under the write
+  permission (667 ms with `proto_db`'s default 2000 ms lease), as
+  `proto_db`'s does (`transactions.py:1639-1656`). A retrain longer than the permission never
+  commits, so an IVF index retrained in a cluster needs `leaseDuration` above four times its
+  measured retrain: about 4 ms per member at dim 8 on protoST 0.16.0 (2.5 ms at 631 members, 3.7 ms
+  at 5150), so about 11 s for 700 members and 80 s for 5000. The longer lease lengthens the write
+  outage when the permission's holder dies. Documented in chapter 20, `docs/queries.md` and
+  `docs/deviations.md`.
+- **Tie order against `proto_db`** (task V8, fix round 2): `tests/interop/vector_ties_identical.sh`
+  gives both implementations records with injected oids and checks that tied scores rank alike,
+  by the member key's order key (`rank_entries`). Fresh records tie differently in every process in
+  both implementations, since a new atom's oid is a random version-4 UUID (ProtoBase D21): that is
+  `proto_db`'s behaviour, not a parity gap.
+- **Chapter 20 runs, and the documentation is complete** (task V9): `examples/tutorial/20_vector_search.st`
+  (moved from `examples/queries/pending/`, which is now empty) runs as a test, unchanged since it
+  was written against the addendum's API, and the chapter is no longer a draft. Its recall block
+  printed 234, 372 and 400 of 400 (nprobe 1, 4, 16) in six runs on protoST 0.14.1 and 0.16.0, and
+  `tests/interop/py_chapter20_recall.py`, the same block in `proto_db` through a database, the same
+  counts in six runs in both of its modes, fresh oids every run; the chapter explains why a bulk
+  build of the same index gives 225 at nprobe 1 (the centroids follow the index's history). The
+  guide gains "A worked vector plan" (`examples/queries/vector_plans.st`: two vector indexes on one
+  path, the planner's choice, the rejected candidate made visible), every figure a model estimate
+  generated from `proto_db`'s planner by `tests/interop/py_guide_plans.py` and checked by
+  `tests/docs/guide_plans.sh` (ruling CR10). Chapter 11's indexed part adds a vector index written
+  by Python, searched, changed and merged onto by protoST, and validated and searched by Python
+  against a brute force (`examples/tutorial/11_indexed_interop.sh`, 12 checks). The reference, the
+  guide, the chapter, the README and `docs/not-done.md` drop their draft markers and quote the last
+  measured runs.
+- **The queries checklist is closed:** 353 `proto_db` test functions, 284 ported, 69 not applicable,
+  0 deferred (`CHECKLIST_FINAL=1 tests/unit/queries_checklist.sh`); no `[measured in ...]` marker
+  and no pending selector is left (`MARKERS_FINAL=1`, `PENDING_FINAL=1`).
+
+### Deviations added
+
+Each is a row of `docs/deviations.md` ("Indexed queries" and Performance, "Vectors"), with its
+reason and cost; the addendum's DV1 to DV9:
+
+- **DV1, hnsw search refused** (ruling VQ1): maintained, merged, validated, explained, estimated
+  and planned; `PBNotSupportedError` at the first execution of its plan, as `proto_db` without
+  hnswlib.
+- **DV2, the exact backend's `numpy`** is kept and written, with no effect.
+- **DV3, IVF training** is `proto_db`'s pure-Python k-means (the libm note, the two ways the square
+  is reached, MSVC's `pow`, protoST D58); centroids may differ in the last bits from `proto_db`'s
+  numpy training; either side validates the other's index.
+- **DV4, no derived-structure cache**: every search reads the store tree.
+- **DV5, a block in a `VectorSearch`'s `'where'`** is described `{ 'block' -> description }`.
+- **DV6, the hnsw estimate's log2** is `PBCost log2:` (R2's near ties; 0 observed).
+- **DV7, Python's own errors** become `PBValidationError` with CPython's text, at the same point:
+  (a) to (f).
+- **DV8, the hnsw refusal text** names protoST instead of `pip install hnswlib`.
+- **DV9, performance**: the vector benchmarks VB0 to VB5, recorded, not a semantic difference.
+
+And four rows of their own: **Symbols in `near[]`** (a Symbol is a String in protoST, so `#l2` is
+accepted); **`near[]` inside an OR or a NOT holding a block** (the refusal is `proto_db`'s, its
+text parenthesised differently in two shapes); **`(near & aBlock) not not`** (accepted, as its
+logically equal `near & aBlock`, where `proto_db`'s front end refuses it); and **Boolean counts in
+a tampered vector index** (`validate:` compares them as Python's `==`, but a hook's arithmetic on
+one fails here where Python computes with `True` as 1). The rows on atoms in `describe`, block
+predicates, the unknown index kinds and the plan near ties (R2) were extended to the vector port.
+
+### Tests
+
+- **The pager stability test no longer hangs** (`1763c2c`, `bdbc32b`, `20633c0`; a test-design
+  fix, no library change). `tests/unit/qry_pager_stability.st` timed out once (600 s) in a full run
+  on protoST 0.14.1. The cause was the test: its actor messages waited inside blocks for endless
+  messages, so a reader's turn could stay buried under a writer's, below protoST's helping
+  (protoST D56); it hung on 0.14.1, 0.14.2 and 0.16.0 at one worker, so it was not protoST's S45.
+  Its rounds are now finite messages, with a one-worker regression script
+  (`qry_pager_stability_one_worker.sh`); `tests/unit/qry_pager_racing.st` (and its one-worker
+  script) restores what the old test covered and the new one dropped: pagers open while three
+  writers race, retry and commit in forced groups. The audit of the library for the same pattern
+  found the TCP transport's endless turns ("Known issues").
+
+### Known issues
+
+- **A TCP cluster node can hang a program that waits on its actors** (0.2.0 onwards; open). On a
+  node whose transport is `PBTcpTransport`, an actor that waits inside a block (a commit does:
+  `PBTransaction commit` waits inside `ensure:`) can stay buried, after what it waited for has
+  settled, under a connection's reader turn, which lasts as long as the connection, until the
+  transport stops. A program that waits for such an actor with no deadline before it stops the
+  transport hangs. Reproduced with five transports and eight such actors, at one worker, two
+  workers and the default pool on protoST 0.14.1, and at one worker and the default pool on
+  0.16.0. The cause is in two lower layers: protoST's
+  helping runs an actor's whole mailbox, its messages to itself included, before the helping waiter
+  checks its own Future, so no finite-turn rewrite of the transport releases it; and a protoIO
+  socket timeout does not bound a large write. The transport is unchanged in 0.4.0 while the
+  maintainer decides on a protoST and protoIO change. Workaround: see `docs/not-done.md`, "Known
+  issues". The suite's cluster tests are not affected (their actors use the in-process transport,
+  and the TCP tests commit from the program thread).
+
+### Final verification
 
 ## 0.3.0 (2026-11-20)
 

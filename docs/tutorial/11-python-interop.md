@@ -122,7 +122,8 @@ with 0.3.0; the next section shows the interplay.
 ## Indexes, from both sides
 
 > **protoBaseST 0.3.0** (the
-> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md), chapter 17).
+> [indexed-queries spec](../superpowers/specs/2026-11-18-indexed-queries-design.md), chapter 17);
+> the vector index, **0.4.0** (chapter 20).
 > The code comes from [11_indexed_interop.sh](../../examples/tutorial/11_indexed_interop.sh),
 > which runs [11_indexed_python_side.py](../../examples/tutorial/11_indexed_python_side.py)
 > and [_indexed_change.st](../../examples/tutorial/_indexed_change.st) on one directory; it runs
@@ -170,9 +171,44 @@ Python then checks every index against a scan, plans the same query with the sam
     assert oslo.count() == 12, oslo.count()
 ```
 
+**A vector index, the same way (0.4.0).** Python also writes forty documents with a three-number
+embedding each into a dictionary with a vector index:
+
+```python
+        docs = tr.new_dictionary().add_index(VectorIndex("by_vec", "vec", dim=3, metric="l2"))
+        for i in range(40):
+            docs = docs.set_at(i, tr.new_object(title=f"doc{i}", vec=place(i)))
+        tr.set_root_object("docs", docs)
+```
+
+protoST searches it, changes it through its mutators and merges a blind write onto it, as it did
+with the people:
+
+```smalltalk
+docs := db newTransaction getRootObject: 'docs'.
+lesson check: 'Python''s vector index is read' is: docs indexNames equals: #('by_vec').
+lesson check: 'and searched here' is: (nearest value: docs) equals: #('doc13' 'doc12' 'doc10').
+db run: [:tr | | ds |
+    ds := tr getRootObject: 'docs'.
+    ds := ds setAt: 12 value: ((ds getAt: 12) with: 'vec' value: #(30.0 0.0 0.5)).
+    ds := ds removeAt: 13.
+    ds := ds setAt: 40 value: (tr newObject: { 'title' -> 'doc40'. 'vec' -> #(12.25 3.0 0.5) }).
+    tr setRootObject: 'docs' value: ds].
+```
+
+Python validates the vector index too, plans the same near query with it, and checks its answer
+against a brute force over the documents:
+
+```python
+    nearest = from_collection(docs).where(F.vec.near(QUERY, k=3))
+    assert nearest.explain()["plan"] == "VectorSearch", nearest.explain()
+    brute = sorted(docs.values(), key=lambda d: math.dist(QUERY, d.vec))[:3]
+    assert [d.title for d in nearest.to_list()] == [d.title for d in brute], nearest.to_list()
+```
+
 For this to hold, protoBaseST must write the index trees `proto_db` would have written for the same
 changes, node for node: the same keys, the same tree shapes, the same order of index updates in
-every mutator (spec 5.4). That is checked by the interop tests of spec 6.1, which run the same
+every mutator (spec 5.4; for vector indexes, Addendum V, 2.11). That is checked by the interop tests of spec 6.1, which run the same
 seeded operations in both languages and compare the dumps, and by this lesson's last step:
 `proto_db` validates every index protoST changed and its verifier accepts the directory.
 

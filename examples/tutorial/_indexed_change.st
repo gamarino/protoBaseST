@@ -7,7 +7,7 @@
 Import from: 'protobase'.
 Import from: '_lesson'.
 
-| lesson space db people inOslo mine |
+| lesson space db people inOslo mine docs nearest query |
 lesson := Lesson named: '11 indexed interop'.
 space := PBObjectSpace storage: (PBFileStorage path: Smalltalk arguments first).
 db := space openDatabase: 'people'.
@@ -32,5 +32,28 @@ lesson check: 'every element is there' is: people count equals: 41.
 lesson check: 'the indexes are still Python''s two' is: people indexNames equals: #('by_age' 'by_city').
 lesson check: 'and each equals a scan'
     is: ([people validate. 'clean'] on: PBCorruptionError do: [:e | e messageText]) equals: 'clean'.
+
+"The vector index (0.4.0): Python's, queried, changed and merged onto here, as the others."
+query := #(12.25 3.0 0.5).
+nearest := [:ds | ((PBQuery from: ds) where: ((PBField path: 'vec') near: query k: 3)) asArray collect: [:d | d at: 'title']].
+docs := db newTransaction getRootObject: 'docs'.
+lesson check: 'Python''s vector index is read' is: docs indexNames equals: #('by_vec').
+lesson check: 'and searched here' is: (nearest value: docs) equals: #('doc13' 'doc12' 'doc10').
+db run: [:tr | | ds |
+    ds := tr getRootObject: 'docs'.
+    ds := ds setAt: 12 value: ((ds getAt: 12) with: 'vec' value: #(30.0 0.0 0.5)).
+    ds := ds removeAt: 13.
+    ds := ds setAt: 40 value: (tr newObject: { 'title' -> 'doc40'. 'vec' -> #(12.25 3.0 0.5) }).
+    tr setRootObject: 'docs' value: ds].
+mine := db newTransaction.
+mine setRootObject: 'docs' value: (mine newDictionary
+    setAt: 41 value: (mine newObject: { 'title' -> 'doc41'. 'vec' -> #(12.0 3.0 0.5) })).
+mine commit.
+docs := db newTransaction getRootObject: 'docs'.
+lesson check: 'a blind write merged onto it: protoST''s two documents come first'
+    is: ((nearest value: docs) first: 2) equals: #('doc40' 'doc41').
+lesson check: 'every document is there' is: docs count equals: 41.
+lesson check: 'the vector index equals a scan'
+    is: ([docs validate. 'clean'] on: PBCorruptionError do: [:e | e messageText]) equals: 'clean'.
 space close.
 lesson finish.

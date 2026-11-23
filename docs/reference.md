@@ -28,7 +28,7 @@ Contents:
 [Errors](#errors) |
 [Lower layers](#lower-layers) |
 [Indexed queries (0.3.0)](#indexed-queries-030) |
-[Vector search (0.4.0, draft)](#vector-search-040-draft) |
+[Vector search (0.4.0)](#vector-search-040) |
 [The module and its files](#the-module-and-its-files)
 
 ## Mapping from `proto_db`
@@ -1309,7 +1309,7 @@ protoBaseST describes it.
 The meaning of every node, field and estimate, with three worked plans, is
 [queries.md, Reading a plan](queries.md#reading-a-plan).
 
-#### PBVectorSearch (0.4.0, draft)
+#### PBVectorSearch (0.4.0)
 
 **`PBVectorSearch`** (`src/protobase/plans.st`, task V6, done), `proto_db`'s `VectorSearch`, joins
 the nodes above. It works with any index whose `supports:` accepts the term. The planner builds it
@@ -1342,16 +1342,14 @@ and what a page costs, are in [queries.md](queries.md#ordered-reads-windows-and-
 | `plan`, `pageSize` | The plan paged; the rows per page. |
 | `printOn:` | `PBPager(page size 50, by rank)` or `PBPager(page size 50, materialised)`. |
 
-## Vector search (0.4.0, draft)
+## Vector search (0.4.0)
 
-> **Draft: this section is implemented up to its task markers.** It is the API of
-> [Addendum V](superpowers/specs/2026-11-19-vectors-addendum.md) (sections 2.1 to 2.9), written
-> before the code; V1 (the kernel), V2 (near queries) and V3 (the vector index's definition,
-> hooks, `validate:` and `explain`, for the exact and hnsw backends), V4 (ivf_flat), V5
-> (collections holding vector indexes written and merged) and V6 (vector search: the index's
-> plans, `PBVectorSearch`, `nearOracle:...`) and V7 (the planner's `near[]` rules, `PBField near:`)
-> are done: every selector below exists. Their figures are the remaining tasks' (V8, V9). A collection holding a `PBVectorIndex` is written and merged like any other
-> (V5, ruling IQ5a). The concepts are in
+> The API of [Addendum V](superpowers/specs/2026-11-19-vectors-addendum.md) (sections 2.1 to 2.9),
+> written before the code and built by the vectors tasks V1 to V7 (the kernel, near queries, the
+> index and its backends, collections written and merged, vector search, the planner's `near[]`
+> rules and `PBField near:`); every selector below exists, and the figures are those of
+> [deviations.md](deviations.md#vectors). A collection holding a `PBVectorIndex` is written and
+> merged like any other (V5, ruling IQ5a). The concepts are in
 > [queries.md, Vector search](queries.md#vector-search); the tutorial is
 > [chapter 20](tutorial/20-vector-search.md).
 
@@ -1424,7 +1422,7 @@ filtered. A `where:` after `skip:`, `take:` or any other step filters that step'
 `near[]`. A query whose `near[]` term no index supports is `PBNotSupportedError` when it runs.
 
 The plan node, `PBVectorSearch`, is listed with the other nodes, under
-[Plans and explain](#pbvectorsearch-040-draft).
+[Plans and explain](#pbvectorsearch-040).
 
 ### Internal: the vector kernel
 
@@ -1432,7 +1430,10 @@ The plan node, `PBVectorSearch`, is listed with the other nodes, under
 they exist to compute exactly what CPython computes, and nothing outside the vector port should
 depend on them. `PBVectorMath` (class side) holds `floatOf:` (Python's `float()` of an Integer,
 Float or `Decimal`), `canonicalVector:dim:`, `fsum:` (CPython's `math.fsum`), `sumNonNegative:`,
-`score:query:vector:`, `scoreFloor:threshold:`, `rank:query:metric:k:threshold:`, `normalized:`,
+`score:query:vector:`, `scorerFor:query:` (a block scoring many vectors against one query: the
+metric dispatch, the query's copy and, for cosine, its norm done once; bit for bit
+`score:query:vector:`, to which any failure falls back), `scoreFloor:threshold:`,
+`rank:query:metric:k:threshold:`, `normalized:`,
 `trainingOrderOf:` and `kmeans:nlist:iterations:seed:`. `PBPythonRandom` (class side) holds
 `sampleRange:count:seed:` (`random.Random(seed).sample(range(n), k)`) and `bits:count:seed:` (a
 test entry point: the first values of `random.getrandbits`). `canonicalVector:dim:` answers a `PBTuple`
@@ -1451,11 +1452,14 @@ kernel calls them; `_forceSmalltalkKernel:` exists for the tests only, which run
 case on both paths. The Smalltalk kernel is the oracle and the fallback (protoST 0.14.1, an
 Integer term, sequences of unequal sizes). `normalized:`, which k-means uses for cosine (the
 vectors before training and the centroids after), takes its norm from the primitive and stays bit
-for bit the Smalltalk kernel's. k-means itself keeps its Smalltalk loops: each distance term is
-`(a - b) raisedTo: 2` (libm pow), summed by `sumNonNegative:` (the primitive `Float fsum:` where
-present, the same correctly rounded sum), and the centroid sums are plain `+` in data order.
-`rank:query:metric:k:threshold:`, `PBVectorIvfFlat listFor:vector:` and `probeOrder:query:` copy
-the query to an Array once per call, not once per scored vector.
+for bit the Smalltalk kernel's. In k-means each distance is the sum of `(a - b) raisedTo: 2` terms
+(libm pow) by `sumNonNegative:` (the primitive `Float fsum:` where present, the same correctly
+rounded sum); on protoST 0.16.0 the whole distance is one call of its
+Float fsumOfPowSquaredDifferences:with: primitive (the same pow and the same sum, bit for bit),
+behind its own feature probe (`hasPowSquaresPrimitive`, `usesPowSquaresPrimitive`); the centroid
+sums are plain `+` in data order. `rank:query:metric:k:threshold:`, the IVF probe loop,
+`PBVectorIvfFlat listFor:vector:` and `probeOrder:query:` score through one `scorerFor:query:`
+per call, so the query is copied to an Array once per call, not once per scored vector.
 
 ## The module and its files
 

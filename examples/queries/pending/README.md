@@ -1,12 +1,12 @@
 # Pending query examples
 
-> **One program waits here, chapter 20's (0.4.0).** The indexed-queries programs written here
-> before their API were moved out once the API landed, and run as tests: those of chapters 11, 17
-> and 18 and `reading_plans` by plan Task 8, chapter 19's by plan Task 9. The vectors phase
+> **Empty since 0.4.0.** The indexed-queries programs written here before their API were moved
+> out once the API landed, and run as tests: those of chapters 11, 17 and 18 and `reading_plans` by
+> plan Task 8, chapter 19's by plan Task 9. The vectors phase
 > ([Addendum V](../../../docs/superpowers/specs/2026-11-19-vectors-addendum.md), plan
 > `docs/superpowers/plans/2026-11-20-vectors.md`) wrote two more in its task V0, against the
-> addendum's API: `vector_search.st` was moved out by task V7 and runs as a test; chapter 20's has
-> never run. The table records where each went or will go.
+> addendum's API: `vector_search.st` was moved out by task V7, chapter 20's by task V9; both run as
+> tests. The table records where each went.
 
 This directory holds the programs of the query chapters, written before the API they need, as
 the cluster chapters' programs were (`examples/cluster/pending/`). Their extensions,
@@ -17,7 +17,7 @@ only `*.st` and `*.sh` files.
 |---|---|---|---|---|
 | `19_ordered_reads_and_pages.st.pending` | [chapter 19](../../../docs/tutorial/19-ordered-reads-and-pages.md) | T9 | Task 9 | [examples/tutorial/19_ordered_reads_and_pages.st](../../tutorial/19_ordered_reads_and_pages.st) |
 | `vector_search.st.pending` | [docs/queries.md, Vector search](../../../docs/queries.md#vector-search) | V7 (the planner's `near[]` rules and `PBField near:`) | V7 | [examples/queries/vector_search.st](../vector_search.st) |
-| [20_vector_search.st.pending](20_vector_search.st.pending) | [chapter 20](../../../docs/tutorial/20-vector-search.md) | V9 (every vector task, and the chapter's measured figures) | V9, pending | `examples/tutorial/20_vector_search.st` |
+| `20_vector_search.st.pending` | [chapter 20](../../../docs/tutorial/20-vector-search.md) | V9 (every vector task, and the chapter's measured figures) | V9 | [examples/tutorial/20_vector_search.st](../../tutorial/20_vector_search.st) |
 
 Each program checks its own results in the house style (`lesson check:`, chapter 1), so once it
 runs it proves what its chapter shows. A tutorial program imports `_lesson` as it will from

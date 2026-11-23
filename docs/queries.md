@@ -33,7 +33,7 @@ Contents:
 [Ordered reads, windows and pages](#ordered-reads-windows-and-pages) |
 [Index maintenance under immutability and the commit](#index-maintenance-under-immutability-and-the-commit) |
 [Cluster mode](#cluster-mode) |
-[Vector search (0.4.0, draft)](#vector-search) |
+[Vector search (0.4.0)](#vector-search) |
 [What it costs](#what-it-costs) |
 [Sources](#sources)
 
@@ -843,8 +843,9 @@ Indexes change nothing in cluster mode's protocol (spec 5.8):
 ## Vector search
 
 <!-- example: examples/queries/vector_search.st -->
+<!-- example: examples/queries/vector_plans.st -->
 
-> **Draft for protoBaseST 0.4.0: implemented, figures pending.** This section describes
+> **protoBaseST 0.4.0.** This section describes
 > [Addendum V](superpowers/specs/2026-11-19-vectors-addendum.md) to the indexed-queries spec, which
 > ports `proto_db`'s vector indexes and vector search (`proto_db/indexing/vector.py`,
 > `vector_backends.py`; the `near[]` parts of `proto_db/query/terms.py`, `plans.py`, `planner.py`
@@ -852,9 +853,9 @@ Indexes change nothing in cluster mode's protocol (spec 5.8):
 > `near[]` terms (V2), the index (V3, V4), its collections written and merged (V5), vector search
 > (V6), and the planner's `near[]` rules with `PBField near:` (V7). Its code blocks come from
 > [vector_search.st](../examples/queries/vector_search.st), a port of `proto_db`'s
-> `examples/vector_search.py` that runs as a test since V7. Figures marked
-> `[measured in V<n>: ...]` do not exist yet. The tutorial is
-> [chapter 20](tutorial/20-vector-search.md).
+> `examples/vector_search.py` that runs as a test since V7, and, for the worked plan,
+> [vector_plans.st](../examples/queries/vector_plans.st). Every figure is from
+> [deviations.md](deviations.md#vectors). The tutorial is [chapter 20](tutorial/20-vector-search.md).
 
 **The obvious solution, and why it fails.** "The five documents nearest to this one" can be
 answered by a walk: score every element, sort, take five. That is correct, and it is the exact
@@ -910,13 +911,17 @@ norm is 0. Every sum is `math.fsum`: the exact sum, rounded once, whatever the o
 protoBaseST ports CPython's `math.fsum` line for line, special values and overflow included, on IEEE
 doubles, whose `+`, `-`, `*` and `/` are one rounding each in protoST. Nothing else is needed for
 correctness: no protoST primitive, no change to protoCore. The cost of the port is measured:
-on 10^4 vectors (bench VB0, 2026-11-20, minimum of 5 runs), protoBaseST's fsum costs 4.9, 8.8 and 10.0 times a naive sum at dim 8, 32 and 128, and takes 68%, 84% and 87% of an inner-product score's time (in `proto_db` the C `math.fsum` takes 25% to 34%); a score is 69.5 to 161.1 times `proto_db`'s pure-Python one ([Performance, Vectors](deviations.md#vectors)). A protoST primitive for these sums is specified, and is built only if the measurement
-of V8 shows the interpreted kernel dominates search time (ruling VQ2). The maintainer decided it
-ahead of V8: protoST 0.15.0 has Float fsum:, fsumOfProducts:with: and
+on 10^4 vectors (bench VB0, 2026-11-20, minimum of 5 runs), protoBaseST's fsum costs 4.9, 8.8 and 10.0 times a naive sum at dim 8, 32 and 128, and takes 68%, 84% and 87% of an inner-product score's time (in `proto_db` the C `math.fsum` takes 25% to 34%); a score is 69.5 to 161.1 times `proto_db`'s pure-Python one ([Performance, Vectors](deviations.md#vectors)). A protoST primitive for these sums was specified, to be built only if the measurement
+of V8 showed the interpreted kernel dominating search time (ruling VQ2). The maintainer decided it
+ahead of V8 (on 0.14.1 V8 then measured the kernel at 72 to 118 per cent of an exact query): protoST 0.15.0 has Float fsum:, fsumOfProducts:with: and
 fsumOfSquaredDifferences:with: (protoST's), and `PBVectorMath` uses them when a feature probe finds them,
 with the same answers to the bit (the vendored cases run on both paths). On 0.15.0 a score costs 16
 to 60 us per vector at dim 8 to 128, 2.5 to 18.3 times `proto_db`'s pure-Python score, and the sum is
-no longer most of it (bench VB0 on 0.15.0, same section); on 0.14.1 the Smalltalk kernel runs alone.
+no longer most of it (bench VB0 on 0.15.0, same section). On 0.16.0, with one scorer per query
+(the metric dispatch, the query's copy and the cosine query norm done once, `PBVectorMath
+scorerFor:query:`), a score costs 8.2 to 27.7 us per vector at dim 8 to 128, and the kernel is 22 to
+33 per cent of an exact query (VB0 and VB1, 2026-11-22, same section). On 0.14.1 the Smalltalk
+kernel runs alone.
 
 Ranking is nearest first, ties by the member key's order (`vector_backends.py:147-163`). For records
 the member key is the oid, so the order is the same in both implementations on the same database.
@@ -1026,8 +1031,7 @@ The `VectorSearch` node's `explain` is `proto_db`'s: `'plan'`, `'index'` (the in
 `explain`), `'term'`, `'where'` when filtered, `'estimate'`, and its one child, the index plan
 (`'VectorExact'`, `'VectorIvfFlat'` or `'VectorHnsw'`). A block in `'where'` is described as
 `{ 'block' -> description }`, where `proto_db` writes `{ 'python' -> ... }` (DV5). A worked vector
-plan with its figures, generated from `proto_db`'s planner as the plans of "Reading a plan" are
-(CR10), is added by the final vectors task, V9.
+plan follows the cost model below.
 
 ### The cost model for vectors
 
@@ -1046,6 +1050,49 @@ the index, a filtered search (rule 2) doubles the members term:
 The arithmetic is Python's: `nprobe / nlist` is one correctly rounded division, the estimates are
 floats, and the hnsw log2 is `PBCost log2:`, the deviation R2 of the key-group plans (DV6).
 
+### A worked vector plan
+
+The data: the 300 documents of [vector_search.st](../examples/queries/vector_search.st), in one
+collection with **two** vector indexes on `'vec'`: `'by_vec'`, exact, and `'by_vec_ivf'`, IVF-Flat
+with 8 lists of which a search probes 2. The query vector is document 42's. **Every figure here is a
+model estimate**, the output of the cost model above, never a measurement and never a promise of
+time. As for the plans of "Reading a plan", ruling CR10 requires each to equal `proto_db`'s own
+planner output for the same data: `tests/interop/py_guide_plans.py` generates it,
+`tests/docs/guide_plans.sh` checks every figure below against it, and the program
+([vector_plans.st](../examples/queries/vector_plans.st)) checks that protoBaseST's planner computes
+the same.
+
+```smalltalk
+nearest := (PBQuery from: both) where: (vec near: query k: 5).
+plan := nearest explain.
+lesson check: 'cost: 8 centroids + 300 x 2/8 + rows + 1' is: (est value: plan value: 'cost') equals: 89.0.
+exactOnly := (PBQuery from: (both removeIndex: 'by_vec_ivf')) where: (vec near: query k: 5).
+lesson check: 'its cost: 300 + rows + 1' is: (est value: exactOnly explain value: 'cost') equals: 306.0.
+```
+
+Reading it (model estimates). Both indexes support the term, so the planner prices both and keeps
+the cheaper. The `VectorSearch` over `'by_vec_ivf'` is estimated at 5.0 rows (k) and a cost of
+89.0: 8 for the centroids, 300 × 2/8 = 75 for the members of the probed fraction of the lists, then
+the rows and 1. The rejected candidate, made visible by removing the IVF index as plan 2 of
+"Reading a plan" does, is the exact search: 300 + 5 + 1 = 306.0.
+
+```smalltalk
+music := (PBQuery from: both) where: ((vec near: query k: 3) & ((PBField path: 'topic') eq: 'music')).
+lesson check: 'its cost: 8 + 300 x 2/8 x 2 + 3 + 1' is: (est value: filtered value: 'cost') equals: 162.0.
+```
+
+With a condition (rule 2), the condition is the search's `'where'` and each member the search
+reaches is counted twice, once to evaluate the condition and once to score it: 8 + 150 + 3 + 1 =
+162.0 for the IVF index, 2 × 300 + 3 + 1 = 604.0 for the exact one. A threshold alone has no k, so
+the model guesses half the members, 150.0 rows: 8 + 75 + 150 + 1 = 234.0 against 300 + 150 + 1 =
+451.0.
+
+What the model does not price is recall. The cheaper plan is the approximate one: in this data,
+3 of the IVF search's 5 documents are among the exact 5, in `proto_db` as here. The
+planner chooses the IVF index because it reads less; whether its answer is good enough is the
+application's call, made by choosing the index and its `'nprobe'` (chapter 20 measures recall on its
+own data), not by the planner.
+
 ### Writes, merges and the cluster
 
 Nothing new: a vector index is maintained in the mutators, so a merge of a blind write maintains
@@ -1053,15 +1100,17 @@ the current version's vector indexes as it maintains its key-group indexes, and 
 cluster's wire changes. One cost is new: a mutator that crosses an IVF retrain threshold runs
 k-means inside that commit, standalone in the publisher, and in a cluster in the round's build under
 the cluster-wide write permission. Measured (bench VB3, 200 appends committed one by one to a list of 600
-vectors of dim 8, protoST 0.16.0): 35.9, 16.2 and 5.0 commits per second with no index, an exact
-index and an IVF index retraining at every 3 % of growth (`proto_db` 156, 133 and 52 in its
-reference mode, 142, 119 and 70 with numpy), and about the same over 5000 vectors (32.1, 15.1 and
-5.1); a retrain (k-means over every member, then the members rebuilt with their lists) takes about
+vectors of dim 8, protoST 0.16.0, the full comparison of 2026-11-22; commits per second = 200 over
+the minimum time): 34.5, 15.2 and 4.6 commits per second with no index, an exact index and an IVF
+index retraining at every 3 % of growth (`proto_db` 152.5, 130.2 and 49.3 in its reference mode,
+139.0, 116.4 and 66.7 with numpy), and about the same over 5000 vectors (30.2, 13.8 and 4.6); a
+retrain (k-means over every member, then the members rebuilt with their lists) takes about
 1.6 to 1.9 s for 630 to 700 members on protoST 0.16.0, about half of it k-means and most of the
 rest the store walk and rebuild (indicative), against 0.2 s for `proto_db`'s pure-path k-means and about 4 ms with numpy (indicative single timings,
 [deviations.md](deviations.md#vectors)). Bench VB5, 120 blind writes merged onto a vector-indexed
-dictionary of 600: 16.1 and 4.7 commits per second standalone with an exact and an IVF index
-(`proto_db` 132 and 51, with numpy 114 and 73), 8.1 and 3.7 in a three-member cluster
+dictionary of 600 (the same run, 120 commits over the minimum time): 15.4 and 4.3 commits per
+second standalone with an exact and an IVF index (`proto_db` 131.0 and 49.6, with numpy 114.3 and
+72.1), 7.7 and 3.4 in a three-member cluster
 ([deviations.md](deviations.md#vectors)). In a cluster the retrain runs under the write
 permission, which `proto_db`'s default 2000 ms lease lets a member believe for 667 ms: a retrain
 that takes longer never commits (every attempt outlasts its permission and is refused as a

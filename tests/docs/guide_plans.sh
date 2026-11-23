@@ -21,6 +21,8 @@
 # Once examples/queries/reading_plans.st exists (Task 8 moves it out of pending/), its literal
 # figures are checked by the same entries and the program is run: its last line must be its EXPECT
 # line, so protoBaseST's planner computes the same figures. Until then only the text is checked.
+# The worked vector plan (docs/queries.md, "A worked vector plan", vectors task V9) is checked the
+# same way against examples/queries/vector_plans.st, which must exist.
 # Needs the interop venv: without it, 'SKIP: no interop venv' and exit 77.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,15 +33,18 @@ REPO="$(cd "$HERE/../.." && pwd)"
 source "$REPO/tests/interop/env.sh"
 generated="$("$PY" "$REPO/tests/interop/py_guide_plans.py")" || { echo "FAIL: py_guide_plans.py failed"; exit 1; }
 PROGRAM="$REPO/examples/queries/reading_plans.st"
-"$PY" -I - "$REPO" "$generated" "$PROGRAM" <<'PY' || exit 1
+VPROGRAM="$REPO/examples/queries/vector_plans.st"
+"$PY" -I - "$REPO" "$generated" "$PROGRAM" "$VPROGRAM" <<'PY' || exit 1
 import os, re, sys
-repo, generated, program = sys.argv[1], sys.argv[2], sys.argv[3]
+repo, generated, program, vprogram = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 values = {}
 for line in generated.splitlines():
     key, value = line.split(" ", 1)
     values[key] = value
 Q, C = "docs/queries.md", "docs/tutorial/18-queries-and-plans.md"
 CODE = (Q, "@program")  # the program's literal figures are the guide's code block's
+VCODE = (Q, "@vprogram")  # the same for the worked vector plan and examples/queries/vector_plans.st
+VP = ("@vprogram",)  # a figure the program checks and the guide's code blocks do not quote
 TABLE = [
     # Plan 1
     (CODE, ["plan1.rows"], "'rows: the size of the Oslo group' is: ((plan at: 'estimate') at: 'rows') equals: {}."),
@@ -78,8 +83,25 @@ TABLE = [
     ((C,), ["tiny1.scan.cost"], "the scan and its filter cost {} units"),
     ((C,), ["tiny1.lookup.cost"], "the lookup costs 1 row plus one descent of `log2 (1 + 2)`, about {} (model estimates"),
     ((C,), ["tiny2.lookup.cost", "tiny2.scan.cost"], "two cities the lookup costs {} and the scan {}."),
+    # A worked vector plan (Addendum V, section 6.3)
+    (VCODE, ["vplan1.cost"], "is: (est value: plan value: 'cost') equals: {}."),
+    (VP, ["vplan1.rows"], "'rows: k' is: (est value: plan value: 'rows') equals: {}."),
+    (VCODE, ["vplan1.exact.cost"], "is: (est value: exactOnly explain value: 'cost') equals: {}."),
+    (VCODE, ["vplan2.cost"], "is: (est value: filtered value: 'cost') equals: {}."),
+    (VP, ["vplan2.exact.cost"], "eq: 'music'))) explain value: 'cost') equals: {}."),
+    (VP, ["vplan3.rows"], "'plan 3: half the members' is: (est value: close value: 'rows') equals: {}."),
+    (VP, ["vplan3.cost"], "'its cost: 8 + 75 + 150 + 1' is: (est value: close value: 'cost') equals: {}."),
+    (VP, ["vplan3.exact.cost"], "(vec near: query threshold: 0.6)) explain value: 'cost') equals: {}."),
+    (VP, ["vplan1.overlap"], "exactFive includes: (d at: 'i')]) size equals: {}."),
+    ((Q,), ["vplan1.rows", "vplan1.cost"], "is estimated at {} rows (k) and a cost of {}:"),
+    ((Q,), ["vplan1.exact.cost"], "is the exact search: 300 + 5 + 1 = {}."),
+    ((Q,), ["vplan2.cost", "vplan2.exact.cost"], "8 + 150 + 3 + 1 = {} for the IVF index, 2 × 300 + 3 + 1 = {} for the exact one."),
+    ((Q,), ["vplan3.rows", "vplan3.cost", "vplan3.exact.cost"],
+     "the model guesses half the members, {} rows: 8 + 75 + 150 + 1 = {} against 300 + 150 + 1 = {}."),
+    ((Q,), ["vplan1.overlap"], "in this data, {} of the IVF search's 5 documents are among the exact 5"),
 ]
-REGIONS = {Q: [(r"### Plan 1", r"\n## Ordered reads"), (r"\*\*The crossover where scanning wins\.\*\*", r"\n\n")],
+REGIONS = {Q: [(r"### Plan 1", r"\n## Ordered reads"), (r"\*\*The crossover where scanning wins\.\*\*", r"\n\n"),
+               (r"### A worked vector plan", r"\n### Writes, merges and the cluster")],
            C: [(r"## Why the planner sometimes scans", r"\n## ")]}
 NUMBER = r"([0-9]+(?:\.[0-9]+)?)"
 fails = []
@@ -116,6 +138,7 @@ def normalise(text):
 files = {Q: Q, C: C}
 if os.path.isfile(program):
     files["@program"] = program
+files["@vprogram"] = vprogram
 covered = {name: [] for name in files}
 checked = 0
 for where, keys, text in TABLE:
@@ -159,10 +182,11 @@ if fails:
 print(f"guide plans: {checked} figures equal proto_db's"
       + (", the program's included" if "@program" in files else " (examples/queries/reading_plans.st not yet in place)"))
 PY
-if [[ -f "$PROGRAM" ]]; then
-    expect="$(sed -n '1s/^"EXPECT: \(.*\)"$/\1/p' "$PROGRAM")"
-    last="$(cd "$(dirname "$PROGRAM")" && STPATH="$REPO/src" "$PROTOST" "$(basename "$PROGRAM")" 2>&1 | tail -n 1)"
-    [[ -n "$expect" && "$last" == "$expect" ]] || { echo "FAIL: $PROGRAM printed '$last', not '$expect'"; exit 1; }
+for prog in "$PROGRAM" "$VPROGRAM"; do
+    [[ -f "$prog" ]] || { [[ "$prog" == "$PROGRAM" ]] && continue; echo "FAIL: $prog is missing"; exit 1; }
+    expect="$(sed -n '1s/^"EXPECT: \(.*\)"$/\1/p' "$prog")"
+    last="$(cd "$(dirname "$prog")" && STPATH="$REPO/src" "$PROTOST" "$(basename "$prog")" 2>&1 | tail -n 1)"
+    [[ -n "$expect" && "$last" == "$expect" ]] || { echo "FAIL: $prog printed '$last', not '$expect'"; exit 1; }
     echo "the program's plans equal them: $last"
-fi
+done
 echo "guide plans ok"
