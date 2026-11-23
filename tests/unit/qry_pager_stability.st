@@ -14,12 +14,16 @@
  The program thread drives the test in rounds. In each round it sends one step to every reader
  that is not done (open the next snapshot when enough commits have landed, or read the next page)
  and one commit to the next writer in turn, all at once, so the pages are read while the commit
- runs, and waits for all of them before the next round. So one commit lands in every round, a
- commit lands before each snapshot and between every two pages of a pager by construction, and
- the rounds are finite: a reader needs 24 commits and one round per page. The writers take turns
- so that the commits are those the readers need (one per round; three per round made the test
- twice as slow, the commits being its cost); conflicting commits and their retries are tested
- by tests/unit/run_retries.st, round_group_commit.st and tx_conflict_read.st; this test is about
+ runs, and waits for all of them before the next round. So one commit lands in every round,
+ concurrently with the pages being read: commits land while every pager is open, and one lands
+ before each snapshot after the first (snapshot k opens once 8 k commits have landed). A round's commit may land before or after the page read in the same
+ round, so a commit lands between page p and page p + 2 (the next round's commit lands after page
+ p is read and before page p + 2 is), not necessarily between every two pages. The rounds are
+ finite: a reader needs 24 commits and one round per page. The writers take turns so that the
+ commits are those the readers need (one per round; three per round made the test twice as slow,
+ the commits being its cost); racing commits, grouped and retried while pagers read, are tested
+ by tests/unit/qry_pager_racing.st, and conflicts and their retries by run_retries.st,
+ round_group_commit.st and tx_conflict_read.st; this test is about
  pagers under commits.
 
  Every actor message is finite and waits for nothing another actor's message must end first
