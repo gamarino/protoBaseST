@@ -1,0 +1,10 @@
+documentos: 600, índices: #('by_vec')
+a) plan: VectorSearch <- VectorExact
+   índice: #(42 406 594 264 80)
+   a mano: #(42 406 594 264 80)
+b) primero los 3, después filtrar: #(406)
+   la condición adentro: #(406 193 520) (VectorSearch <- VectorExact)
+c) bucle de +: grande puntúa 0.0, orden #('chico' 'grande')
+   el índice: #('grande' 'chico')
+   (x raisedTo: 2) = (x * x): false; raisedTo: 2 da 1.702830482254721e16
+d) VectorSearch <- VectorIvfFlat, nprobe 1: 67 de 100 vecinos verdaderos

@@ -1,0 +1,10 @@
+bases: #('biblioteca')
+versiones al crearla: 1
+tags después de add: sin asignar: 0
+tags después de asignar la respuesta: 1
+versiones: #(2 1 0)
+título actual: La biblioteca de FAST
+título en la versión 1: Mi biblioteca
+raíces en la versión 0: #()
+reabierta: 2 libros, título 'La biblioteca de FAST'
+archivos: #('<uuid>.seg' 'space.lock' 'space.root')
