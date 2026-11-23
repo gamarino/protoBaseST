@@ -143,8 +143,8 @@ versions of its snapshot, and a version never changes (chapter 2). So a pager ne
 twice and never skips one, whatever is committed meanwhile, and it needs no lock and no pinning:
 every committed version stays readable (chapter 7). The same holds under real concurrency:
 `tests/unit/qry_pager_stability.st` runs three writer actors that insert before, inside and after
-the pages and delete rows, while three reader actors page through snapshots, waiting for a commit
-before each page; every reader sees exactly its snapshot's rows, by rank and materialised.
+the pages and delete rows, while three reader actors page through snapshots, with commits landing
+between every two pages; every reader sees exactly its snapshot's rows, by rank and materialised.
 
 The obvious alternative, a new query per page with an offset, reads a new snapshot each time:
 
