@@ -371,13 +371,14 @@ predicates, the unknown index kinds and the plan near ties (R2) were extended to
   number was given to another descriptor. Each socket is now closed exactly once, by whichever
   closer wins a compare-and-set (`_PBTcpReader >> closeSocket`, `_PBTcpSender >> _closeLink`).
   The non-atomic close is protoST's (and protoIO's close of a descriptor never read or written
-  through a state); it is recorded for them in `docs/not-done.md`. Test:
+  through a state); it is filed as protoST issue 24 (https://github.com/gamarino/protoST/issues/24)
+  and protoIO issue 4 (https://github.com/gamarino/protoIO/issues/4). Test:
   `cluster_transport_tcp_failures.st` (5) and (6).
 - **The listener spun when an accept failed at once** (final review M10; as in 0.3.0 and
   `proto_db`'s `_accept` loop). An accept that fails at once (`EMFILE`, for example) was written to
   stderr and the next turn sent at once, one line per turn without a pause. The next turn now
   follows a timer of `pollInterval`; the turn itself still ends at once. Test:
-  `cluster_transport_tcp_failures.st` (7) and (8).
+  `cluster_transport_tcp_failures.st` (7) to (9); (9) fails when the timer branch is removed.
 
 ### Tests
 
@@ -409,6 +410,14 @@ predicates, the unknown index kinds and the plan near ties (R2) were extended to
   three merged dumps in every run (soak below). The helping scheduler plays no part.
 
 ### Final verification
+
+After the final review's fixes (`d720038`: the floor check, M1 to M10), the full default suite ran
+once on protoST 0.16.1 (protoCore 3.6.1, protoIO 0.7.1), sequentially, with both interop venvs
+present and `PROTOBASE_REPO` set (2026-11-23, 11:57 to 12:46 UTC): passed 317, failed 0, skipped 0.
+After the final re-review's fixes (a deterministic test of the accept pause, the timing-dependent
+check of `cluster_vector_retrain.st` removed, M9's issues linked), the same run on the final tree
+(2026-11-23, 12:54 to 13:50 UTC): passed 317, failed 0, skipped 0. Only this paragraph changed
+after it, and `tests/docs` ran again on that.
 
 After the TCP fix and the floor move (`9ac97fa` and the tree of the floor-move commit), the full
 default suite ran once on protoST 0.16.1 (protoCore 3.6.1, protoIO 0.7.1), sequentially, with both

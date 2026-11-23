@@ -1,4 +1,4 @@
-"EXPECT: ok 7"
+"EXPECT: ok 8"
 "PBTcpTransport (cluster/transport.st): the failure paths of closing and accepting (final review
  M1, M9, M10).
 
@@ -23,6 +23,14 @@
  stderr line per turn without a pause. (7) The listener's step answers #failed for a failed accept,
  which its turn answers with a timer of pollInterval before the next turn, never an immediate
  one; #idle when no connection came. (8) A transport whose listener fails every accept still stops.
+ (9) The pause itself: a listener whose accept fails, its proxy replaced by a TurnRecorder, runs
+ one turn on the program thread. The recorder signals TurnSent, a Notification, at each run it is
+ sent; the test's handler around the turn catches it only when the next turn is sent inside the
+ turn (the spin), on the program thread; sent by the timer, on a worker, no handler of the test is
+ on that stack and the Notification answers nil. So the check is the handler's verdict, not a
+ time: the turn must return without sending, and the timer's send must come (waited for without a
+ deadline: the runner's timeout bounds it). Removing the timer branch of _PBTcpListener >> run
+ fails it.
 
  Test seams, in this file only: FakeSocket and FailingServer stand in for a Socket and a
  ServerSocket (the transport's actors call only close, nextBytes:, timeout: and acceptTimeout: on
@@ -70,7 +78,27 @@ FailingServer >> acceptTimeout: aMillis
 FailingServer >> close
   ^ self.
 
-| c membership settled peer t b reader sender fake outcome queueOf runOf listener frame stopped |
+"Signalled by a TurnRecorder at each turn it is sent."
+Notification subclass: #TurnSent.
+
+"A stand-in for the listener's actor proxy: counts the turns sent to it."
+Object subclass: #TurnRecorder instanceVariableNames: 'calls'.
+
+TurnRecorder class >> new
+  ^ self basicNew setCalls.
+
+TurnRecorder >> setCalls
+  calls := Atom on: 0.
+
+TurnRecorder >> calls
+  ^ calls value.
+
+TurnRecorder >> run
+  calls swap: [:n | n + 1].
+  TurnSent new signal.
+  ^ self.
+
+| c membership settled peer t b reader sender fake outcome queueOf runOf listener frame stopped recorder sync |
 c := Check new.
 membership := [:pairs | PBMembership peers: (pairs collect: [:p | PBPeer nodeId: p first host: '127.0.0.1' port: p last]) voters: nil].
 "Whether aFuture had settled: resolve: of a settled Future is a no-op, so the probe comes back
@@ -134,6 +162,15 @@ listener := _PBTcpListener transport: b server: FailingServer new.
 c that: '(7) a failed accept is the step #failed (the next turn waits pollInterval), no connection within the timeout #idle'
   is: { listener _acceptOne. (_PBTcpListener transport: b server: (ServerSocket listenOn: 0 host: '127.0.0.1')) _acceptOne }
   equals: #(#failed #idle).
+
+"(9) M10: the next turn after a failed accept is sent by the timer, not inside the turn."
+listener := _PBTcpListener transport: b server: FailingServer new.
+recorder := TurnRecorder new.
+listener instVarNamed: 'proxy' put: recorder.
+sync := [listener run. #deferred] on: TurnSent do: [:e | e return: #sentInsideTheTurn].
+[recorder calls >= 1] whileFalse: [(Future after: 10) wait].
+c that: '(9) after a failed accept the turn returns without sending the next one; the timer sends it, once'
+  is: { sync. recorder calls } equals: { #deferred. 1 }.
 
 "(8) M10: the running listener of b fails every accept from now on; b still stops."
 runOf := (b instVarNamed: 'run') value.

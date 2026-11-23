@@ -1,4 +1,4 @@
-"EXPECT: ok 4"
+"EXPECT: ok 3"
 "An IVF retrain in a cluster commit (final review M7; ruling 69: the retrain stays under the write
  permission, as proto_db's transactions.py runs it). A blind write of one member onto a
  vector-indexed dictionary (t newDictionary setAt:value:, as tests/unit/vec_collections.st (8)) is
@@ -13,15 +13,18 @@
  members and its index the training of 3. (3) The same commit, its build as long, on a node whose
  lease is long enough (leaseDuration 30000, driftMargin 20000: a permission of up to 10 s; a startupGrace of 500 ms, as
  the node starts a new cluster, so its first permission does not wait out a lease of 30 s), commits: the dictionary holds the
- five members and its index was retrained at 5, in the build. (4) On the first node with no delay
- the same commit commits too.
+ five members and its index was retrained at 5, in the build. There is no check that the same
+ commit with no delay commits on the first node: its build would have to fit about 750 ms of
+ permission (1000 ms of belief less a sendReserve of 250 ms), which a loaded machine or a long
+ pause need not grant, so its outcome would depend on timing (final re-review N3); (3) makes the
+ same point with seconds to spare.
 
  How the build outlasts the permission: the RoundSeam's buildDelay (tests/unit/_cluster_commit.st)
  makes the build sleep 1300 ms before it merges, as tests/unit/cluster_commit_path.st (8) does. A
  real retrain takes that long only for an index of several hundred members (bench VB3/VB5), which
  would make this test slow and its outcome depend on the machine's speed; the refusal does not
  depend on what made the build long (mayReplicate:now: compares the permission left with
- sendReserve), and (3) and (4) show the retrain does run in that build. The delay is longer than
+ sendReserve), and (3) shows the retrain does run in that build. The delay is longer than
  the first node's whole permission and far shorter than the second's, so neither outcome depends on
  timing; every wait is a condition with a deadline (CommitKit)."
 Import from: 'protobase'.
@@ -84,11 +87,6 @@ out := kitLong settle: (Worker new asActor once: dbLong block: blind retries: 0)
 seam buildDelay swap: [:x | nil].
 c that: '(3) under a lease whose permission outlasts the build, the same commit commits, the index retrained at 5 in the build'
   is: { out first. rootOf value: kitLong value: 's1' } equals: { #ok. { #(1 2 3 4 5). 5 } }.
-
-"(4)"
-out := kitShort settle: (Worker new asActor once: dbShort block: blind retries: 0).
-c that: '(4) on the short lease with no delay, the same commit commits and retrains'
-  is: { out first. rootOf value: kitShort value: 's0' } equals: { #ok. { #(1 2 3 4 5). 5 } }.
 
 kitShort shutdown.
 kitLong shutdown.
