@@ -94,7 +94,7 @@ Chapter 11's section "Indexes, from both sides" covers a vector index too (`11_i
 
 ## Running the programs
 
-You need protoST 0.14.1 or newer and this repository's `src/` on the module path (README,
+You need protoST 0.16.1 or newer and this repository's `src/` on the module path (README,
 "Requirements"):
 
 ```sh

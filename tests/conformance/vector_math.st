@@ -21,9 +21,9 @@
  and list_for (the best-scoring centroid under the assignment metric, cosine for cosine and l2
  otherwise, lowest number on ties: IvfFlatBackend.list_for, which PBVectorIvfFlat listFor:vector:
  ports; here it pins that the scores pick proto_db's list). Every group runs twice (task VP-adopt,
- Addendum V 2.2.4): with protoST 0.15.0's Float fsum primitives, when the feature probe found them,
- and with the Smalltalk kernel forced (PBVectorMath _forceSmalltalkKernel:, a test-only switch);
- both runs must agree with CPython. On an older protoST both runs take the Smalltalk kernel. It
+ Addendum V 2.2.4): with protoST's Float fsum primitives, which the floor (0.16.1) always has, and
+ with the Smalltalk kernel forced (PBVectorMath _forceSmalltalkKernel:, a test-only switch), their
+ oracle; both runs must agree with CPython. It
  prints the generator's CPython, libc and numpy lines, then per run its kernel and the number of
  cases per group, then 'vector math vectors ok'."
 Import from: 'protobase'.
@@ -82,9 +82,9 @@ group := [:name :aBlock | | cases |
   counts add: name , ' ' , cases size printString].
 { false. true } do: [:forced | | kernel |
 PBVectorMath _forceSmalltalkKernel: forced.
-kernel := PBVectorMath usesFsumPrimitive
+kernel := PBVectorMath usesPrimitives
   ifTrue: ['the fsum primitives']
-  ifFalse: [forced ifTrue: ['the Smalltalk kernel (forced)'] ifFalse: ['the Smalltalk kernel (no primitive in this protoST)']].
+  ifFalse: ['the Smalltalk kernel (forced)'].
 counts := OrderedCollection new.
 check := [:aGroup :anIndex :got :wanted |
   got = wanted ifFalse: [fails add: kernel , ': ' , aGroup , ' #' , anIndex printString , ': expected ' , wanted printString , ', got ' , got printString]].

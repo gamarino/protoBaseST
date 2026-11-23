@@ -235,9 +235,10 @@ of a million uniform doubles in [-1000, 1000], on 845 (Addendum V, section 2.5).
 multiplies would pick another nearest centroid on a near tie, and the stored centroids would not be
 `proto_db`'s.
 
-So protoBaseST squares with protoST's `raisedTo: 2`, which calls the same pow function (on protoST
-0.16.0, Float fsumOfPowSquaredDifferences:with: computes a whole distance in one primitive, with the
-same pow and the same correctly rounded sum, behind its own feature probe), and its tests pin
+So protoBaseST squares with protoST's `raisedTo: 2`, which calls the same pow function (protoST's
+Float fsumOfPowSquaredDifferences:with:, from 0.16.0, computes a whole distance in one primitive, with
+the same pow and the same correctly rounded sum, and the tests check it against that Smalltalk
+loop), and its tests pin
 half-way cases computed by CPython, so that a change in either fails loudly instead of moving a
 centroid. It also means "the same bytes" has a precise scope for IVF training: the same history,
 `proto_db` training without numpy (numpy has its own arithmetic), and the same C library on the same

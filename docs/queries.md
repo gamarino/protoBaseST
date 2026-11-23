@@ -914,14 +914,15 @@ correctness: no protoST primitive, no change to protoCore. The cost of the port 
 on 10^4 vectors (bench VB0, 2026-11-20, minimum of 5 runs), protoBaseST's fsum costs 4.9, 8.8 and 10.0 times a naive sum at dim 8, 32 and 128, and takes 68%, 84% and 87% of an inner-product score's time (in `proto_db` the C `math.fsum` takes 25% to 34%); a score is 69.5 to 161.1 times `proto_db`'s pure-Python one ([Performance, Vectors](deviations.md#vectors)). A protoST primitive for these sums was specified, to be built only if the measurement
 of V8 showed the interpreted kernel dominating search time (ruling VQ2). The maintainer decided it
 ahead of V8 (on 0.14.1 V8 then measured the kernel at 72 to 118 per cent of an exact query): protoST 0.15.0 has Float fsum:, fsumOfProducts:with: and
-fsumOfSquaredDifferences:with: (protoST's), and `PBVectorMath` uses them when a feature probe finds them,
-with the same answers to the bit (the vendored cases run on both paths). On 0.15.0 a score costs 16
+fsumOfSquaredDifferences:with: (protoST's), and `PBVectorMath` uses them (behind a feature probe
+while the floor was protoST 0.14.1; always since the floor is 0.16.1), with the same answers to the
+bit (the vendored cases run on both paths). On 0.15.0 a score costs 16
 to 60 us per vector at dim 8 to 128, 2.5 to 18.3 times `proto_db`'s pure-Python score, and the sum is
 no longer most of it (bench VB0 on 0.15.0, same section). On 0.16.0, with one scorer per query
 (the metric dispatch, the query's copy and the cosine query norm done once, `PBVectorMath
 scorerFor:query:`), a score costs 8.2 to 27.7 us per vector at dim 8 to 128, and the kernel is 22 to
-33 per cent of an exact query (VB0 and VB1, 2026-11-22, same section). On 0.14.1 the Smalltalk
-kernel runs alone.
+33 per cent of an exact query (VB0 and VB1, 2026-11-22, same section). The Smalltalk kernel stays
+as the primitives' oracle in the tests.
 
 Ranking is nearest first, ties by the member key's order (`vector_backends.py:147-163`). For records
 the member key is the oid, so the order is the same in both implementations on the same database.
@@ -962,7 +963,7 @@ the mutator (and so inside a merge or a cluster round's build) that crossed the 
    does. On protoST 0.15.0 the correctly rounded sums (each distance's `_sum_nonnegative`, and the
    norm in the cosine normalisation of the vectors and the centroids) run in protoST's fsum
    primitive and answer the same bits; on 0.16.0 each whole distance, the libm pow squares included,
-   is one primitive call, behind its own feature probe, with the same bits again; the plain sums
+   is one primitive call, with the same bits again; the plain sums
    stay Smalltalk.
 
 So "the same centroids" has a precise scope: the same history, `proto_db` without numpy (with numpy

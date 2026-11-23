@@ -1445,18 +1445,17 @@ infinities of opposite signs of Python's math.fsum, Python's float of a signalli
 sample larger than its population), they
 signal `PBValidationError` with CPython's text (DV7). Every result is pinned bit for bit by
 `tests/unit/vec_math.st`, `tests/unit/vec_random.st` and the `proto_db` vectors of
-`tests/conformance/vector_math.st`. On protoST 0.15.0 the sums run in its `Float` fsum primitives
-(Float fsum:, fsumOfProducts:with: and fsumOfSquaredDifferences:with:, protoST's): `hasFsumPrimitive` is
-the feature probe's answer, read once when the module loads, and `usesFsumPrimitive` whether the
-kernel calls them; `_forceSmalltalkKernel:` exists for the tests only, which run every vendored
-case on both paths. The Smalltalk kernel is the oracle and the fallback (protoST 0.14.1, an
-Integer term, sequences of unequal sizes). `normalized:`, which k-means uses for cosine (the
-vectors before training and the centroids after), takes its norm from the primitive and stays bit
-for bit the Smalltalk kernel's. In k-means each distance is the sum of `(a - b) raisedTo: 2` terms
-(libm pow) by `sumNonNegative:` (the primitive `Float fsum:` where present, the same correctly
-rounded sum); on protoST 0.16.0 the whole distance is one call of its
-Float fsumOfPowSquaredDifferences:with: primitive (the same pow and the same sum, bit for bit),
-behind its own feature probe (`hasPowSquaresPrimitive`, `usesPowSquaresPrimitive`); the centroid
+`tests/conformance/vector_math.st`. The sums run in protoST's `Float` fsum primitives (Float fsum:,
+fsumOfProducts:with: and fsumOfSquaredDifferences:with:, protoST 0.15.0), always present on the
+protoST 0.16.1 floor; `usesPrimitives` answers whether the kernel calls them, true unless a test
+forced the Smalltalk kernel with `_forceSmalltalkKernel:` (tests only), so that every vendored case
+runs on both paths. The Smalltalk kernel is the primitives' oracle, and answers where a primitive
+cannot (an Integer term, sequences of unequal sizes). `normalized:`, which k-means uses for cosine
+(the vectors before training and the centroids after), takes its norm from the primitive and stays
+bit for bit the Smalltalk kernel's. In k-means each distance is the sum of `(a - b) raisedTo: 2`
+terms (libm pow) by `sumNonNegative:`, computed in one call of protoST's
+Float fsumOfPowSquaredDifferences:with: primitive (0.16.0; the same pow and the same sum, bit for
+bit, the Smalltalk loop when the kernel is forced); the centroid
 sums are plain `+` in data order. `rank:query:metric:k:threshold:`, the IVF probe loop,
 `PBVectorIvfFlat listFor:vector:` and `probeOrder:query:` score through one `scorerFor:query:`
 per call, so the query is copied to an Array once per call, not once per scored vector.

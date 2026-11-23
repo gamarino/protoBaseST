@@ -4,23 +4,29 @@
 
 ### Requirements
 
-- **protoST 0.14.1** (was 0.12.0), **protoCore 3.6.1** (was 3.6.0) and **protoIO 0.7.0**
-  (unchanged). protoST 0.14.0 adds the exact `Fraction` comparison and
+- **protoST 0.16.1** (was 0.12.0), **protoCore 3.6.1** (was 3.6.0) and **protoIO 0.7.1** (was
+  0.7.0). protoST 0.14.0 adds the exact `Fraction` comparison and
   `ByteArray >> unsignedIntegerFrom:to:bigEndian:`; 0.14.1 fixes S43 (a ThreadSanitizer
-  capped-wait polling flake) and S44 (empty conversions). The README Requirements table, the
-  tutorial and the examples state the new floor; the default suite passes unchanged on it.
-- **protoST 0.15.0 recommended** (the floor stays 0.14.1): its `Float fsum:`,
-  `fsumOfProducts:with:` and `fsumOfSquaredDifferences:with:` primitives speed up the vector
-  scores; protoBaseST finds them by a feature probe and runs its Smalltalk kernel without them,
-  with the same answers to the bit.
-- **protoST 0.16.0 recommended for vectors** (the floor stays 0.14.1): its
-  `Float fsumOfPowSquaredDifferences:with:` computes the IVF k-means distance (`pow(a_i - b_i,
-  2.0)`, then the msum of `fsum:`); protoBaseST finds it by its own feature probe (0.15.0 has the
-  fsum primitives but not this one) and keeps the Smalltalk loop as its oracle and fallback, the
-  centroids byte-identical on both paths. The vector benchmarks run on 0.16.0.
-- **The final suite** (task V9) ran on protoST 0.14.1 (the floor), 0.14.2 and 0.16.0, each on
-  protoCore 3.6.1 and protoIO 0.7.0, with both interop venvs present, and the vector contract files
-  again at 32 property seeds; the results are under "Final verification" below.
+  capped-wait polling flake) and S44 (empty conversions); 0.15.0 adds the `Float fsum:`,
+  `fsumOfProducts:with:` and `fsumOfSquaredDifferences:with:` primitives, which the vector scores
+  call, and 0.16.0 `Float fsumOfPowSquaredDifferences:with:`, the IVF k-means distance
+  (`pow(a_i - b_i, 2.0)`, then the msum of `fsum:`); 0.16.1 makes a helping wait run one message at
+  a time (S48) and, with protoIO 0.7.1, bounds a whole socket write by its timeout and reports the
+  bytes written (S49), which the TCP transport's fix needs ("Fixed" below). The README
+  Requirements table, the tutorial and the examples state the floor.
+- **The floor moved during the cycle.** The vectors phase ran on a 0.14.1 floor, with each
+  primitive behind a feature probe and the Smalltalk kernel as the fallback; the TCP fix then
+  moved the floor to 0.16.1 (a split floor, 0.14.1 standalone and 0.16.1 for TCP clusters, would
+  be a trap). On 0.16.1 every primitive is always present, so the probes (`hasFsumPrimitive`,
+  `hasPowSquaresPrimitive`) are gone and `PBVectorMath usesPrimitives` replaces
+  `usesFsumPrimitive` and `usesPowSquaresPrimitive`. The Smalltalk kernel stays, as the tests'
+  oracle (`_forceSmalltalkKernel:` runs every vendored case on both paths, the centroids
+  byte-identical) and where a primitive cannot answer (an Integer term, sequences of unequal
+  sizes). The vector benchmarks ran on 0.16.0, whose vector primitives 0.16.1 leaves unchanged.
+- **The final suite** ran on protoST 0.16.1 (the floor), protoCore 3.6.1 and protoIO 0.7.1, with
+  both interop venvs present, after the TCP fix; the earlier final runs of task V9 (protoST 0.14.1,
+  0.14.2 and 0.16.0, and the vector contract files at 32 property seeds) are kept below. The
+  results are under "Final verification".
 
 ### Vectors
 
@@ -78,13 +84,13 @@
   numpy. Pinned by `tests/unit/vec_ivf.st`, `tests/interop/vector_index_identical.sh` (101 indexes,
   every training of five growth histories, one shrunk to nothing and regrown, and 73 refusal
   texts) and the `ivf` root of `tests/conformance/database_contents.st`.
-- **The fsum primitives of protoST 0.15.0** (task VP-adopt; internal): `PBVectorMath` probes
-  `Float respondsTo: #fsum:` once when the module loads and, where the primitives exist, computes
+- **The fsum primitives of protoST 0.15.0** (task VP-adopt; internal): `PBVectorMath` computes
   fsum, `sumNonNegative:`, the three scores, `normalized:` and the squared norm of
-  `canonicalVector:dim:` with them; k-means keeps its Smalltalk loop of `raisedTo: 2` terms (until
-  protoST 0.16.0's own primitive, below under Requirements). The
-  Smalltalk kernel stays as the oracle and the fallback (an Integer term, sequences of unequal
-  sizes, a protoST without the primitives), and the primitives' errors become the kernel's
+  `canonicalVector:dim:` with them, and k-means each distance with protoST 0.16.0's own primitive
+  (above under Requirements). They were adopted behind feature probes while the floor was 0.14.1;
+  the 0.16.1 floor made the probes dead code, and they are gone. The
+  Smalltalk kernel stays as the oracle and where a primitive cannot answer (an Integer term,
+  sequences of unequal sizes), and the primitives' errors become the kernel's
   (`PBValidationError` with CPython's text, infinity in `sumNonNegative:`). Pinned on both paths,
   in one process, by `tests/conformance/vector_math.st` (every case run with the primitives and
   with the Smalltalk kernel forced, a test-only switch) and `tests/unit/vec_math.st`. A score's
@@ -278,6 +284,41 @@ a tampered vector index** (`validate:` compares them as Python's `==`, but a hoo
 one fails here where Python computes with `True` as 1). The rows on atoms in `describe`, block
 predicates, the unknown index kinds and the plan near ties (R2) were extended to the vector port.
 
+### Fixed
+
+- **A TCP cluster node could hang a program whose actors wait while a connection is open**
+  (0.2.0 to 0.3.0; fixed in 0.4.0, which needs protoST 0.16.1 and protoIO 0.7.1). On a node whose
+  transport is `PBTcpTransport`, an actor that waits inside a block (a commit does:
+  `PBTransaction commit` waits inside `ensure:`) lets its worker run other actors' messages on top
+  of the wait (protoST LANGUAGE 10.4). The listener's accept loop and each connection's read loop
+  were one message that lasted as long as the transport or the connection, so a waiting actor that
+  picked one up stayed buried, after what it waited for had settled, until the transport stopped,
+  and a program that waited for it with no deadline before stopping the transport hung. Reproduced
+  with five transports and eight such actors at one worker, two workers and the default pool on
+  protoST 0.14.1, and at one worker and the default pool on 0.16.0. Every turn of the transport's actors now ends: the listener's after
+  one accept that waits at most `pollInterval` (50 ms), a reader's after reads of at most that
+  long (a frame read in part is kept for the next turn), a sender's after writes of at most that
+  long (the rest of a frame continues in the next turn); each actor then sends itself the next
+  turn, and `stop` chains on a Future each actor settles when its last turn ends. The bytes, their
+  order, the counters, the errors, the reconnects and the timeouts are unchanged; a frame's write
+  still fails after `requestTimeout` of writing, now counted over its writes. The fix needs protoST
+  0.16.1, whose helping wait runs one message and then checks its Future (on 0.16.0 the actor's
+  self-sent turns kept the wait buried, and at one worker stopped the program), and protoIO 0.7.1,
+  whose write timeout bounds a whole write and reports the bytes written (before, a large write to
+  a peer that did not read could block without limit). These turns starve no other actor: each
+  blocks in I/O with a timeout, and the pool adds a worker while one does (protoST D59). Tests:
+  `cluster_transport_tcp_burial.st` (the reproducer: it hangs on 0.16.0 and passes on 0.16.1, at
+  one worker and the default pool), `cluster_transport_tcp_starvation.st` (independent actors
+  progress at one worker while connections poll), `cluster_transport_tcp_partial_frame.st` and
+  `cluster_transport_tcp_slow_reader.st` (a timed-out write keeps the unwritten rest, or the
+  attempt fails exactly as before), each with a one-worker script.
+  **Upgrade note for programs on protoBaseST 0.2.0 to 0.3.0** (or on a protoST older than 0.16.1):
+  on a node with a TCP transport, do not wait with no deadline for an actor that waits inside a
+  block (an actor that commits) while the transport runs: stop the transport first (`stop`, and
+  wait on its Future), then wait for the actor, which then returns; or wait with `waitWithin:`,
+  which signals `TimeoutError` instead of hanging. Committing from the program thread is not
+  exposed.
+
 ### Tests
 
 - **The pager stability test no longer hangs** (`1763c2c`, `bdbc32b`, `20633c0`; a test-design
@@ -289,7 +330,7 @@ predicates, the unknown index kinds and the plan near ties (R2) were extended to
   (`qry_pager_stability_one_worker.sh`); `tests/unit/qry_pager_racing.st` (and its one-worker
   script) restores what the old test covered and the new one dropped: pagers open while three
   writers race, retry and commit in forced groups. The audit of the library for the same pattern
-  found the TCP transport's endless turns ("Known issues").
+  found the TCP transport's endless turns ("Fixed" above).
 - **The index merge test no longer fails at random** (a test fix, no library change).
   `tests/interop/index_ops_identical.sh` failed in about one run in eight, on protoST 0.14.1, 0.14.2
   and 0.16.0 alike: "the planted wrong replay order went unnoticed in merged_bag". The records got
@@ -301,26 +342,19 @@ predicates, the unknown index kinds and the plan near ties (R2) were extended to
   `py_index_replay.py` now gives the records fixed oids, with which the planted fault changes all
   three merged dumps in every run (soak below). The helping scheduler plays no part.
 
-### Known issues
-
-- **A TCP cluster node can hang a program that waits on its actors** (0.2.0 onwards; open). On a
-  node whose transport is `PBTcpTransport`, an actor that waits inside a block (a commit does:
-  `PBTransaction commit` waits inside `ensure:`) can stay buried, after what it waited for has
-  settled, under a connection's reader turn, which lasts as long as the connection, until the
-  transport stops. A program that waits for such an actor with no deadline before it stops the
-  transport hangs. Reproduced with five transports and eight such actors, at one worker, two
-  workers and the default pool on protoST 0.14.1, and at one worker and the default pool on
-  0.16.0. The cause is in two lower layers: protoST's
-  helping runs an actor's whole mailbox, its messages to itself included, before the helping waiter
-  checks its own Future, so no finite-turn rewrite of the transport releases it; and a protoIO
-  socket timeout does not bound a large write. The transport is unchanged in 0.4.0 while the
-  maintainer decides on a protoST and protoIO change. Workaround: see `docs/not-done.md`, "Known
-  issues". The suite's cluster tests are not affected (their actors use the in-process transport,
-  and the TCP tests commit from the program thread).
-
 ### Final verification
 
-The full default suite ran on the tree of `d7125b1`, sequentially, once per binary, with both
+After the TCP fix and the floor move (`9ac97fa` and the tree of the floor-move commit), the full
+default suite ran once on protoST 0.16.1 (protoCore 3.6.1, protoIO 0.7.1), sequentially, with both
+interop venvs present and `PROTOBASE_REPO` set (2026-11-23): passed 311, failed 0, skipped 0 (62
+min, with two simulator soak processes running beside it). The TCP burial test passed 20 runs of
+20 at one worker and 20 of 20 at the default pool; every cluster and transport test, the cluster
+checklist and the cluster examples passed; of the simulator families, one process each, ten
+passed at `PBST_SIM_SEEDS=200`, and `sim_leases.st` and `sim_round_rules.st`, which did not finish
+that many seeds within the 2-hour timeout, passed at 40 (22 and 31 minutes); and `cluster_persister.st`, whose check (1) raced with the other nodes'
+persisters (2 failures in 25 runs on 0.16.1; fixed in the test, `2c34563`), passed 40 of 40.
+
+Earlier, the full default suite ran on the tree of `d7125b1`, sequentially, once per binary, with both
 interop venvs present and `PROTOBASE_REPO` set (2026-11-23):
 
 - protoST 0.14.1: passed 304, failed 0, skipped 0 (53 min).

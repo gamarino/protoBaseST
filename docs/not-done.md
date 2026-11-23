@@ -23,9 +23,6 @@ design (spec section 2) or a cut made while building, with its reason.
   retrained in a cluster needs a lease longer than four times its retrain, about 4 ms per member
   at dim 8 on protoST 0.16.0. A collection holding an index of a kind protoBaseST does not know
   stays read only.
-- **A known hang on TCP cluster nodes** (0.2.0 onwards, open): a program that waits with no
-  deadline for a committing actor before it stops the node's TCP transport can hang
-  ([Known issues](#known-issues)).
   Equality and range indexes are maintained by every write and by merges onto indexed
   collections, queried through `PBQuery` and a cost-based planner, and paged in process (0.3.0;
   [chapters 17-19](tutorial/17-indexes.md), [queries.md](queries.md)).
@@ -155,48 +152,57 @@ Not tested, or not proven:
 | hnsw search | Refused (ruling VQ1, DV1) | The graph is hnswlib's: native C++, rebuilt per process, not stored and not deterministic in `proto_db` either. A Smalltalk graph would be new and unreproducible against hnswlib. | A program searching an hnsw index from protoST gets `PBNotSupportedError`; the index is still maintained, merged and validated. Use `'exact'` or `'ivf_flat'`. |
 | The derived-structure cache (`DERIVED`) | Not ported (DV4) | No process-wide mutable state in the Smalltalk layer (spec 5.1); the store tree already gives per-list access. | Every exact search re-reads the tree (no first-query build either); measured in VB1. |
 | A faster IVF retrain | Not done | A retrain is k-means plus a rebuild of every member's store entry; on protoST 0.16.0 about half of it is k-means, most of the rest the store walk and rebuild (indicative). | A cluster with a large IVF index needs a long lease (above). What would come first: the store walk (its order-key recomputation), measured. |
-| The TCP transport's endless turns (a hang, below) | Open | The fix needs a protoST or protoIO change ([Known issues](#known-issues)). | Programs on TCP cluster nodes follow the workaround. |
+| The TCP transport's endless turns (a hang, below) | **Fixed** in 0.4.0, which needs protoST 0.16.1 and protoIO 0.7.1 | Found in the vectors phase's final checks; the fix needed a protoST and a protoIO change ([Fixed issues](#fixed-issues)). | Programs on protoBaseST 0.2.0 to 0.3.0 follow the upgrade note there. |
 
-## Known issues
+## Fixed issues
 
-**A TCP cluster node can hang a program that waits on its actors** (0.2.0 onwards; open, found
-during the vectors phase's final checks). On a cluster node whose transport is `PBTcpTransport`,
-each accepted connection is read by one actor turn that lasts as long as the connection
-(`_PBTcpReader >> run`; the listener's `run` lasts as long as the transport). protoST lets an actor
-that waits inside a block help while it waits: its worker runs other actors' turns on top of the
-wait (protoST LANGUAGE 10.4, D56). When such a worker picks up a reader's turn, the waiting actor
-stays buried under it, after what it waited for has settled, until the connection closes, which is
-normally when the transport stops. A commit waits inside a block (`PBTransaction commit` waits
-inside `ensure:`), so an actor that commits on a TCP node is exposed whenever a connection is
-accepted during its commit: at a peer's first message and after every reconnect. The cluster keeps
-working (the blocked reader's I/O makes the pool add a worker) and the commit itself is decided;
-what does not happen is the actor's return. A program that waits for that actor with no deadline
-before it stops the transport hangs.
+**A TCP cluster node could hang a program that waits on its actors** (0.2.0 to 0.3.0; found during
+the vectors phase's final checks, fixed in 0.4.0, which needs protoST 0.16.1 and protoIO 0.7.1). On
+a cluster node whose transport was `PBTcpTransport`, each accepted connection was read by one actor
+turn that lasted as long as the connection (`_PBTcpReader >> run`; the listener's `run` lasted as
+long as the transport). protoST lets an actor that waits inside a block help while it waits: its
+worker runs other actors' turns on top of the wait (protoST LANGUAGE 10.4, D56). When such a worker
+picked up a reader's turn, the waiting actor stayed buried under it, after what it waited for had
+settled, until the connection closed, which was normally when the transport stopped. A commit
+waits inside a block (`PBTransaction commit` waits inside `ensure:`), so an actor that committed on
+a TCP node was exposed whenever a connection was accepted during its commit: at a peer's first
+message and after every reconnect. The cluster kept working and the commit itself was decided; what
+did not happen was the actor's return, so a program that waited for that actor with no deadline
+before it stopped the transport hung.
 
 - **Evidence.** A probe with five TCP transports and eight actors waiting inside `ensure:` while 20
-  connections are accepted: all eight buried after their Future was resolved, at one worker, two
+  connections were accepted: all eight buried after their Future was resolved, at one worker, two
   and the default pool on protoST 0.14.1 and at one worker and the default pool on 0.16.0; all
-  eight returned once the transports stopped. Without the connections none was buried. No test of
-  the suite is affected: its cluster tests with actors use the in-process transport, whose turns
-  are finite, and its TCP tests commit from the program thread, which never helps.
-- **The cause is below protoBaseST.** Rewriting the transport's turns as finite ones that re-send
-  themselves does not help: protoST's helping drains an actor's whole mailbox, the messages it
-  sends itself included, before the helping waiter checks its own Future, so a self-re-sending
-  reader still buries it (at one worker such an actor freezes the whole program, timers included).
-  And a protoIO socket timeout does not bound a large write (an 8 MiB write to a peer that does not
-  read stayed blocked for more than 30 s with a 1 s timeout), so a sender cannot be made finite
-  either. The fix needs one of: a bounded drain when helping, a yield, or actors that helping never
-  runs, in protoST, and a write that reports partial progress, in protoIO. The maintainer is
-  deciding; `src/protobase/cluster/transport.st` is unchanged in 0.4.0.
-- **Workaround.** On a node with a TCP transport, do not wait with no deadline for an actor that
-  waits inside a block (an actor that commits, for example) while the transport runs: stop the
-  transport first (`stop`, and wait on its Future), then wait for the actor, which then returns.
-  Or wait with a deadline (`waitWithin:`), which signals `TimeoutError` instead of hanging, though
-  the actor may still be buried. Committing from the program thread, as the TCP tests do, is not
-  exposed: the program thread's waits block it and run no actor turn. Checked on 2026-11-23 against
-  the probe: stopping the transports first, then waiting with no deadline, all eight actors returned
-  in every run (three runs each at one worker and at the default pool, on protoST 0.14.1 and
-  0.16.0), where the same wait before the stop hung.
+  eight returned once the transports stopped. It is now `tests/unit/cluster_transport_tcp_burial.st`
+  (and its one-worker script), which hangs on protoST 0.16.0 and passes on 0.16.1.
+- **Why it needed protoST and protoIO.** The first rewrite of the transport's turns as finite ones
+  that re-send themselves did not help on 0.16.0: protoST's helping drained an actor's whole
+  mailbox, the messages it sent itself included, before the helping waiter checked its own Future,
+  so a self-re-sending reader still buried it (at one worker such an actor froze the whole program,
+  timers included). And a protoIO socket timeout did not bound a large write (an 8 MiB write to a
+  peer that did not read stayed blocked for more than 30 s with a 1 s timeout), so a sender could
+  not be made finite either. protoST 0.16.1 makes a helping wait run one message and then check its
+  Future (S48), and protoIO 0.7.1 bounds a whole write by its timeout and reports the bytes written
+  (S49).
+- **The fix** (`src/protobase/cluster/transport.st`). Every turn of the listener, of each reader
+  and of each sender ends after at most `pollInterval` (50 ms) of network waiting, plus one connect
+  for a sender; a frame read or written in part is kept for the next turn, and the actor sends
+  itself that turn. `stop` chains on a Future each actor settles when its last turn ends. What
+  travels and the counters are unchanged, and a frame's write still fails after `requestTimeout`
+  of writing. A worker that is not waiting still runs every message an actor sends itself in one
+  turn (protoST D59), but each of these turns blocks in I/O with a timeout, and the pool adds a
+  worker while one does, so the transport starves no other actor:
+  `cluster_transport_tcp_starvation.st` checks it at one worker.
+- **Upgrade note for programs on protoBaseST 0.2.0 to 0.3.0** (or on a protoST older than 0.16.1,
+  which 0.4.0 does not support). On a node with a TCP transport, do not wait with no deadline for
+  an actor that waits inside a block (an actor that commits, for example) while the transport
+  runs: stop the transport first (`stop`, and wait on its Future), then wait for the actor, which
+  then returns. Or wait with a deadline (`waitWithin:`), which signals `TimeoutError` instead of
+  hanging, though the actor may still be buried. Committing from the program thread is not
+  exposed: the program thread's waits block it and run no actor turn. Checked on 2026-11-23
+  against the probe: stopping the transports first, then waiting with no deadline, all eight
+  actors returned in every run (three runs each at one worker and at the default pool, on protoST
+  0.14.1 and 0.16.0), where the same wait before the stop hung.
 
 ## What would come next, if the workshop wants it
 

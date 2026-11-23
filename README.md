@@ -120,22 +120,26 @@ lease longer than four times its retrain. Start with
 | Component | Version | Source |
 |---|---|---|
 | protoCore | v3.6.1 | https://github.com/numaes/protoCore |
-| protoIO | v0.7.0 | https://github.com/gamarino/protoIO |
-| protoST | v0.14.1 | https://github.com/gamarino/protoST |
+| protoIO | v0.7.1 | https://github.com/gamarino/protoIO |
+| protoST | v0.16.1 | https://github.com/gamarino/protoST |
 
-These are the minimum versions: protoST 0.14.1 is the floor. **protoST 0.16.0 is recommended**:
-0.15.0's `Float` fsum primitives make the vector scores faster, and 0.16.0 adds the k-means
-distance primitive (the pow squares of IVF training), which makes the IVF training faster.
-protoBaseST uses each when it finds it (one feature probe per primitive); on 0.14.1 it computes the
-same answers, to the bit, in Smalltalk. The final 0.4.0 suite ran on protoST 0.14.1, 0.14.2 and
-0.16.0, each on protoCore 3.6.1 and protoIO 0.7.0 (the 0.3.0 release was tested on protoCore 3.6.0
-with protoST 0.12.0). The vector benchmarks of 0.4.0 run on 0.16.0.
+These are the minimum versions: protoST 0.16.1 is the floor. A TCP cluster needs it: its helping
+waits run one message at a time (protoST S48), and protoIO 0.7.1 bounds a whole socket write by its
+timeout and reports how many bytes it wrote (S49), which together let `PBTcpTransport` end every
+turn, so an actor that waits while a connection is open is never buried under it (CHANGELOG,
+0.4.0, "Fixed"). The vector kernel calls protoST's `Float` fsum primitives (0.15.0) and its k-means
+distance primitive (0.16.0) directly; the Smalltalk kernel they replace is kept as the tests'
+oracle. The final 0.4.0 suite ran on protoST 0.16.1, protoCore 3.6.1 and protoIO 0.7.1 (the 0.3.0
+release was tested on protoCore 3.6.0 with protoST 0.12.0). The vector benchmarks of 0.4.0 ran on
+0.16.0, whose vector primitives 0.16.1 keeps unchanged.
 
-Build protoST 0.14.1 against protoCore 3.6.1 and protoIO 0.7.0 (see its own README); it provides
-`lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S44,
+Build protoST 0.16.1 against protoCore 3.6.1 and protoIO 0.7.1 (see its own README); it provides
+`lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S49,
 `BinaryFile >> linkCount` and `FileReference >> realPath` (the hard-link refusal and the lock
 naming of the cluster logs), the exact `Fraction` comparison and the ByteArray primitive that
-reads an unsigned Integer of any width from bytes (both from protoST 0.14.0), which this code
+reads an unsigned Integer of any width from bytes (both from protoST 0.14.0), the `Float` fsum and
+k-means distance primitives (0.15.0 and 0.16.0), and the bounded helping wait and write timeout
+(0.16.1), which this code
 relies on. The Python interop tests and the ERP demo also need a checkout of the
 [protoBase repository](https://github.com/gamarino/ProtoDB), at the tag `v2.0.0rc4` (`v2.0.0rc2`
 before the cluster branch), and Python 3.12 or newer (3.11 before it; tested with 3.14):
@@ -286,7 +290,7 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 
 ## Running the tests
 
-The tests need protoST 0.14.1 or newer (see Requirements). Point `PROTOST` at the binary:
+The tests need protoST 0.16.1 or newer (see Requirements). Point `PROTOST` at the binary:
 
 ```sh
 export PROTOST=../protoST/build_release/protost      # default: protost from PATH

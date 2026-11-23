@@ -15,7 +15,7 @@ checks the refusal.
 ## Run them
 
 ```sh
-export PROTOST=../protoST/build_release/protost        # protoST 0.14.1 or newer
+export PROTOST=../protoST/build_release/protost        # protoST 0.16.1 or newer
 cd examples/tutorial
 STPATH=$PWD/../../src $PROTOST 01_first_commit.st      # one lesson
 cd ../..

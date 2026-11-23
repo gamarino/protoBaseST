@@ -20,14 +20,13 @@
  raisedTo: 2 in k-means, on a half-way case, with a k-means witness whose centroids change if the
  square multiplies); trainingOrderOf: against byte order; and the IEEE self-test of 2.2.3 (error-free
  transformations, signed zeros, subnormals, half-way products, sqrt, the libm pow square). Then the
- fsum primitives of protoST 0.15.0 (Addendum V, 2.2.4; task VP-adopt): the feature probe selects
- them from protoST 0.15.0 on, and only there (Smalltalk version), and the test-only switch forces
- the Smalltalk kernel; on both paths the kernel answers alike and the primitives' errors become
+ fsum primitives of protoST 0.15.0 (Addendum V, 2.2.4; task VP-adopt): the floor (protoST 0.16.1)
+ has them and the kernel calls them, and the test-only switch forces the Smalltalk kernel, their
+ oracle; on both paths the kernel answers alike and the primitives' errors become
  the kernel's (PBValidationError with CPython's text, infinity in sumNonNegative:), an Integer term
  keeps the Smalltalk kernel's answer, and sequences of unequal sizes pair as Python's zip. Last,
- the k-means distance's primitive of protoST 0.16.0 (Float fsumOfPowSquaredDifferences:with:): its
- own probe selects it from 0.16.0 on, and only there (0.15.0 has fsum: but not it), the same
- test-only switch forces the Smalltalk loop, and both paths answer the same bytes: the libm pow
+ the k-means distance's primitive of protoST 0.16.0 (Float fsumOfPowSquaredDifferences:with:):
+ the floor has it, the same test-only switch forces the Smalltalk loop, and both paths answer the same bytes: the libm pow
  half-way square of a positive and of a negative difference, an overflowing square (infinity), an overflowing sum (infinity, as
  sumNonNegative:), an Integer term, and k-means centroids over seeded data. Then scorerFor:query:
  (task V8, fix round 1), the per-query scorer that rank:, the IVF probe loop, listFor:vector: and
@@ -38,8 +37,8 @@ Import from: 'protobase'.
 Import from: '_check'.
 
 | c f hex hexes outcome tuple list pow2 bitsOf floatOfBits unitsOf nearest seed next decimals
-  oracleFails half five entries ranked q x witness vs sorted hi lo yr version released paths
-  released16 seedPow nextPow data scorerCases viaScore viaScorer refusedAtCreation |
+  oracleFails half five entries ranked q x witness vs sorted hi lo yr paths
+  seedPow nextPow data scorerCases viaScore viaScorer refusedAtCreation |
 c := Check new.
 "A Float from its big-endian hex bytes, and the hex bytes of a Float (nil answers 'nil')."
 f := [:h | (Check bytes: h) float64At: 1 bigEndian: true].
@@ -330,18 +329,16 @@ c that: 'IEEE self-test: TwoSum keeps its low part, signed zeros, subnormals, ha
             '0000000000000002' '0000000000000001' '0000000000000000' '434e3f9396099984' '434e3f9396099985'
             '3ff6a09e667f3bcd' '4010000000000000' '5fefffffffffffff' '3fd5555555555555').
 
-"--- 13. The fsum primitives: the feature probe and the test-only switch ---"
-version := ((Smalltalk version subStrings: ' ') last subStrings: '.') collect: [:each | each asNumber].
-released := ((version at: 1) * 1000000) + ((version at: 2) * 1000) + (version at: 3) >= 15000.
+"--- 13. The fsum primitives: always present on the floor; the test-only switch ---"
 paths := OrderedCollection new.
-paths add: { PBVectorMath hasFsumPrimitive. PBVectorMath usesFsumPrimitive }.
+paths add: PBVectorMath usesPrimitives.
 PBVectorMath _forceSmalltalkKernel: true.
-paths add: { PBVectorMath hasFsumPrimitive. PBVectorMath usesFsumPrimitive }.
+paths add: PBVectorMath usesPrimitives.
 PBVectorMath _forceSmalltalkKernel: false.
-paths add: { PBVectorMath hasFsumPrimitive. PBVectorMath usesFsumPrimitive }.
-c that: 'the probe selects the fsum primitives from protoST 0.15.0 on; the switch forces the Smalltalk kernel'
-  is: { (Float respondsTo: #fsum:) = released. paths asArray }
-  equals: { true. { { released. released }. { released. false }. { released. released } } }.
+paths add: PBVectorMath usesPrimitives.
+c that: 'the floor (protoST 0.16.1) has the fsum primitives, the kernel calls them, and the switch forces the Smalltalk kernel'
+  is: { { Float respondsTo: #fsum:. Float respondsTo: #fsumOfProducts:with:. Float respondsTo: #fsumOfSquaredDifferences:with: }. paths asArray }
+  equals: #(#(true true true) #(true false true)).
 
 "--- 14. The same answers and errors on both paths ---"
 "Each case's outcome (a Float as its hex, or the error's class and text) with the primitives (when
@@ -374,17 +371,9 @@ c that: 'the primitives'' errors become the kernel''s, and both paths answer ali
     '402c000000000000'. 'fff0000000000000'. 'bfc9999999999999'. 'refused: -inf + inf in fsum'. '3ff0000000000000'. '0000000000000000'.
     #('3fe3333333333333' '3fe999999999999a'). 'nil' } }.
 
-"--- 15. The k-means distance's primitive: its own probe and the same switch ---"
-released16 := ((version at: 1) * 1000000) + ((version at: 2) * 1000) + (version at: 3) >= 16000.
-paths := OrderedCollection new.
-paths add: { PBVectorMath hasPowSquaresPrimitive. PBVectorMath usesPowSquaresPrimitive }.
-PBVectorMath _forceSmalltalkKernel: true.
-paths add: { PBVectorMath hasPowSquaresPrimitive. PBVectorMath usesPowSquaresPrimitive }.
-PBVectorMath _forceSmalltalkKernel: false.
-paths add: { PBVectorMath hasPowSquaresPrimitive. PBVectorMath usesPowSquaresPrimitive }.
-c that: 'the k-means distance primitive is probed on its own, from protoST 0.16.0 on; the switch forces the Smalltalk loop'
-  is: { (Float respondsTo: #fsumOfPowSquaredDifferences:with:) = released16. paths asArray }
-  equals: { true. { { released16. released16 }. { released16. false }. { released16. released16 } } }.
+"--- 15. The k-means distance's primitive: present on the floor; the same switch ---"
+c that: 'the floor has the k-means distance primitive (protoST 0.16.0 on), which the same switch turns off'
+  is: { Float respondsTo: #fsumOfPowSquaredDifferences:with:. PBVectorMath usesPrimitives } equals: #(true true).
 
 "--- 16. The k-means distance and centroids: the same bytes on both paths ---"
 seedPow := 4242.

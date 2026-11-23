@@ -29,16 +29,10 @@ on them. PBNearQuery is the public value of a near[] term (terms.st).
     kmeans: vectors nlist: n iterations: i seed: s
                                     _kmeans, its pure-Python path (an Array of n centroids, each an
                                     Array of Floats)
-    hasFsumPrimitive                the feature probe: whether this protoST has Float fsum:,
-                                    fsumOfProducts:with: and fsumOfSquaredDifferences:with:
-                                    (protoST 0.15.0 on), read once when the module loads
-    usesFsumPrimitive               whether the kernel calls them: the probe, unless a test forced
+    usesPrimitives                  whether the kernel calls protoST's Float fsum:,
+                                    fsumOfProducts:with:, fsumOfSquaredDifferences:with: and
+                                    fsumOfPowSquaredDifferences:with:: true, unless a test forced
                                     the Smalltalk kernel (_forceSmalltalkKernel:, tests only)
-    hasPowSquaresPrimitive          the k-means distance's own probe: whether this protoST has
-                                    Float fsumOfPowSquaredDifferences:with: (protoST 0.16.0 on;
-                                    0.15.0 has fsum: but not it), read once when the module loads
-    usesPowSquaresPrimitive         whether k-means calls it: its probe, unless a test forced the
-                                    Smalltalk kernel (the same switch)
 
   PBPythonRandom (class side only)
     sampleRange: n count: k seed: s     random.Random(s).sample(range(n), k), an Array of Integers
@@ -89,15 +83,15 @@ correctly rounded square; squared, which is x * x in protoST, is never used.
 The fsum primitives (Addendum V, 2.2.4; task VP-adopt). protoST 0.15.0's Float fsum:,
 fsumOfProducts:with: and fsumOfSquaredDifferences:with: are CPython's math_fsum in C++, checked
 against CPython's vectors in protoST and against this module's in tests/conformance/vector_math.st.
-A feature probe, not a version check, decides when the module loads (Float respondsTo: #fsum:), so
-the protoST floor stays 0.14.1, where the Smalltalk kernel runs alone. The primitives serve fsum:,
+The protoST floor, 0.16.1, has them, so the kernel always calls them (feature probes chose them
+while the floor was 0.14.1; on 0.16.1 they could choose nothing else and are gone). The primitives
+serve fsum:,
 sumNonNegative: and the scores (the products and the squared differences, each rounded as the
 Smalltalk kernel rounds them, and cosine's norms), normalized: and canonicalVector:dim:'s norm;
 k-means squares with raisedTo: 2 (libm pow) and sums with sumNonNegative:; protoST 0.16.0's
-Float fsumOfPowSquaredDifferences:with: computes that whole distance, the same bytes, and a second
-probe made when the module loads (Float respondsTo: #fsumOfPowSquaredDifferences:with:) decides
-whether k-means calls it, since 0.15.0 has the others but not it. The Smalltalk kernel stays as the oracle and the fallback, and
-answers wherever the primitive cannot: an Integer term (the primitive takes Floats only; the
+Float fsumOfPowSquaredDifferences:with: computes that whole distance, the same bytes, and k-means
+calls it. The Smalltalk kernel stays as the primitives' oracle (the tests run every case on both
+paths, _forceSmalltalkKernel:), and answers wherever a primitive cannot: an Integer term (the primitive takes Floats only; the
 Smalltalk kernel's answer is kept), and sequences of unequal sizes in a score (zip). The
 primitive's own errors (Error, 'fsum: intermediate overflow' and 'fsum: -inf + inf') are matched by
 their text around the primitive call only and become the kernel's: PBValidationError with
@@ -111,9 +105,8 @@ DV7: only the class differs).
 
 State. The generator's state (624 words and an index) is an Array local to one call of
 sampleRange:count:seed: or bits:count:seed:, passed to the private methods that draw from it; it is
-never kept in a class or instance variable. The kernel's two class variables are set once when the
-module loads: FsumPrimitive and PowSquaresPrimitive, the probes' Booleans, and SmalltalkForced, an
-Atom whose value only the tests change (_forceSmalltalkKernel:)."
+never kept in a class or instance variable. The kernel's one class variable is set once when the
+module loads: SmalltalkForced, an Atom whose value only the tests change (_forceSmalltalkKernel:)."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/keys'.
@@ -122,7 +115,7 @@ Import from: 'protobase/codec'.
 Import from: 'protobase/keyspec'.
 Import from: 'decimal'.
 
-Object subclass: #PBVectorMath classVariableNames: 'FsumPrimitive PowSquaresPrimitive SmalltalkForced'.
+Object subclass: #PBVectorMath classVariableNames: 'SmalltalkForced'.
 PBVectorMath comment: 'The vector math kernel of the vector indexes (class side only): CPython''s float(), math.fsum and proto_db v2.0.0rc4''s scores, ranking and pure-Python k-means, bit for bit; protoST 0.15.0''s Float fsum primitives and 0.16.0''s k-means distance primitive where their feature probes find them, the Smalltalk kernel as their oracle and fallback. Not public API.'.
 
 Object subclass: #PBNearQuery instanceVariableNames: 'vector k threshold metric'.
@@ -211,39 +204,23 @@ PBVectorMath class >> canonicalVector: aKey dim: anInteger
   (self _isFinite: (self _fsumOfProducts: out with: out size: anInteger overflow: [Float infinity])) ifFalse: [^ nil].
   ^ PBTuple _trustedOn: out.
 
-"=== PBVectorMath: the fsum primitives (feature probe) ======================"
+"=== PBVectorMath: the fsum primitives and the test-only switch ============"
 
-"The feature probe, made once when the module loads (Addendum V, 2.2.4): whether this protoST
- answers Float fsum: (protoST 0.15.0 adds it with fsumOfProducts:with: and
- fsumOfSquaredDifferences:with:), whether it answers Float fsumOfPowSquaredDifferences:with:
- (protoST 0.16.0, the k-means distance; a separate fact, as 0.15.0 has the others but not it), and
- the Atom of the test-only switch, false."
+"protoST 0.16.1 is the floor, so Float fsum:, fsumOfProducts:with: and
+ fsumOfSquaredDifferences:with: (protoST 0.15.0) and Float fsumOfPowSquaredDifferences:with: (0.16.0)
+ always exist; the feature probes that chose them while the floor was 0.14.1 could no longer choose
+ anything else and are gone. Made once when the module loads: the Atom of the test-only switch,
+ false."
 PBVectorMath class >> _initializeKernel
-  FsumPrimitive isNil ifTrue: [FsumPrimitive := Float respondsTo: #fsum:].
-  PowSquaresPrimitive isNil ifTrue: [
-    PowSquaresPrimitive := Float respondsTo: #fsumOfPowSquaredDifferences:with:].
   SmalltalkForced isNil ifTrue: [SmalltalkForced := Atom on: false].
 
-"Whether this protoST has the Float fsum primitives (the probe's answer)."
-PBVectorMath class >> hasFsumPrimitive
-  ^ FsumPrimitive.
-
-"Whether the kernel calls the fsum primitives: the probe found them and no test forced the
- Smalltalk kernel."
-PBVectorMath class >> usesFsumPrimitive
-  ^ FsumPrimitive and: [SmalltalkForced value not].
-
-"Whether this protoST has Float fsumOfPowSquaredDifferences:with: (its own probe's answer)."
-PBVectorMath class >> hasPowSquaresPrimitive
-  ^ PowSquaresPrimitive.
-
-"Whether the k-means distance calls Float fsumOfPowSquaredDifferences:with:: its probe found it and
- no test forced the Smalltalk kernel."
-PBVectorMath class >> usesPowSquaresPrimitive
-  ^ PowSquaresPrimitive and: [SmalltalkForced value not].
+"Whether the kernel calls protoST's primitives (the fsum family and the k-means distance): true
+ unless a test forced the Smalltalk kernel, which stays as their oracle."
+PBVectorMath class >> usesPrimitives
+  ^ SmalltalkForced value not.
 
 "For the tests only: aBoolean true makes the kernel compute with its Smalltalk code even where
- the primitives exist, false restores the probe's choice; both paths can so be checked in one
+ the primitives exist, false restores the primitives; both paths can so be checked in one
  process (tests/unit/vec_math.st, tests/conformance/vector_math.st). Never called by protoBaseST."
 PBVectorMath class >> _forceSmalltalkKernel: aBoolean
   [ | current |
@@ -278,7 +255,7 @@ PBVectorMath class >> _fsumFailure: aText
 "fsum of aSequence (anOverflowBlock's value on an intermediate overflow): the primitive Float
  fsum: when the kernel uses it, the Smalltalk kernel otherwise."
 PBVectorMath class >> _fsum: aSequence overflow: anOverflowBlock
-  self usesFsumPrimitive ifFalse: [^ self _smalltalkFsum: aSequence overflow: anOverflowBlock].
+  self usesPrimitives ifFalse: [^ self _smalltalkFsum: aSequence overflow: anOverflowBlock].
   ^ self _primitive: [Float fsum: aSequence] overflow: anOverflowBlock
     otherwise: [self _smalltalkFsum: aSequence overflow: anOverflowBlock].
 
@@ -289,7 +266,7 @@ PBVectorMath class >> _fsum: aSequence overflow: anOverflowBlock
  scorerFor:query:, which converts the query once with it; each score then copies only the stored
  vector."
 PBVectorMath class >> _primitiveOperand: aSequence
-  self usesFsumPrimitive ifFalse: [^ aSequence].
+  self usesPrimitives ifFalse: [^ aSequence].
   ((aSequence isKindOf: Array) or: [aSequence isKindOf: OrderedCollection]) ifTrue: [^ aSequence].
   ^ aSequence asArray.
 
@@ -299,7 +276,7 @@ PBVectorMath class >> _primitiveOperand: aSequence
 PBVectorMath class >> _fsumOfProducts: a with: b size: anInteger overflow: anOverflowBlock
   | products |
   products := [(1 to: anInteger) asArray collect: [:i | (a at: i) * (b at: i)]].
-  (self usesFsumPrimitive and: [a size = anInteger and: [b size = anInteger]]) ifFalse: [
+  (self usesPrimitives and: [a size = anInteger and: [b size = anInteger]]) ifFalse: [
     ^ self _fsum: products value overflow: anOverflowBlock].
   ^ self _primitive: [Float fsumOfProducts: a with: b] overflow: anOverflowBlock
     otherwise: [self _smalltalkFsum: products value overflow: anOverflowBlock].
@@ -310,7 +287,7 @@ PBVectorMath class >> _fsumOfProducts: a with: b size: anInteger overflow: anOve
 PBVectorMath class >> _sumSquaredDifferences: a with: b size: anInteger
   | squares |
   squares := [(1 to: anInteger) asArray collect: [:i | | d | d := (a at: i) - (b at: i). d * d]].
-  (self usesFsumPrimitive and: [a size = anInteger and: [b size = anInteger]]) ifFalse: [
+  (self usesPrimitives and: [a size = anInteger and: [b size = anInteger]]) ifFalse: [
     ^ self sumNonNegative: squares value].
   ^ self _primitive: [Float fsumOfSquaredDifferences: a with: b] overflow: [Float infinity]
     otherwise: [self _smalltalkFsum: squares value overflow: [Float infinity]].
@@ -437,7 +414,7 @@ PBVectorMath class >> score: aMetric query: aQuery vector: aVector
 PBVectorMath class >> scorerFor: aMetric query: aQuery
   | q nq |
   q := self _primitiveOperand: aQuery.
-  self usesFsumPrimitive ifFalse: [
+  self usesPrimitives ifFalse: [
     aMetric = 'cosine' ifFalse: [^ [:aVector | self score: aMetric query: q vector: aVector]].
     ^ [:aVector | | n nv |
       n := q size min: aVector size.
@@ -576,13 +553,13 @@ PBVectorMath class >> _kmeansDistance: aVector to: aCentroid
   ^ self _kmeansDistance: aVector to: aCentroid squares: (Array new: (aVector size min: aCentroid size)).
 
 "_kmeansDistance:to: with aBuffer (an Array of the zip's size) for the squares. protoST 0.16.0's
- Float fsumOfPowSquaredDifferences:with: when its probe found it and both sequences have the
+ Float fsumOfPowSquaredDifferences:with: unless the Smalltalk kernel is forced, when both sequences have the
  buffer's size: pow(a - b, 2.0) by libm and the msum of fsum:, the same bytes as raisedTo: 2 and
  sumNonNegative: (protoST docs/LANGUAGE.md, the pow form); an intermediate overflow is infinity, as
  in sumNonNegative:, and a term that is not a Float falls back to the Smalltalk loop. Otherwise the
  Smalltalk loop, the primitive's oracle: each raisedTo: 2 into aBuffer, then sumNonNegative:."
 PBVectorMath class >> _kmeansDistance: aVector to: aCentroid squares: aBuffer
-  (self usesPowSquaresPrimitive and: [aVector size = aBuffer size and: [aCentroid size = aBuffer size]])
+  (self usesPrimitives and: [aVector size = aBuffer size and: [aCentroid size = aBuffer size]])
     ifFalse: [^ self _kmeansSquares: aVector to: aCentroid into: aBuffer].
   ^ self _primitive: [Float fsumOfPowSquaredDifferences: aVector with: aCentroid] overflow: [Float infinity]
     otherwise: [self _kmeansSquares: aVector to: aCentroid into: aBuffer].
