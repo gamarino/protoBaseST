@@ -138,9 +138,9 @@ _PBTransportRun>>_setNodeId:key:handler:inbox:senders:listener:
 _PBInProcessInbox>>_setTransport:nodeId:key:handler:
 PBTcpTransport>>_setListener:port:requestTimeout:run:inbound:counters:
 _PBInbound>>_setClosed:entries:
-_PBTcpListener>>_setTransport:server:
-_PBTcpReader>>_setTransport:socket:nodeId:key:handler:
-_PBTcpSender>>_setTransport:peer:queue:link:proxy:
+_PBTcpListener>>_setTransport:server:proxy:ended:
+_PBTcpReader>>_setTransport:socket:nodeId:key:handler:proxy:partial:ended:
+_PBTcpSender>>_setTransport:peer:queue:link:writing:proxy:ended:
 _PBSendQueue>>_setFrames:bytes:draining:closed:
 PBLogDetached>>_setLog:
 _PBNodeCells>>_setConfig:node:acceptorState:committed:counters:fence:stopped:waiters:dispatcher:acceptor:transport:dispatchMax:tokens:critical:own:persistFailure:
