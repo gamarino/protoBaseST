@@ -110,13 +110,14 @@ lesson check: 'whose indexes were maintained in the same step'
     is: ([changed validate. 'clean'] on: PBCorruptionError do: [:e | e messageText]) equals: 'clean'.
 ```
 
-So a directory shared with Python can use indexes from both languages. A collection holding a
-vector index, or an index of a kind protoBaseST does not know, still refuses every change, naming
-it ([chapter 12](12-refusals.md)). [Chapter 17](17-indexes.md) explains why a hand-kept index fails
+So a directory shared with Python can use indexes from both languages. Since 0.4.0 that includes
+vector indexes ([chapter 20](20-vector-search.md)); a collection holding an index of a kind
+protoBaseST does not know still refuses every change, naming it ([chapter 12](12-refusals.md)). [Chapter 17](17-indexes.md) explains why a hand-kept index fails
 and what replaces it; [chapter 18](18-queries-and-plans.md) queries the indexes.
 
 ## What to take away
 
 - Keys compare by the format's rule; tuples are composite keys.
 - Queries are walks or hand-kept lookup collections, updated in the same transaction.
-- `proto_db`'s indexes are read, not queried or maintained.
+- `proto_db`'s indexes are read here; chapters 17-19 maintain and query them (0.3.0), chapter 20
+  the vector indexes (0.4.0).

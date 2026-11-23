@@ -5,7 +5,7 @@ Usage: python py_index_replay.py make <directory>      write the shared spaces
        python py_index_replay.py check <directory>     the verifier and validate() on the results
 
 'make' writes, with ProtoBase, two spaces whose roots both sides read, so that the records are the
-same atoms with the same oids on both sides:
+same atoms with the same oids on both sides (fixed oids, so that every run builds the same trees):
   main, database 'idx':
     'records'  60 records: 'n' (0..59), 'v' drawn from mixed values (numbers of every type, 1 / 1.0
                / Decimal 1, strings, None, NaN, lists, maps, tuples; absent in one record in ten)
@@ -158,7 +158,15 @@ def make(directory):
             attrs = {"n": i, "w": rnd.randrange(7)}
             if rnd.random() >= 0.1:
                 attrs["v"] = rnd.choice(values)
-            records.append(DBObject(**attrs))
+            record = DBObject(**attrs)
+            # A fixed oid per record. A fresh atom draws a random version-4 UUID (ProtoBase D21),
+            # and the trees order atoms by oid, so with random oids the planted wrong replay order
+            # of index_ops_identical.sh gave a merged counted set equal to ProtoBase's in about
+            # one run in eight (the test then failed). With these oids every run builds the same
+            # trees, and the planted fault changes all three merged dumps. 919 is odd, so
+            # i * 919 mod 4096 is distinct for the 60 records.
+            object.__setattr__(record, "oid", uuid.UUID(int=(i * 919 % 4096) + 1))
+            records.append(record)
         tx.set_root_object("records", records)
         tx.set_root_object("ops", {kind: sequence(rnd, kind, len(records)) for kind in KINDS})
         tx.commit()

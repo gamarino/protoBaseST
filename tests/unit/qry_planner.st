@@ -1,12 +1,12 @@
 "EXPECT: ok 16"
-"Indexed queries, plan Task 7: PBPlanner (proto_db proto_db/query/planner.py at v2.0.0rc4, less the
- near[] rules). The behaviours of proto_db's tests/unit/test_planner.py that apply (the near[] tests
- are excluded by spec 3.3; the property is tests/unit/qry_prop_equals_scan.st), over its data: 200
+"Indexed queries, plan Task 7: PBPlanner (proto_db proto_db/query/planner.py at v2.0.0rc4). The
+ behaviours of proto_db's tests/unit/test_planner.py that apply (its near[] tests are
+ tests/unit/vec_planner.st, vectors phase V7; the property is tests/unit/qry_prop_equals_scan.st), over its data: 200
  records with x unique 0..199, z = x mod 10, name 'n<x>' and y = x mod 4, y absent from every tenth.
  Every plan is checked as test_planner.py's check does: its rows equal the scan oracle's (QData scan:
  over evaluate:) as a multiset, twice, and its explain's estimate is its estimate. Then two checks of
- this port: an index the planner cannot consult (an opaque atom of an unknown kind, a vector index)
- is skipped, and a collection whose extractor index names an unregistered extractor answers by the
+ this port: an index the planner cannot consult (an opaque atom of an unknown kind) is skipped,
+ while a vector index is consulted and answers near[] terms only (since the vectors phase's V7), and a collection whose extractor index names an unregistered extractor answers by the
  index while a scan or a residual filter on the extractor signals PBValidationError naming it
  (Review Focus 5). Mapped in tests/unit/queries_checklist.tsv."
 Import from: 'protobase'.
@@ -23,7 +23,7 @@ ScanCostIndex >> estimate: aTerm
 
 | c desc recs records t t1 plan p bad check names find missing keysOf sortedKeys info expr residual x y z
   coll a b r mixed d1 items got opaque vector set base withBad onlyBad kids walk plans u v1 v2 v3 plan2 lower
-  idx unreg row |
+  idx unreg row nearX |
 c := Check new.
 missing := PBMissing default.
 d1 := Decimal fromString: '1'.
@@ -300,12 +300,12 @@ c that: 'planning is per version: a plan keeps answering for its version'
     names value: (p value: v3 value: expr) explain. plan2 execute collect: [:e | e at: 'x'] }
   equals: { #(). #(500). #(). #('Filter' 'CollectionScan'). #(500) }.
 
-"=== this port: indexes the planner cannot consult (plan Task 6 review) ==="
+"=== this port: an index the planner cannot consult, and a vector index it consults (plan Task 6
+ review; vectors phase V7) ==="
 opaque := PBOpaqueAtom named: 'acme.indexing.CustomIndex' unloadedAt: (PBAtomPointer segment: (ByteArray new: 16) offset: 1) storage: Object new.
-vector := PBVectorIndex _unsavedWithState: (PBFrozenDict withAssociations: {
-  'name' -> 'b_vec'. 'key_spec' -> (PBTuple withAll: #('path' 'x')). 'dim' -> 2. 'metric' -> 'l2'. 'backend' -> 'flat'.
-  'params' -> nil. 'store' -> nil. 'invalid' -> nil. 'total_count' -> 0. 'centroids' -> (PBTuple withAll: #()).
-  'trained_size' -> 0. 'member_tokens' -> 1 }).
+"An exact l2 index of dim 2 on x, empty: no x is a vector of dim 2, so built over the records it
+ would hold every one in its invalid group and answer no near[] query either."
+vector := PBVectorIndex name: 'b_vec' path: 'x' dim: 2 metric: 'l2'.
 "aCollection with the opaque index 'a_custom' and the vector index 'b_vec' added to its index set."
 withBad := [:aCollection | | set2 |
   set2 := aCollection indexes.
@@ -320,12 +320,17 @@ r := { p value: base value: expr. p value: onlyBad value: expr.
   plan value: onlyBad value: (x value: '<' value: 3) value: { PBSortKey key: 'x' descending: true } value: nil value: 0 }.
 check value: (r at: 1) value: base value: expr.
 check value: (r at: 2) value: onlyBad value: expr.
-c that: 'an opaque index and a vector index are skipped: another index or a scan answers'
+nearX := PBTerm path: 'x' op: 'near[]' value: (PBNearQuery vector: #(1.0 2.0) k: 3).
+r := r , { p value: base value: nearX. p value: onlyBad value: nearX & (x value: '<' value: 3) }.
+c that: 'an opaque index is skipped; a vector index answers near[] only: another index or a scan answers the rest'
   is: { base indexNames. names value: (r at: 1) explain. ((r at: 1) explain at: 'index') at: 'index'. names value: (r at: 2) explain.
     (r at: 2) execute collect: [:e | e at: 'x']. (r at: 3) execute collect: [:e | e at: 'x']. names value: (r at: 4) explain.
-    (r at: 4) execute collect: [:e | e at: 'x']. bad asArray }
+    (r at: 4) execute collect: [:e | e at: 'x']. bad asArray.
+    names value: (r at: 5) explain. ((r at: 5) explain at: 'index') at: 'index'. (r at: 5) execute.
+    names value: (r at: 6) explain. ((r at: 6) explain at: 'where') = (desc value: (x value: '<' value: 3)). (r at: 6) execute }
   equals: { #('a_custom' 'b_vec' 'c_x'). #('IndexLookup'). 'c_x'. #('Filter' 'CollectionScan'). #(7). #(2 1 0).
-    #('Sort' 'Filter' 'CollectionScan'). #(2 1 0). #() }.
+    #('Sort' 'Filter' 'CollectionScan'). #(2 1 0). #().
+    #('VectorSearch' 'VectorExact'). 'b_vec'. #(). #('VectorSearch' 'VectorExact'). true. #() }.
 
 "=== this port: an unregistered extractor (Review Focus 5) ==="
 PBKeySpec registerExtractor: 'qry_planner.name' block: [:e | (PBKeySpec path: 'name') extract: e] version: '1'.

@@ -1,0 +1,165 @@
+"EXPECT: 20 vector search ok (19 checks)"
+"Lesson 20: vector search.
+ Tutorial chapter: docs/tutorial/20-vector-search.md
+
+ Written by the vectors task V0 against the API of Addendum V
+ (docs/superpowers/specs/2026-11-19-vectors-addendum.md, sections 2.3 to 2.9) before that API
+ existed, in examples/queries/pending/; moved here by task V9, which ran it for the first time,
+ unchanged, and runs as a test since.
+
+ What it teaches:
+ - a vector index is an index like the others: part of the collection version, maintained by
+   every mutator; a document without a valid vector is kept in the collection, never returned;
+ - nearest neighbours, the obvious way (score every document, sort) and through the index: the
+   same answer, nearest first, ties by member key; explain shows VectorSearch <- VectorExact;
+ - 'the k nearest among those that satisfy a condition' is not 'the k nearest, then filter':
+   the second can answer fewer than k; the condition goes inside the search, and a block given
+   to where: joins it too (proto_db's mixing rule, R27);
+ - thresholds per metric, and a threshold with k;
+ - why the scores are correctly rounded sums: a plain loop of + ranks two documents in the wrong
+   order, where the index (and proto_db) ranks them right;
+ - why x ** 2 is not x * x in protoST either: Python's ** is libm pow, so the k-means of IVF
+   training squares with raisedTo: 2;
+ - IVF-Flat: recall against nprobe; nprobe = nlist is exact;
+ - an hnsw index is maintained, but its search is refused (ruling VQ1).
+
+ Run it from examples/tutorial: STPATH=<repository>/src protost 20_vector_search.st"
+Import from: 'protobase'.
+Import from: '_lesson'.
+
+| lesson dir space db topics seed next docs all target cosine dot norm planOf ranked nearest
+  firstThenFilter music musicMatches close closeRanked both ipDocs ipQuery ipAll naive byIndex x
+  recall hnsw |
+lesson := Lesson named: '20 vector search'.
+dir := FileSystem temp / ('pbst-tutorial-20-' , Smalltalk pid printString).
+dir deleteAll.
+space := PBObjectSpace storage: (PBFileStorage path: dir pathString).
+db := space newDatabase: 'docs'.
+
+"600 documents with an 8-dimensional embedding each. The numbers come from a small seeded
+ generator written here (Park and Miller's), so every run builds the same data; an application
+ takes them from an embedding model."
+topics := #('sports' 'music' 'science').
+seed := 7.
+next := [seed := seed * 16807 \\ 2147483647. seed / 2147483647.0 * 2.0 - 1.0].
+docs := (0 to: 599) collect: [:i | { i. topics at: i \\ 3 + 1. (1 to: 8) collect: [:j | next value] }].
+db newTransactionDo: [:t |
+    | coll |
+    coll := t newList addIndex: (PBVectorIndex name: 'by_vec' path: 'vec' dim: 8 metric: 'cosine').
+    docs do: [:d |
+        coll := coll appendLast: (t newObject: { 'i' -> (d at: 1). 'topic' -> (d at: 2). 'vec' -> (d at: 3) })].
+    coll := coll appendLast: (t newObject: { 'i' -> 600. 'topic' -> 'music'. 'vec' -> #(1.0 2.0) }).
+    t setRootObject: 'docs' value: coll].
+docs := db newTransaction getRootObject: 'docs'.
+all := OrderedCollection new.
+docs do: [:d | all add: d].
+lesson check: '601 documents, one index' is: { docs size. docs indexNames asArray } equals: #(601 #('by_vec')).
+lesson check: 'the short vector is kept aside, not indexed'
+    is: (((docs getIndex: 'by_vec') explain) at: 'invalid') equals: 1.
+
+"Nearest neighbours, the obvious way: score every document and sort."
+dot := [:a :b | | s | s := 0.0. 1 to: a size do: [:j | s := s + ((a at: j) * (b at: j))]. s].
+norm := [:a | (dot value: a value: a) sqrt].
+cosine := [:a :b | (dot value: a value: b) / ((norm value: a) * (norm value: b))].
+target := ((all detect: [:d | (d at: 'i') = 42]) at: 'vec') asArray.
+ranked := ((all select: [:d | (d at: 'vec') size = 8])
+    asSortedCollection: [:a :b | (cosine value: target value: (a at: 'vec')) >= (cosine value: target value: (b at: 'vec'))]) asArray.
+planOf := [:query | | names node |
+    names := OrderedCollection new.
+    node := query explain.
+    [node isNil] whileFalse: [
+        names add: (node at: 'plan').
+        node := (node at: 'children') isEmpty ifTrue: [nil] ifFalse: [(node at: 'children') at: 1]].
+    names inject: '' into: [:acc :each | acc isEmpty ifTrue: [each] ifFalse: [acc , ' <- ' , each]]].
+
+"The same question to the index."
+nearest := (PBQuery from: docs) where: ((PBField path: 'vec') near: target k: 5).
+lesson check: 'the index answers it' is: (planOf value: nearest) equals: 'VectorSearch <- VectorExact'.
+lesson check: 'the same five, nearest first'
+    is: (nearest asArray collect: [:d | d at: 'i']) equals: ((ranked first: 5) collect: [:d | d at: 'i']).
+lesson check: 'document 42 is its own nearest neighbour' is: (nearest first at: 'i') equals: 42.
+
+"The three nearest music documents: the obvious way, then the condition inside the search.
+ Document 42 is a sports document and its own nearest neighbour, so the obvious way keeps at most two."
+firstThenFilter := (nearest asArray first: 3) select: [:d | (d at: 'topic') = 'music'].
+lesson check: 'the k nearest, then filtered: fewer than three' isTrue: firstThenFilter size < 3.
+music := (PBQuery from: docs) where: (((PBField path: 'vec') near: target k: 3) & ((PBField path: 'topic') eq: 'music')).
+musicMatches := (ranked select: [:d | (d at: 'topic') = 'music']) first: 3.
+lesson check: 'three, the nearest among the music documents'
+    is: (music asArray collect: [:d | d at: 'i']) equals: (musicMatches collect: [:d | d at: 'i']).
+lesson check: 'the condition is inside the search' is: (planOf value: music) equals: 'VectorSearch <- VectorExact'.
+lesson check: 'a block from where: joins it too'
+    is: ((((PBQuery from: docs) where: ((PBField path: 'vec') near: target k: 3)) where: [:d | (d at: 'topic') = 'music']) asArray
+        collect: [:d | d at: 'i'])
+    equals: (musicMatches collect: [:d | d at: 'i']).
+
+"Thresholds: cosine keeps a similarity of at least t; a threshold with k keeps the k nearest of those."
+close := ((PBQuery from: docs) where: ((PBField path: 'vec') near: target threshold: 0.6)) asArray.
+closeRanked := ranked select: [:d | (cosine value: target value: (d at: 'vec')) >= 0.6].
+lesson check: 'every document at least 0.6 similar, and only those'
+    is: (close collect: [:d | d at: 'i']) asSet equals: (closeRanked collect: [:d | d at: 'i']) asSet.
+both := ((PBQuery from: docs) where: ((PBField path: 'vec') near: target k: 3 threshold: 0.6)) asArray.
+lesson check: 'k and a threshold: the k nearest of those'
+    is: (both collect: [:d | d at: 'i']) equals: ((closeRanked first: (3 min: closeRanked size)) collect: [:d | d at: 'i']).
+
+"Why the scores are correctly rounded. The inner product of (1, 1, 1) with (1e16, 1, -1e16) is 1;
+ with (0.5, 0.25, 0) it is 0.75. A plain loop of + loses the 1 against 1e16."
+ipQuery := #(1.0 1.0 1.0).
+db newTransactionDo: [:t |
+    t setRootObject: 'ip' value: ((t newList
+        addIndex: (PBVectorIndex name: 'by_vec' path: 'vec' dim: 3 metric: 'ip'))
+        appendLast: (t newObject: { 'name' -> 'big'. 'vec' -> #(1.0e16 1.0 -1.0e16) }))].
+db newTransactionDo: [:t |
+    t setRootObject: 'ip' value: ((t getRootObject: 'ip')
+        appendLast: (t newObject: { 'name' -> 'small'. 'vec' -> #(0.5 0.25 0.0) }))].
+ipDocs := db newTransaction getRootObject: 'ip'.
+ipAll := OrderedCollection new.
+ipDocs do: [:d | ipAll add: d].
+naive := (ipAll asSortedCollection: [:a :b | (dot value: ipQuery value: (a at: 'vec')) >= (dot value: ipQuery value: (b at: 'vec'))]) asArray.
+lesson check: 'the plain loop ranks small first: it scored big 0.0'
+    is: { (naive first at: 'name'). dot value: ipQuery value: #(1.0e16 1.0 -1.0e16) } equals: #('small' 0.0).
+byIndex := ((PBQuery from: ipDocs) where: ((PBField path: 'vec') near: ipQuery k: 2)) asArray.
+lesson check: 'the index ranks big first, as proto_db does' is: (byIndex collect: [:d | d at: 'name']) equals: #('big' 'small').
+
+"Why x ** 2 is not x * x. 130492547 squared needs 54 bits: a half-way case. Python's ** is libm pow,
+ which rounds it one way; the product rounds it the other. protoST's raisedTo: 2 is libm pow too."
+x := 130492547 asFloat.
+lesson check: 'raisedTo: 2 and * disagree on a half-way square' isTrue: ((x raisedTo: 2) = (x * x)) not.
+lesson check: 'raisedTo: 2 answers what CPython x ** 2 answers' is: (x raisedTo: 2) printString equals: '1.702830482254721e16'.
+
+"IVF-Flat: the same documents in 16 lists; a search probes nprobe of them."
+recall := [:nprobe | | hits coll |
+    db newTransactionDo: [:t |
+        | ivf |
+        ivf := t newList addIndex: (PBVectorIndex name: 'ivf' keySpec: (PBKeySpec path: 'vec') dim: 8 metric: 'cosine'
+            backend: 'ivf_flat' params: (Dictionary new at: 'nlist' put: 16; at: 'nprobe' put: nprobe; yourself)).
+        docs do: [:d | ivf := ivf appendLast: d].
+        t setRootObject: 'ivf' value: ivf].
+    coll := db newTransaction getRootObject: 'ivf'.
+    hits := 0.
+    0 to: 39 do: [:q | | vec truth found |
+        vec := (ranked detect: [:d | (d at: 'i') = (q * 13)]) at: 'vec'.
+        truth := (((ranked asSortedCollection: [:a :b | (cosine value: vec value: (a at: 'vec')) >= (cosine value: vec value: (b at: 'vec'))])
+            asArray first: 10) collect: [:d | d at: 'i']) asSet.
+        found := (((PBQuery from: coll) where: ((PBField path: 'vec') near: vec k: 10)) asArray collect: [:d | d at: 'i']) asSet.
+        hits := hits + (truth select: [:i | found includes: i]) size].
+    (hits / 400) asFloat].
+#(1 4) do: [:nprobe | lesson say: 'nlist=16 nprobe=' , nprobe printString , ': recall@10 = ' , (recall value: nprobe) printString].
+lesson check: 'nprobe = nlist is exact' is: (recall value: 16) equals: 1.0.
+
+"hnsw: maintained and validated, never searched here."
+db newTransactionDo: [:t |
+    | coll |
+    coll := t newList addIndex: (PBVectorIndex name: 'graph' keySpec: (PBKeySpec path: 'vec') dim: 8 metric: 'cosine'
+        backend: 'hnsw' params: nil).
+    coll := coll appendLast: (all detect: [:d | (d at: 'i') = 42]).
+    t setRootObject: 'hnsw' value: coll].
+hnsw := db newTransaction getRootObject: 'hnsw'.
+lesson check: 'an hnsw-indexed collection is written and validates' is: hnsw validate size equals: 1.
+lesson check: 'its plan is built' is: (planOf value: ((PBQuery from: hnsw) where: ((PBField path: 'vec') near: target k: 1))) equals: 'VectorSearch <- VectorHnsw'.
+lesson check: 'its search is refused' signals: PBNotSupportedError containing: 'hnsw'
+    during: [((PBQuery from: hnsw) where: ((PBField path: 'vec') near: target k: 1)) asArray].
+
+space close.
+dir deleteAll.
+lesson finish.

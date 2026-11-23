@@ -6,7 +6,8 @@
  semantics: 1 = 1.0 = Decimal 1, true is not 1, nil is a value, PBMissing matches only '?N', '!='
  is not the complement of '==', range operators stay within the value's type rank, unorderable keys
  match only '?!N', '!=', 'contains', '?T' and '?!T'. Terms are frozen values, equal by order key.
- 'near[]' is refused (vector search is out of scope, spec 3.3). The vector
+ 'near[]' is an operator whose term holds a PBNearQuery (vectors phase V2; its behaviours are
+ tests/unit/vec_terms.st's). The vector
  ../conformance/vectors-index-keys/terms.msgpack (tests/interop/py_term_cases.py, checked against
  the directory's manifest.sha256) holds proto_db's answers on the values of QData termValues: 160
  seed: 5 (QData values: and QData domainValues) for every operator, its outcome for the degenerate terms of the plan's Review Focus 4, and
@@ -38,16 +39,19 @@ t := [:path :op :value | PBTerm path: path op: op value: value].
 "test_operator_vocabulary_uses_the_0_1_spellings"
 fails := OrderedCollection new.
 expect value: 'operators' value: PBTerm operators asArray
-  value: #('==' '!=' '<' '<=' '>' '>=' 'in' 'between[]' 'between()' 'between(]' 'between[)' '?N' '?!N' 'contains' '?T' '?!T').
+  value: #('==' '!=' '<' '<=' '>' '>=' 'in' 'between[]' 'between()' 'between(]' 'between[)' '?N' '?!N' 'near[]' 'contains' '?T' '?!T').
 expect value: 'unary operators' value: PBTerm unaryOperators asArray value: #('?N' '?!N' '?T' '?!T').
 #('==' '!=' '<' '<=' '>' '>=' 'contains') do: [:op |
   expect value: op value: (t value: 'x' value: op value: 1) op value: op].
 expect value: 'path:op:' value: (PBTerm path: 'x' op: '?N') value value: nil.
 c that: 'the operator vocabulary is proto_db''s' is: fails asArray equals: #().
 
-"near[] is refused (spec 3.3; test_near_* are n/a)"
-c that: 'near[] is refused' signals: PBNotSupportedError containing: 'vector' during: [
-  PBTerm path: 'v' op: 'near[]' value: #(1.0 0.0)].
+"near[] builds a term holding a PBNearQuery (vectors phase V2; the test_near_* behaviours are
+ tests/unit/vec_terms.st's)"
+s := PBTerm path: 'v' op: 'near[]' value: (PBFrozenDict withAssociations: { 'vector' -> #(1 0). 'k' -> 2 }).
+c that: 'near[] builds a term holding a PBNearQuery'
+  is: { s op. s value. s = (PBTerm path: 'v' op: 'near[]' value: (PBNearQuery vector: #(1.0 0.0) k: 2)) }
+  equals: { 'near[]'. PBNearQuery vector: #(1.0 0.0) k: 2. true }.
 
 "test_term_is_frozen_and_compares_by_value"
 fails := OrderedCollection new.
@@ -208,9 +212,11 @@ atoms := TermAtoms on: values.
   (PBKeys exactToken: (atoms decode: bytes)) = (PBKeys exactToken: (values at: i)) ifFalse: [
     Error signal: 'QData termValues: no longer draws the values of the vector (value ' , i printString , ')']].
 cases := data at: 'cases'.
+"Python's own errors (the near[] cases whose id names DV7) are PBValidationError here (deviation
+ DV7)."
 errorClass := [:name |
   name isNil ifTrue: [nil] ifFalse: [
-    name = 'ProtoValidationError' ifTrue: [PBValidationError] ifFalse: [
+    (#('ProtoValidationError' 'OverflowError' 'ValueError' 'TypeError') includes: name) ifTrue: [PBValidationError] ifFalse: [
       name = 'ProtoNotSupportedError' ifTrue: [PBNotSupportedError] ifFalse: [Error signal: 'unknown class ' , name]]]].
 "For each case: (the error class of compile:, nil) or (nil, the expression)."
 outcome := [:case | | tokens |
@@ -234,7 +240,9 @@ cases doWithIndex: [:case :i |
  by the unit checks above and in qry_expressions.st only. The counts below are of cases: 204 (176
  with answers, 12 degenerate, 177 compiled until Task 6's review added five terms on the records'
  path 'r', '!=', '<', 'between[]', 'in' and '== nil', for the path indexes of qry_index_plans.st:
- 181 with answers, 182 compiled)."
+ 181 with answers, 182 compiled). The vectors phase (V2) holds 42 near[] cases, the Task 5 one
+ among them, renamed (245 cases): 11 compile and are refused by evaluate: (no answers), 28 are
+ degenerate (40 in all), 5 record Python's own errors (DV7); 193 compile."
 expect value: 'cases with answers' value: (cases select: [:case | (case at: 'answers') notNil]) size value: 181.
 c that: 'matches: on QData values equals proto_db''s answers for every operator' is: fails asArray equals: #().
 
@@ -246,15 +254,13 @@ cases doWithIndex: [:case :i |
   got := (dec at: i) key.
   expr := (dec at: i) value.
   want := errorClass value: (case at: 'error').
-  "near[] is refused when the term is made (spec 3.3); proto_db refuses it when it is evaluated"
-  ((id includesSubstring: 'near[]') and: [(case at: 'match_error') = 'ProtoNotSupportedError']) ifTrue: [want := PBNotSupportedError].
   got = want ifFalse: [fails add: id , ': compile: signals ' , got printString , ', proto_db ' , want printString].
   (expr notNil and: [(case at: 'match_error') notNil]) ifTrue: [
     got := [values do: [:v | expr evaluate: v]. nil] on: PBDBError do: [:e | e return: e class].
     got = (errorClass value: (case at: 'match_error')) ifFalse: [
       fails add: id , ': evaluate: signals ' , got printString , ', proto_db ' , (case at: 'match_error')]]].
 "A count of the vector (value-domain note above)."
-expect value: 'degenerate cases' value: (cases select: [:case | (case at: 'id') includesSubstring: '(degenerate)']) size value: 12.
+expect value: 'degenerate cases' value: (cases select: [:case | (case at: 'id') includesSubstring: '(degenerate)']) size value: 40.
 s := t value: nil value: 'in' value: { 1. 1.0. decimal1. true. 's1'. nil. 1 }.
 expect value: 'in keeps duplicates and mixed types' value: s value size value: 7.
 s := t value: nil value: 'in' value: (-500 to: 499) asArray.
@@ -282,7 +288,7 @@ cases doWithIndex: [:case :i |
         (MessagePack encode: (TermAtoms tree: expr describe)) = (case at: 'describe') ifFalse: [
           fails add: (case at: 'id') , ': describe ' , expr describe printString]]]].
 "A count of the vector (value-domain note above)."
-expect value: 'compiled cases' value: (dec select: [:each | each value notNil]) size value: 182.
+expect value: 'compiled cases' value: (dec select: [:each | each value notNil]) size value: 193.
 c that: 'compile: of every recorded list gives proto_db''s list and description' is: fails asArray equals: #().
 
 c report displayNl.

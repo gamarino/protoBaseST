@@ -4,7 +4,8 @@ A port of proto_db's proto_db/query/linq.py at v2.0.0rc4 (proto_db spec section 
 the field builder F (Field and _Operand, linq.py:360-484 and 600-640), the predicate mixing rule
 (linq.py:48-61, 169-358) and Queryable (linq.py:906-1189), with protoST's names (ruling IQ2) and
 less what spec 3.2 defers (group_by, join, select_many, computed values, startswith and endswith,
-ValuesScan, the query cache, portable pager tokens) and 3.3 excludes (near).
+ValuesScan, the query cache, portable pager tokens). near: and the R27 mixing rule are the vectors
+phase's V7 (Addendum V 2.9; linq.py:53-58, 644-647, 996-1008 and 1099-1105).
 
 PBField names a key, as a term path does (PBKeySpec forTermPath:): PBField path: 'address.zip',
 PBField element, PBField extractor: 'name_length'. Its messages answer PBTerms, the pure
@@ -21,6 +22,9 @@ conditions the planner answers with indexes:
                                         by bounds '[]' '()' '(]' '[)' (linq.py range)
   isNone notNone isTrue notTrue contains: v
                                         '?N' '?!N' '?T' '?!T' 'contains'
+  near: aPBNearQuery, near: aVector k: k, near:threshold:, near:k:threshold:,
+  near:k:threshold:metric:              'near[]' (linq.py near; nil allowed for k, threshold and
+                                        metric, PBNearQuery's validation and texts)
 
 = is not overridden (call IC4): a field compared with = answers a Boolean, which where: refuses.
 Conditions combine with &, | and not (terms.st), expressions only (ruling CR5).
@@ -43,13 +47,24 @@ block becomes a PBBlockPredicate described as 'block'; it is opaque and runs in 
 rule is proto_db's: in a top-level AND, the pure conjuncts (no PBBlockPredicate inside) go to the
 planner and each impure conjunct becomes its own BlockFilter on top, in order; an OR or a NOT
 holding a block is one BlockFilter for the whole condition, never partly indexed, never dropped.
+The exception is ruling R27 (linq.py:53-58): when the pure part of the leading run's condition
+(below) has exactly one conjunct holding near[] and it is a bare near[] term with k, the impure
+conjuncts join the condition handed to the planner as conjuncts (a PBBlockPredicate as it is, any
+other one as a PBBlockPredicate of its evaluation, described as render: renders it), so they are
+the PBVectorSearch's where: the k nearest among the elements they accept, not k nearest then
+filtered. A near[] term inside an OR or a NOT holding a block (a PBBlockPredicate, a public
+PBExpression, so &, | and not accept it) has no per-element semantics: where: refuses it when it
+is sent, as proto_db's where does (linq.py:344-353, 940-943, _check_no_near), each impure part of
+its condition checked, PBNotSupportedError with proto_db's text.
 
 The plan (linq.py Queryable.plan, 'Placement'): the leading where: and orderBy:/thenBy: calls are
 merged (the conditions ANDed, the keys composed: orderBy: puts its key first, so earlier keys
 break its ties; thenBy: appends) and handed to PBPlanner with the skip:/take: calls that directly
 follow them, so indexes answer conditions and may stream ordered rows. When the merged condition
 has impure parts, or a key is a block, the planner gets the pure condition (and the keys when they
-are all paths) and the BlockFilters, a PBSort and a PBLimit are stacked on top in that order. Every
+are all paths) and the BlockFilters, a PBSort and a PBLimit are stacked on top in that order. The
+R27 rule applies to this leading run only: a where: after a window step or any other operator
+filters that step's result, as below. Every
 later operator is a node on top, in call order: a later orderBy: run re-sorts (PBSort), a skip:/take:
 run is one PBLimit (composed like slicing), a where: is a PBFilter and BlockFilters, project: and
 collect: a PBProject, distinct a PBDistinct. explain is the explain of exactly that plan.
@@ -197,6 +212,30 @@ PBField >> betweenLeftOpen: low and: high
 PBField >> betweenRightOpen: low and: high
   ^ self _op: 'between[)' value: { low. high }.
 
+"The near[] term of aPBNearQuery (linq.py near): the nearest elements, answered by a vector index
+ only (PBQuery's plan refuses it without one, PBNotSupportedError). PBValidationError, the term's
+ text, for anything but a PBNearQuery or a mapping of its fields."
+PBField >> near: aPBNearQuery
+  ^ self _op: PBTerm nearOperator value: aPBNearQuery.
+
+"The k nearest to aVector, by the index's metric."
+PBField >> near: aVector k: anInteger
+  ^ self near: aVector k: anInteger threshold: nil metric: nil.
+
+"Those within aNumber of aVector (a similarity of at least aNumber for cosine and ip, a distance of
+ at most aNumber for l2)."
+PBField >> near: aVector threshold: aNumber
+  ^ self near: aVector k: nil threshold: aNumber metric: nil.
+
+"The k nearest within aNumber of aVector."
+PBField >> near: aVector k: anInteger threshold: aNumber
+  ^ self near: aVector k: anInteger threshold: aNumber metric: nil.
+
+"The near[] term of PBNearQuery vector: aVector k: anIntegerOrNil threshold: aNumberOrNil metric:
+ aStringOrNil (its validation and texts; at least one of k and the threshold)."
+PBField >> near: aVector k: anIntegerOrNil threshold: aNumberOrNil metric: aStringOrNil
+  ^ self near: (PBNearQuery vector: aVector k: anIntegerOrNil threshold: aNumberOrNil metric: aStringOrNil).
+
 "A substring of a String or ByteArray key, an item of a list, a key of a map, a member of a
  collection."
 PBField >> contains: aValue
@@ -246,9 +285,14 @@ PBQuery >> _with: anOp
 "=== PBQuery: operators =========================================================="
 
 "The rows satisfying anExpressionOrBlock: a PBExpression, or a block of one argument (an opaque
- PBBlockPredicate described as 'block'). Anything else is PBValidationError (ruling CR6)."
+ PBBlockPredicate described as 'block'). Anything else is PBValidationError (ruling CR6). An impure
+ part of the condition (a top-level conjunct holding a block, or the whole condition) holding a
+ near[] term is PBNotSupportedError (linq.py:940-943)."
 PBQuery >> where: anExpressionOrBlock
-  ^ self _with: { #where. self class _condition: anExpressionOrBlock }.
+  | condition |
+  condition := self class _condition: anExpressionOrBlock.
+  ((self class _split: condition) at: 2) do: [:part | self class _checkNoNear: part].
+  ^ self _with: { #where. condition }.
 
 "Rows sorted stably by aKey, ascending (linq.py order_by): a path String, a PBField or a block of
  one argument; a previous order only breaks the ties of this one."
@@ -329,6 +373,11 @@ PBQuery >> plan
     ifFalse: [self class _split: (PBPlanner conjunctionOf: predicates asArray)].
   expr := split at: 1.
   impure := split at: 2.
+  (impure notEmpty and: [self class _singleKnn: expr]) ifTrue: [
+    "near(k) AND a block is the k nearest among the elements the block accepts (ruling R27): the
+     impure parts join the vector plan's where instead of filtering its result."
+    expr := PBAnd withAll: { expr } , (impure collect: [:part | self class _predicateOf: part]).
+    impure := #()].
   pathKeys := keys allSatisfy: [:each | each keySpecObject notNil].
   (impure isEmpty and: [pathKeys])
     ifTrue: [
@@ -473,13 +522,35 @@ PBQuery class >> _split: anExpression
   ^ { pure isEmpty ifTrue: [nil] ifFalse: [PBPlanner conjunctionOf: pure].
     operands reject: [:each | self _isPure: each] }.
 
+"linq.py _check_no_near: anImpurePart, run per element by a BlockFilter, may not hold a near[]
+ term (it has no per-element semantics); the text names the part as render: renders it (linq.py
+ describe)."
+PBQuery class >> _checkNoNear: anImpurePart
+  (PBPlanner hasNear: anImpurePart) ifTrue: [
+    ^ PBNotSupportedError signal: 'A ''near[]'' term cannot run inside a Python predicate (it is combined with one by OR/NOT in '
+      , (self render: anImpurePart) , '): it has no per-element semantics; AND it at the top level instead'].
+
+"Whether anExpressionOrNil has exactly one conjunct holding near[], and it is a bare near[] term
+ with k (linq.py _single_knn)."
+PBQuery class >> _singleKnn: anExpressionOrNil
+  | near |
+  anExpressionOrNil isNil ifTrue: [^ false].
+  near := ((anExpressionOrNil isKindOf: PBAnd) ifTrue: [anExpressionOrNil operands] ifFalse: [{ anExpressionOrNil }])
+    select: [:each | PBPlanner hasNear: each].
+  ^ near size = 1 and: [PBPlanner isKnn: near first].
+
+"The impure condition anExpression as one opaque conjunct (linq.py PythonPredicate(part,
+ part.describe())): a PBBlockPredicate as it is, any other one a PBBlockPredicate of its
+ evaluation, described as render: renders it (as _blockFilter:for: describes it)."
+PBQuery class >> _predicateOf: anExpression
+  (anExpression isKindOf: PBBlockPredicate) ifTrue: [^ anExpression].
+  ^ PBBlockPredicate block: [:each | anExpression evaluate: each] description: (self render: anExpression).
+
 "aPlan under a BlockFilter of the impure condition anExpression: a PBBlockPredicate as is, any
  other one evaluated whole, described as proto_db renders it (linq.py PythonFilter of an impure
  predicate)."
 PBQuery class >> _blockFilter: aPlan for: anExpression
-  (anExpression isKindOf: PBBlockPredicate) ifTrue: [^ PBBlockFilter source: aPlan predicate: anExpression].
-  ^ PBBlockFilter source: aPlan
-    predicate: (PBBlockPredicate block: [:each | anExpression evaluate: each] description: (self render: anExpression)).
+  ^ PBBlockFilter source: aPlan predicate: (self _predicateOf: anExpression).
 
 "A one-line rendering of anExpression (linq.py _render and the describe of its impure predicates):
  a term 'path op value' (the element as 'element', a unary operator without a value), a PBAnd or
@@ -491,7 +562,7 @@ PBQuery class >> render: anExpression
   (anExpression isKindOf: PBTerm) ifTrue: [
     path := anExpression path isNil ifTrue: ['element'] ifFalse: [anExpression path].
     (PBTerm unaryOperators includes: anExpression op) ifTrue: [^ path , ' ' , anExpression op].
-    ^ path , ' ' , anExpression op , ' ' , (PBKeySpec _repr: anExpression value)].
+    ^ path , ' ' , anExpression op , ' ' , (PBCodec _pyRepr: anExpression value)].
   (anExpression isKindOf: PBNot) ifTrue: [^ '~(' , (self render: anExpression operand) , ')'].
   ^ ((anExpression isKindOf: PBAnd) ifTrue: [' & '] ifFalse: [' | '])
     join: (anExpression operands collect: [:each | '(' , (self render: each) , ')']).

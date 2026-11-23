@@ -1,7 +1,8 @@
 "-- terms.st: PBTerm and the expression language (PBExpression, PBAnd, PBOr, PBNot, PBBlockPredicate) --
 
 A port of proto_db's proto_db/query/terms.py and proto_db/query/expressions.py at v2.0.0rc4
-(proto_db spec section 10, decisions D28 and D36), less the vector parts (spec 3.3).
+(proto_db spec section 10, decisions D28 and D36), near[] included (vectors phase V2, Addendum V
+2.6).
 
 A PBTerm is (path, op, value): the key its path names (PBKeySpec forTermPath:, a dotted path, nil
 for the element itself, '@name' for a registered extractor) compared with value by op, one of
@@ -14,10 +15,13 @@ proto_db's operator strings:
   'between(]' 'between[)'        excludes both, (] the lower, [) the upper
   '?N' '?!N' '?T' '?!T'          no operand (PBTerm path:op:)
   'contains'                     one orderable operand
+  'near[]'                       a PBNearQuery (vectors.st), or a Dictionary or PBFrozenDict of its
+                                 fields (converted, PBTerm _nearQuery:)
 
-'near[]' (vector search) is refused with PBNotSupportedError (spec 3.3). An operand is made
-canonical (PBCodec canonical:) and must be orderable and not PBMissing; anything else is
-PBValidationError (terms.py:152-213).
+An operand is made canonical (PBCodec canonical:) and must be orderable and not PBMissing; anything
+else is PBValidationError (terms.py:152-213). A near[] term is answered by vector plans, never by
+the scan oracle: its matches:, and so the evaluate: of an expression that reaches it, signal
+PBNotSupportedError (terms.py:218-219), and it is equal to another by its PBNearQuery.
 
 matches: is the scan oracle every index must agree with (terms.py:215-253, D28): '==' and 'in'
 compare order keys (1 = 1.0 = Decimal 1, true is not 1, nil is a value); a PBMissing key (an absent
@@ -43,14 +47,15 @@ description}), asList (the 0.1 prefix list syntax) and termsDo:.
 PBExpression compile: anArray reads the 0.1 prefix syntax (expressions.py module docstring): a list
 (an Array, an OrderedCollection or a PBFrozenList) is a stream of expressions joined by an implicit
 AND; an expression is 'path op' for the unary operators, 'path op value' for the comparisons, 'in'
-and 'contains', 'path between-op low high', '&' e1 e2 and '|' e1 e2 (binary, prefix), '!' e, a
-nested list, or an expression already built. Malformed input is PBValidationError naming the
-position (counted from 0, as proto_db counts it).
+and 'contains', 'path between-op low high', 'path near[] vector threshold' (the 0.1 cosine
+threshold query) or 'path near[] aNearQueryOrMapping', '&' e1 e2 and '|' e1 e2 (binary, prefix),
+'!' e, a nested list, or an expression already built. Malformed input is PBValidationError naming
+the position (counted from 0, as proto_db counts it).
 
 Messages follow proto_db's, with protoST's names; a value is quoted as Python's repr does for a
 String (PBKeySpec _repr:). describe renders an operand as proto_db's display_value: nil, Booleans,
 Integers, Strings and finite Floats as they are, tuples and lists as Arrays, a map as {'@dict' ->
-pairs}, any other value as Python's repr of it ('Decimal(''1.50'')', 'datetime.date(2026, 1, 2)',
+pairs}, a PBNearQuery as its describe, any other value as Python's repr of it ('Decimal(''1.50'')', 'datetime.date(2026, 1, 2)',
 b'...', 'inf'), so explain reads the same in both languages; the exceptions (an atom, an
 instant-form datetime in an IANA zone) are listed in docs/deviations.md."
 
@@ -61,6 +66,7 @@ Import from: 'protobase/registry'.
 Import from: 'protobase/codec'.
 Import from: 'protobase/keyspec'.
 Import from: 'protobase/collections'.
+Import from: 'protobase/vectors'.
 Import from: 'decimal'.
 Import from: 'calendar'.
 Import from: 'uuid'.
@@ -146,13 +152,13 @@ PBExpression class >> _twoOperands: aToken at: anIndex of: aTokenArray
 
 "expressions.py _Compiler.parse_term: the term whose path is at anIndex."
 PBExpression class >> _parseTerm: aTokenArray at: anIndex
-  | path op rest |
+  | path op rest value |
   path := aTokenArray at: anIndex.
   anIndex + 1 > aTokenArray size ifTrue: [
     ^ PBValidationError signal: 'Term at position ' , (anIndex - 1) printString , ' needs an operator after path '
       , (PBKeySpec _repr: path)].
   op := aTokenArray at: anIndex + 1.
-  ((self _isText: op) and: [(PBTerm operators includes: op) or: [op = PBTerm nearOperator]]) ifFalse: [
+  ((self _isText: op) and: [PBTerm operators includes: op]) ifFalse: [
     ^ PBValidationError signal: 'Unknown operator ' , (PBKeySpec _repr: op) , ' at position ' , anIndex printString
       , '; expected one of ' , PBTerm _operatorList].
   rest := aTokenArray size - (anIndex + 1).
@@ -164,7 +170,21 @@ PBExpression class >> _parseTerm: aTokenArray at: anIndex
     ^ { PBTerm path: path op: op value: { aTokenArray at: anIndex + 2. aTokenArray at: anIndex + 3 }. anIndex + 4 }].
   rest < 1 ifTrue: [
     ^ PBValidationError signal: 'Operator ' , (PBKeySpec _repr: op) , ' at position ' , anIndex printString , ' needs a value'].
-  ^ { PBTerm path: path op: op value: (aTokenArray at: anIndex + 2). anIndex + 3 }.
+  value := aTokenArray at: anIndex + 2.
+  (op = PBTerm nearOperator and: [(self _isNearValue: value) not]) ifTrue: [
+    "The 0.1 form: a cosine threshold query (expressions.py:352-356)."
+    rest < 2 ifTrue: [
+      ^ PBValidationError signal: '''near[]'' at position ' , anIndex printString
+        , ' needs a vector and a threshold (or a NearQuery / mapping of its fields)'].
+    ^ { PBTerm path: path op: op value: (PBNearQuery vector: value k: nil threshold: (aTokenArray at: anIndex + 3) metric: 'cosine').
+      anIndex + 4 }].
+  ^ { PBTerm path: path op: op value: value. anIndex + 3 }.
+
+"Whether anObject is a near[] value of the long form: a PBNearQuery or a mapping (a Dictionary or
+ a PBFrozenDict; expressions.py: isinstance(value, (NearQuery, dict)))."
+PBExpression class >> _isNearValue: anObject
+  anObject isClassObject ifTrue: [^ false].
+  ^ (anObject isKindOf: PBNearQuery) or: [(anObject isKindOf: Dictionary) or: [anObject isKindOf: PBFrozenDict]].
 
 "Whether anObject is a String (not a Symbol)."
 PBExpression class >> _isText: anObject
@@ -201,9 +221,9 @@ PBExpression >> not
 
 "=== PBTerm =================================================================="
 
-"proto_db's operator strings, in terms.py's order (less 'near[]', which is refused)."
+"proto_db's operator strings (terms.py OPERATORS), in the order of test_terms.py's vocabulary test."
 PBTerm class >> operators
-  ^ #('==' '!=' '<' '<=' '>' '>=' 'in' 'between[]' 'between()' 'between(]' 'between[)' '?N' '?!N' 'contains' '?T' '?!T').
+  ^ #('==' '!=' '<' '<=' '>' '>=' 'in' 'between[]' 'between()' 'between(]' 'between[)' '?N' '?!N' 'near[]' 'contains' '?T' '?!T').
 
 "The operators that take no value (terms.py UNARY_OPERATORS)."
 PBTerm class >> unaryOperators
@@ -215,11 +235,11 @@ PBTerm class >> betweenOperators
 PBTerm class >> scalarOperators
   ^ #('==' '!=' '<' '<=' '>' '>=').
 
-"proto_db's vector operator, refused here (spec 3.3)."
+"proto_db's vector operator (terms.py NEAR): its value is a PBNearQuery."
 PBTerm class >> nearOperator
   ^ 'near[]'.
 
-"The operators as Python prints sorted(OPERATORS), less 'near[]'."
+"The operators as Python prints sorted(OPERATORS)."
 PBTerm class >> _operatorList
   ^ '[' , (', ' join: ((self operators asSortedCollection: [:a :b | a <= b]) asArray collect: [:each | PBCodec repr: each])) , ']'.
 
@@ -228,9 +248,10 @@ PBTerm class >> path: aStringOrNil op: anOperator value: aValue
   | spec operands keys canonical low high |
   spec := PBKeySpec forTermPath: aStringOrNil.
   (PBExpression _isText: anOperator) ifFalse: [^ self _unknownOperator: anOperator].
-  anOperator = self nearOperator ifTrue: [
-    ^ PBNotSupportedError signal: 'The operator ''near[]'' is answered by a vector search; vector indexes and vector search are not supported by protoBaseST (spec 3.3)'].
   (self operators includes: anOperator) ifFalse: [^ self _unknownOperator: anOperator].
+  anOperator = self nearOperator ifTrue: [
+    canonical := self _nearQuery: aValue.
+    ^ self _path: aStringOrNil op: anOperator value: canonical spec: spec valueKey: canonical operandKeys: #()].
   ((self scalarOperators includes: anOperator) or: [anOperator = 'contains']) ifTrue: [
     canonical := self _operand: aValue op: anOperator.
     keys := { PBKeys orderKey: canonical }.
@@ -265,6 +286,25 @@ PBTerm class >> path: aStringOrNil op: anOperator value: aValue
     ^ PBValidationError signal: 'Operator ' , (PBKeySpec _repr: anOperator) , ' takes no value, got ' , (PBKeySpec _repr: aValue)].
   ^ self _path: aStringOrNil op: anOperator value: nil spec: spec valueKey: (PBKeys orderKey: nil) operandKeys: #().
 
+"The PBNearQuery anObject names (terms.py _near_query, terms.py:128-137): itself, or a Dictionary
+ or PBFrozenDict holding 'vector' and only 'vector', 'k', 'threshold' and 'metric' (String keys),
+ converted; PBValidationError otherwise. The text of an unknown key lists the keys as Python's
+ sorted(map(str, keys)) prints them (PBCodec _pyStr:)."
+PBTerm class >> _nearQuery: anObject
+  | keys texts at |
+  (anObject isClassObject not and: [anObject isKindOf: PBNearQuery]) ifTrue: [^ anObject].
+  (anObject isClassObject not and: [(anObject isKindOf: Dictionary) or: [anObject isKindOf: PBFrozenDict]]) ifFalse: [
+    ^ PBValidationError signal: 'near[] needs a NearQuery (or a mapping of its fields), not ' , (PBKeySpec _repr: anObject)].
+  keys := OrderedCollection new.
+  anObject keysAndValuesDo: [:k :v | keys add: k].
+  ((keys allSatisfy: [:k | (PBExpression _isText: k) and: [#('vector' 'k' 'threshold' 'metric') includes: k]])
+      and: [keys anySatisfy: [:k | (PBExpression _isText: k) and: [k = 'vector']]]) ifFalse: [
+    texts := (keys collect: [:k | PBCodec _pyStr: k]) asArray asSortedCollection: [:a :b | a <= b].
+    ^ PBValidationError signal: 'A near[] mapping needs ''vector'' and only vector/k/threshold/metric, got ['
+      , (', ' join: (texts asArray collect: [:each | PBCodec repr: each])) , ']'].
+  at := [:name | | found | found := nil. anObject keysAndValuesDo: [:k :v | k = name ifTrue: [found := v]]. found].
+  ^ PBNearQuery vector: (at value: 'vector') k: (at value: 'k') threshold: (at value: 'threshold') metric: (at value: 'metric').
+
 "The term (aStringOrNil, anOperator) of a unary operator ('?N', '?!N', '?T', '?!T')."
 PBTerm class >> path: aStringOrNil op: anOperator
   ^ self path: aStringOrNil op: anOperator value: nil.
@@ -298,6 +338,9 @@ PBTerm class >> _isPair: anObject
 
 "The order key of aKey, or nil when it has none (terms.py is_orderable)."
 PBTerm class >> _orderKeyOrNil: aKey
+  "An Integer's key is built directly: it is what PBKeys _orderKeyLeaf: builds for one, which never
+   signals, without the handler and the fold."
+  (aKey isClassObject not and: [aKey isInteger]) ifTrue: [^ PBOrderKey basicNew _setRank: 3 payload: aKey].
   ^ [PBKeys orderKey: aKey] on: PBValidationError do: [:e | e return: nil].
 
 "Python's bool(aValue): nil, false, PBMissing, a zero number (a NaN is true), an empty String,
@@ -351,28 +394,17 @@ PBTerm class >> _bytes: aByteArray include: aNeedle
 
 "proto_db's display_value: aValue as explain shows it (terms.py display_value). nil, Booleans,
  Integers, Strings and finite Floats are kept; tuples and lists become Arrays; a map becomes
- {'@dict' -> {{key. value}. ...}}; any other value becomes Python's repr of it (_pythonRepr:).
+ {'@dict' -> {{key. value}. ...}}; any other value becomes Python's repr of it (PBCodec _pyRepr:).
  Any depth (an explicit stack)."
 PBTerm class >> displayValue: aValue
   ^ _PBValueFrame fold: aValue
-    children: [:v | self _displayChildren: v]
+    children: [:v | PBCodec _pyItems: v]
     leaf: [:v | self _displayLeaf: v]
     node: [:v :results |
       (v isKindOf: PBFrozenDict)
         ifTrue: [PBFrozenDict withAssociations: { '@dict' -> ((1 to: results size // 2) asArray collect: [:i |
           { results at: 2 * i - 1. results at: 2 * i }]) }]
         ifFalse: [results asArray]].
-
-PBTerm class >> _displayChildren: aValue
-  | out |
-  aValue isClassObject ifTrue: [^ nil].
-  (((aValue isKindOf: _PBSequence) or: [aValue isKindOf: Array]) or: [aValue isKindOf: OrderedCollection]) ifTrue: [
-    ^ aValue asArray].
-  (aValue isKindOf: PBFrozenDict) ifTrue: [
-    out := OrderedCollection new.
-    aValue keysAndValuesDo: [:k :v | out add: k; add: v].
-    ^ out asArray].
-  ^ nil.
 
 PBTerm class >> _displayLeaf: aValue
   aValue isNil ifTrue: [^ nil].
@@ -381,120 +413,8 @@ PBTerm class >> _displayLeaf: aValue
   aValue isInteger ifTrue: [^ aValue].
   (PBExpression _isText: aValue) ifTrue: [^ aValue].
   (aValue isFloat and: [aValue isNaN not and: [aValue isInfinite not]]) ifTrue: [^ aValue].
-  ^ self _pythonRepr: aValue.
-
-"Python's repr of aValue, for the values display_value renders as text. An atom is shown as
- proto_db's generic Atom repr, <type name oid=...> (proto_db prints a record's fields, a
- collection's count, or, for a stub, its storage pointer), and an instant-form datetime in an IANA
- zone by its printString (Python shows its wall clock in the zone, which needs a time-zone
- database): docs/deviations.md."
-PBTerm class >> _pythonRepr: aValue
-  aValue isFloat ifTrue: [
-    "Only a NaN or an infinity comes here: display_value keeps a finite float."
-    aValue isNaN ifTrue: [^ 'nan'].
-    ^ aValue > 0 ifTrue: ['inf'] ifFalse: ['-inf']].
-  (aValue isKindOf: Decimal) ifTrue: [^ 'Decimal(''' , aValue printString , ''')'].
-  (aValue isKindOf: ByteArray) ifTrue: [^ self _bytesRepr: aValue].
-  (aValue isKindOf: DateTime) ifTrue: [^ self _dateTimeRepr: aValue].
-  (aValue isKindOf: CalendarDate) ifTrue: [
-    ^ self _call: 'datetime.date' args: { aValue year printString. aValue month printString. aValue day printString }].
-  (aValue isKindOf: TimeOfDay) ifTrue: [^ self _timeRepr: aValue].
-  (aValue isKindOf: TimeSpan) ifTrue: [^ self _timedeltaRepr: aValue totalMicroseconds].
-  (aValue isKindOf: UUID) ifTrue: [^ 'UUID(''' , aValue printString , ''')'].
-  (aValue isKindOf: PBMutableObject) ifTrue: [^ 'MutableObject(' , (PBCodec repr: aValue name) , ')'].
-  aValue == PBMissing default ifTrue: [^ 'MISSING'].
-  (aValue isKindOf: PBAtom) ifTrue: [^ '<' , aValue class typeName , ' oid=' , (self _uuidText: aValue oid) , '>'].
-  ^ aValue printString.
-
-PBTerm class >> _call: aName args: anArray
-  ^ aName , '(' , (', ' join: anArray) , ')'.
-
-"The 8-4-4-4-12 text of 16 oid bytes, as Python prints a UUID."
-PBTerm class >> _uuidText: aByteArray
-  | hex |
-  hex := (aByteArray isKindOf: ByteArray) ifTrue: [aByteArray hex asLowercase] ifFalse: [^ aByteArray printString].
-  ^ (hex copyFrom: 1 to: 8) , '-' , (hex copyFrom: 9 to: 12) , '-' , (hex copyFrom: 13 to: 16) , '-'
-    , (hex copyFrom: 17 to: 20) , '-' , (hex copyFrom: 21 to: 32).
-
-"Python's repr of bytes: b'...', single quotes unless the bytes hold a single quote and no double
- one; the quote and the backslash escaped, \t \n \r, \xhh outside printable ASCII."
-PBTerm class >> _bytesRepr: aByteArray
-  | quote out |
-  quote := ((aByteArray asArray includes: 39) and: [(aByteArray asArray includes: 34) not]) ifTrue: [34] ifFalse: [39].
-  out := WriteStream on: String new.
-  out nextPutAll: 'b'; nextPut: (Character value: quote).
-  aByteArray do: [:b |
-    (b = quote or: [b = 92])
-      ifTrue: [out nextPut: $\; nextPut: (Character value: b)]
-      ifFalse: [
-        b = 9 ifTrue: [out nextPutAll: '\t'] ifFalse: [
-        b = 10 ifTrue: [out nextPutAll: '\n'] ifFalse: [
-        b = 13 ifTrue: [out nextPutAll: '\r'] ifFalse: [
-        (b < 32 or: [b >= 127])
-          ifTrue: [ | hex |
-            hex := (b printString: 16) asLowercase.
-            out nextPutAll: '\x'; nextPutAll: (hex size = 1 ifTrue: ['0' , hex] ifFalse: [hex])]
-          ifFalse: [out nextPut: (Character value: b)]]]]]].
-  out nextPut: (Character value: quote).
-  ^ out contents.
-
-"Python's repr of a timedelta of aMicroseconds: datetime.timedelta(days=d, seconds=s,
- microseconds=u), the zero fields left out, datetime.timedelta(0) when all are."
-PBTerm class >> _timedeltaRepr: aMicroseconds
-  | days seconds micros args |
-  days := aMicroseconds // 86400000000.
-  seconds := aMicroseconds \\ 86400000000 // 1000000.
-  micros := aMicroseconds \\ 1000000.
-  args := OrderedCollection new.
-  days = 0 ifFalse: [args add: 'days=' , days printString].
-  seconds = 0 ifFalse: [args add: 'seconds=' , seconds printString].
-  micros = 0 ifFalse: [args add: 'microseconds=' , micros printString].
-  args isEmpty ifTrue: [args add: '0'].
-  ^ self _call: 'datetime.timedelta' args: args asArray.
-
-"Python's repr of a tzinfo as proto_db decodes it (codec.py _decode_tz): an IANA zone is
- zoneinfo.ZoneInfo(key='K'); a fixed offset whose name is the default one is an unnamed timezone,
- datetime.timezone.utc for zero, and a named one keeps its name."
-PBTerm class >> _zoneRepr: aZone
-  | default |
-  (aZone isKindOf: ZoneName) ifTrue: [^ 'zoneinfo.ZoneInfo(key=' , (PBCodec repr: aZone key) , ')'].
-  default := (ZoneOffset microseconds: aZone microseconds) name.
-  aZone name = default ifTrue: [
-    aZone microseconds = 0 ifTrue: [^ 'datetime.timezone.utc'].
-    ^ self _call: 'datetime.timezone' args: { self _timedeltaRepr: aZone microseconds }].
-  ^ self _call: 'datetime.timezone' args: { self _timedeltaRepr: aZone microseconds. PBCodec repr: aZone name }.
-
-"The arguments of a time or datetime repr: anArray (the fields up to the minute), then the second
- and the microsecond with trailing zeros left out, then fold=1 and tzinfo in the order CPython's C
- implementation appends them: a datetime appends fold before tzinfo, a time tzinfo before fold
- (aBoolean true)."
-PBTerm class >> _clockArgs: anArray second: s microsecond: us fold: aFold zone: aZone tzinfoFirst: aBoolean
-  | args fold tz |
-  args := anArray asOrderedCollection.
-  us = 0
-    ifTrue: [s = 0 ifFalse: [args add: s printString]]
-    ifFalse: [args add: s printString; add: us printString].
-  fold := aFold = 0 ifTrue: [#()] ifFalse: [#('fold=1')].
-  tz := aZone isNil ifTrue: [#()] ifFalse: [{ 'tzinfo=' , (self _zoneRepr: aZone) }].
-  aBoolean ifTrue: [args addAll: tz; addAll: fold] ifFalse: [args addAll: fold; addAll: tz].
-  ^ args asArray.
-
-"A time keeps its wall clock in every zone form, so an IANA zone is rendered too."
-PBTerm class >> _timeRepr: aTime
-  ^ self _call: 'datetime.time' args: (self _clockArgs: { aTime hour printString. aTime minute printString }
-    second: aTime second microsecond: aTime microsecond fold: aTime fold zone: aTime zone tzinfoFirst: true).
-
-"A naive, fixed-offset or format-3 zone datetime (PBLegacyZoneDateTime, which holds its wall clock
- and zone key, as proto_db's decoder builds datetime(..., tzinfo=ZoneInfo(key))) is rendered as
- Python renders it. An instant-form datetime in an IANA zone holds its UTC instant only: its wall
- clock in the zone needs a time-zone database (design 4.3), so it is shown by its printString
- (docs/deviations.md)."
-PBTerm class >> _dateTimeRepr: aDateTime
-  ((aDateTime zone isKindOf: ZoneName) and: [(aDateTime isKindOf: PBLegacyZoneDateTime) not]) ifTrue: [
-    ^ aDateTime printString].
-  ^ self _call: 'datetime.datetime' args: (self _clockArgs: ({ aDateTime year. aDateTime month. aDateTime day.
-      aDateTime hour. aDateTime minute } collect: [:each | each printString])
-    second: aDateTime second microsecond: aDateTime microsecond fold: aDateTime fold zone: aDateTime zone tzinfoFirst: false).
+  (aValue isKindOf: PBNearQuery) ifTrue: [^ aValue describe].
+  ^ PBCodec _pyRepr: aValue.
 
 PBTerm >> _setPath: aStringOrNil op: anOperator value: aValue keySpecObject: aKeySpec valueKey: anOrderKey operandKeys: anArray
   "Runs once, on a fresh instance."
@@ -515,7 +435,7 @@ PBTerm >> op
   ^ op.
 
 "The canonical operand: one value, a PBTuple of operands for 'in', the PBTuple (low, high) for
- the between operators, nil for the unary ones."
+ the between operators, the PBNearQuery for 'near[]', nil for the unary ones."
 PBTerm >> value
   ^ value.
 
@@ -524,43 +444,70 @@ PBTerm >> keySpecObject
   ^ keySpecObject.
 
 "Whether anElement satisfies the term: the scan oracle (terms.py Term.matches, D28; the module
- comment). An extractor's exception passes through unwrapped."
+ comment). An extractor's exception passes through unwrapped. A near[] term is
+ PBNotSupportedError: its answer depends on the index's metric and on the whole collection.
+ The operator is read once, by its first character, which tells every operator apart but '<' from
+ '<=' and '>' from '>=' (by its size), the four between operators (by their brackets) and the four
+ unary ones (by their second and last characters); each operator takes the steps of its own branch
+ in proto_db's order: near[] refused before the key is read, then the key, the unary operators
+ (MISSING and nil are none for ?N), MISSING false, contains, the order key (nil for an unorderable
+ key: != true, every other operator false), then the comparison, an ordered one false across
+ ranks."
 PBTerm >> matches: anElement
-  | key k low high |
+  | c key k low high |
+  c := op at: 1.
+  c = $n ifTrue: [
+    ^ PBNotSupportedError signal: '''near[]'' terms are answered by vector plans, not by a scan'].
   key := keySpecObject extract: anElement.
-  (op = '?N' or: [op = '?!N']) ifTrue: [^ (key == PBMissing default or: [key isNil]) = (op = '?N')].
+  c = $? ifTrue: [ | negated |
+    negated := (op at: 2) = $!.
+    (op at: op size) = $N ifTrue: [^ (key == PBMissing default or: [key isNil]) ~= negated].
+    key == PBMissing default ifTrue: [^ false].
+    ^ (self class _truthy: key) ~= negated].
   key == PBMissing default ifTrue: [^ false].
-  (op = '?T' or: [op = '?!T']) ifTrue: [^ (self class _truthy: key) = (op = '?T')].
-  op = 'contains' ifTrue: [^ self class _contains: key operand: value key: valueKey].
+  c = $c ifTrue: [^ self class _contains: key operand: value key: valueKey].
   k := self class _orderKeyOrNil: key.
-  op = '!=' ifTrue: [^ (k notNil and: [k = valueKey]) not].
+  c = $! ifTrue: [^ (k notNil and: [k = valueKey]) not].
   k isNil ifTrue: [^ false].
-  op = '==' ifTrue: [^ k = valueKey].
-  op = 'in' ifTrue: [^ operandKeys anySatisfy: [:each | k = each]].
-  (self class betweenOperators includes: op) ifTrue: [
+  c = $= ifTrue: [^ k = valueKey].
+  c = $i ifTrue: [^ operandKeys anySatisfy: [:each | k = each]].
+  c = $b ifTrue: [
     low := operandKeys at: 1.
     high := operandKeys at: 2.
     k rank = low rank ifFalse: [^ false].
-    ^ ((op = 'between[]' or: [op = 'between[)']) ifTrue: [low <= k] ifFalse: [low < k])
-      and: [(op = 'between[]' or: [op = 'between(]']) ifTrue: [k <= high] ifFalse: [k < high]]].
+    ^ ((op at: 8) = $[ ifTrue: [low <= k] ifFalse: [low < k])
+      and: [(op at: 9) = $] ifTrue: [k <= high] ifFalse: [k < high]]].
   k rank = valueKey rank ifFalse: [^ false].
-  op = '<' ifTrue: [^ k < valueKey].
-  op = '<=' ifTrue: [^ k <= valueKey].
-  op = '>' ifTrue: [^ k > valueKey].
-  ^ k >= valueKey.
+  c = $< ifTrue: [^ op size = 1 ifTrue: [k < valueKey] ifFalse: [k <= valueKey]].
+  ^ op size = 1 ifTrue: [k > valueKey] ifFalse: [k >= valueKey].
 
 PBTerm >> evaluate: anElement
   ^ self matches: anElement.
+
+"The parts of proto_db's repr (PBCodec _pyRepr:): path, operator and value (nil for a unary
+ operator, as proto_db stores it)."
+PBTerm >> _pyReprParts
+  ^ { path. op. (self class unaryOperators includes: op) ifTrue: [nil] ifFalse: [value] }.
+
+"Term(path=..., op=..., value=...): the dataclass repr of terms.py Term (its key_spec is
+ repr=False), anArray the reprs of _pyReprParts."
+PBTerm >> _pyReprWith: anArray
+  ^ 'Term(path=' , (anArray at: 1) , ', op=' , (anArray at: 2) , ', value=' , (anArray at: 3) , ')'.
 
 "{ 'path'. 'op'. 'value' } as a PBFrozenDict, the value as proto_db's display_value renders it."
 PBTerm >> describe
   ^ PBFrozenDict withAssociations: { 'path' -> path. 'op' -> op. 'value' -> (self class displayValue: value) }.
 
-"{ path. op } for a unary operator, { path. op. low. high } for a between operator, { path. 'in'.
- operands } for 'in', { path. op. value } otherwise (terms.py Term.to_list)."
+"{ path. op } for a unary operator, { path. op. low. high } for a between operator, { path.
+ 'near[]'. vector. threshold } for a cosine threshold query (the 0.1 form; vector an Array), { path.
+ 'in'. operands } for 'in', { path. op. value } otherwise, a near[] term's value its PBNearQuery
+ (terms.py Term.to_list)."
 PBTerm >> asList
   (self class unaryOperators includes: op) ifTrue: [^ { path. op }].
   (self class betweenOperators includes: op) ifTrue: [^ { path. op. value at: 1. value at: 2 }].
+  op = self class nearOperator ifTrue: [
+    (value k isNil and: [value metric = 'cosine']) ifTrue: [^ { path. op. value vector asArray. value threshold }].
+    ^ { path. op. value }].
   op = 'in' ifTrue: [^ { path. op. value asArray }].
   ^ { path. op. value }.
 
@@ -611,6 +558,15 @@ _PBNode >> hash
   h := self class name hash.
   operands do: [:each | h := (h * 31 + each hash) \\ 1073741824].
   ^ h.
+
+"The parts of proto_db's repr (PBCodec _pyRepr:): the operands."
+_PBNode >> _pyReprParts
+  ^ operands asArray.
+
+"And(...), Or(...), Not(...): expressions.py _Node.__repr__, the class's proto_db name and the
+ operands' reprs (anArray)."
+_PBNode >> _pyReprWith: anArray
+  ^ (self class name copyFrom: 3 to: self class name size) , '(' , (', ' join: anArray) , ')'.
 
 _PBNode >> printOn: aStream
   aStream nextPutAll: self class name; nextPut: $(.
@@ -729,8 +685,10 @@ PBBlockPredicate >> evaluate: anElement
 PBBlockPredicate >> describe
   ^ PBFrozenDict withAssociations: { 'block' -> description }.
 
+"Refused (expressions.py PythonPredicate.to_list): the predicate quoted as proto_db's repr, 'a
+ block' where proto_db writes 'a Python callable' (docs/deviations.md, Block predicates)."
 PBBlockPredicate >> asList
-  ^ PBNotSupportedError signal: self printString , ' wraps a block and has no 0.1 list form'.
+  ^ PBNotSupportedError signal: (PBCodec _pyRepr: self) , ' wraps a block and has no 0.1 list form'.
 
 PBBlockPredicate >> termsDo: aBlock
   ^ self.
@@ -742,6 +700,15 @@ PBBlockPredicate >> = anObject
 
 PBBlockPredicate >> hash
   ^ description hash.
+
+"The parts of proto_db's repr (PBCodec _pyRepr:): the description."
+PBBlockPredicate >> _pyReprParts
+  ^ { description }.
+
+"PythonPredicate('...'): expressions.py PythonPredicate.__repr__ (the class protoBaseST ports as
+ PBBlockPredicate), anArray the repr of the description."
+PBBlockPredicate >> _pyReprWith: anArray
+  ^ 'PythonPredicate(' , (anArray at: 1) , ')'.
 
 PBBlockPredicate >> printOn: aStream
   aStream nextPutAll: 'PBBlockPredicate('; print: description; nextPut: $).

@@ -16,8 +16,14 @@ design (spec section 2) or a cut made while building, with its reason.
   barrier, no notify. A three-member cluster commits about half as many small transactions per
   second as one standalone process on disjoint roots, and a third as many on one hot key ([deviations.md](deviations.md#cluster-mode-commits-per-second)).
 - No cloud or tiered storage, no durability mode other than `fsync`, no Windows.
-- No vector-index writes, training or vector search: a collection holding a vector index, or an
-  index of a kind protoBaseST does not know, stays read only, and a `near[]` term is refused.
+- Vector search (0.4.0, [chapter 20](tutorial/20-vector-search.md)) searches `'exact'` and
+  `'ivf_flat'` indexes; an `'hnsw'` index is maintained but **its search is refused** (DV1: the
+  graph is hnswlib's, native and not deterministic). No derived-structure cache (DV4). IVF centroids
+  equal `proto_db`'s only for its pure-Python training on the same C library (DV3). An IVF index
+  retrained in a cluster needs a lease longer than four times its retrain, about 4 ms per member
+  at dim 8 on protoST 0.16.0; that is the break-even point, so size it at twice that (below).
+  protoBaseST refuses to load on a protoST below its floor, 0.16.1 (`PBNotSupportedError`). A collection holding an index of a kind protoBaseST does not know
+  stays read only.
   Equality and range indexes are maintained by every write and by merges onto indexed
   collections, queried through `PBQuery` and a cost-based planner, and paged in process (0.3.0;
   [chapters 17-19](tutorial/17-indexes.md), [queries.md](queries.md)).
@@ -59,7 +65,15 @@ cluster branch):
   index contract over 200 seeds and the planned-equals-scan property over 5000 seeds (250,000
   queries over every collection kind, saved, reloaded and read by concurrent actors); `proto_db`'s
   query, index and planner tests, 301 in all: 202 ported, 99 not applicable, 0 deferred
-  (`tests/unit/queries_checklist.tsv`).
+  (`tests/unit/queries_checklist.tsv`);
+- vector indexes and vector search (0.4.0), against `proto_db` `v2.0.0rc4`: 4021 vector-math cases
+  bit for bit (fsum, scores, Python's `float()`, the Mersenne Twister, `random.sample`, k-means, on
+  both kernels); index trees node by node and refusal texts byte for byte (101 indexes, every
+  training of five growth histories); every collection mutator and merge node for node; spaces
+  handed both ways with `proto_db` in its numpy mode; 101 vector cases among the 415 recorded
+  queries, 0 near ties; the index contract for eight vector registrations; tie order with injected
+  oids; and the queries checklist, now 353 test functions: 284 ported, 69 not applicable, 0
+  deferred.
 
 Not tested, or not proven:
 
@@ -77,7 +91,11 @@ Not tested, or not proven:
   whose records are on no reachable peer abandons the term).
 - **Speed.** The AVL workload is many times slower than `proto_db`'s, and the indexed-query
   workloads are 3.5 to 35 times slower on every unit, an indexed commit spending most of its time
-  on index work ([the final comparison](deviations.md#the-final-comparison-plan-task-10)). The
+  on index work ([the final comparison](deviations.md#the-final-comparison-plan-task-10)). On
+  protoST 0.16.0 an exact vector query over 10^4 vectors takes 3.4 to 5.1 times `proto_db`'s
+  pure-Python search and 443 to 1206 times its numpy search, an IVF build 2.4 times its pure-Python
+  build and about 100 times numpy's, and a commit to a vector-indexed collection 8.5 to 12.3 times
+  ([Vectors](deviations.md#vectors)). The
   dated figures, and how they were measured, are in [deviations.md](deviations.md#performance);
   they are indicative only.
 - **Memory and long runs.** A segment rolls over at 256 MiB as `proto_db`'s does; nothing was run
@@ -114,8 +132,8 @@ Not tested, or not proven:
 | `CountedSet` | **Done** (ruling R22), first a stretch goal | Time allowed, and cutting it would have left `PBCountedSet` mutators refusing. | None. |
 | Framed log reader (`PBFramedLog`) | Written, removed (ruling R14), **re-ported** with the linear search in cluster Task A1 (`cluster/log.st`) | The spec lists framed logs as a non-goal and nothing in protoBaseST reads them; an uncalled reader is debt. Its worst case was quadratic. | Done in cluster Task A1 (linear prefix-checksum search). |
 | `asOf:` | Not added | `proto_db` has none. | A three-line helper in each program. |
-| Symbolic link to the acceptor log file | **Done** (cluster Task 4 follow-up, protoST 0.12.0) | `proto_db`'s `RootsLog` resolves the log path with `os.path.realpath` before it names `<path>.lock` (8.3d re-review 12, M3). Before the fix `PBAcceptorLog path:` named the lock after the path as given, and review reproduced two live handles on one log through a symbolic link (two lock files, promises 5, 3, 4 appended). `path:` now resolves `FileReference >> realPath` (protoST 0.12.0) before it names the lock and uses the real path as the log's path; `tests/unit/cluster_acceptor_log.st` case 11 is the reproduction, refused. The space's `space.lock` needs no resolution, as in `proto_db`'s `FileStorage`: it lives inside the space directory (`tests/unit/store_root_lock_alias.st`). | protoST 0.12.0 is now the floor. The in-process inode registry of `OwnerLock` (`track`) is not ported: within one process the OS lock on the one lock file already refuses a second open. |
-| Hard-link check of framed logs | **Done** in cluster Task 4 | `proto_db`'s `open_log` refuses a log file with more than one hard link (`ProtoLockingError`) before reading or repairing it (`logfile.py:283-290`), because the path-named `.lock` file only excludes a second opener when a log has exactly one name. protoST 0.11.0 added `BinaryFile >> linkCount`; `PBFramedLog openAppend:kind:` refuses such a file with `PBLockingError` at the same point, after `PBAcceptorLog` took its lock. | protoST 0.11.0 was the floor then (0.12.0 now). |
+| Symbolic link to the acceptor log file | **Done** (cluster Task 4 follow-up, protoST 0.12.0) | `proto_db`'s `RootsLog` resolves the log path with `os.path.realpath` before it names `<path>.lock` (8.3d re-review 12, M3). Before the fix `PBAcceptorLog path:` named the lock after the path as given, and review reproduced two live handles on one log through a symbolic link (two lock files, promises 5, 3, 4 appended). `path:` now resolves `FileReference >> realPath` (protoST 0.12.0) before it names the lock and uses the real path as the log's path; `tests/unit/cluster_acceptor_log.st` case 11 is the reproduction, refused. The space's `space.lock` needs no resolution, as in `proto_db`'s `FileStorage`: it lives inside the space directory (`tests/unit/store_root_lock_alias.st`). | protoST 0.12.0 was the floor then (0.16.1 now). The in-process inode registry of `OwnerLock` (`track`) is not ported: within one process the OS lock on the one lock file already refuses a second open. |
+| Hard-link check of framed logs | **Done** in cluster Task 4 | `proto_db`'s `open_log` refuses a log file with more than one hard link (`ProtoLockingError`) before reading or repairing it (`logfile.py:283-290`), because the path-named `.lock` file only excludes a second opener when a log has exactly one name. protoST 0.11.0 added `BinaryFile >> linkCount`; `PBFramedLog openAppend:kind:` refuses such a file with `PBLockingError` at the same point, after `PBAcceptorLog` took its lock. | protoST 0.11.0 was the floor then (0.16.1 now). |
 | Cluster held retries | **Done** (cluster Task 23) | Ported with the commit round. | |
 | Phase D: tiered storage and peer fetch | Not done | Shared storage first (Q1); `fetch`, `commit_query`, read capping (R212), `unknown` answers, the local-records rules (`await_records`, R133's `_BaseUnreachable`) and log kinds 5 and 6 belong to it. Its options are refused. | Multi-host needs a shared file system whose `flock` is reliable. |
 | Pipelined permits (DEPTH 1) | Not done | Q3: DEPTH 0 first, pipelining after measurement. The measurement now exists (deviations, Performance). | One permission at a time: adding members does not add throughput. |
@@ -131,7 +149,66 @@ Not tested, or not proven:
 | Computed values, `startswith` / `endswith`, field-to-field comparison | Deferred (spec 3.2, ruling IQ3) | In `proto_db` they are not terms: they always become a `PythonFilter` (`linq.py:37-46`). | A block predicate through `where:` does the same job, as a `BlockFilter` that never uses an index. |
 | `RepeatedKeysDictionary` writes | Not a goal (unchanged) | A non-goal of the prototype; an indexed one is refused as before. | Its own task. |
 | Collection `rebuilt` (misfiled format-3 repair) | Deferred (spec 3.2) | A repair tool for damage format 3 left; `validate` reports it (`PBMisfiledError`). | Nothing repairs a misfiled collection. What would close it: a port with `validate`'s misfiled checks, if a real format-3 database needs it. |
-| Vector indexes and vector search | Excluded from 0.3.0 (spec 3.3) | `near[]`, `PBVectorIndex` writes and training, `VectorSearch` and the planner's kNN rules were out of this feature's scope; maintaining a collection's other indexes and not its vector one would write a stale index. | A collection with a vector index is read only from protoST. The maintainer has asked for vectors as a separate scope extension after 0.3.0. |
+| Vector indexes and vector search | **Done** in 0.4.0 (Addendum V); excluded from 0.3.0 (spec 3.3) | In 0.3.0 a collection with a vector index was read only from protoST. | Such collections are written and merged, and searched, since 0.4.0 ([chapter 20](tutorial/20-vector-search.md)). |
+| hnsw search | Refused (ruling VQ1, DV1) | The graph is hnswlib's: native C++, rebuilt per process, not stored and not deterministic in `proto_db` either. A Smalltalk graph would be new and unreproducible against hnswlib. | A program searching an hnsw index from protoST gets `PBNotSupportedError`; the index is still maintained, merged and validated. Use `'exact'` or `'ivf_flat'`. |
+| The derived-structure cache (`DERIVED`) | Not ported (DV4) | No process-wide mutable state in the Smalltalk layer (spec 5.1); the store tree already gives per-list access. | Every exact search re-reads the tree (no first-query build either); measured in VB1. |
+| A faster IVF retrain | Not done | A retrain is k-means plus a rebuild of every member's store entry; on protoST 0.16.0 about half of it is k-means, most of the rest the store walk and rebuild (indicative). | A cluster with a large IVF index needs a long lease (above). What would come first: the store walk (its order-key recomputation), measured. |
+| Lease sizing for an IVF index in a cluster (final review M6) | A lower bound, stated | The rule "a lease of more than four times the measured retrain" is the break-even point: the permission is a third of the lease less sendReserve (a twelfth by default), a quarter of the lease, and retrains slow by about half as a process ages (deviations, "Vectors"). | Size the lease at twice the rule, eight times the measured retrain (about 32 ms per member at dim 8 on protoST 0.16.0). A lease sized at the rule can still refuse a long-running node's retrain again and again: a liveness cost, never a safety one (the refusal is retryable, names `leaseDuration` and writes nothing, `tests/unit/cluster_vector_retrain.st`). |
+| A sender's connect to a black-holed peer (final review M3) | Bounded, not tested | A sender's turn ends after its writes of at most `pollInterval`, or after one connect, which waits up to `requestTimeout` (1 s by default) for a peer whose SYN is dropped. A waiting actor buried under that turn resumes after it; with a crashed VM the connect is retried after every back-off (0.1 to 0.2 s), so the wait can recur. The tests' unreachable peer is a closed loopback port, which refuses at once, so the connect wait is never exercised. | What would close it: a connect bounded by `pollInterval` per turn, which needs a non-blocking connect in protoST, and a test against an address that drops SYNs. |
+| A reader's turn under a trickling peer (final review M5) | Bounded, stated | A read waits until `readChunk` (1024) bytes came, and its timeout restarts with every byte, so a client that sends one byte just inside every `pollInterval` keeps one read, and the reader's turn, for up to 1024 times 50 ms, about 51 s. The HMAC is checked only once a whole frame arrived, so anyone who can reach the port can do this, on any number of connections. 0.3.0's turn had no bound at all. | Trusted networks only (as for TLS above). What would close it: a read that answers what has arrived (protoST has none: `nextBytes:` waits for the count), so a turn could end at its deadline whatever a peer sends. |
+| The cost of reading a frame 1 KiB at a time (final review M4) | Measured, stated | `readChunk` keeps the bound above at 51 s; one read per body, as 0.3.0 did, would make it the body's size times 50 ms, 1024 times longer for a 1 MiB frame. `bench/run_tcp_frames.sh` (2026-11-23, protoST 0.16.1): delivering a 1 MiB frame takes 27 to 32 ms against 11 to 13 with one read per body, 2 MiB 58 to 67 against 20 to 24 (minima of three rounds; CHANGELOG 0.4.0, "Fixed"). | A large replicated record is delivered about 2 to 3 times slower on the wire, which the encoding's own cost dwarfs. Closed by the same read primitive as the item above. |
+| A socket closed twice by two threads (final review M9) | **Fixed** in protoBaseST; filed for protoST ([protoST#24](https://github.com/gamarino/protoST/issues/24)) and protoIO ([protoIO#4](https://github.com/gamarino/protoIO/issues/4)) | The transport now closes each socket once (a compare-and-set between `stop` and the connection's own actor). The root cause is protoST's: `IOStream >> close` tests and sets a plain `closed` instance variable, so two threads can both pass it, and protoIO's close of a descriptor never read or written through a state shuts down and closes the raw descriptor while the first close's state still owns it. | Filed as [protoST#24](https://github.com/gamarino/protoST/issues/24) and [protoIO#4](https://github.com/gamarino/protoIO/issues/4): an atomic close. Any protoST program that closes one stream from two threads is exposed. |
+| The TCP transport's endless turns (a hang, below) | **Fixed** in 0.4.0, which needs protoST 0.16.1 and protoIO 0.7.1 | Found in the vectors phase's final checks; the fix needed a protoST and a protoIO change ([Fixed issues](#fixed-issues)). | Programs on protoBaseST 0.2.0 to 0.3.0 follow the upgrade note there. |
+
+## Fixed issues
+
+**A TCP cluster node could hang a program that waits on its actors** (0.2.0 to 0.3.0; found during
+the vectors phase's final checks, fixed in 0.4.0, which needs protoST 0.16.1 and protoIO 0.7.1). On
+a cluster node whose transport was `PBTcpTransport`, each accepted connection was read by one actor
+turn that lasted as long as the connection (`_PBTcpReader >> run`; the listener's `run` lasted as
+long as the transport). protoST lets an actor that waits inside a block help while it waits: its
+worker runs other actors' turns on top of the wait (protoST LANGUAGE 10.4, D56). When such a worker
+picked up a reader's turn, the waiting actor stayed buried under it, after what it waited for had
+settled, until the connection closed, which was normally when the transport stopped. A commit
+waits inside a block (`PBTransaction commit` waits inside `ensure:`), so an actor that committed on
+a TCP node was exposed whenever a connection was accepted during its commit: at a peer's first
+message and after every reconnect. The cluster kept working and the commit itself was decided; what
+did not happen was the actor's return, so a program that waited for that actor with no deadline
+before it stopped the transport hung.
+
+- **Evidence.** A probe with five TCP transports and eight actors waiting inside `ensure:` while 20
+  connections were accepted: all eight buried after their Future was resolved, at one worker, two
+  and the default pool on protoST 0.14.1 and at one worker and the default pool on 0.16.0; all
+  eight returned once the transports stopped. It is now `tests/unit/cluster_transport_tcp_burial.st`
+  (and its one-worker script), which hangs on protoST 0.16.0 and passes on 0.16.1.
+- **Why it needed protoST and protoIO.** The first rewrite of the transport's turns as finite ones
+  that re-send themselves did not help on 0.16.0: protoST's helping drained an actor's whole
+  mailbox, the messages it sent itself included, before the helping waiter checked its own Future,
+  so a self-re-sending reader still buried it (at one worker such an actor froze the whole program,
+  timers included). And a protoIO socket timeout did not bound a large write (an 8 MiB write to a
+  peer that did not read stayed blocked for more than 30 s with a 1 s timeout), so a sender could
+  not be made finite either. protoST 0.16.1 makes a helping wait run one message and then check its
+  Future (S48), and protoIO 0.7.1 bounds a whole write by its timeout and reports the bytes written
+  (S49).
+- **The fix** (`src/protobase/cluster/transport.st`). Every turn of the listener, of each reader
+  and of each sender ends after at most `pollInterval` (50 ms) of network waiting, plus one connect
+  for a sender; a frame read or written in part is kept for the next turn, and the actor sends
+  itself that turn. `stop` chains on a Future each actor settles when its last turn ends. What
+  travels and the counters are unchanged, and a frame's write still fails after `requestTimeout`
+  of writing. A worker that is not waiting still runs every message an actor sends itself in one
+  turn (protoST D59), but each of these turns blocks in I/O with a timeout, and the pool adds a
+  worker while one does, so the transport starves no other actor:
+  `cluster_transport_tcp_starvation.st` checks it at one worker.
+- **Upgrade note for programs on protoBaseST 0.2.0 to 0.3.0** (or on a protoST older than 0.16.1,
+  which 0.4.0 does not support). On a node with a TCP transport, do not wait with no deadline for
+  an actor that waits inside a block (an actor that commits, for example) while the transport
+  runs: stop the transport first (`stop`, and wait on its Future), then wait for the actor, which
+  then returns. Or wait with a deadline (`waitWithin:`), which signals `TimeoutError` instead of
+  hanging, though the actor may still be buried. Committing from the program thread is not
+  exposed: the program thread's waits block it and run no actor turn. Checked on 2026-11-23
+  against the probe: stopping the transports first, then waiting with no deadline, all eight
+  actors returned in every run (three runs each at one worker and at the default pool, on protoST
+  0.14.1 and 0.16.0), where the same wait before the stop hung.
 
 ## What would come next, if the workshop wants it
 

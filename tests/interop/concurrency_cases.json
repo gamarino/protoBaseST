@@ -4,7 +4,8 @@
     "roles swapped (set-remove-add, Task 21 fix round 1), the counted set blind adds (counted-set-",
     "blind-adds, plan Task 22: the counter-transform merge, D26) and 12 further counted set cases",
     "(cs-*, Task 22 review: clamping, removes, replace, read-modify, mixed numbers), and the two concurrent",
-    "addIndex: cases of indexed queries plan Task 4b (index-add-*). Every case runs two",
+    "addIndex: cases of indexed queries plan Task 4b (index-add-*), and the two blind writes onto a",
+    "vector-indexed root of the vectors phase V5 (vector-indexed-root*). Every case runs two",
     "transactions, A and B, interleaved as plan call C12 orders them: start A, start B, commit B,",
     "commit A. A side runs its steps when it starts and commits later; its outcome is 'committed' or",
     "the class of the error its steps or its commit signalled, with protoBaseST's names (PB...).",
@@ -12,8 +13,10 @@
     "on a copy of the conformance database vector, whose database is 'db'). The steps:",
     "  ['read root', r]                     get the root r (records its token, absence included)",
     "  ['set root', r, v]                   set the root r to v; in setup, v may be",
-    "                                       {'dict': {k: v}}, {'list': [v]}, {'set': [e]} or",
-    "                                       {'counted set': [e]}",
+    "                                       {'dict': {k: v}}, {'list': [v]}, {'set': [e]},",
+    "                                       {'counted set': [e]} or {'vector dict': {k: v}} (a",
+    "                                       Dictionary with an exact and an ivf_flat index on the",
+    "                                       element, py_case.py vector_indexes)",
     "  ['blind dict set root', r, k, v]     set r to a new Dictionary {k: v}, r unread (merges)",
     "  ['blind dict add index', r, k, v, i] set r to a new Dictionary {k: v} with an EqualityIndex named",
     "                                       i on the path 'v', r unread (merges: the index is added",
@@ -36,7 +39,9 @@
     "                                       transaction, set r to that committed value with k2 -> v2",
     "expected holds ProtoBase's outcome (the reference) and the final contents of the roots and",
     "cells listed in roots and mutables, and the index names of the roots listed in indexes (sorted,",
-    "comma-separated), in the dump notation of py_case.py and _case_ops.st:",
+    "comma-separated), and for the roots listed in vectors one line: validate's outcome, the keys,",
+    "and per index its members, invalid occurrences, trained size and centroids (Python's repr), in",
+    "the dump notation of py_case.py and _case_ops.st:",
     "absent, 1, 'text', {'k': v} (sorted keys), [v], #{e} (sorted), #{e: n} for a CountedSet (element",
     "and count, sorted), <object> for a DBObject.",
     "Every case must give the reference with protoST as A, with Python as A and with two protoST",
@@ -308,6 +313,28 @@
       "roots": ["d"], "mutables": [], "indexes": ["d"],
       "expected": {"outcome": "A=committed B=committed",
                    "dump": ["root d = {'ka': 1, 'kb': 2, 's': 0}", "indexes d = by_a,by_b"]}
+    },
+    {
+      "id": "vector-indexed-root",
+      "row": "Blind writes onto a Dictionary root holding vector indexes (an exact and an ivf_flat index on the element): both merge; B's merge trains the ivf index, A's retrains it (vectors phase V5)",
+      "setup": [["set root", "d", {"vector dict": {"s": [1.0, 0.0]}}]],
+      "a": [["blind dict set root", "d", "ka", [0.6, 0.8]]],
+      "b": [["blind dict set root", "d", "kb", [0.0, 1.0]]],
+      "roots": [], "mutables": [], "indexes": ["d"], "vectors": ["d"],
+      "expected": {"outcome": "A=committed B=committed",
+                   "dump": ["indexes d = exact,ivf",
+                            "vectors d = validate ok; keys 'ka', 'kb', 's'; exact members 3 invalid 0 trained 0 centroids (); ivf members 3 invalid 0 trained 3 centroids ((0.3, 0.9), (1.0, 0.0))"]}
+    },
+    {
+      "id": "vector-indexed-root-invalid",
+      "row": "Blind writes onto a Dictionary root holding vector indexes, one of them a value that is not a vector: B's merge retrains the ivf index, A's files its value in the invalid group (vectors phase V5)",
+      "setup": [["set root", "d", {"vector dict": {"s": [1.0, 0.0], "t": [0.0, 1.0]}}]],
+      "a": [["blind dict set root", "d", "ka", "text"]],
+      "b": [["blind dict set root", "d", "kb", [2, 3]]],
+      "roots": [], "mutables": [], "indexes": ["d"], "vectors": ["d"],
+      "expected": {"outcome": "A=committed B=committed",
+                   "dump": ["indexes d = exact,ivf",
+                            "vectors d = validate ok; keys 'ka', 'kb', 's', 't'; exact members 3 invalid 1 trained 0 centroids (); ivf members 3 invalid 1 trained 3 centroids ((0.5, 0.5), (2.0, 3.0))"]}
     }
   ]
 }

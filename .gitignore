@@ -1,5 +1,6 @@
 .superpowers/
 tests/interop/.venv
+tests/interop/.venv-numpy
 *.tmp
 tests/**/out/
 __pycache__/

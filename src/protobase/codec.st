@@ -1021,3 +1021,200 @@ PBCodec class >> _hexDigit: aCharacter
   (c between: 97 and: 102) ifTrue: [^ c - 87].
   (c between: 65 and: 70) ifTrue: [^ c - 55].
   ^ nil.
+
+"=== Python's repr and str ===================================================
+
+proto_db's texts quote values with Python's repr (f'{value!r}') or str. The vector port's
+messages (PBNearQuery, PBVectorBackend, PBVectorIndex) and display_value (PBTerm displayValue:)
+render such a value with _pyRepr: or _pyStr:, so that the text is proto_db's: one helper for every
+value they quote (the vectors phase's ruling). Not public API."
+
+"Python's str(aValue): a String is itself, a Decimal its scientific string (Decimal.__str__);
+ every other value its repr (_pyRepr:)."
+PBCodec class >> _pyStr: aValue
+  (aValue isClassObject not and: [aValue isString and: [aValue isSymbol not]]) ifTrue: [^ aValue].
+  (aValue isClassObject not and: [aValue isKindOf: Decimal]) ifTrue: [^ aValue printString].
+  ^ self _pyRepr: aValue.
+
+"Python's repr(aValue), for the values proto_db's messages and display_value render with repr:
+ None, True, False, a str quoted as Python quotes it (repr:), an int, a float (_pyFloatRepr:), a
+ tuple (its items' reprs, '(x,)' for one item), a list (a PBFrozenList, an Array or an
+ OrderedCollection), a map (a PBFrozenDict, '{k: v, ...}' in its order), a value that answers
+ _pyReprParts (a term, a near query, an AND, OR or NOT, a block predicate: proto_db's dataclass
+ or class repr, built from the reprs of the parts it answers by its _pyReprWith:), and every
+ other value as _pyLeafRepr: renders it. Any depth: an explicit stack (_PBValueFrame fold:),
+ never recursion."
+PBCodec class >> _pyRepr: aValue
+  ^ _PBValueFrame fold: aValue
+    children: [:v | self _pyReprItems: v]
+    leaf: [:v | self _pyLeaf: v]
+    node: [:v :texts |
+      (v isClassObject not and: [v respondsTo: #_pyReprWith:])
+        ifTrue: [v _pyReprWith: texts]
+        ifFalse: [self _pyContainer: v texts: texts]].
+
+"The parts whose reprs aValue's repr shows: those it answers to _pyReprParts (a term, a near query,
+ an expression node, a block predicate), else its items as a container (_pyItems:), or nil."
+PBCodec class >> _pyReprItems: aValue
+  (aValue isClassObject not and: [aValue respondsTo: #_pyReprParts]) ifTrue: [^ aValue _pyReprParts].
+  ^ self _pyItems: aValue.
+
+"The items a container's repr shows, in order (a map's keys and values alternate), or nil for a
+ value that is not a container."
+PBCodec class >> _pyItems: aValue
+  | out |
+  aValue isClassObject ifTrue: [^ nil].
+  (((aValue isKindOf: _PBSequence) or: [aValue isKindOf: Array]) or: [aValue isKindOf: OrderedCollection]) ifTrue: [
+    ^ aValue asArray].
+  (aValue isKindOf: PBFrozenDict) ifTrue: [
+    out := OrderedCollection new.
+    aValue keysAndValuesDo: [:k :v | out add: k; add: v].
+    ^ out asArray].
+  ^ nil.
+
+PBCodec class >> _pyLeaf: aValue
+  aValue isNil ifTrue: [^ 'None'].
+  aValue == true ifTrue: [^ 'True'].
+  aValue == false ifTrue: [^ 'False'].
+  aValue isClassObject ifTrue: [^ self _pyLeafRepr: aValue].
+  (aValue isString and: [aValue isSymbol not]) ifTrue: [^ self repr: aValue].
+  aValue isInteger ifTrue: [^ aValue printString].
+  aValue isFloat ifTrue: [^ self _pyFloatRepr: aValue].
+  ^ self _pyLeafRepr: aValue.
+
+PBCodec class >> _pyContainer: aValue texts: anArray
+  (aValue isKindOf: PBTuple) ifTrue: [
+    ^ '(' , (', ' join: anArray) , (anArray size = 1 ifTrue: [',)'] ifFalse: [')'])].
+  (aValue isKindOf: PBFrozenDict) ifTrue: [
+    ^ '{' , (', ' join: ((1 to: anArray size // 2) asArray collect: [:i |
+      (anArray at: 2 * i - 1) , ': ' , (anArray at: 2 * i)])) , '}'].
+  ^ '[' , (', ' join: anArray) , ']'.
+
+"Python's repr of aFloat: the shortest round-trip digits, as protoST prints them, with Python's
+ exponent form (1e+16, 1e-05, 1.5e+300: no '.0' before the exponent, a sign and at least two
+ digits); nan, inf and -inf."
+PBCodec class >> _pyFloatRepr: aFloat
+  | text e mantissa exponent |
+  (aFloat isNaN or: [aFloat isInfinite]) ifTrue: [^ self _pyLeafRepr: aFloat].
+  text := aFloat printString.
+  e := text indexOf: $e.
+  e = 0 ifTrue: [^ text].
+  mantissa := text copyFrom: 1 to: e - 1.
+  exponent := (text copyFrom: e + 1 to: text size) asNumber.
+  (mantissa endsWith: '.0') ifTrue: [mantissa := mantissa copyFrom: 1 to: mantissa size - 2].
+  ^ mantissa , 'e' , (exponent < 0 ifTrue: ['-'] ifFalse: ['+'])
+    , (exponent abs < 10 ifTrue: ['0'] ifFalse: ['']) , exponent abs printString.
+
+"Python's repr of aValue, a value that is not a container (_pyRepr:): a NaN or an infinity, a
+ Decimal, bytes, a date, a time, a datetime, a timedelta, a UUID, a mutable cell, MISSING, an atom;
+ any other value its printString. An atom is shown as proto_db's generic Atom repr, <type name
+ oid=...> (proto_db prints a record's fields, a collection's count, or, for a stub, its storage
+ pointer), and an instant-form datetime in an IANA zone by its printString (Python shows its wall
+ clock in the zone, which needs a time-zone database): docs/deviations.md."
+PBCodec class >> _pyLeafRepr: aValue
+  aValue isFloat ifTrue: [
+    "Only a NaN or an infinity comes here: _pyRepr: renders a finite Float."
+    aValue isNaN ifTrue: [^ 'nan'].
+    ^ aValue > 0 ifTrue: ['inf'] ifFalse: ['-inf']].
+  (aValue isKindOf: Decimal) ifTrue: [^ 'Decimal(''' , aValue printString , ''')'].
+  (aValue isKindOf: ByteArray) ifTrue: [^ self _pyBytesRepr: aValue].
+  (aValue isKindOf: DateTime) ifTrue: [^ self _pyDateTimeRepr: aValue].
+  (aValue isKindOf: CalendarDate) ifTrue: [
+    ^ self _pyCall: 'datetime.date' args: { aValue year printString. aValue month printString. aValue day printString }].
+  (aValue isKindOf: TimeOfDay) ifTrue: [^ self _pyTimeRepr: aValue].
+  (aValue isKindOf: TimeSpan) ifTrue: [^ self _pyTimedeltaRepr: aValue totalMicroseconds].
+  (aValue isKindOf: UUID) ifTrue: [^ 'UUID(''' , aValue printString , ''')'].
+  (aValue isKindOf: PBMutableObject) ifTrue: [^ 'MutableObject(' , (self repr: aValue name) , ')'].
+  aValue == PBMissing default ifTrue: [^ 'MISSING'].
+  (aValue isKindOf: PBAtom) ifTrue: [^ '<' , aValue class typeName , ' oid=' , (self _pyUuidText: aValue oid) , '>'].
+  ^ aValue printString.
+
+PBCodec class >> _pyCall: aName args: anArray
+  ^ aName , '(' , (', ' join: anArray) , ')'.
+
+"The 8-4-4-4-12 text of 16 oid bytes, as Python prints a UUID."
+PBCodec class >> _pyUuidText: aByteArray
+  | hex |
+  hex := (aByteArray isKindOf: ByteArray) ifTrue: [aByteArray hex asLowercase] ifFalse: [^ aByteArray printString].
+  ^ (hex copyFrom: 1 to: 8) , '-' , (hex copyFrom: 9 to: 12) , '-' , (hex copyFrom: 13 to: 16) , '-'
+    , (hex copyFrom: 17 to: 20) , '-' , (hex copyFrom: 21 to: 32).
+
+"Python's repr of bytes: b'...', single quotes unless the bytes hold a single quote and no double
+ one; the quote and the backslash escaped, \t \n \r, \xhh outside printable ASCII."
+PBCodec class >> _pyBytesRepr: aByteArray
+  | quote out |
+  quote := ((aByteArray asArray includes: 39) and: [(aByteArray asArray includes: 34) not]) ifTrue: [34] ifFalse: [39].
+  out := WriteStream on: String new.
+  out nextPutAll: 'b'; nextPut: (Character value: quote).
+  aByteArray do: [:b |
+    (b = quote or: [b = 92])
+      ifTrue: [out nextPut: $\; nextPut: (Character value: b)]
+      ifFalse: [
+        b = 9 ifTrue: [out nextPutAll: '\t'] ifFalse: [
+        b = 10 ifTrue: [out nextPutAll: '\n'] ifFalse: [
+        b = 13 ifTrue: [out nextPutAll: '\r'] ifFalse: [
+        (b < 32 or: [b >= 127])
+          ifTrue: [ | hex |
+            hex := (b printString: 16) asLowercase.
+            out nextPutAll: '\x'; nextPutAll: (hex size = 1 ifTrue: ['0' , hex] ifFalse: [hex])]
+          ifFalse: [out nextPut: (Character value: b)]]]]]].
+  out nextPut: (Character value: quote).
+  ^ out contents.
+
+"Python's repr of a timedelta of aMicroseconds: datetime.timedelta(days=d, seconds=s,
+ microseconds=u), the zero fields left out, datetime.timedelta(0) when all are."
+PBCodec class >> _pyTimedeltaRepr: aMicroseconds
+  | days seconds micros args |
+  days := aMicroseconds // 86400000000.
+  seconds := aMicroseconds \\ 86400000000 // 1000000.
+  micros := aMicroseconds \\ 1000000.
+  args := OrderedCollection new.
+  days = 0 ifFalse: [args add: 'days=' , days printString].
+  seconds = 0 ifFalse: [args add: 'seconds=' , seconds printString].
+  micros = 0 ifFalse: [args add: 'microseconds=' , micros printString].
+  args isEmpty ifTrue: [args add: '0'].
+  ^ self _pyCall: 'datetime.timedelta' args: args asArray.
+
+"Python's repr of a tzinfo as proto_db decodes it (codec.py _decode_tz): an IANA zone is
+ zoneinfo.ZoneInfo(key='K'); a fixed offset whose name is the default one is an unnamed timezone,
+ datetime.timezone.utc for zero, and a named one keeps its name."
+PBCodec class >> _pyZoneRepr: aZone
+  | default |
+  (aZone isKindOf: ZoneName) ifTrue: [^ 'zoneinfo.ZoneInfo(key=' , (self repr: aZone key) , ')'].
+  default := (ZoneOffset microseconds: aZone microseconds) name.
+  aZone name = default ifTrue: [
+    aZone microseconds = 0 ifTrue: [^ 'datetime.timezone.utc'].
+    ^ self _pyCall: 'datetime.timezone' args: { self _pyTimedeltaRepr: aZone microseconds }].
+  ^ self _pyCall: 'datetime.timezone' args: { self _pyTimedeltaRepr: aZone microseconds. self repr: aZone name }.
+
+"The arguments of a time or datetime repr: anArray (the fields up to the minute), then the second
+ and the microsecond with trailing zeros left out, then fold=1 and tzinfo in the order CPython's C
+ implementation appends them: a datetime appends fold before tzinfo, a time tzinfo before fold
+ (aBoolean true)."
+PBCodec class >> _pyClockArgs: anArray second: s microsecond: us fold: aFold zone: aZone tzinfoFirst: aBoolean
+  | args fold tz |
+  args := anArray asOrderedCollection.
+  us = 0
+    ifTrue: [s = 0 ifFalse: [args add: s printString]]
+    ifFalse: [args add: s printString; add: us printString].
+  fold := aFold = 0 ifTrue: [#()] ifFalse: [#('fold=1')].
+  tz := aZone isNil ifTrue: [#()] ifFalse: [{ 'tzinfo=' , (self _pyZoneRepr: aZone) }].
+  aBoolean ifTrue: [args addAll: tz; addAll: fold] ifFalse: [args addAll: fold; addAll: tz].
+  ^ args asArray.
+
+"A time keeps its wall clock in every zone form, so an IANA zone is rendered too."
+PBCodec class >> _pyTimeRepr: aTime
+  ^ self _pyCall: 'datetime.time' args: (self _pyClockArgs: { aTime hour printString. aTime minute printString }
+    second: aTime second microsecond: aTime microsecond fold: aTime fold zone: aTime zone tzinfoFirst: true).
+
+"A naive, fixed-offset or format-3 zone datetime (PBLegacyZoneDateTime, which holds its wall clock
+ and zone key, as proto_db's decoder builds datetime(..., tzinfo=ZoneInfo(key))) is rendered as
+ Python renders it. An instant-form datetime in an IANA zone holds its UTC instant only: its wall
+ clock in the zone needs a time-zone database (design 4.3), so it is shown by its printString
+ (docs/deviations.md)."
+PBCodec class >> _pyDateTimeRepr: aDateTime
+  ((aDateTime zone isKindOf: ZoneName) and: [(aDateTime isKindOf: PBLegacyZoneDateTime) not]) ifTrue: [
+    ^ aDateTime printString].
+  ^ self _pyCall: 'datetime.datetime' args: (self _pyClockArgs: ({ aDateTime year. aDateTime month. aDateTime day.
+      aDateTime hour. aDateTime minute } collect: [:each | each printString])
+    second: aDateTime second microsecond: aDateTime microsecond fold: aDateTime fold zone: aDateTime zone tzinfoFirst: false).

@@ -109,8 +109,9 @@ explicit.
   (`('@index_add' name index)`, `('@index_remove' name)`, never on `PBList`), so a blind write
   onto an indexed current merges as in `proto_db` (`tests/unit/idx_merge.st`,
   `tests/interop/index_both_directions.sh`, row 13 of `tests/interop/concurrency.sh`). What stays
-  refused: a collection holding a `PBVectorIndex` or an index of a kind protoBaseST does not know
-  is read only, a merge onto one included (`PBNotSupportedError` naming it; see the table below).
+  refused: a collection holding an index of a kind protoBaseST does not know is read only, a
+  merge onto one included (`PBNotSupportedError` naming it; see the table below). A collection
+  holding a `PBVectorIndex` is written and merged since the vectors phase's V5 (ruling IQ5a).
   `extend:` of nothing still answers the receiver, as `proto_db`'s. *Cost:* a merge onto an
   indexed current runs the index work and the extractors in the commit's build, at protoBaseST's
   index speed (bench M3 below). The term and expression language is provided (plan Task 5:
@@ -216,7 +217,8 @@ explicit.
 The round-trip tests (design spec 10.2) write a space from protoST and have `proto_db`'s verifier
 accept it. The space cannot contain what protoBaseST cannot write:
 
-- a collection holding a vector index or an index of an unknown kind (read only, ruling IQ5);
+- a collection holding an index of an unknown kind (read only, ruling IQ5a; a collection holding a
+  vector index is written since the vectors phase's V5, `tests/interop/vector_ops_identical.sh`);
 - `PBRepeatedKeysDictionary` writes (a non-goal);
 - Python-only types such as `demo.erp.AuditNote`, which protoST reads as opaque atoms and never
   re-writes.
@@ -953,12 +955,21 @@ The detail:
 | `isExtractorRegistered:` | A protoBaseST addition: `proto_db` has no such function (its programs call `extractor_version` and catch the error). | Asking needs no exception handler. | None: one more message. |
 | Projection | `project:` and `collect:`; `PBQuery` has **no** `select:` (ruling IQ2). | Smalltalk's `select:` filters; `proto_db`'s `select` projects, and would read backwards. | A name to learn. |
 | Selection blocks | Not in the first release (ruling IQ2): a block condition is opaque and never uses an index. | Translating a block by running it on a recording object fails silently (`30 < (p at: 'age')`, inlined `ifTrue:` and `==`, methods of the element). | Index-using conditions are written with `PBField`. |
-| Plan choice on near ties (R2) | The descent term `log2 (G + 2)` and a sort's `n log2 n` are computed by `PBCost class >> log2:` (`src/protobase/plans.st`, the one place a logarithm is computed, plan call IP7) as `ln x / ln 2` (protoST has no `log2`; ruling IQ4: protoST is not changed), which can differ from C's `log2` in the last bit. Two candidates whose costs are within a relative 1e-12 may be ranked differently: the same answer by another plan. | No protoST change for plan parity (IQ4). | The query vectors (`tests/conformance/queries.st`) report such a plan difference by name and do not fail on it; it counts as a near tie only when the choice differs (the node and index names) and the root costs agree within plan call IP8; any other plan difference, and every result difference, fails. Measured at Task 7: 0 near ties in the 314 recorded queries, every plan node for node and cost for cost `proto_db`'s. |
-| Vector and unknown index kinds (Task 4a) | A collection holding a `PBVectorIndex`, or an index of a kind protoBaseST does not know, stays read only: every change and every merge onto it is `PBNotSupportedError` naming it (IC2, ruling IQ5). | Vector search is out of scope; maintaining the other indexes but not that one would write a stale index. | Such a collection is changed from Python only. |
-| `near[]` terms (Task 5) | `PBTerm path:op:value:` with `'near[]'`, and the list syntax naming it, signal `PBNotSupportedError` when the term is made; `proto_db` builds the term (a `NearQuery`) and refuses it only when it is evaluated by a scan, answering it with a vector plan otherwise. | Vector search is out of scope (spec 3.3); a term no plan of this port can answer is refused where it is written, never later. | A query naming `near[]` fails at once, as every vector feature does. |
-| Atoms and instant-form IANA datetimes in `describe` (Task 5) | `describe` (so `explain`) renders an atom as `<type name oid=...>` and an instant-form datetime in an IANA zone by its `printString`; `proto_db`'s `display_value` prints Python's `repr`: a record's fields (`DBObject(r=1)`), a collection's count, a stub's storage pointer (`<type stub at ...>`), a zone datetime's wall clock. Every other value is rendered as Python renders it, checked by `tests/unit/qry_terms.st`: against `proto_db` for the case operands (numbers, `Decimal('1.50')`, `inf`, strings, `b'\x00'`, dates, naive and fixed-offset datetimes, times, timedeltas, UUIDs, tuples), and against CPython's text for the rest (`Decimal('Infinity')`, `Decimal('NaN')` and the other specials, named offsets, `fold=1`, a time or a format-3 datetime in an IANA zone, `zoneinfo.ZoneInfo(key='Europe/Rome')`, `MutableObject('cell')`, maps as `{'@dict': ...}`). | Python's `repr` of a record walks its fields with Python's rules; an instant-form datetime holds only its UTC instant, and its wall clock in the zone needs a time-zone database (design 4.3). A time and a format-3 datetime keep their wall clock, so they are rendered. | The `explain` of a term whose operand is an atom, or of a key that is an instant-form zone datetime, differs in that one value; results do not. |
+| Plan choice on near ties (R2) | The descent term `log2 (G + 2)` and a sort's `n log2 n` are computed by `PBCost class >> log2:` (`src/protobase/plans.st`, the one place a logarithm is computed, plan call IP7) as `ln x / ln 2` (protoST has no `log2`; ruling IQ4: protoST is not changed), which can differ from C's `log2` in the last bit. Two candidates whose costs are within a relative 1e-12 may be ranked differently: the same answer by another plan. | No protoST change for plan parity (IQ4). | The query vectors (`tests/conformance/queries.st`) report such a plan difference by name and do not fail on it; it counts as a near tie only when the choice differs (the node and index names) and the root costs agree within plan call IP8; any other plan difference, and every result difference, fails. Measured at Task 7: 0 near ties in the 314 recorded queries, every plan node for node and cost for cost `proto_db`'s. **Vector plans (DV6; vectors V6, V7):** the hnsw estimate's descent `log2 (members + 2)` is `PBCost class >> log2:` too (`vector_backends.py:815-821`), so an hnsw candidate can rank otherwise on a near tie in the same way; the vector query cases (vectors V7, 101 of the 415 recorded queries, 16 over an hnsw index, 13 of them planned and their execution refused, DV1) have 0 near ties, every vector plan node for node and cost for cost within IP8 `proto_db`'s. |
+| Unknown index kinds (Task 4a; narrowed by vectors V5) | A collection holding an index of a kind protoBaseST does not know (an opaque atom, such as a custom `proto_db` index kind) stays read only: every change and every merge onto it is `PBNotSupportedError` naming it (IC2, ruling IQ5 as narrowed by IQ5a). A collection holding a `PBVectorIndex` is not refused since V5: its mutators and merges maintain it as `proto_db`'s do (Addendum V, 2.10). | Maintaining the other indexes but not that one would write a stale index, and an unknown kind cannot be maintained. | Such a collection is changed from Python only. |
+| Python's own errors (DV7; vectors V1, V2, V3, V6) | Where `proto_db` fails with an exception Python raises itself, not a `ProtoError`, protoBaseST refuses at the same call, and at the same point of its checks, with `PBValidationError` carrying CPython's message. In force: (a) an `ip` or cosine score whose exact sum overflows (`OverflowError`, `vector_backends.py:128`, `136`; `PBVectorMath`, V1), and so, since V6, the execution of a search plan or a `nearOracle:...` that scores such a vector, when it is scored (the IVF probe count and the ranking score each entry they reach; `PBVectorMath` computes every score of a search); (b) a signalling-NaN `Decimal` as a vector component of a stored element, in `withAdded:`, `withRemoved:`, `build:` and `validate:` ("cannot convert signaling NaN to float", the `ValueError` of `float()` in `canonical_vector`; V3; a component that already made the key invalid, a Boolean before it, masks it as in Python; `nearOracle:...` too, since V6, as `near_oracle`'s `canonical_vector`); (c) a signalling-NaN `Decimal` as a `PBNearQuery` component or threshold ("cannot convert signaling NaN to float", `ValueError`, `terms.py:93`; V2); (d) an Integer beyond the Float range as a `PBNearQuery` component or threshold ("int too large to convert to float", the `OverflowError` of `math.isfinite`, `terms.py:93`; V2); (f) a metric Python cannot hash, such as a list (the `TypeError` of `metric not in NEAR_METRICS`, `terms.py:123`; V2), refused with `proto_db`'s metric sentence, since CPython's ("unhashable type: 'list'") names a Python type. (e) an Integer `retrain_growth` beyond the Float range ("int too large to convert to float", the `OverflowError` of `math.isfinite` in `_growth`, `vector_backends.py:320`; V3, checked by `tests/unit/vec_index.st`). Filing an element with a signalling-NaN component under `invalid` would write a space whose `validate` crashes in `proto_db`, so it is refused. The term vector records `proto_db`'s class for (c), (d) and (f) (`tests/interop/py_term_cases.py`, cases named DV7). | The host's exception classes; "refuse, never diverge": the operation fails at the same point in both, and nothing is written. | Only the class differs (and, for (f), the text). |
+| hnsw search (DV1; vectors V6, ruling VQ1) | An `'hnsw'` index is maintained, merged, validated, explained, estimated and planned as `proto_db`'s, but the execution of its plan (alone, under a `PBVectorSearch`, or restricted to a condition) is `PBNotSupportedError` naming the index, at the first execution and never at planning: `proto_db` answers it when `hnswlib` is installed and refuses it the same way, at the same moment, when it is not (`vector_backends.py:290-302`; `tests/unit/test_vector_index.py:520-531`). | The graph is hnswlib's (native C++, built per process, `deterministic = False`, `vector_backends.py:755`): it is not part of the format, and `proto_db` does not promise the same graph twice. | A program querying an hnsw index from protoST gets an error; the index can still be changed and merged. Checked by `tests/unit/vec_plans.st`. |
+| The text of the hnsw refusal (DV8; vectors V6) | "Index 'v' (VectorIndex on vec): the 'hnsw' vector backend needs hnswlib, which protoST cannot load; use the 'exact' or 'ivf_flat' backend", where `proto_db` says to `pip install hnswlib` and warns about free-threaded CPython (`vector_backends.py:298-301`). Every other text of the vector port is `proto_db`'s. | The advice would be wrong in protoST. | Text only. |
+| The exact backend's `numpy` (DV2; vectors V3, V6) | `'numpy'` is validated, kept and written as `proto_db`'s, and has no effect: an exact search scores every member exactly (`PBVectorMath`), where `proto_db` with numpy screens candidates in float64 and re-scores them exactly (`vector_backends.py:22-27`, `433-439`). | The screening is an optimisation whose result is, by construction, the exact answer. | None on answers (both modes of `proto_db` give VB1's checksums); only speed. |
+| No derived-structure cache (DV4; vectors V6) | A search reads the version's store tree itself: `proto_db` caches, per index version, a flat snapshot (exact), the grouped lists (ivf_flat) and the hnsw graph in a process-wide `DERIVED` cache (`vector_backends.py:200-272`). protoBaseST has none: an exact search walks the store; an ivf_flat search reads only the lists it reaches in probe order, each by a key range of the store tree bounded on the list number (an Integer compare), and skips an empty one as it reaches it (`proto_db` filters the probe order against its cached lists first: the same lists are probed). | No process-wide mutable state in the Smalltalk layer (spec 5.1); the tree already gives per-list access. | No first-query build cost and nothing to release when a space closes; every exact search re-reads the tree (bench VB1 has the first query and the repeated ones). `test_closing_a_space_releases_its_derived_vector_structures` is n/a. |
+| IVF training (DV3; vectors V4) | An `'ivf_flat'` index is trained by `proto_db`'s pure-Python k-means (`vector_backends.py:527-563`, `644-661`), operation for operation: the vectors sorted by their big-endian IEEE bytes, normalised for cosine, the initial centroids at `random.Random(seed).sample(range(n), nlist)` (CPython's Mersenne Twister, ported), Lloyd iterations whose distances sum `(a - b) ** 2` terms, ties to the lowest list, sums added in data order (each distance is one call of protoST's `Float fsumOfPowSquaredDifferences:with:` (0.16.0), bit for bit the Smalltalk loop of `raisedTo: 2` and `sumNonNegative:`). `proto_db` trains with numpy instead when numpy is importable (`531-543`). CPython's `float ** 2` is the C library's `pow`, which is not correctly rounded (it differs from `(a - b) * (a - b)` on half-way squares, Addendum V 2.5); protoBaseST squares with `raisedTo: 2`, the same `pow`, and sums centroids with plain `+` (on protoST 0.15.0 only the correctly rounded sums, the distances' `_sum_nonnegative` and the cosine normalisation's norm, run in protoST's fsum primitive, bit for bit the Smalltalk kernel's; the squares stay `raisedTo: 2`), so its centroids and lists equal those of `proto_db` without numpy byte for byte, on the same host's libm (CPython 3.14 and glibc 2.43 on the reference host: `tests/interop/vector_index_identical.sh`, every training of four growth histories crossing `nlist` and `retrain_growth`; `tests/unit/vec_ivf.st`, a subnormal-square and a half-way case). **The libm note:** the centroids of `proto_db`'s pure path are a function of the host's `pow`; another libm (musl, Apple's, Microsoft's) may round some squares differently, for `proto_db` against itself as for protoBaseST, and a libm that set `ERANGE` on a subnormal square would make CPython's `**` raise `OverflowError`, which `_sum_nonnegative` turns into an infinite distance, where protoST's `raisedTo:` answers the subnormal: training would not fail on either side, but another centroid could be nearest, so the centroids would differ (glibc does not set it: 300,000 such squares raised nothing). Identity is claimed and tested on one host, both sides on its libm (RV7). **Two differences in how the square is reached, neither changing a byte:** (1) an overflowing square makes CPython's `**` raise `OverflowError` inside `fsum`, which `_sum_nonnegative` answers as an infinite distance; protoST's `raisedTo: 2` and the 0.16.0 primitive answer an infinite term, and the msum of an infinite term among finite ones is infinity, so the distance is infinite in both. That needs no term to be a NaN, and none can be: a canonical vector is finite with a finite squared norm (`canonical_vector`), and a centroid is a mean of such vectors, so every difference is finite or infinite, never a NaN (`tests/unit/vec_math.st` 16 pins an overflowing square and an overflowing sum on both paths); (2) CPython's `float_pow` squares the absolute value of a negative base, while `raisedTo: 2` and the primitive pass the signed difference to `pow(d, 2.0)`; glibc's `pow` with exponent 2 depends only on the magnitude, so the bytes are the same (`tests/unit/vec_math.st` 10 and 16 square a half-way difference of either sign). **Platforms:** protoST's deviation D58 (0.16.0) records that MSVC's `pow(x, 2.0)` rounds some half-way squares differently from glibc's, for CPython there as well; protoBaseST's tests pin k-means and pow-square bytes computed by CPython on glibc, so they hold on that libm only. protoBaseST has no Windows CI; on another libm those pinned bytes are expected to differ in the last bit, not the two paths from each other. | Only the pure path is specified operation by operation; numpy's results depend on its BLAS, and the format leaves the centroids to the writer (`format-spec.rst:65`, `1448-1456`). | On one stored database both answer identically: list numbers, probes and rankings are computed from the stored centroids, whoever trained them, and `validate:` accepts either side's index. What differs is the centroids after a (re)training of the same history: protoBaseST's may differ in the last bits from those of `proto_db` with numpy installed. |
+| Symbols in `near[]` (vectors V2) | A Symbol is accepted wherever a `near[]` query takes a String: as its metric (`#l2`) and as a key of the mapping form (`#vector -> ...`). Python has no Symbols, and `proto_db` takes a `str` only. | In protoST a Symbol is a String (`#l2 isSymbol` answers false, its class is `String`), so the two cannot be told apart, and refusing one would refuse the other. | None: `#l2` names the metric `'l2'`, as the String does. |
+| Atoms and instant-form IANA datetimes in `describe` (Task 5) and in the vector port's messages (vectors V2, V3) | `describe` (so `explain`) renders an atom as `<type name oid=...>`, and so do the texts of `PBNearQuery`, `PBVectorBackend` and `PBVectorIndex` that quote a value (one helper, `PBCodec _pyRepr:`, renders every value they quote: `withRemoved:` of a record the index does not hold, a tampered element in `validate:`) and an instant-form datetime in an IANA zone by its `printString`; `proto_db`'s `display_value` prints Python's `repr`: a record's fields (`DBObject(r=1)`), a collection's count, a stub's storage pointer (`<type stub at ...>`), a zone datetime's wall clock. Every other value is rendered as Python renders it, checked by `tests/unit/qry_terms.st`: against `proto_db` for the case operands (numbers, `Decimal('1.50')`, `inf`, strings, `b'\x00'`, dates, naive and fixed-offset datetimes, times, timedeltas, UUIDs, tuples), and against CPython's text for the rest (`Decimal('Infinity')`, `Decimal('NaN')` and the other specials, named offsets, `fold=1`, a time or a format-3 datetime in an IANA zone, `zoneinfo.ZoneInfo(key='Europe/Rome')`, `MutableObject('cell')`, maps as `{'@dict': ...}`). | Python's `repr` of a record walks its fields with Python's rules; an instant-form datetime holds only its UTC instant, and its wall clock in the zone needs a time-zone database (design 4.3). A time and a format-3 datetime keep their wall clock, so they are rendered. | The `explain` of a term whose operand is an atom, or of a key that is an instant-form zone datetime, differs in that one value, and so does a vector refusal that quotes a record (`does not hold <proto_db.core.dbobject.DBObject oid=...>` where `proto_db` says `does not hold DBObject(vec=(1.0, 0.0))`); results do not. |
+| Boolean counts in a tampered vector index (vectors V3) | `validate:` compares a vector index's stored totals (`'total_count'`, the invalid group's total) and counts as Python's `==` does (`true` is 1, `6.0` is 6), so it judges a tampered space as `proto_db` does. A hook that does arithmetic on such a stored value does not: `withRemoved:` computes `count - 1` and `total - 1` in Smalltalk, so a stored `true` fails there (`doesNotUnderstand: -`), where Python computes `True - 1` as 0 and goes on. | A Python `bool` is an `int`; a protoST Boolean is not a number, and emulating Python's arithmetic in every hook would serve only data that no writer of either implementation produces. | Only on a space already tampered with (both writers store Integers): `validate:` answers as `proto_db` does, and a change to such a collection fails where `proto_db` would continue. |
 | `in` over a `Set` (Task 5) | A protoST `Set` keeps `true` and `1` as two operands; a Python `set` holds one of them, since `True == 1` there. Both sort their operands by order key. | The difference is the host's set, not the term: `PBTerm` keeps what it is given, as `proto_db`'s `Term` does. | `in: (Set withAll: { true. 1 })` also matches 1, where `{True, 1}` in Python matches only `True`; a sequence (an `Array`) is the same in both. |
-| Block predicates (Task 5) | `PBBlockPredicate` (`proto_db`'s `PythonPredicate`) describes itself as `{ 'block' -> description }`, where `proto_db` writes `{'python': description}`; it takes a block of one argument (`proto_db`: any callable). | Named after the language that runs it, as `BlockFilter` (call IC6). | A one-key difference in the description of a condition holding a block; the query vectors hold none. |
+| Block predicates (Task 5; DV5, vectors V7) | `PBBlockPredicate` (`proto_db`'s `PythonPredicate`) describes itself as `{ 'block' -> description }`, where `proto_db` writes `{'python': description}`; it takes a block of one argument (`proto_db`: any callable). Since the vectors phase's V7 a `VectorSearch`'s `'where'` can hold one: `near(k)` with a block given to the leading `where:` steps (ruling R27) puts the block into the search's predicate, and its `explain` describes it so (DV5). A block's description is the one it was given (`'block'` for a `where:` block), where `proto_db` describes a lambda by its qualified name, file and line. Its refusal of the 0.1 list form (`asList`) reads `PythonPredicate('d') wraps a block and has no 0.1 list form`, where `proto_db` writes `... wraps a Python callable and ...`: the predicate is quoted as `proto_db`'s repr, only the noun differs. | Named after the language that runs it, as `BlockFilter` (call IC6). | A one-key difference in the description of a condition holding a block, and so in a `VectorSearch`'s `'where'`; one noun in the `asList` refusal; the query vectors hold none. |
+| `near[]` inside an OR or a NOT holding a block: the text (vectors V7) | `where:` refuses a `near[]` term inside an OR or a NOT holding a block with `proto_db`'s class and text template (`linq.py:344-353`), the part rendered as `render:` renders it. In two shapes the rendering differs: `(a | near) | aBlock` reads `(a == 1) | (v near[] ...) | (block)`, where `proto_db` writes `((a == 1) | (v near[] ...)) | (block)`; and `(near | aBlock) not not` reads `(v near[] ...) | (block)`, where `proto_db` writes `~(~((v near[] ...) | (block)))`. And `proto_db` describes a lambda by its qualified name, file and line, which no block has (row above). | One layer here: a block is a `PBBlockPredicate`, an expression node, so `PBOr withAll:` flattens a nested OR and `PBNot of:` collapses a double negation (`expressions.py`'s `Not` rule). `proto_db` has two layers: its `Predicate` wrappers (`_Pure`, `_AnyOf`, `_Negation`) keep a pure OR as one part and do not collapse a negation. | The refusal and its class are `proto_db`'s; the text's parenthesisation differs in those two shapes (11 shapes compared in review 2 of task V7: 8 identical, these 2 different, 1 not buildable in Python). |
+| `(near & aBlock) not not` (vectors V7) | Accepted, and answered as `near & aBlock`: the k nearest among the elements the block accepts (ruling R27), where `proto_db`'s front end refuses `~~(near & fn)` (`ProtoNotSupportedError`, `_check_no_near`). | `PBNot of:` collapses a double negation, so `where:` receives the logically equal `near & aBlock`; this is what `proto_db`'s own expression layer does with `Not(Not(And(near, PythonPredicate)))`, which it collapses and accepts. Matching the front end's refusal would need a second, non-collapsing negation for a contrived input. | A condition `proto_db`'s front end refuses is answered here, with the answer of its logically equal form. |
 | The 0.1 list syntax (Task 5) | `PBExpression compile:` takes an `Array`, an `OrderedCollection` or a `PBFrozenList` as a list (`proto_db`: a Python `list`); a `PBTuple` is refused, as a Python tuple is. | A list in protoST is any of the three, and a decoded MessagePack list is a `PBFrozenList`. | None. |
 | Lists in `explain` (Task 6) | Every list in an `explain` (`'indexes'`, `'children'`, `'keys'`, the operands of a term) is a `PBFrozenList`, where `proto_db` answers Python lists and tuples. | A decoded MessagePack list is a `PBFrozenList`, so an `explain` compares with `proto_db`'s as decoded, and `PBNotation describe:` prints it (it cannot print an `Array`). | `at:` and `do:` work; `first` is spelled `asArray first`. |
 | Blocks in `explain` (Task 6) | A `PBSortKey` or `PBProject` block is described by its description, `'block'` by default (`key:descending:description:`, `source:fields:description:`); `proto_db` describes a callable by its `__qualname__`. | A protoST block has no qualified name; the caller names it. | The `'key'` or `'function'` of a block differs; no vector holds one. |
@@ -1005,7 +1016,13 @@ Purity is a documented contract ([queries.md](queries.md#extractors-and-their-pu
   (counted from 0) with protoST's names: "PBAnd operands must be PBExpression instances ... use
   PBExpression compile: for the list syntax", an `in` operand "needs a list, tuple or set of values
   (an Array, an OrderedCollection, a PBFrozenList, a PBTuple or a Set)". The list of operators in
-  "Unknown operator" leaves out `'near[]'`, which is refused (above).
+  "Unknown operator" is `proto_db`'s, `'near[]'` included. The `near[]` texts (`PBNearQuery`, the
+  mapping form, the 0.1 list form, `PBFilter`, `normalize:`) are `proto_db`'s word for word, its
+  Python nouns included ("k must be an int >= 1", "or None"), as the reference promises; the value
+  they quote is protoST's (`PBKeySpec _repr:`: `true`, `#(1 2)`), except the keys of a refused
+  mapping, which are listed as Python's `str` renders them (`'None'`, `'1e+16'`, `"b'\x01'"`,
+  `"(1, 't')"`), so that text is `proto_db`'s whole. Where `proto_db` fails with one of Python's
+  own errors, the text is CPython's (DV7, row "Python's own errors" above).
 
 ## Performance
 
@@ -1903,6 +1920,927 @@ median of 3; peak RSS in MB:
     pauses under 0.1 ms), and with the control 16.3 s against 12.9 s (one pair, load 4.8).
   - The driver, its runner and the raw outputs are in the task's working notes (`.superpowers/`,
     not in the repository).
+
+#### Headline benchmarks re-measured on protoST 0.14.1 (V-pin, 2026-11-20)
+
+The stack moved to protoST 0.14.1 on protoCore 3.6.1 (task V-pin of the vectors plan). The three
+headline benchmarks were re-run, serially, on a quiet machine, as new runs beside the protoST 0.12.0
+ones above; **no earlier figure is rewritten and nothing is asserted about time**. Every query run
+ended `verified: 5 runs of each implementation report the same work (rows, queries, plan,
+checksum)`, and every AVL and transaction run self-reported and passed its check. Indicative only: one
+machine, one session, five rounds each.
+
+- **Provenance.** The runner's line, unmodified: `2026-11-20T11:14Z; protoBaseST 119584a; protoST 0.14.1`.
+  Commits: `7fbd139` (the pin move) and `119584a` (the primitive adoption), a clean tree for every
+  run. The binaries: protoST 0.14.1 (`v0.14.1`, `15157d7`) on protoCore 3.6.1 (`v3.6.1`,
+  `00a90df3`) and protoIO 0.7.0, the `pinned-361` release builds (`ldd` shows the pinned
+  `libprotoCore.so.5`, never `/usr`'s); `proto_db` v2.0.0rc4 on CPython 3.14.6. The earlier
+  figures above are `pinned-360` (protoST 0.12.0 on protoCore 3.6.0) at older protoBaseST commits.
+- **Machine and load.** AMD Ryzen 5 5500U, 12 CPUs, Linux 7.0.0-43 (DEV12). Load average before
+  and after: AVL 2.38 before (the runner prints no after figure); query run 2.38 before and 2.08 after (a short build by another
+  session had just ended: the one-minute load was 2.5 when the AVL run started, the five-minute
+  average 7.4); transactions 1.84 before and 2.10 after. The query run took 54 minutes
+  (10:20Z to 11:14Z).
+- **Commands.** `RUNS=5 bench/run_avl.sh pinned361=<protost>`, `RUNS=5 bench/run_tx.sh
+  pinned361=<protost>`, `RUNS=5 bench/run_query.sh M1 M2 M3 P1 P2 P3`, with `PROTOST` and
+  `PROTOBASE_REPO` set.
+
+**AVL operations** (microseconds per operation, minimum / median):
+
+| operation | ops | ProtoBase | pinned361 | ratio pinned361 |
+|---|---|---|---|---|
+| posAppend | 1000 | 17.0 / 17.2 | 147.2 / 150.5 | 9x |
+| keyPut-new | 1000 | 26.1 / 26.4 | 181.5 / 189.0 | 7x |
+| posAt | 2000 | 0.8 / 0.8 | 15.3 / 15.4 | 20x |
+| keyAt | 2000 | 1.8 / 1.9 | 27.7 / 28.1 | 15x |
+| keyPut-replace | 500 | 19.2 / 19.3 | 172.3 / 172.9 | 9x |
+| check-pos | 3 | 678.5 / 686.6 | 18167.7 / 18561.3 | 27x |
+| check-key | 3 | 1025.0 / 1038.7 | 31033.7 / 31948.3 | 30x |
+
+**Commits per second** (`TX_SCALE=1`, minimum / median wall time; segments on ZFS, `fsync`):
+
+| profile | transactions | ProtoBase commits/s | ProtoBase retries | pinned361 commits/s | pinned361 retries | ratio pinned361 |
+|---|---|---|---|---|---|---|
+| tiny | 100 | 163.9 / 155.3 | 0-0 | 54.1 / 53.6 | 0-0 | 0.330x |
+| small-record | 100 | 159.1 / 156.5 | 0-0 | 51.1 / 50.2 | 0-0 | 0.321x |
+| batch-100 | 10 | 75.7 / 74.2 | 0-0 | 8.9 / 8.7 | 0-0 | 0.118x |
+| conc-disjoint-1 | 120 | 160.1 / 157.4 | 0-0 | 47.1 / 47.1 | 0-0 | 0.294x |
+| conc-disjoint-2 | 120 | 152.9 / 151.3 | 0-0 | 49.6 / 49.0 | 0-0 | 0.325x |
+| conc-disjoint-4 | 120 | 256.8 / 246.9 | 0-0 | 52.7 / 51.6 | 0-0 | 0.205x |
+| conc-merge-1 | 120 | 155.4 / 152.2 | 0-0 | 38.3 / 37.2 | 0-0 | 0.246x |
+| conc-merge-2 | 120 | 144.8 / 143.7 | 0-0 | 45.7 / 41.8 | 0-0 | 0.315x |
+| conc-merge-4 | 120 | 238.2 / 232.8 | 0-0 | 46.1 / 45.3 | 0-0 | 0.193x |
+| conc-hot-1 | 120 | 168.3 / 163.4 | 0-0 | 56.1 / 55.4 | 0-0 | 0.334x |
+| conc-hot-2 | 120 | 156.0 / 152.2 | 9-38 | 53.1 / 50.4 | 14-56 | 0.340x |
+| conc-hot-4 | 120 | 135.8 / 133.9 | 57-117 | 44.9 / 43.5 | 41-144 | 0.330x |
+
+**M1, M2, M3 (commits with indexes, bulk build against fold, the cluster) and P1, P2, P3 (the
+planner)**, microseconds, minimum / median; protoBaseST peak RSS in MB:
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st |
+|---|---|---|---|---|---|---|
+| M1 | 600 | idx0 | 1287521 / 1343151 | 4759445 / 4821141 | 3.7x | 27 / 1085 |
+| M1 | 600 | idx1 | 1533237 / 1563797 | 13755653 / 13890551 | 9.0x | 34 / 4128 |
+| M1 | 600 | idx3 | 2060544 / 2120526 | 32500847 / 33015599 | 15.8x | 46 / 5140 |
+| M2 | 100 | build | 1882 / 1900 | 36571 / 38469 | 19.4x | 23 / 97 |
+| M2 | 100 | fold | 5022 / 5065 | 44404 / 45836 | 8.8x | 24 / 97 |
+| M2 | 1000 | build | 19122 / 20021 | 434696 / 454779 | 22.7x | 25 / 264 |
+| M2 | 1000 | fold | 66717 / 67293 | 628485 / 650177 | 9.4x | 24 / 240 |
+| M2 | 10000 | build | 204316 / 212870 | 5024412 / 5198421 | 24.6x | 38 / 2326 |
+| M2 | 10000 | fold | 838089 / 858723 | 8746668 / 8985768 | 10.4x | 35 / 2186 |
+| M2 | 100000 | build | 2709895 / 2783515 | 53778817 / 54455202 | 19.8x | 172 / 5299 |
+| M2 | 100000 | fold | 12838432 / 12946482 | 110909792 / 114651304 | 8.6x | 142 / 5270 |
+| M3 | 600 | idx0 | 800313 / 813732 | 3074622 / 3103652 | 3.8x | 27 / 837 |
+| M3 | 600 | idx1 | 936415 / 938474 | 8448352 / 8662500 | 9.0x | 31 / 2988 |
+| M3 | 600 | idx3 | 1210178 / 1234176 | 20858878 / 21063507 | 17.2x | 40 / 5140 |
+| M3 | 600 | idx0-c3 | - | 5903094 / 6014560 | - | - / 1165 (largest member) |
+| M3 | 600 | idx1-c3 | - | 14380158 / 14797360 | - | - / 1889 (largest member) |
+| M3 | 600 | idx3-c3 | - | 44074416 / 54417679 | - | - / 2088 (largest member) |
+| P1 | 1 | idx0 | 5417 / 5482 | 139080 / 141630 | 25.7x | 24 / 401 |
+| P1 | 1 | idx2 | 11966 / 12177 | 321127 / 331124 | 26.8x | 26 / 773 |
+| P1 | 1 | idx8 | 14110 / 14200 | 405612 / 428468 | 28.7x | 30 / 1821 |
+| P1 | 8 | idx0 | 15780 / 15862 | 485019 / 489978 | 30.7x | 25 / 593 |
+| P1 | 8 | idx2 | 37029 / 39161 | 855204 / 885951 | 23.1x | 27 / 1025 |
+| P1 | 8 | idx8 | 95436 / 98021 | 1766945 / 1822154 | 18.5x | 31 / 2246 |
+| P1 | 32 | idx0 | 43683 / 45439 | 1762051 / 1782438 | 40.3x | 27 / 1254 |
+| P1 | 32 | idx2 | 188884 / 191905 | 3126482 / 3153748 | 16.6x | 29 / 1954 |
+| P1 | 32 | idx8 | 600098 / 615330 | 7322972 / 7444189 | 12.2x | 34 / 3996 |
+| P2 | 2000 | r0001-index | 59 / 60 | 741 / 780 | 12.6x | 31 / 1465 |
+| P2 | 2000 | r0001-scan | 20738 / 21605 | 495952 / 507682 | 23.9x | 31 / 1580 |
+| P2 | 2000 | r0010-index | 186 / 195 | 3530 / 3800 | 19.0x | 31 / 1464 |
+| P2 | 2000 | r0010-scan | 21222 / 21514 | 506282 / 509462 | 23.9x | 31 / 1577 |
+| P2 | 2000 | r0100-index | 1401 / 1416 | 41026 / 44082 | 29.3x | 31 / 1476 |
+| P2 | 2000 | r0100-scan | 20418 / 21779 | 484237 / 495626 | 23.7x | 31 / 1577 |
+| P2 | 2000 | r0500-index | 6894 / 7029 | 207523 / 211418 | 30.1x | 31 / 1517 |
+| P2 | 2000 | r0500-scan | 20393 / 21371 | 507889 / 530196 | 24.9x | 31 / 1584 |
+| P2 | 2000 | r0900-index | 12441 / 12631 | 364170 / 370748 | 29.3x | 31 / 1561 |
+| P2 | 2000 | r0900-scan | 20652 / 21105 | 515007 / 531713 | 24.9x | 31 / 1589 |
+| P2 | 2000 | r0990-index | 13967 / 14663 | 405322 / 420817 | 29.0x | 31 / 1569 |
+| P2 | 2000 | r0990-scan | 20682 / 21308 | 530426 / 534371 | 25.6x | 31 / 1589 |
+| P2 | 2000 | r1000-index | 13753 / 13814 | 406428 / 422988 | 29.6x | 31 / 1569 |
+| P2 | 2000 | r1000-scan | 21132 / 21582 | 527112 / 540162 | 24.9x | 31 / 1589 |
+| P2 | 2000 | ne-few-index | 2950 / 3047 | 91996 / 95407 | 31.2x | 31 / 1493 |
+| P2 | 2000 | ne-few-scan | 20315 / 20780 | 450156 / 460804 | 22.2x | 31 / 1565 |
+| P2 | 2000 | ne-many-index | 15475 / 16171 | 357701 / 358948 | 23.1x | 31 / 1569 |
+| P2 | 2000 | ne-many-scan | 20897 / 21042 | 449763 / 458561 | 21.5x | 31 / 1569 |
+| P3 | 2000 | intersect | 7815 / 7839 | 56360 / 57203 | 7.2x | 27 / 1324 |
+| P3 | 2000 | filter | 2234 / 2309 | 52184 / 55121 | 23.4x | 27 / 1316 |
+
+M3 cluster retries per run (block runs beyond one per commit): idx0-c3 27, 1, 0, 0, 0; idx1-c3 31,
+26, 29, 28, 25; idx3-c3 172, 153, 174, 115, 171.
+
+### Vectors
+
+**VB0, the vector math kernel** (vectors phase task V1; an input to ruling VQ2). `RUNS=5
+bench/run_query.sh VB0`, measured 2026-11-20 12:29-12:41 UTC on an AMD Ryzen 5 5500U (12 CPUs, Linux
+7.0.0-43-generic), load average 1.35 before and 2.39 after; protoBaseST `a36dc7f`, protoST 0.14.1
+(`worktrees/pinned-361/protoST/build_release/protost`, protoCore 3.6.1), `proto_db` `v2.0.0rc4` on
+CPython 3.14.6 and glibc 2.43 in its reference mode (numpy and hnswlib blocked, every score its
+pure-Python `exact_score`; the default mode, with numpy, was skipped: `tests/interop/.venv-numpy` does
+not exist yet). Data: `proto_db`'s clustered benchmark set (`benchmarks/workloads/vector.py:18-26`,
+seed 51, 16 centres), 10^4 vectors and one query, read by both sides from one MessagePack file
+(`bench/py_vector_data.py`). Each unit times one operation over the 10^4 vectors (`bench/vector_workload.st`
+states them): `products` the dim products of each vector, `naive` a plain left-to-right sum of
+precomputed products, `fsum` CPython's `math.fsum` of the same products, and the three scores. The
+runner printed `verified`: every run of both sides reported the same CRC-32 of the results' bytes,
+so every product, sum and score is `proto_db`'s to the bit. Times in microseconds, minimum and median
+of 5 interleaved runs; nothing is asserted about time.
+
+| dim | op | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st |
+|---|---|---|---|---|---|
+| 8 | products | 8298 / 8788 | 169151 / 173085 | 20.4x | 31 / 413 |
+| 8 | naive | 2006 / 2028 | 90532 / 94478 | 45.1x | 27 / 334 |
+| 8 | fsum | 2139 / 2259 | 443275 / 468377 | 207.2x | 27 / 474 |
+| 8 | ip | 8434 / 8826 | 653086 / 664258 | 77.4x | 27 / 554 |
+| 8 | l2 | 10306 / 10893 | 716641 / 731393 | 69.5x | 27 / 578 |
+| 8 | cosine | 20571 / 20644 | 1716774 / 1786196 | 83.5x | 27 / 1063 |
+| 32 | products | 32169 / 32620 | 444381 / 467272 | 13.8x | 64 / 1135 |
+| 32 | naive | 5862 / 5977 | 278608 / 287513 | 47.5x | 47 / 868 |
+| 32 | fsum | 7539 / 7910 | 2445678 / 2505955 | 324.4x | 47 / 1856 |
+| 32 | ip | 23599 / 24997 | 2916613 / 3032046 | 123.6x | 47 / 2036 |
+| 32 | l2 | 27712 / 29318 | 3132586 / 3248288 | 113.0x | 47 / 2144 |
+| 32 | cosine | 55337 / 58146 | 8916927 / 9178626 | 161.1x | 47 / 4943 |
+| 128 | products | 107690 / 108909 | 1584645 / 1618040 | 14.7x | 197 / 4155 |
+| 128 | naive | 21180 / 22011 | 1010019 / 1033946 | 47.7x | 128 / 3092 |
+| 128 | fsum | 28192 / 29459 | 10128024 / 10540129 | 359.3x | 128 / 4964 |
+| 128 | ip | 83195 / 87900 | 11630306 / 12140643 | 139.8x | 128 / 4966 |
+| 128 | l2 | 103367 / 106770 | 13340647 / 13612491 | 129.1x | 128 / 4966 |
+| 128 | cosine | 210111 / 214950 | 33496258 / 34064568 | 159.4x | 128 / 4964 |
+
+What the table says, and what it does not:
+
+- **The sum dominates a score.** An `ip` score is the products plus one fsum; the fsum alone takes
+  68% (dim 8), 84% (32) and 87% (128) of the `ip` time in protoBaseST, against 25%, 32% and 34% in
+  `proto_db`, whose `math.fsum` is C. The correctly rounded sum costs 4.9, 8.8 and 10.0 times a naive
+  interpreted sum: the ratio grows with the dimension (more partials per sum).
+- **A score per vector** (the minimum divided by 10^4) costs 65, 292 and 1163 us for `ip` at dim 8,
+  32 and 128, 72, 313 and 1334 us for `l2`, and 2.63, 3.06 and 2.88 times the `ip` time for cosine (two
+  norms and a dot product, three fsums); the scores are 69.5 (`l2`, dim 8) to 161.1 (cosine, dim 32)
+  times `proto_db`'s pure-Python scores. An exact search over 10^4 vectors of dim 32 would spend about 3 s in
+  the kernel alone; V8 measures searches, and ruling VQ2 decides on those figures whether the protoST
+  fsum primitive (Addendum V, 2.2.4) is built.
+- **Peak resident set** is not determinant: protoCore keeps memory until it needs it, up to the heap
+  budget (`PROTOCORE_HEAP_LIMIT_CELLS`, 80,000,000 cells here), which the dim-128 units reach; it is
+  reported, not compared.
+
+**VB0 on protoST 0.15.0, with the fsum primitives** (task VP-adopt; the run above is kept as the
+0.14.1 baseline). `RUNS=5 bench/run_query.sh VB0`, measured 2026-11-20 14:42-14:47 UTC on the same
+machine, load average 2.95 / 3.34 / 3.36 (1, 5 and 15 minutes) before and 2.64 / 3.17 / 3.30 after;
+protoBaseST `2f6ab44` (committed tree), protoST 0.15.0
+(`worktrees/pinned-0150/protoST/build_release/protost`, protoCore 3.6.1 per `ldd`, protoIO 0.7.0),
+`PBVectorMath usesFsumPrimitive` true; `proto_db` and the data as above. The runner printed
+`verified`: every result is `proto_db`'s to the bit, as with the Smalltalk kernel.
+
+| dim | op | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | 0.14.1 / 0.15.0 (min) | peak RSS MB py / st |
+|---|---|---|---|---|---|---|
+| 8 | products | 8740 / 9304 | 188261 / 191055 | 21.5x | 0.9x | 31 / 414 |
+| 8 | naive | 2168 / 2252 | 97419 / 98238 | 44.9x | 0.9x | 27 / 335 |
+| 8 | fsum | 2369 / 2388 | 49839 / 50811 | 21.0x | 8.9x | 27 / 291 |
+| 8 | ip | 9359 / 9930 | 171323 / 176481 | 18.3x | 3.8x | 27 / 335 |
+| 8 | l2 | 11546 / 11712 | 163151 / 167690 | 14.1x | 4.4x | 27 / 331 |
+| 8 | cosine | 21178 / 23966 | 354295 / 387420 | 16.7x | 4.8x | 27 / 431 |
+| 32 | products | 33268 / 34371 | 483211 / 509456 | 14.5x | 0.9x | 64 / 1136 |
+| 32 | naive | 6451 / 6593 | 288522 / 306205 | 44.7x | 1.0x | 47 / 869 |
+| 32 | fsum | 8553 / 8958 | 66501 / 69425 | 7.8x | 36.8x | 47 / 673 |
+| 32 | ip | 27924 / 28833 | 205215 / 212894 | 7.3x | 14.2x | 47 / 717 |
+| 32 | l2 | 34016 / 34498 | 192865 / 203766 | 5.7x | 16.2x | 47 / 713 |
+| 32 | cosine | 63935 / 69025 | 396953 / 410627 | 6.2x | 22.5x | 47 / 813 |
+| 128 | products | 113340 / 116277 | 1717960 / 1768144 | 15.2x | 0.9x | 197 / 4156 |
+| 128 | naive | 23999 / 24983 | 1090660 / 1136748 | 45.4x | 0.9x | 128 / 3093 |
+| 128 | fsum | 31106 / 33546 | 134054 / 137761 | 4.3x | 75.6x | 128 / 2297 |
+| 128 | ip | 100361 / 102443 | 298788 / 310040 | 3.0x | 38.9x | 128 / 2345 |
+| 128 | l2 | 113650 / 118571 | 297544 / 301457 | 2.6x | 44.8x | 128 / 2337 |
+| 128 | cosine | 235901 / 236327 | 597312 / 601554 | 2.5x | 56.1x | 128 / 2441 |
+
+What changed, and what did not:
+
+- **The sum no longer dominates a score.** The primitive fsum of precomputed products costs 0.51,
+  0.23 and 0.12 times the naive interpreted sum at dim 8, 32 and 128 (it was 4.9, 8.8 and 10.0
+  times). An `ip` score is now one `fsumOfProducts:with:` call, products and sum in C; the `fsum`
+  unit (the same sum over Arrays of products) is 29%, 32% and 45% of the `ip` time, and the rest of
+  a score is interpreted overhead: the call, the dispatch on the metric and the copy of each
+  `PBTuple` vector to an Array (below). A score per vector costs 17.1, 20.5 and 29.9 us for `ip`,
+  16.3, 19.3 and 29.8 us for `l2`, and 35.4, 39.7 and 59.7 us for cosine; the scores are 2.5 (cosine,
+  dim 128) to 18.3 (`ip`, dim 8) times `proto_db`'s pure-Python scores (69.5 to 161.1 times on 0.14.1).
+- **products and naive** run no primitive; their 0.9x to 1.0x against the 0.14.1 run is the noise
+  between the two runs, not a regression.
+- **PBTuple against Array.** The primitives read Arrays and OrderedCollections directly, any other
+  sequence through `size` and `at:`; the indexes hold vectors as `PBTuple`s. Measured on the same
+  data, one process per dim, minimum of 5 (`score:query:vector:` over the 10^4 vectors, us): `ip`
+  with the `PBTuple`s handed to the primitive 175566, 355939 and 1117629 at dim 8, 32 and 128;
+  with each operand copied to an Array first 151814, 176236 and 296936; with Arrays held beforehand
+  (no copy, a bound) 107284, 134877 and 234988. Cosine: 529291, 1080980 and 3083632; copied 377236,
+  438701 and 578321; bound 323380, 377313 and 498554. `fsumOfProducts:with:` alone, `PBTuple`s
+  against Arrays: 77939 against 15954, 264050 against 40180, 1004944 against 168326. The copy is one
+  Array per operand per score, and it is a net win at every dim and metric (1.2 to 5.3 times), so
+  `score:query:vector:` copies a `PBTuple` or `PBFrozenList` operand to an Array when the primitives
+  are in use (`2f6ab44`); the table above is measured with it. A first run without the copy
+  (`cd89a2e`, same day) measured `ip` at 160858, 348247 and 1054215 us.
+- The figures are one machine's, under a load average near 3; nothing is asserted about time.
+
+**VB3 and VB5, vector index maintenance** (vectors phase task V5). `RUNS=5 bench/run_query.sh VB3
+VB5`, measured 2026-11-20 17:11-18:06 UTC on the same machine, load average 2.58 before and 2.37
+after (the runner starts only below 3); protoBaseST `880127e` (clean tree), protoST 0.15.0
+(`worktrees/pinned-0150/protoST/build_release/protost`, the benchmark binary; the tests of the
+same commit pass on the floor, protoST 0.14.1 at `worktrees/pinned-361/protoST/build_release/protost`),
+`proto_db` `v2.0.0rc4` on CPython 3.14.6 and glibc 2.43 in its reference mode (numpy and hnswlib
+blocked; `tests/interop/.venv-numpy` exists, but `proto_db`'s numpy centroids cannot be verified
+against protoBaseST's, DV3, so that mode is not measured). Data: `proto_db`'s clustered set at dim
+8 (`bench/py_vector_data.py`); indexes on the element, l2: exact, or `ivf_flat` with nlist 16,
+train_iters 10, seed 51 and retrain_growth 1.03 (`bench/_vector_bench.st`). Every run of both
+implementations reported the same work, `verified`: rows, commits and a CRC-32 over the elements,
+the index counts and, for VB3, every IVF centroid; each run with an IVF index is refused unless the
+index retrained past its start. Commits per second are the commits divided by the minimum time over
+5 runs (the median is within 3 % of it everywhere):
+
+| unit | proto_db | protoBaseST | peak RSS MB py / st |
+|---|---|---|---|
+| VB3, 600 + 200 appends, no index | 157.3 | 36.7 | 26 / 1106 |
+| VB3, 600 + 200 appends, exact | 132.6 | 16.6 | 36 / 5102 |
+| VB3, 600 + 200 appends, IVF (nine retrains, at 618 to 787) | 51.1 | 3.3 | 45 / 5082 |
+| VB3, 5000 + 200 appends, no index | 151.9 | 32.2 | 34 / 2480 |
+| VB3, 5000 + 200 appends, exact | 126.4 | 15.1 | 64 / 5137 |
+| VB3, 5000 + 200 appends, IVF (one retrain, at 5150) | 56.9 | 3.3 | 83 / 5161 |
+| VB5, 120 blind writes merged onto 600, exact | 129.7 | 16.2 | 32 / 3929 |
+| VB5, the same, IVF (six retrains, at 618 to 719) | 48.7 | 3.2 | 39 / 5082 |
+| VB5, the same in a three-member cluster, exact | - | 8.4 | - / 2074 (largest member) |
+| VB5, the same in a three-member cluster, IVF (90 s lease) | - | 2.7 | - / 2090 (largest member) |
+
+- **A retrain is the cost.** Each VB3 commit reads the list and appends one vector; with an exact
+  index protoBaseST commits 2.2 times slower than with none, `proto_db` 1.2 times. An IVF retrain
+  is k-means over every member on the pure-Python path, which protoBaseST runs operation for
+  operation: each distance's sum is `sumNonNegative:`, which is the fsum primitive on protoST
+  0.15.0 and the Smalltalk msum on 0.14.1 (where it is about 78 % of a distance); the `pow` squares
+  (`raisedTo: 2`, a primitive call each) and the boxed Floats they allocate stay in Smalltalk on
+  both. That is why VB3's IVF rate is the same at 600 (nine retrains, over 618 to 787 vectors) and
+  at 5000 (one retrain over 5150 vectors). One training, `build:` of the VB data at dim 8, nlist 16,
+  10 iterations, each size in a fresh process (indicative: single runs, load about 1.6, after the
+  fix-round-1 k-means below):
+
+  | | 631 vectors | 696 vectors |
+  |---|---|---|
+  | protoBaseST, protoST 0.14.1 (the floor) | 7752 ms | 8421 ms |
+  | protoBaseST, protoST 0.15.0 (the bench binary) | 2799 ms | 3058 ms |
+  | `proto_db`, pure path, `build:` | 193 ms | 214 ms |
+  | `proto_db`, pure path, `_kmeans` alone (the reviewer's figures) | 153 ms | 173 ms |
+  | `proto_db`, numpy 2.3.5 (its default mode), `_kmeans` alone (the reviewer's figures) | 4.4 ms | 4.3 ms |
+
+  The VB3/VB5 figures above were measured before that fix (V5 fix round 1:
+  `kmeans:nlist:iterations:seed:` copies each vector to an Array once, reuses one squares buffer
+  and adds the sums in place, the same operations in the same order, so the centroids are the same
+  bytes); the review measured that k-means at 3835 ms (631) on 0.15.0 and 9547 ms on 0.14.1. A
+  first figure of this section, 10.6 s over 631 and 15.2 s over 696, was 0.14.1, both sizes in one
+  process: a retrain gets slower as the process ages (the review timed four in one 0.15.0 process at
+  2.3, 2.7, 3.5 and 3.4 s, whatever the size), which made 696 look much dearer than 631.
+- **In a cluster a retrain needs a long lease.** The merge of a blind write, and its retrain, runs
+  in the round's build, under the write permission, which a member believes for a third of the
+  lease (the drift margin is two thirds): 667 ms with `proto_db`'s default 2000 ms. A retrain that
+  takes longer outlasts its permission at every attempt (a truthful retryable conflict, R121), so it
+  never commits. Measured with retrain_growth 1.05 and the default lease (protoST 0.14.1): no member
+  of the IVF cluster unit finished its 40 commits within 1700 s, while the exact unit finishes in
+  15 s. VB5's IVF cluster unit therefore runs with `leaseDuration` 90000 ms (a 30 s permission;
+  `bench/run_query.sh`, `QUERY_VB5_IVF_LEASE_MS`) and an acquire timeout of three leases (the new
+  members' startup grace grows to 150 s, untimed): it then commits with no retry in 5 of 5 runs.
+  The exact cluster unit, on the default lease, retried 33, 31, 28, 27 and 28 times per 120
+  commits. `proto_db`'s own k-means fits the default permission at this size; at a few thousand
+  members it would not either. Safety is not affected: a refused attempt writes nothing. A longer
+  lease has a price: when the holder of the write permission dies, no member can write until its
+  lease and drift margin have passed (with 90 s, two and a half minutes), and a starting member
+  grants nothing for the same span. The advice stands until the k-means distance gets a protoST
+  primitive (planned for protoST 0.16.0), when the retrain will be measured again against the
+  default 667 ms permission. (Measured on 0.16.0 in the run below: the retrain still does not fit,
+  so the advice stays, with a sizing rule.)
+- The peak resident set of a protoBaseST unit is mostly the heap budget it is allowed
+  (`QUERY_HEAP_LIMIT_CELLS`, about 5 GB), which protoCore keeps until it needs it; it is not a
+  measure of the working set.
+
+**VB3 and VB5 on protoST 0.16.0, with `proto_db`'s default mode** (task V5, fix round 2).
+`RUNS=5 bench/run_query.sh VB3 VB5`, measured 2026-11-21, ending 17:01 UTC, on the same machine,
+load average 1.62 before and 3.10 after (the machine was also building other projects at times);
+protoBaseST `97e25e4` (clean tree), protoST 0.16.0
+(`worktrees/pinned-0160/protoST/build_release/protost`, protoCore 3.6.1 per `ldd`, now the
+benchmark binary: its `Float fsumOfPowSquaredDifferences:with:` computes every k-means distance,
+DV3), the same data, indexes and verification as the run above. `proto_db` `v2.0.0rc4` ran in
+both of its modes: the reference mode (numpy and hnswlib blocked, CPython 3.14.6), whose work every
+protoBaseST run equals (`verified`), and its default mode (numpy 2.3.5 in
+`tests/interop/.venv-numpy`, CPython 3.14.0), whose counts (contents, members, invalid
+occurrences, trained sizes, centroid counts) and, except for VB3's IVF checksum, which covers the
+centroids, whole work equal the reference mode's. Its centroids are numpy's and are not compared
+(DV3): that column is a timing of the same commits, not of the same training. Commits per second,
+the commits over the minimum time of 5 runs (every median within 6 % of it):
+
+| unit | proto_db, reference | proto_db, numpy | protoBaseST | peak RSS MB py / st |
+|---|---|---|---|---|
+| VB3, 600 + 200 appends, no index | 156.2 | 142.3 | 35.9 | 27 / 1105 |
+| VB3, 600 + 200 appends, exact | 133.0 | 119.3 | 16.2 | 36 / 5118 |
+| VB3, 600 + 200 appends, IVF | 51.6 | 69.8 | 5.0 | 45 / 5093 |
+| VB3, 5000 + 200 appends, no index | 147.3 | 136.6 | 32.1 | 34 / 2484 |
+| VB3, 5000 + 200 appends, exact | 129.2 | 108.7 | 15.1 | 64 / 5136 |
+| VB3, 5000 + 200 appends, IVF | 57.4 | 75.4 | 5.1 | 83 / 5131 |
+| VB5, 120 blind writes merged onto 600, exact | 132.3 | 114.1 | 16.1 | 32 / 3929 |
+| VB5, the same, IVF | 50.8 | 73.1 | 4.7 | 39 / 5093 |
+| VB5, the same in a three-member cluster, exact | - | - | 8.1 | - / 2074 (largest member) |
+| VB5, the same in a three-member cluster, IVF (90 s lease) | - | - | 3.7 | - / 2075 (largest member) |
+
+- **The primitive's gain.** An IVF commit rate rose from 3.3 to 5.0 (VB3 at 600), 3.3 to 5.1 (VB3
+  at 5000) and 3.2 to 4.7 (VB5) commits per second against 0.15.0, 2.7 to 3.7 in the cluster
+  (these two runs also differ in fix round 1's k-means buffers, which only 0.16.0's run has). The
+  units without an IVF index are unchanged (35.9 against 36.7, 16.2 against 16.6: noise of the
+  load). `proto_db` commits 10 to 11 times faster than protoBaseST with an IVF index in its reference
+  mode, 14 to 16 times with numpy; its default mode is slower than its reference mode where nothing trains (other CPython
+  patch release in that venv; not investigated), faster where an IVF index retrains.
+- **The retrain against the default permission.** One training, each size in a fresh process
+  (`build:` of the VB data, then `_retrained` of the result, which is what a merge crossing the
+  threshold runs; dim 8, nlist 16, 10 iterations), measured before the run above under the bench
+  marker at load 2.3 rising to 4.0 (indicative: single runs, three at the two VB sizes):
+
+  | members | `build:` | retrain (`_retrained`) |
+  |---|---|---|
+  | 631 | 2047 to 2151 ms | 1555 to 1636 ms |
+  | 696 | 2200 to 2353 ms | 1747 to 1935 ms |
+  | 1000 | 3874 ms | 3404 ms |
+  | 2000 | 9182 ms | 6941 ms |
+  | 5150 | 26535 ms | 19080 ms |
+
+  Per member, the retrain costs 2.5 to 2.6 ms at 631, 2.5 to 2.8 ms at 696, 3.4 ms at 1000, 3.5 ms
+  at 2000 and 3.7 ms at 5150: it grows with the size. k-means is about half of a retrain; the rest is rebuilding the members: the store walk (each
+  member's order key recomputed, then a sort) about 20 %, the store rebuild about 15 %, and the
+  assignment of every member to its list (`listFor:`) about 10 %, the smallest part (the V5 review's
+  split at 631 members, each part timed alone, load about 3.5, indicative). A later speed pass
+  should start from the store walk. A retrain is still 2.3 to 2.9 times the 667 ms a member believes a permission under
+  the default 2000 ms lease, so the long-lease requirement of a cluster that retrains an IVF index
+  stays, and VB5's IVF cluster unit keeps its 90 s lease (it retried 0 times in 5 runs; the exact
+  unit, on the default lease, 34, 31, 28, 30 and 30). **Sizing rule:** a build must fit in the
+  believed permission less the send reserve, a third of the lease less a twelfth, so the lease
+  must exceed four times the measured retrain for the index's size. On protoST 0.16.0 at
+  dim 8 (nlist 16, 10 iterations) a retrain costs a growing amount per member, 2.5 ms at 631 members
+  rising to 3.7 ms at 5150, so up to about 4 ms per member over the measured range: a lease above
+  16 ms per member, about 11 s for 700 members and 80 s for 5000, with headroom for load. The lease bounds the write outage after a holder dies,
+  which is the price.
+
+**VB1 and VB2, vector search** (vectors phase task V6). `RUNS=5 bench/run_query.sh VB1 VB2`,
+measured 2026-11-21, ending 19:58 UTC, on an AMD Ryzen 5 5500U (12 CPUs, Linux 7.0.0-43-generic),
+load average 1.78 before and 2.08 after; protoBaseST `09e9d4f` (the clean committed tree), protoST
+0.16.0 (`worktrees/pinned-0160/protoST/build_release/protost`), `proto_db` `v2.0.0rc4` in its
+reference mode (CPython 3.14.6, glibc 2.43, numpy and hnswlib blocked) and its default mode (column
+numpy: numpy 2.3.5, CPython 3.14.0, `tests/interop/.venv-numpy`). Data: `proto_db`'s clustered
+benchmark set (seed 51, 16 centres) with 10 query points (`bench/py_vector_data.py`); k = 10; the
+records `{ 'i'. 'vec' }` searched through a `PBVectorSearch` (`proto_db`: `VectorSearch`) over the
+index's plan, built by the program: the plan both planners build for near(k) on an indexed collection. `-first` is the first query after the
+index is built, `-knn` the 10 queries (the first among them again); VB2's `-build` is the
+`ivf_flat` build (nlist 100, k-means on 10^4 vectors of dim 32), `-nprobe<p>` the 10 queries on the
+same trained index with that nprobe. The runner printed `verified`: every run of every
+implementation reported `proto_db`'s first run's work, so VB1's answers are `proto_db`'s in both of
+its modes (exact answers do not depend on numpy), and VB2's centroids and answers are those of its
+reference mode; its numpy mode trains its own centroids (DV3) and is verified by its counts only.
+Recall at 10 against the exact answer, over the 10 queries, was the same in all three: 46 of 100 at
+nprobe 1, 85 at nprobe 4, 100 at nprobe 100. Times in microseconds, minimum and median of 5
+interleaved runs; nothing is asserted about time.
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB1 | 1000 | d8-cosine-first | 7218 / 7355 | 57825 / 61184 | 8.0x | 25 / 690 | 2359 / 2597 |
+| VB1 | 1000 | d8-cosine-knn | 62024 / 67962 | 586644 / 630240 | 9.5x | 25 / 690 | 3148 / 3496 |
+| VB1 | 1000 | d8-l2-first | 5699 / 6348 | 41481 / 44389 | 7.3x | 25 / 566 | 1758 / 2411 |
+| VB1 | 1000 | d8-l2-knn | 52120 / 55621 | 416098 / 435433 | 8.0x | 25 / 566 | 2291 / 3163 |
+| VB1 | 1000 | d32-cosine-first | 10443 / 11806 | 62752 / 64007 | 6.0x | 26 / 775 | 3007 / 3092 |
+| VB1 | 1000 | d32-cosine-knn | 100088 / 112890 | 638561 / 661812 | 6.4x | 26 / 775 | 3862 / 3983 |
+| VB1 | 1000 | d32-l2-first | 7624 / 8688 | 42381 / 45254 | 5.6x | 26 / 650 | 2945 / 3238 |
+| VB1 | 1000 | d32-l2-knn | 72244 / 78409 | 451270 / 452496 | 6.2x | 26 / 650 | 3289 / 3469 |
+| VB1 | 10000 | d8-cosine-first | 132369 / 133825 | 597254 / 616935 | 4.5x | 48 / 5092 | 15630 / 16188 |
+| VB1 | 10000 | d8-cosine-knn | 900436 / 915571 | 6320614 / 6346510 | 7.0x | 48 / 5092 | 3604 / 3779 |
+| VB1 | 10000 | d8-l2-first | 123199 / 124910 | 436108 / 459867 | 3.5x | 48 / 5092 | 15219 / 15500 |
+| VB1 | 10000 | d8-l2-knn | 787593 / 801469 | 4461892 / 4727204 | 5.7x | 48 / 5092 | 4482 / 4629 |
+| VB1 | 10000 | d32-cosine-first | 173640 / 176979 | 666384 / 675408 | 3.8x | 61 / 5089 | 26370 / 27713 |
+| VB1 | 10000 | d32-cosine-knn | 1289632 / 1298917 | 6954950 / 7155001 | 5.4x | 61 / 5089 | 6200 / 6816 |
+| VB1 | 10000 | d32-l2-first | 154145 / 164234 | 479321 / 484646 | 3.1x | 61 / 5089 | 27739 / 28208 |
+| VB1 | 10000 | d32-l2-knn | 1016612 / 1034286 | 4944847 / 4997425 | 4.9x | 61 / 5089 | 9880 / 10261 |
+| VB2 | 10000 | d32-ivf-build | 56686826 / 56950388 | 163933587 / 167256841 | 2.9x | 79 / 5089 | 1245128 / 1312498 |
+| VB2 | 10000 | d32-ivf-nprobe1 | 21920 / 22080 | 617364 / 768519 | 28.2x | 79 / 5089 | 11798 / 11945 |
+| VB2 | 10000 | d32-ivf-nprobe4 | 144924 / 149445 | 1095917 / 1159150 | 7.6x | 79 / 5089 | 11414 / 11716 |
+| VB2 | 10000 | d32-ivf-nprobe100 | 1362887 / 1393694 | 14563864 / 14671563 | 10.7x | 79 / 5089 | 21535 / 22158 |
+
+Observed: protoBaseST's first query costs what every later one costs (no derived cache, DV4),
+where `proto_db`'s first query builds its flat snapshot (in the reference mode 1.0 to 1.2 times
+a later query at 10^3 and 1.3 to 1.6 times at 10^4; with numpy, its matrix too: 7.5 to 9 times at
+10^3, 28 to 43 times at 10^4). An exact
+query over 10^4 vectors takes about 0.45 to 0.7 s on protoST 0.16.0: 4.9 to 7.0 times
+`proto_db`'s pure-Python search (6.2 to 9.5 times at 10^3) and 500 to 1800 times its numpy
+search. The `ivf_flat` build is 2.9 times the pure-Python one, and its probes of 1 and 4
+lists take 0.06 and 0.11 s per query. A full probe (nprobe 100) takes about twice an exact search
+of the same index size (1.46 s against 0.70 s per query), where `proto_db`'s costs about the same
+as its exact search. (Review I1 of task V6 measured the cause: every node a bounded range walk
+reached was compared with tuple order keys, and before the first list was read every list was
+probed for emptiness; the run below follows the fix.) The peak resident
+set of protoBaseST (about 5 GB at 10^4) is protoCore's heap budget being used, not a working set
+(memory figures are not a headline).
+
+**VB1 and VB2 after fix round 1 of task V6** (2026-11-22). The same command, data and
+implementations as the run above, measured 2026-11-21 23:40 to 2026-11-22 00:17 UTC on the same
+machine, load average 2.91 before and 4.20 after (the machine grew busier during the run: the
+exact rows are up to 18 per cent slower than in the run above, on both sides, a few unchanged); protoBaseST `605d991`
+(the clean committed tree), protoST 0.16.0. The change: a list of the store is read by a walk
+bounded on the key's Integer list number instead of tuple order-key compares (the same nodes in
+the same order), and the probe order is walked lazily, an empty list skipped as it is reached
+instead of every list probed for emptiness before the first is read. The runner printed
+`verified`; recall was again 46, 85 and 100 of 100 in all three implementations.
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+| VB1 | 1000 | d8-cosine-first | 7206 / 7830 | 65412 / 72164 | 9.1x | 23 / 677 | 2125 / 2426 |
+| VB1 | 1000 | d8-cosine-knn | 64601 / 71960 | 649090 / 687743 | 10.0x | 23 / 677 | 2964 / 3283 |
+| VB1 | 1000 | d8-l2-first | 5920 / 6751 | 41772 / 50358 | 7.1x | 23 / 552 | 2478 / 2539 |
+| VB1 | 1000 | d8-l2-knn | 56116 / 57051 | 445971 / 497645 | 7.9x | 23 / 552 | 2909 / 3233 |
+| VB1 | 1000 | d32-cosine-first | 11409 / 12758 | 71043 / 80317 | 6.2x | 24 / 761 | 3403 / 3528 |
+| VB1 | 1000 | d32-cosine-knn | 117568 / 120242 | 737200 / 762394 | 6.3x | 24 / 761 | 4179 / 4439 |
+| VB1 | 1000 | d32-l2-first | 8848 / 9236 | 41987 / 44891 | 4.7x | 24 / 637 | 3075 / 3858 |
+| VB1 | 1000 | d32-l2-knn | 80905 / 88394 | 447870 / 506858 | 5.5x | 24 / 637 | 3536 / 3946 |
+| VB1 | 10000 | d8-cosine-first | 145916 / 159315 | 637732 / 678338 | 4.4x | 46 / 5090 | 17523 / 18679 |
+| VB1 | 10000 | d8-cosine-knn | 991296 / 1064982 | 7178765 / 7598329 | 7.2x | 46 / 5090 | 4202 / 4415 |
+| VB1 | 10000 | d8-l2-first | 133622 / 156345 | 477171 / 499942 | 3.6x | 46 / 5090 | 17264 / 20089 |
+| VB1 | 10000 | d8-l2-knn | 913492 / 929489 | 5012334 / 5256932 | 5.5x | 46 / 5090 | 5145 / 6494 |
+| VB1 | 10000 | d32-cosine-first | 191877 / 198957 | 715685 / 738710 | 3.7x | 59 / 5087 | 28399 / 28975 |
+| VB1 | 10000 | d32-cosine-knn | 1442574 / 1467884 | 7692983 / 7865632 | 5.3x | 59 / 5087 | 7258 / 7565 |
+| VB1 | 10000 | d32-l2-first | 161067 / 168489 | 526005 / 549272 | 3.3x | 59 / 5087 | 30944 / 32275 |
+| VB1 | 10000 | d32-l2-knn | 1116438 / 1154995 | 5361926 / 5497977 | 4.8x | 59 / 5087 | 11874 / 12719 |
+| VB2 | 10000 | d32-ivf-build | 62846341 / 64271246 | 191839295 / 196962247 | 3.1x | 76 / 5087 | 1627480 / 1730075 |
+| VB2 | 10000 | d32-ivf-nprobe1 | 23766 / 25579 | 194128 / 240887 | 8.2x | 76 / 5087 | 12183 / 13260 |
+| VB2 | 10000 | d32-ivf-nprobe4 | 151692 / 167521 | 535111 / 681444 | 3.5x | 76 / 5087 | 11797 / 12852 |
+| VB2 | 10000 | d32-ivf-nprobe100 | 1499394 / 1588079 | 10769764 / 10789113 | 7.2x | 76 / 5087 | 25151 / 25316 |
+
+Observed: the IVF queries are cheaper; the exact ones do not use the bounded walk. The table's
+microseconds cover the 10 queries of each unit; per query, nprobe 1 takes 19 ms instead of 62 ms
+(8.2 times `proto_db`'s pure-Python search instead of 28.2 times), nprobe 4 54 ms instead of
+110 ms (3.5 times instead of 7.6), and the full probe (nprobe 100) 1.08 s instead of 1.46 s. The
+full probe now costs 1.40 times an exact search of the same index size (10769764 against 7692983
+microseconds for the 10 queries; it was 2.09 times), where `proto_db`'s costs 1.04 times its own.
+The remaining gap is not measured. Candidates only: the per-list collections (one
+OrderedCollection per probed list, its `asArray`, and `probed addAll:`; the per-member entry
+Arrays are not one, since the exact search builds them too) and the 101 bounded descents (review 1
+measured the walks bounded on the list number at about 6 per cent of an exact search, too little
+alone for 40 per cent). Nor is what remains at nprobe 1 and 4 against `proto_db` (8.2 and 3.5
+times) measured; the interpreted kernel and the store walk, where `proto_db` reads its cached
+lists, are candidates only.
+
+**VB4, filtered kNN** (vectors phase task V7). `RUNS=5 bench/run_query.sh VB4`, measured
+2026-11-22 08:23 to 08:32 UTC on an AMD Ryzen 5 5500U (12 CPUs, Linux 7.0.0-43-generic), load
+average 2.57 before and 3.41 after (4.02 a moment later: the machine grew busier during the run);
+protoBaseST `1fd30d8` (the clean committed tree), protoST 0.16.0
+(`worktrees/pinned-0160/protoST/build_release/protost`), `proto_db` `v2.0.0rc4` in its reference
+mode (CPython 3.14.6, glibc 2.43, numpy and hnswlib blocked; an exact answer does not depend on
+numpy, so its default mode is not run). Data: `proto_db`'s clustered benchmark set (seed 51, 16
+centres), 10^4 vectors of dim 8 and its 10 query points (`bench/py_vector_data.py`), as the
+records `{ 'i'. 's' -> i mod 100. 'vec' }` under an exact l2 index; the condition `s < p` keeps p
+per cent of them. `-filtered` is near(k = 10) AND `s < p` planned by each planner (checked first,
+untimed, to be one `VectorSearch` whose `'where'` is the condition, ruling R27) and executed;
+`-post` is near(k = 10) planned and executed alone, then the condition applied to its 10 rows.
+Planning is timed with the execution. The runner printed `verified`: every run of both sides
+reported the same rows and the same CRC-32 of the answers' positions, so both answers are
+`proto_db`'s. The rows of the 10 queries: 100 for `-filtered` at every selectivity, and 1, 17 and
+60 for `-post` at 1, 10 and 50 per cent. Times in microseconds for the 10 queries, minimum and
+median of 5 interleaved runs; nothing is asserted about time.
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB4 | 10000 | d8-s01-filtered | 209863 / 214527 | 6401987 / 6539876 | 30.5x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s01-post | 894956 / 925393 | 4793909 / 4975721 | 5.4x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s10-filtered | 328825 / 343666 | 6632641 / 6883538 | 20.2x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s10-post | 864738 / 872740 | 4896461 / 4936969 | 5.7x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s50-filtered | 677686 / 698571 | 7943173 / 8400157 | 11.7x | 47 / 5093 | - |
+| VB4 | 10000 | d8-s50-post | 865546 / 882906 | 4795003 / 5098400 | 5.5x | 47 / 5093 | - |
+
+Observed, per query (the table's figures divided by 10): the filtered search answers 10 rows at
+every selectivity, the post-filter 0.1, 1.7 and 6 on average, so the two do not answer the same
+question, and only the filtered one answers near(k) AND P. Both implementations do the same work
+for each: the filtered search evaluates the condition on every member of the index and scores
+only the members it accepts (`ExactBackend.search`, `PBVectorExact search:`), the post-filter
+scores every member. Which is cheaper depends on the ratio of the two costs. In `proto_db` the
+filtered search is the cheaper: 21, 33 and 68 ms against 86 to 89 ms for the post-filter. In
+protoBaseST it was the dearer: 640, 663 and 794 ms against 479 to 490 ms, 1.3 to 1.7 times the
+post-filter, and 11.7 to 30.5 times `proto_db`'s filtered search (the post-filter is 5.4 to 5.7
+times). Review 1 of task V7 decomposed the cost per member in single-process probes (load 3 to 5,
+figures within about 20 per cent; not a bench): walking the store about 15 microseconds in
+protoBaseST (about 0 in `proto_db`, which reads a cached snapshot, DV4), evaluating `s < p` about
+47 to 55 against 1.8 (about 28 times), ranking about 43 against 8.6 (about 5 times: the scores
+have a primitive, the term evaluator was generic interpreted code). The filtered search wins when
+evaluating one member costs less than ranking the members it rejects: 1.8 < 8.6 in `proto_db`, 50
+> 43 here, so here it lost at every selectivity. Fix round 1 of task V7 made the term evaluator
+cheaper with the same answers (the run below).
+
+**VB4 after fix round 1 of task V7** (2026-11-22). The same command, data and implementations as
+the run above, measured 2026-11-22 09:58 to 10:05 UTC on the same machine, load average 2.19
+before and 3.13 after; protoBaseST `88c5eea` (the clean committed tree), protoST 0.16.0. The
+change: `PBTerm >> matches:` reads its operator once, an Integer's order key is built without a
+handler or a fold, and a key path checks the names a record may carry once, when it is built;
+every answer is the same (an old-against-new comparison of 377223 evaluations printed the same
+bytes). The runner printed `verified`, with the run above's rows and checksums.
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB4 | 10000 | d8-s01-filtered | 203490 / 212512 | 3957297 / 4251096 | 19.4x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s01-post | 857910 / 890668 | 4698480 / 4823124 | 5.5x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s10-filtered | 314379 / 341253 | 4279142 / 4351815 | 13.6x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s10-post | 849991 / 875895 | 4660537 / 4705372 | 5.5x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s50-filtered | 651796 / 672604 | 5574189 / 5679563 | 8.6x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s50-post | 829676 / 847748 | 4583279 / 4677532 | 5.5x | 48 / 5093 | - |
+
+Observed, per query (the table's figures divided by 10): the filtered search takes 396, 428 and
+557 ms against 466 to 470 ms for the post-filter (458 at 50 per cent), so it is now the cheaper at
+1 and 10 per cent (0.84 and 0.92 times the post-filter) and still the dearer at 50 (1.22 times),
+where it evaluates every member and scores half of them; it was 640, 663 and 794 ms. Against
+`proto_db`'s filtered search (20, 31 and 65 ms) it is 19.4, 13.6 and 8.6 times; the post-filter
+is unchanged (5.5 times: it evaluates the condition on its 10 rows only). One probe on protoST
+0.16.0 (not a bench): evaluating `s < 1` over the 10^4 records took 260 ms instead of 470 ms, about
+26 microseconds per member, still about 14 times `proto_db`'s 1.8. With 26 against about 43 to rank
+a member, the filtered search saves more than it spends while it rejects more than about 60 per
+cent of the members (26 / 43): it does at 1 and 10 per cent, not at 50.
+
+**The full vector comparison (vectors phase task V8, 2026-11-22).** `RUNS=5 bench/run_query.sh
+VB0 VB1 VB2 VB3 VB4 VB5`, measured 2026-11-22 11:27 to 13:06 UTC on an AMD Ryzen 5 5500U (12 CPUs,
+Linux 7.0.0-43-generic), serially (nothing else of the task running; started with the 1-minute
+load below 3), load average 1.44 / 1.89 / 2.60 (1, 5 and 15 minutes) before and 3.05 / 2.85 / 2.91
+after (sampled at the two ends only, not during the 100-minute run; a load of 1.4 to 3.1 on 12 CPUs
+is not the quiet machine plan Step 1 asks for, and what else ran on the machine is not known);
+protoBaseST `a230436` (the clean committed tree), protoST 0.16.0
+(`worktrees/pinned-0160/protoST/build_release/protost`, protoCore 3.6.1 of `worktrees/pinned-0160`
+per `ldd`, the benchmark binary: every score through the fsum primitives, every k-means distance
+through `fsumOfPowSquaredDifferences:with:`). `proto_db` `v2.0.0rc4` ran in both of its modes: the
+reference mode (CPython 3.14.6, glibc 2.43, numpy and hnswlib blocked), whose work every
+protoBaseST run equals, and its default mode (column numpy: numpy 2.3.5, CPython 3.14.0,
+`tests/interop/.venv-numpy`) for VB1, VB2, VB3 and VB5, verified by its counts and, where no
+centroid is checksummed, its whole work (DV3). VB4 runs the reference mode only (an exact answer
+does not depend on numpy). The data, units and checksums are those of the runs above. The runner
+printed `verified`; VB2's recall at 10 was 46, 85 and 100 of 100 (nprobe 1, 4, 100) in all three
+implementations; VB5's IVF cluster unit ran with the 90 s lease and retried 0 times in 5 runs, the
+exact cluster unit (default lease) 32, 31, 23, 31 and 38 times per 120 commits. Times in
+microseconds **summed over the unit's work** (a VB0 unit: 10^4 scored vectors; a VB1 or VB4 `-knn`,
+`-filtered`, `-post` unit and a VB2 `-nprobe` unit: 10 queries; a `-first` unit: 1 query; a VB2
+`-build`: one build; a VB3 unit: 200 commits; a VB5 unit: 120 commits), minimum and median of 5
+interleaved runs; peak resident set per implementation is the largest over its runs; nothing is
+asserted about time.
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB0 | 10000 | d8-products | 6855 / 9056 | 173347 / 185071 | 25.3x | 34 / 414 | - |
+| VB0 | 10000 | d8-naive | 1980 / 2206 | 91056 / 98078 | 46.0x | 30 / 339 | - |
+| VB0 | 10000 | d8-fsum | 2161 / 2356 | 51472 / 53025 | 23.8x | 30 / 290 | - |
+| VB0 | 10000 | d8-ip | 8643 / 9924 | 159784 / 174946 | 18.5x | 30 / 335 | - |
+| VB0 | 10000 | d8-l2 | 10588 / 12265 | 172019 / 179988 | 16.2x | 30 / 331 | - |
+| VB0 | 10000 | d8-cosine | 21060 / 23654 | 340662 / 377007 | 16.2x | 30 / 435 | - |
+| VB0 | 10000 | d32-products | 24133 / 27218 | 480192 / 496874 | 19.9x | 68 / 1136 | - |
+| VB0 | 10000 | d32-naive | 5840 / 6155 | 286587 / 306270 | 49.1x | 51 / 868 | - |
+| VB0 | 10000 | d32-fsum | 7893 / 8362 | 63404 / 68214 | 8.0x | 51 / 672 | - |
+| VB0 | 10000 | d32-ip | 26039 / 27762 | 190930 / 197703 | 7.3x | 51 / 716 | - |
+| VB0 | 10000 | d32-l2 | 30057 / 30517 | 187570 / 201450 | 6.2x | 51 / 713 | - |
+| VB0 | 10000 | d32-cosine | 59433 / 66858 | 394966 / 404832 | 6.6x | 51 / 816 | - |
+| VB0 | 10000 | d128-products | 91424 / 97008 | 1679754 / 1696725 | 18.4x | 201 / 4156 | - |
+| VB0 | 10000 | d128-naive | 21827 / 23251 | 1049529 / 1089802 | 48.1x | 132 / 3097 | - |
+| VB0 | 10000 | d128-fsum | 29336 / 32288 | 134960 / 137851 | 4.6x | 132 / 2297 | - |
+| VB0 | 10000 | d128-ip | 92203 / 97824 | 294230 / 298258 | 3.2x | 132 / 2345 | - |
+| VB0 | 10000 | d128-l2 | 111195 / 116039 | 277493 / 302188 | 2.5x | 132 / 2337 | - |
+| VB0 | 10000 | d128-cosine | 220588 / 232417 | 582368 / 590891 | 2.6x | 132 / 2441 | - |
+| VB1 | 1000 | d8-cosine-first | 6627 / 7595 | 58895 / 63312 | 8.9x | 24 / 677 | 2057 / 2657 |
+| VB1 | 1000 | d8-cosine-knn | 61076 / 66685 | 611677 / 618955 | 10.0x | 24 / 677 | 2854 / 3173 |
+| VB1 | 1000 | d8-l2-first | 6040 / 6388 | 39154 / 40645 | 6.5x | 24 / 553 | 1908 / 2549 |
+| VB1 | 1000 | d8-l2-knn | 52853 / 58708 | 402780 / 425423 | 7.6x | 24 / 553 | 2599 / 3209 |
+| VB1 | 1000 | d32-cosine-first | 11115 / 11349 | 63110 / 65751 | 5.7x | 25 / 762 | 3040 / 3360 |
+| VB1 | 1000 | d32-cosine-knn | 104700 / 110367 | 644898 / 664002 | 6.2x | 25 / 762 | 3684 / 4184 |
+| VB1 | 1000 | d32-l2-first | 7758 / 8717 | 44198 / 48935 | 5.7x | 25 / 633 | 3358 / 3444 |
+| VB1 | 1000 | d32-l2-knn | 77473 / 78373 | 435317 / 494966 | 5.6x | 25 / 633 | 3574 / 3636 |
+| VB1 | 10000 | d8-cosine-first | 134973 / 137827 | 587929 / 693003 | 4.4x | 47 / 5091 | 15189 / 16750 |
+| VB1 | 10000 | d8-cosine-knn | 913885 / 948790 | 6330640 / 6383317 | 6.9x | 47 / 5091 | 3515 / 4039 |
+| VB1 | 10000 | d8-l2-first | 124094 / 128079 | 441921 / 475060 | 3.6x | 47 / 5091 | 16327 / 16450 |
+| VB1 | 10000 | d8-l2-knn | 800978 / 812562 | 4554625 / 4754050 | 5.7x | 47 / 5091 | 4458 / 4892 |
+| VB1 | 10000 | d32-cosine-first | 171209 / 183228 | 661035 / 686638 | 3.9x | 60 / 5087 | 26446 / 27316 |
+| VB1 | 10000 | d32-cosine-knn | 1287763 / 1378429 | 6924777 / 7027394 | 5.4x | 60 / 5087 | 6719 / 6794 |
+| VB1 | 10000 | d32-l2-first | 144414 / 151597 | 477665 / 489945 | 3.3x | 60 / 5088 | 28010 / 29481 |
+| VB1 | 10000 | d32-l2-knn | 1029813 / 1051106 | 4990833 / 5056483 | 4.8x | 60 / 5088 | 10473 / 11460 |
+| VB2 | 10000 | d32-ivf-build | 58082795 / 59559286 | 172819414 / 175993639 | 3.0x | 77 / 5088 | 1474684 / 1553441 |
+| VB2 | 10000 | d32-ivf-nprobe1 | 23046 / 24186 | 186563 / 234631 | 8.1x | 77 / 5088 | 11598 / 12131 |
+| VB2 | 10000 | d32-ivf-nprobe4 | 151531 / 155191 | 458393 / 563681 | 3.0x | 77 / 5088 | 11814 / 11869 |
+| VB2 | 10000 | d32-ivf-nprobe100 | 1397837 / 1482949 | 9648239 / 10164257 | 6.9x | 77 / 5088 | 22908 / 23191 |
+| VB3 | 600 | d8-none | 1311799 / 1332336 | 5797020 / 5854103 | 4.4x | 25 / 1109 | 1438574 / 1456327 |
+| VB3 | 600 | d8-exact | 1536511 / 1551914 | 13148741 / 13779561 | 8.6x | 34 / 5118 | 1717853 / 1906684 |
+| VB3 | 600 | d8-ivf | 4055560 / 4300202 | 43401866 / 44690271 | 10.7x | 44 / 5092 | 2998420 / 3160283 |
+| VB3 | 5000 | d8-none | 1325584 / 1349468 | 6623248 / 6679575 | 5.0x | 33 / 2483 | 1470955 / 1498538 |
+| VB3 | 5000 | d8-exact | 1596101 / 1602957 | 14492278 / 14627310 | 9.1x | 63 / 5135 | 1903748 / 1933483 |
+| VB3 | 5000 | d8-ivf | 3527658 / 3784142 | 43541052 / 43794666 | 12.3x | 82 / 5138 | 2713799 / 2778473 |
+| VB4 | 10000 | d8-s01-filtered | 203582 / 212442 | 3990058 / 4359389 | 19.6x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s01-post | 860295 / 888590 | 4775171 / 4854722 | 5.6x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s10-filtered | 325535 / 342113 | 4297609 / 4401339 | 13.2x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s10-post | 851094 / 893625 | 4651778 / 4802355 | 5.5x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s50-filtered | 638304 / 666439 | 5639049 / 5823765 | 8.8x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s50-post | 828853 / 849642 | 4692166 / 4784947 | 5.7x | 48 / 5093 | - |
+| VB5 | 600 | d8-exact | 916169 / 936031 | 7770469 / 7962942 | 8.5x | 31 / 3924 | 1049513 / 1070374 |
+| VB5 | 600 | d8-ivf | 2421297 / 2518957 | 28066516 / 28578355 | 11.6x | 38 / 5092 | 1663984 / 1701882 |
+| VB5 | 600 | d8-exact-c3 | - | 15625547 / 16229295 | - | - / 2074 (largest member) | - |
+| VB5 | 600 | d8-ivf-c3 | - | 35817441 / 37004420 | - | - / 2075 (largest member) | - |
+
+Observed (each derived figure names its divisor):
+
+- **Exact search** (VB1 `-knn`, divided by its 10 queries): over 10^4 vectors a query takes 633 ms
+  (dim 8, cosine), 455 ms (dim 8, l2), 692 ms (dim 32, cosine) and 499 ms (dim 32, l2): 4.8 to 6.9
+  times `proto_db`'s pure-Python search, 477 to 1801 times its numpy search (the ratio of the
+  minima). Over 10^3 vectors: 40 to 64 ms per query, 5.6 to 10.0 times. The figures agree with the
+  V6 run within the load's noise.
+- **IVF** (VB2): the `ivf_flat` build over 10^4 vectors of dim 32 takes 172.8 s (one build), 3.0
+  times the pure-Python build and 117 times numpy's 1.47 s. Per query (divided by 10): 18.7 ms at
+  nprobe 1, 45.8 ms at nprobe 4 and 965 ms for the full probe; the full probe is 1.39 times the
+  exact cosine search of the same size (9648239 against 6924777 us, both for 10 queries), where
+  `proto_db`'s is 1.09 times its own.
+- **Maintenance** (VB3, VB5; commits per second = the unit's commits, 200 or 120, over its minimum
+  time in seconds): no index 34.5 (600) and 30.2 (5000) against `proto_db`'s 152.5 and 150.9; exact
+  15.2 and 13.8 against 130.2 and 125.3; IVF 4.6 and 4.6 against 49.3 and 56.7 (numpy 66.7 and
+  73.7). VB5: exact 15.4 against 131.0, IVF 4.3 against 49.6 (numpy 72.1); in a three-member
+  cluster 7.7 (exact) and 3.4 (IVF, 90 s lease). Each IVF rate is 0.35 to 0.5 below the V5 round-2
+  run's (4.61, 4.59, 4.28 and 3.35 against 5.0, 5.1, 4.7 and 3.7), at a similar load (that run:
+  1.62 before, 3.10 after). The maintenance path did change since (`keyspec.st` in V7's fix round 1,
+  `88c5eea`; `avl.st` and `indexes.st` in V6 and V7). An A/B of the sources, outside the bench
+  protocol and indicative (one protoST 0.16.0 binary, only the protoBaseST side, the trees
+  `6d72eb0`, the V5 round-2 commit, and `a230436`, alternated over 5 rounds, load 2.1 to 6.3), found
+  no regression: VB3 600 IVF 4.88 against 4.86 commits per second (200 commits over the minimum of
+  40.98 and 41.19 s), VB5 IVF 4.46 against 4.50 (120 over 26.91 and 26.67 s), with the same
+  checksums. `6d72eb0` itself ran at 4.88, not its recorded 5.0, so the difference against the V5
+  round-2 run is the machine's state on the two days, not the source; what in the machine's state
+  differs is not known.
+- **Filtered search** (VB4, divided by 10): the filtered search takes 399, 430 and 564 ms per query
+  at 1, 10 and 50 per cent against 465 to 478 ms for the post-filter, as in V7's fix-round-1 run.
+- **Peak resident set** is mostly protoCore's heap budget (`QUERY_HEAP_LIMIT_CELLS`, about 5 GB),
+  kept until needed; it is reported, not compared.
+
+**The same VB0 and VB1 on protoST 0.14.1 (no primitives, the Smalltalk kernel), for ruling VQ2.**
+`RUNS=5 bench/run_query.sh VB0 VB1` right after the run above, 2026-11-22 13:06 to 13:45 UTC, the
+same machine, load average 2.88 / 2.82 / 2.90 before and 2.24 / 2.87 / 3.07 after; protoBaseST
+`a230436`, protoST 0.14.1 (`worktrees/pinned-361/protoST/build_release/protost`, protoCore 3.6.1 of
+`worktrees/pinned-361` per `ldd`; `PBVectorMath`'s probes find no primitive, so every sum is the
+Smalltalk msum); `proto_db` in both modes as above. The runner printed `verified`: the same answers,
+scores and sums to the bit as on 0.16.0 and in `proto_db`. Units as in the table above.
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB0 | 10000 | d8-products | 7884 / 8533 | 174488 / 181186 | 22.1x | 35 / 414 | - |
+| VB0 | 10000 | d8-naive | 1976 / 2131 | 94936 / 97029 | 48.0x | 30 / 339 | - |
+| VB0 | 10000 | d8-fsum | 2226 / 2397 | 517899 / 535535 | 232.7x | 30 / 491 | - |
+| VB0 | 10000 | d8-ip | 8798 / 9371 | 763899 / 812207 | 86.8x | 30 / 599 | - |
+| VB0 | 10000 | d8-l2 | 10805 / 11273 | 811182 / 823195 | 75.1x | 30 / 615 | - |
+| VB0 | 10000 | d8-cosine | 20650 / 22354 | 2281766 / 2346671 | 110.5x | 30 / 1304 | - |
+| VB0 | 10000 | d32-products | 25847 / 26796 | 484883 / 494417 | 18.8x | 68 / 1136 | - |
+| VB0 | 10000 | d32-naive | 5830 / 6265 | 291590 / 297778 | 50.0x | 51 / 869 | - |
+| VB0 | 10000 | d32-fsum | 8170 / 8322 | 2641776 / 2684689 | 323.4x | 51 / 1868 | - |
+| VB0 | 10000 | d32-ip | 25011 / 26453 | 3226875 / 3312041 | 129.0x | 51 / 2072 | - |
+| VB0 | 10000 | d32-l2 | 29213 / 30626 | 3438690 / 3523756 | 117.7x | 51 / 2177 | - |
+| VB0 | 10000 | d32-cosine | 58417 / 60926 | 10814506 / 10962752 | 185.1x | 51 / 4947 | - |
+| VB0 | 10000 | d128-products | 94693 / 97662 | 1702489 / 1754935 | 18.0x | 201 / 4156 | - |
+| VB0 | 10000 | d128-naive | 21885 / 22639 | 1070816 / 1105887 | 48.9x | 132 / 3097 | - |
+| VB0 | 10000 | d128-fsum | 31001 / 31452 | 11158792 / 11307546 | 359.9x | 132 / 4964 | - |
+| VB0 | 10000 | d128-ip | 89876 / 90664 | 12900801 / 13042229 | 143.5x | 132 / 4967 | - |
+| VB0 | 10000 | d128-l2 | 107266 / 114453 | 14662298 / 14710796 | 136.7x | 132 / 4967 | - |
+| VB0 | 10000 | d128-cosine | 218616 / 228381 | 38601825 / 39508782 | 176.6x | 132 / 4967 | - |
+| VB1 | 1000 | d8-cosine-first | 6903 / 7272 | 243703 / 248055 | 35.3x | 24 / 1738 | 2284 / 2555 |
+| VB1 | 1000 | d8-cosine-knn | 62357 / 67147 | 2672173 / 2705446 | 42.9x | 24 / 1738 | 3097 / 3279 |
+| VB1 | 1000 | d8-l2-first | 5848 / 5952 | 107478 / 119900 | 18.4x | 24 / 929 | 2520 / 2880 |
+| VB1 | 1000 | d8-l2-knn | 55175 / 57825 | 1119541 / 1128776 | 20.3x | 24 / 929 | 3361 / 3808 |
+| VB1 | 1000 | d32-cosine-first | 10664 / 12186 | 1028079 / 1053133 | 96.4x | 25 / 4959 | 3141 / 3446 |
+| VB1 | 1000 | d32-cosine-knn | 101375 / 116696 | 10277285 / 10425575 | 101.4x | 25 / 4959 | 3991 / 4303 |
+| VB1 | 1000 | d32-l2-first | 8411 / 9112 | 376807 / 387984 | 44.8x | 25 / 2487 | 3353 / 3455 |
+| VB1 | 1000 | d32-l2-knn | 71307 / 79126 | 3825194 / 3961142 | 53.6x | 25 / 2487 | 3696 / 3793 |
+| VB1 | 10000 | d8-cosine-first | 134238 / 137294 | 2374214 / 2396825 | 17.7x | 47 / 5090 | 15511 / 16306 |
+| VB1 | 10000 | d8-cosine-knn | 912612 / 946962 | 24947190 / 25078922 | 27.3x | 47 / 5090 | 3643 / 3893 |
+| VB1 | 10000 | d8-l2-first | 125302 / 135844 | 1050843 / 1125433 | 8.4x | 47 / 5090 | 16087 / 16918 |
+| VB1 | 10000 | d8-l2-knn | 824294 / 843421 | 11094980 / 11216994 | 13.5x | 47 / 5090 | 4547 / 4710 |
+| VB1 | 10000 | d32-cosine-first | 177618 / 180722 | 9367209 / 9678755 | 52.7x | 60 / 5036 | 25792 / 26366 |
+| VB1 | 10000 | d32-cosine-knn | 1299858 / 1346467 | 91809858 / 92500821 | 70.6x | 60 / 5036 | 6323 / 6430 |
+| VB1 | 10000 | d32-l2-first | 143335 / 152740 | 3535229 / 3660160 | 24.7x | 60 / 5035 | 27710 / 28844 |
+| VB1 | 10000 | d32-l2-knn | 1022072 / 1051087 | 33703686 / 33973167 | 33.0x | 60 / 5035 | 10378 / 10513 |
+
+The primitives' effect, 0.14.1 over 0.16.0 (minima of the two tables): a VB0 score is 4.7 (l2, dim
+8) to 66.3 (cosine, dim 128) times faster; an exact query (VB1 `-knn`) 2.4 (l2, 10^4, dim 8) to 15.9
+(cosine, 10^3, dim 32) times faster. On 0.14.1 an exact query over 10^4 vectors of dim 32 took 9.18
+s (cosine) and 3.37 s (l2) per query (divided by 10), 70.6 and 33.0 times `proto_db`'s pure-Python
+search; on 0.16.0, 0.69 s and 0.50 s, 5.4 and 4.8 times.
+
+**Ruling VQ2's computation** (plan Task 10, Step 3; recorded as a measurement: the maintainer
+decided the primitive on 2026-11-20, ahead of this task, `docs/decisions.md`, VQ2). For each VB1
+unit: the kernel cost per scored vector is VB0's protoBaseST minimum for the same dim and metric
+divided by its 10^4 vectors (VB0 times `PBVectorMath score:query:vector:` with a `PBTuple` query and
+`PBTuple` vectors; an exact search, `rank:`, made the same call once per member with the query
+already copied to an Array once per ranking, so per score only the stored vector was copied; the
+V8 review measured the two call shapes within noise of each other, 0 to 20 per cent either way);
+an exact query scores every member, so the kernel's time per
+query is that cost times n; the measured query time is VB1's `-knn` minimum divided by its 10
+queries (and, as a check, the `-first` minimum, one query). Share = kernel per query / measured per
+query. VB0 has no unit for n: the per-vector cost is taken at 10^4 for both sizes.
+
+On protoST 0.14.1 (the Smalltalk kernel):
+
+| n | dim | metric | VB0 st score us/vector (min/10^4) | kernel us/query (x n) | VB1 -knn us/query (min/10) | share knn | VB1 -first us (min/1) | share first |
+|---|---|---|---|---|---|---|---|---|
+| 1000 | 8 | cosine | 228.2 | 228177 | 267217 | 85% | 243703 | 94% |
+| 1000 | 8 | l2 | 81.1 | 81118 | 111954 | 72% | 107478 | 75% |
+| 1000 | 32 | cosine | 1081.5 | 1081451 | 1027728 | 105% | 1028079 | 105% |
+| 1000 | 32 | l2 | 343.9 | 343869 | 382519 | 90% | 376807 | 91% |
+| 10000 | 8 | cosine | 228.2 | 2281766 | 2494719 | 91% | 2374214 | 96% |
+| 10000 | 8 | l2 | 81.1 | 811182 | 1109498 | 73% | 1050843 | 77% |
+| 10000 | 32 | cosine | 1081.5 | 10814506 | 9180986 | 118% | 9367209 | 115% |
+| 10000 | 32 | l2 | 343.9 | 3438690 | 3370369 | 102% | 3535229 | 97% |
+
+On protoST 0.16.0 (the primitives):
+
+| n | dim | metric | VB0 st score us/vector (min/10^4) | kernel us/query (x n) | VB1 -knn us/query (min/10) | share knn | VB1 -first us (min/1) | share first |
+|---|---|---|---|---|---|---|---|---|
+| 1000 | 8 | cosine | 34.1 | 34066 | 61168 | 56% | 58895 | 58% |
+| 1000 | 8 | l2 | 17.2 | 17202 | 40278 | 43% | 39154 | 44% |
+| 1000 | 32 | cosine | 39.5 | 39497 | 64490 | 61% | 63110 | 63% |
+| 1000 | 32 | l2 | 18.8 | 18757 | 43532 | 43% | 44198 | 42% |
+| 10000 | 8 | cosine | 34.1 | 340662 | 633064 | 54% | 587929 | 58% |
+| 10000 | 8 | l2 | 17.2 | 172019 | 455462 | 38% | 441921 | 39% |
+| 10000 | 32 | cosine | 39.5 | 394966 | 692478 | 57% | 661035 | 60% |
+| 10000 | 32 | l2 | 18.8 | 187570 | 499083 | 38% | 477665 | 39% |
+
+Outcome:
+
+- **On 0.14.1 the interpreted kernel dominates:** the share is 72 to 118 per cent of a `-knn` query
+  (75 to 115 per cent of a `-first` one), above one half on every VB1 unit. The rule would have
+  triggered VP on its own, on all eight units. Shares above 100 per cent (dim 32, up to 118 per
+  cent at cosine, 10^4) mean the estimate exceeds the measured query; why VB0's per-score cost
+  exceeds the in-search one there is not measured (on 0.14.1 no copy is made). It is an estimate of
+  the share, not a decomposition, and every unit is far enough above one half for the outcome not
+  to depend on it.
+- **On 0.16.0 the share falls to 38 to 61 per cent** (39 to 63 per cent of a `-first` query): below
+  one half for every l2 unit (38 to 43), still above it for every cosine unit (54 to 61). What
+  stays above one half is not the interpreted sum: VB0's `fsum` unit (the primitive sum alone over
+  Arrays of products) is 32, 33 and 46 per cent of an `ip` score at dim 8, 32 and 128 (on 0.14.1 the
+  interpreted sum was 68, 82 and 86 per cent). The V8 review measured the rest (single-process
+  probes on 0.16.0, dim 8, the query already an Array, load about 2; not a bench): a cosine score
+  cost 26.4 us and an l2 score 11.5 us, of which the three raw primitive calls, two `sqrt` and the
+  stored vector's copy take 6.5 us (the copy 3.1 us); one primitive call through its error wrapper
+  (`_primitive:overflow:otherwise:`, an `on: Error do:` and three or four closures) cost 9.9 us
+  against 4.6 us for the raw call with the copy. So each wrapped call pays about 5 us, and a cosine
+  score makes three wrapped calls, about 15 of its 26 us; one of the three, the query's norm, is the
+  same for every score of a query and was recomputed at each (as `proto_db`'s `exact_score` also
+  recomputes it). The metric dispatch and the copy are small. Fix round 1 of task V8 removes both
+  costs with the same results (`PBVectorMath scorerFor:query:`, the run below).
+- **What is not the kernel** (the measured `-knn` query divided by 10, minus the kernel estimate,
+  per query): on 0.16.0 it is 23.1 to 27.1 ms at 10^3 and 283.4 to 311.5 ms at 10^4 over the eight
+  units (divided by n, about 23 to 31 us per member: the store walk, the entries and the ranking).
+  On 0.14.1 it is 30.8 to 39.0 ms at 10^3 except dim 32 cosine (-53.7 ms), and 213.0 and 298.3 ms
+  at 10^4, dim 8, against -1633.5 (cosine) and -68.3 ms (l2) at dim 32: negative where the estimate
+  overshoots. So it is not compared across the binaries, except at dim 8, l2, 10^4: 298.3 ms on
+  0.14.1 against 283.4 ms on 0.16.0.
+- The figures are one machine's, at a load average between 1.4 and 3.1; nothing is asserted about
+  time.
+
+**After fix round 1 of task V8: one scorer per query** (2026-11-22). The change (`c3428c2`):
+`PBVectorMath scorerFor:query:` answers a block that scores many vectors against one query, with
+the metric dispatch, the query's copy and, for cosine, the query's norm done once (the norm at the
+first score, so a refusal comes at the score where it came before), and the primitives called
+directly under one error handler per score; any fsum failure, and operands of unequal sizes, fall
+back to `score:query:vector:`. The same sums in the same order, the same `sqrt` and the same
+`(dot / nq) / nv`. `rank:`, the IVF probe loop, `listFor:vector:` and `probeOrder:query:` use it.
+Evidence of the same results: `tests/unit/vec_math.st` case 17 (written first, and failing on
+`doesNotUnderstand: scorerFor:query:`); every one of the 418 score cases of
+`tests/conformance/vector_math.st` through the scorer three ways (a first score, a second score of
+the same scorer, `PBTuple` operands), with the primitives and with the Smalltalk kernel forced, on
+protoST 0.14.1 and 0.16.0; and an old-against-new comparison on protoST 0.16.0 (`a230436` against
+the new source, one process each): the answers of exact (cosine, l2, ip) and IVF (cosine, l2;
+nlist 54, nprobe 1, 4 and 54) searches over the 10^4 VB vectors plus a zero vector and four scaled
+ones, dims 8 and 32, 11 queries each, the IVF centroids, 200 list assignments and every probe order:
+the same 251 lines; and the scorer against `score:query:vector:` over 720360 scores (zero query
+included): 0 byte differences. (A zero query ties every member. Ties among atoms are ordered by the atom's oid, as in
+`proto_db`; a new atom's oid is a random version-4 UUID drawn on first need in both implementations
+(ProtoBase D21), so fresh records tie differently in every process in both, with the old source as
+with the new, and answers are the same on one database (Addendum V, 2.5). That query is therefore
+compared by its scores only; `tests/interop/vector_ties_identical.sh` pins the tie rule against
+`proto_db` with injected oids.)
+
+Two runs, serial, under the bench marker, each started with the 1-minute load below 3, on the same
+machine as above (load sampled at the ends only; not a quiet machine, other processes unknown):
+`RUNS=5 bench/run_query.sh VB0 VB1 VB2 VB4` on 2026-11-22 16:22 to 17:05 UTC, load 2.01 / 3.60 /
+4.36 before and 2.08 / 2.91 / 3.19 after, protoBaseST `6479330` (the clean committed tree: the fix
+and the rewording above); then, after VB0 gained the scorer units (`1af211c`: `ip-scorer`,
+`l2-scorer`, `cosine-scorer`, the same scores through one `scorerFor:query:` made once and timed;
+`proto_db`'s side is `exact_score` again, so the checksums are the same scores'), `RUNS=5
+bench/run_query.sh VB0` on 17:06 to 17:13 UTC, load 1.98 / 2.69 / 3.09 before and 2.63 / 2.81 /
+3.04 after, protoBaseST `1af211c` (clean; the same `src` as `6479330`). protoST 0.16.0
+(`worktrees/pinned-0160`), `proto_db` in both modes as above. Both runs printed `verified`; VB2's
+recall was again 46, 85 and 100 of 100 in all three implementations. Units as in the first table
+of the V8 run (microseconds summed over each unit's work).
+
+VB0 (the second run):
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB0 | 10000 | d8-products | 7410 / 7591 | 166308 / 190962 | 22.4x | 34 / 410 | - |
+| VB0 | 10000 | d8-naive | 2013 / 2097 | 92289 / 103131 | 45.8x | 30 / 338 | - |
+| VB0 | 10000 | d8-fsum | 2150 / 2201 | 46923 / 48460 | 21.8x | 30 / 290 | - |
+| VB0 | 10000 | d8-ip | 9105 / 10139 | 159054 / 174130 | 17.5x | 30 / 334 | - |
+| VB0 | 10000 | d8-l2 | 10340 / 10952 | 166501 / 180796 | 16.1x | 30 / 330 | - |
+| VB0 | 10000 | d8-cosine | 20726 / 21824 | 326906 / 343219 | 15.8x | 30 / 434 | - |
+| VB0 | 10000 | d8-ip-scorer | 9085 / 10283 | 82162 / 84431 | 9.0x | 30 / 294 | - |
+| VB0 | 10000 | d8-l2-scorer | 11189 / 11325 | 92860 / 99038 | 8.3x | 30 / 298 | - |
+| VB0 | 10000 | d8-cosine-scorer | 20264 / 21167 | 99136 / 107469 | 4.9x | 30 / 298 | - |
+| VB0 | 10000 | d32-products | 23698 / 25233 | 469351 / 500373 | 19.8x | 67 / 1115 | - |
+| VB0 | 10000 | d32-naive | 5802 / 5917 | 285354 / 295572 | 49.2x | 50 / 868 | - |
+| VB0 | 10000 | d32-fsum | 7634 / 7921 | 63309 / 74737 | 8.3x | 50 / 672 | - |
+| VB0 | 10000 | d32-ip | 25150 / 27924 | 202190 / 209618 | 8.0x | 50 / 716 | - |
+| VB0 | 10000 | d32-l2 | 29521 / 29879 | 185367 / 191367 | 6.3x | 50 / 712 | - |
+| VB0 | 10000 | d32-cosine | 59734 / 60679 | 381518 / 384155 | 6.4x | 50 / 816 | - |
+| VB0 | 10000 | d32-ip-scorer | 25967 / 26999 | 108716 / 118398 | 4.2x | 50 / 676 | - |
+| VB0 | 10000 | d32-l2-scorer | 29041 / 30810 | 108253 / 115398 | 3.7x | 50 / 680 | - |
+| VB0 | 10000 | d32-cosine-scorer | 57501 / 58832 | 136877 / 149816 | 2.4x | 50 / 680 | - |
+| VB0 | 10000 | d128-products | 90961 / 95344 | 1677509 / 1742987 | 18.4x | 200 / 4080 | - |
+| VB0 | 10000 | d128-naive | 22334 / 22559 | 1024827 / 1067026 | 45.9x | 131 / 3097 | - |
+| VB0 | 10000 | d128-fsum | 30315 / 30900 | 133693 / 138958 | 4.4x | 131 / 2297 | - |
+| VB0 | 10000 | d128-ip | 87812 / 94056 | 288611 / 304066 | 3.3x | 131 / 2344 | - |
+| VB0 | 10000 | d128-l2 | 108163 / 110328 | 287601 / 292645 | 2.7x | 131 / 2337 | - |
+| VB0 | 10000 | d128-cosine | 210202 / 220838 | 561811 / 619359 | 2.7x | 131 / 2440 | - |
+| VB0 | 10000 | d128-ip-scorer | 87957 / 90173 | 216972 / 238640 | 2.5x | 131 / 2305 | - |
+| VB0 | 10000 | d128-l2-scorer | 110284 / 115104 | 207740 / 214245 | 1.9x | 131 / 2304 | - |
+| VB0 | 10000 | d128-cosine-scorer | 218363 / 223379 | 277321 / 296324 | 1.3x | 131 / 2308 | - |
+
+VB1, VB2 and VB4 (the first run; its VB0 rows, without the scorer units, are left out: they repeat
+the second run's score rows within 8.6 per cent on the protoBaseST side and 9.2 per cent on
+the `proto_db` side):
+
+| id | size | plan | proto_db us min / median | protoBaseST us min / median | ratio st/py (min) | peak RSS MB py / st | proto_db numpy us min / median |
+|---|---|---|---|---|---|---|---|
+| VB1 | 1000 | d8-cosine-first | 6974 / 7252 | 35354 / 36148 | 5.1x | 23 / 529 | 2041 / 2872 |
+| VB1 | 1000 | d8-cosine-knn | 64359 / 70631 | 378648 / 434425 | 5.9x | 23 / 529 | 2673 / 2750 |
+| VB1 | 1000 | d8-l2-first | 6331 / 6571 | 34068 / 38333 | 5.4x | 23 / 525 | 2508 / 2781 |
+| VB1 | 1000 | d8-l2-knn | 57290 / 60957 | 355686 / 386971 | 6.2x | 23 / 525 | 3448 / 3624 |
+| VB1 | 1000 | d32-cosine-first | 10734 / 11146 | 40112 / 41911 | 3.7x | 24 / 609 | 3205 / 3374 |
+| VB1 | 1000 | d32-cosine-knn | 105060 / 109385 | 418612 / 432796 | 4.0x | 24 / 609 | 3927 / 4177 |
+| VB1 | 1000 | d32-l2-first | 8022 / 8579 | 38141 / 39404 | 4.8x | 24 / 609 | 3315 / 3584 |
+| VB1 | 1000 | d32-l2-knn | 75077 / 78747 | 389218 / 417816 | 5.2x | 24 / 609 | 3523 / 3764 |
+| VB1 | 10000 | d8-cosine-first | 137678 / 145357 | 416156 / 438382 | 3.0x | 46 / 5091 | 15660 / 16136 |
+| VB1 | 10000 | d8-cosine-knn | 931361 / 974873 | 4293329 / 4493476 | 4.6x | 46 / 5091 | 3561 / 3828 |
+| VB1 | 10000 | d8-l2-first | 125450 / 132626 | 416388 / 430983 | 3.3x | 46 / 5091 | 15783 / 15914 |
+| VB1 | 10000 | d8-l2-knn | 816237 / 839234 | 4171258 / 4211577 | 5.1x | 46 / 5091 | 4494 / 4698 |
+| VB1 | 10000 | d32-cosine-first | 178004 / 182972 | 451420 / 460077 | 2.5x | 59 / 5087 | 26038 / 27557 |
+| VB1 | 10000 | d32-cosine-knn | 1386591 / 1416734 | 4661320 / 4877082 | 3.4x | 59 / 5087 | 6140 / 6584 |
+| VB1 | 10000 | d32-l2-first | 145400 / 149937 | 442929 / 447064 | 3.0x | 59 / 5087 | 26819 / 28566 |
+| VB1 | 10000 | d32-l2-knn | 1023704 / 1111224 | 4525471 / 4621082 | 4.4x | 59 / 5087 | 10226 / 10386 |
+| VB2 | 10000 | d32-ivf-build | 58424745 / 59365278 | 139670590 / 145109267 | 2.4x | 77 / 5095 | 1433512 / 1548172 |
+| VB2 | 10000 | d32-ivf-nprobe1 | 21959 / 22990 | 116127 / 132360 | 5.3x | 77 / 5095 | 12140 / 12832 |
+| VB2 | 10000 | d32-ivf-nprobe4 | 151235 / 153345 | 265997 / 322397 | 1.8x | 77 / 5095 | 11826 / 12419 |
+| VB2 | 10000 | d32-ivf-nprobe100 | 1398321 / 1484371 | 5764022 / 6100883 | 4.1x | 77 / 5095 | 22698 / 23695 |
+| VB4 | 10000 | d8-s01-filtered | 207332 / 214099 | 4099428 / 4250791 | 19.8x | 47 / 5093 | - |
+| VB4 | 10000 | d8-s01-post | 883985 / 907817 | 4238205 / 4276800 | 4.8x | 47 / 5093 | - |
+| VB4 | 10000 | d8-s10-filtered | 341450 / 351832 | 4262626 / 4457897 | 12.5x | 47 / 5093 | - |
+| VB4 | 10000 | d8-s10-post | 842926 / 877615 | 4205058 / 4372436 | 5.0x | 47 / 5093 | - |
+| VB4 | 10000 | d8-s50-filtered | 649864 / 668718 | 5346801 / 5467586 | 8.2x | 48 / 5093 | - |
+| VB4 | 10000 | d8-s50-post | 850094 / 898323 | 4255117 / 4408285 | 5.0x | 48 / 5093 | - |
+
+Observed (each derived figure names its divisor):
+
+- **Exact search** (VB1 `-knn`, divided by its 10 queries): over 10^4 vectors a query takes 429 ms
+  (dim 8, cosine), 417 ms (dim 8, l2), 466 ms (dim 32, cosine) and 453 ms (dim 32, l2), against
+  633, 455, 692 and 499 ms in the V8 run: cosine 1.47 to 1.49 times faster, l2 1.09 to 1.10 times
+  (l2 gained only the hoisted dispatch and the single handler); 3.4 to 5.1 times `proto_db`'s
+  pure-Python search (4.8 to 6.9 before), 443 to 1206 times its numpy search. Over 10^3 vectors:
+  36 to 42 ms per query, 1.54 to 1.62 times faster at cosine and 1.12 to 1.13 at l2. Cosine queries
+  now cost about what l2 queries cost.
+- **IVF** (VB2): the build takes 139.7 s (one build; 172.8 s in the V8 run: its member assignment,
+  `listFor:vector:`, scores every member against the 100 centroids by cosine), 2.4 times
+  `proto_db`'s pure-Python build. Per query (divided by 10): 11.6 ms at nprobe 1, 26.6 ms at nprobe
+  4 and 576 ms for the full probe (18.7, 45.8 and 965 ms before); the full probe is 1.24 times the
+  exact cosine search of the same size (5764022 against 4661320 us, both for 10 queries), where
+  `proto_db`'s is 1.01 times its own.
+- **Filtered search** (VB4, l2, divided by 10): 410, 426 and 535 ms per query at 1, 10 and 50 per
+  cent against 421 to 426 ms for the post-filter (399, 430 and 564 against 465 to 478 before).
+- **VB0:** a score through the scorer costs, per vector (the minimum divided by 10^4), 8.2, 9.3 and
+  9.9 us (`ip`, `l2`, cosine) at dim 8, 10.9, 10.8 and 13.7 us at dim 32, 21.7, 20.8 and 27.7 us at
+  dim 128, against 15.9, 16.7 and 32.7 us at dim 8 through `score:query:vector:` in the same run; a
+  cosine score is 2.4 times `proto_db`'s pure-Python one at dim 32 and 4.9 at dim 8.
+- **Maintenance** (VB3, VB5) is not re-run: the bench's indexes are l2, where the scorer only
+  hoists the dispatch, and the indicative A/B above measured the new tree at 4.93 (VB3 600 IVF) and
+  4.48 (VB5 IVF) commits per second against 4.86 and 4.50 for `a230436`, with the same checksums.
+
+**VQ2's share after the fix** (the same computation as in the V8 run, with the kernel cost taken
+from VB0's `-scorer` unit, the call an exact search now makes once per member: its minimum divided
+by 10^4, times n, over VB1's `-knn` minimum divided by 10 and the `-first` minimum; VB0 from the
+second run, VB1 from the first):
+
+| n | dim | metric | VB0 st scorer us/vector (min/10^4) | kernel us/query (x n) | VB1 -knn us/query (min/10) | share knn | VB1 -first us (min/1) | share first |
+|---|---|---|---|---|---|---|---|---|
+| 1000 | 8 | cosine | 9.9 | 9914 | 37865 | 26% | 35354 | 28% |
+| 1000 | 8 | l2 | 9.3 | 9286 | 35569 | 26% | 34068 | 27% |
+| 1000 | 32 | cosine | 13.7 | 13688 | 41861 | 33% | 40112 | 34% |
+| 1000 | 32 | l2 | 10.8 | 10825 | 38922 | 28% | 38141 | 28% |
+| 10000 | 8 | cosine | 9.9 | 99136 | 429333 | 23% | 416156 | 24% |
+| 10000 | 8 | l2 | 9.3 | 92860 | 417126 | 22% | 416388 | 22% |
+| 10000 | 32 | cosine | 13.7 | 136877 | 466132 | 29% | 451420 | 30% |
+| 10000 | 32 | l2 | 10.8 | 108253 | 452547 | 24% | 442929 | 24% |
+
+The share is 22 to 33 per cent of a `-knn` query (22 to 34 per cent of a `-first` one): below one
+half on every VB1 unit, cosine (23 to 33) and l2 (22 to 28) alike; it was 38 to 61 per cent on
+0.16.0 before the fix and 72 to 118 per cent on 0.14.1. (The V8 run's formula with VB0's
+`score:query:vector:` units, the second run's published rows above, would now give 40 to 91 per
+cent of a `-knn` query and 40 to 95 per cent of a `-first` one: that call is no longer what a
+search makes, so its figure overstates the kernel.) What is not the kernel, per query (the `-knn`
+minimum divided by 10, minus the kernel estimate), is 26.3 to 28.2 ms at 10^3 and 324 to 344 ms at
+10^4 (divided by n, about 26 to 34 us per member: the store walk, the entries and the ranking), now
+67 to 78 per cent of an exact query (`-knn`). The figures are one machine's, at a 1-minute load average
+between 1.98 and 2.63 at the two runs' ends; nothing is asserted about time.
 
 ## Known protoST limits
 

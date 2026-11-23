@@ -988,6 +988,13 @@ PBAvl class >> keysAndValuesDo: aBlock over: aRoot
  side. aLowInclusive and aHighInclusive admit a key equal to the bound. O(log n
  + k) for k pairs."
 PBAvl class >> keyDo: aBlock over: aRoot fromOrderKey: aLow inclusive: aLowInclusive toOrderKey: aHigh inclusive: aHighInclusive
+  self nodeDo: [:node | aBlock value: node key value: node value] over: aRoot
+    fromOrderKey: aLow inclusive: aLowInclusive toOrderKey: aHigh inclusive: aHighInclusive.
+
+"As keyDo:over:fromOrderKey:inclusive:toOrderKey:inclusive:, evaluating aBlock with each node of
+ the range itself, so the caller may read what the node holds besides its key and value (its
+ cached order key: the vector index's search, indexes.st)."
+PBAvl class >> nodeDo: aBlock over: aRoot fromOrderKey: aLow inclusive: aLowInclusive toOrderKey: aHigh inclusive: aHighInclusive
   | stack node c |
   self _root: aRoot kind: PBKeyNode.
   stack := OrderedCollection new.
@@ -1007,7 +1014,32 @@ PBAvl class >> keyDo: aBlock over: aRoot fromOrderKey: aLow inclusive: aLowInclu
     (aHigh notNil and: [
         c := node orderKey compareWith: aHigh.
         c > 0 or: [c = 0 and: [aHighInclusive not]]]) ifTrue: [^ self].
-    aBlock value: node key value: node value.
+    aBlock value: node.
+    node := self _right: node].
+
+"As nodeDo:over:fromOrderKey:inclusive:toOrderKey:inclusive:, over the range that aSideBlock
+ decides instead of two order-key bounds: aSideBlock answers, for a node, a negative Integer when
+ the node lies below the range, a positive one when it lies above it, and 0 when it is in it. The
+ range must be contiguous in key order (a key-order prefix test, as the vector index's list
+ number, indexes.st: an Integer compare where the bounds would compare whole tuple order keys).
+ It visits the nodes the order-key walk with the same range visits, in the same order."
+PBAvl class >> nodeDo: aBlock over: aRoot side: aSideBlock
+  | stack node |
+  self _root: aRoot kind: PBKeyNode.
+  stack := OrderedCollection new.
+  node := aRoot.
+  [stack notEmpty or: [node notNil]] whileTrue: [
+    [node notNil] whileTrue: [
+      "A node below the range has its left subtree below it too: skip both."
+      (aSideBlock value: node) < 0
+        ifTrue: [node := self _right: node]
+        ifFalse: [
+          stack addLast: node.
+          node := self _left: node]].
+    stack isEmpty ifTrue: [^ self].
+    node := stack removeLast.
+    (aSideBlock value: node) > 0 ifTrue: [^ self].
+    aBlock value: node.
     node := self _right: node].
 
 "Evaluates aBlock with each key and value (unboxed) of the keyed tree aRoot, in

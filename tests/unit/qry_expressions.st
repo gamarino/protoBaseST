@@ -6,8 +6,9 @@
  itself; nodes are frozen values compared by structure; evaluate: is two-valued and short-circuits
  left to right; PBExpression compile: reads the prefix syntax ('&' and '|' binary, '!' unary, an
  implicit AND, nested lists) and refuses malformed input with PBValidationError; '&', '|' and not
- take expressions only (ruling CR5). Each check gathers its mismatches and requires none, so one
- label covers one behaviour."
+ take expressions only (ruling CR5). The near[] sub-cases of the tests ported here (vectors phase
+ V2) are among them; the near[] behaviours of their own are tests/unit/vec_terms.st's. Each check
+ gathers its mismatches and requires none, so one label covers one behaviour."
 Import from: 'protobase'.
 Import from: '_check'.
 
@@ -40,6 +41,8 @@ expect value: 'in (1 2) and in (1.0 Decimal 2)' value: (t value: 'x' value: 'in'
 expect value: 'tuples' value: (t value: 'x' value: '==' value: (PBTuple withAll: { true. 1 })) = (t value: 'x' value: '==' value: (PBTuple withAll: #(1 1))) value: false.
 expect value: 'and of true and 1' value: (PBAnd withAll: { t value: 'x' value: '==' value: true. b2 }) = (PBAnd withAll: { t value: 'x' value: '==' value: 1. b2 }) value: false.
 expect value: 'not of true and 1' value: (t value: 'x' value: '==' value: true) not = (t value: 'x' value: '==' value: 1) not value: false.
+expect value: 'a near[] term and its mapping' value: (t value: 'v' value: 'near[]' value: (PBNearQuery vector: #(1 0) k: 2))
+  = (t value: 'v' value: 'near[]' value: (PBFrozenDict withAssociations: { 'vector' -> (PBTuple withAll: #(1.0 0.0)). 'k' -> 2 })) value: true.
 expect value: 'equal terms match the same elements' value: { (t value: 'x' value: '==' value: true) matches: (PBFrozenDict withAssociations: { 'x' -> 1 }). (t value: 'x' value: '==' value: 1) matches: (PBFrozenDict withAssociations: { 'x' -> 1 }) } value: #(false true).
 c that: 'terms are expressions, equal by value semantics' is: fails asArray equals: #().
 
@@ -85,11 +88,14 @@ c that: 'nodes are frozen values compared by structure' is: fails asArray equals
 "test_describe_is_json_serialisable, test_iter_terms_walks_the_tree_in_order"
 fails := OrderedCollection new.
 d := (t value: 'd' value: '==' value: (Decimal fromString: '1.50'))
-  & ((t value: 't' value: 'between[]' value: #(1 5)) | (PBTerm path: 'n' op: '?N') not).
+  & ((t value: 't' value: 'between[]' value: #(1 5)) | (PBTerm path: 'n' op: '?N') not)
+  & (t value: 'v' value: 'near[]' value: (PBNearQuery vector: #(1 0) k: 3)).
 expect value: 'and' value: ((d describe at: 'and') first) value: (PBFrozenDict withAssociations: { 'path' -> 'd'. 'op' -> '=='. 'value' -> 'Decimal(''1.50'')' }).
 expect value: 'or' value: ((((d describe at: 'and') at: 2) at: 'or') first at: 'value') value: #(1 5).
 expect value: 'not' value: ((((d describe at: 'and') at: 2) at: 'or') at: 2)
   value: (PBFrozenDict withAssociations: { 'not' -> (PBFrozenDict withAssociations: { 'path' -> 'n'. 'op' -> '?N'. 'value' -> nil }) }).
+expect value: 'near[]' value: ((d describe at: 'and') at: 3) value: (PBFrozenDict withAssociations: { 'path' -> 'v'. 'op' -> 'near[]'.
+  'value' -> (PBFrozenDict withAssociations: { 'vector' -> #(1.0 0.0). 'k' -> 3. 'threshold' -> nil. 'metric' -> nil }) }).
 expect value: 'describe is plain data (canonical)' value: (refused value: [PBCodec canonical: d describe]) value: nil.
 list := OrderedCollection new.
 (a1 & (b2 | c3 not)) termsDo: [:each | list add: each].
@@ -113,7 +119,11 @@ fails := OrderedCollection new.
   #('a' '?T') -> (PBTerm path: 'a' op: '?T'). #('a' '?!T') -> (PBTerm path: 'a' op: '?!T').
   #('a' 'between[]' 1 5) -> (t value: 'a' value: 'between[]' value: #(1 5)). #('a' 'between()' 1 5) -> (t value: 'a' value: 'between()' value: #(1 5)).
   #('a' 'between(]' 1 5) -> (t value: 'a' value: 'between(]' value: #(1 5)). #('a' 'between[)' 1 5) -> (t value: 'a' value: 'between[)' value: #(1 5)).
-  { nil. '=='. 5 } -> (t value: nil value: '==' value: 5). #('a.b.c' '==' 5) -> (t value: 'a.b.c' value: '==' value: 5) } do: [:each |
+  { nil. '=='. 5 } -> (t value: nil value: '==' value: 5). #('a.b.c' '==' 5) -> (t value: 'a.b.c' value: '==' value: 5).
+  #('v' 'near[]' #(1 0) 0.8) -> (t value: 'v' value: 'near[]' value: (PBNearQuery vector: #(1.0 0.0) k: nil threshold: 0.8 metric: 'cosine')).
+  { 'v'. 'near[]'. PBFrozenDict withAssociations: { 'vector' -> #(1 0). 'k' -> 2 } } -> (t value: 'v' value: 'near[]' value: (PBNearQuery vector: #(1.0 0.0) k: 2)).
+  { 'v'. 'near[]'. PBNearQuery vector: #(1 0) k: 2 threshold: nil metric: 'l2' }
+    -> (t value: 'v' value: 'near[]' value: (PBNearQuery vector: #(1 0) k: 2 threshold: nil metric: 'l2')) } do: [:each |
     compiled := PBExpression compile: each key.
     expect value: each key printString value: compiled value: each value.
     expect value: each key printString , ' round trip' value: (PBExpression compile: compiled asList) value: compiled].
@@ -134,7 +144,8 @@ expect value: 'built expressions as tokens' value: (PBExpression compile: { '&'.
 expect value: 'an expression compiles to itself' value: (PBExpression compile: a1) == a1 value: true.
 expect value: 'a PBFrozenList is a list' value: (PBExpression compile: (PBFrozenList withAll: { 'a'. '=='. 1 })) value: a1.
 { a1 & (b2 | c3 not). PBOr withAll: { (a1 & b2) not. c3. t value: 'x' value: 'between[]' value: #(1 9) }.
-  ((t value: 'y' value: 'in' value: #('a' 'b')) | (PBTerm path: 'z' op: '?T')) not } do: [:tree |
+  ((t value: 'y' value: 'in' value: #('a' 'b')) | (PBTerm path: 'z' op: '?T')) not.
+  ((t value: 'v' value: 'near[]' value: (PBNearQuery vector: #(1 2) k: 4)) | (t value: 'y' value: 'in' value: #('a' 'b'))) not } do: [:tree |
     expect value: 'round trip ' , tree printString value: (PBExpression compile: tree asList) value: tree].
 expect value: 'and lists nested to the right' value: (PBAnd withAll: { a1. b2. c3 }) asList
   value: { '&'. a1 asList. { '&'. b2 asList. c3 asList } }.
@@ -148,11 +159,10 @@ fails := OrderedCollection new.
   #('&' 'a' '==' 1) -> '''&'' needs two operands'. #('|') -> '''|'' needs two operands'. #('!') -> '''!'' needs an operand'.
   #(5 '==' 1) -> 'Expected a path'. { #('a' '==' 1). 7 } -> 'Expected a path'. #(#()) -> 'empty'.
   { 'a'. '=='. #(1 2) } -> 'orderable'. #('a' 'between[]' 1 'z') -> 'one type rank'. #('a' '?N' 3) -> 'Expected a path'.
-  #('a' 'in' 3) -> 'list, tuple or set' } do: [:each | | text |
+  #('a' 'in' 3) -> 'list, tuple or set'. #('v' 'near[]' #(1 0)) -> 'near' } do: [:each | | text |
     text := msg value: [PBExpression compile: each key].
     ((text beginsWith: 'PBValidationError: ') and: [text includesSubstring: each value]) ifFalse: [
       fails add: each key printString , ': ' , text]].
-expect value: 'near[] in the list syntax' value: (refused value: [PBExpression compile: #('v' 'near[]' #(1 0) 0.8)]) value: PBNotSupportedError.
 c that: 'compile: refuses malformed input' is: fails asArray equals: #().
 
 "test_evaluate_term_is_the_scan_oracle, test_evaluate_truth_tables,

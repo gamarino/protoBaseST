@@ -322,15 +322,9 @@ PBKeys class >> _oidBytes: anOid
   ^ anOid bytes.
 
 PBKeys class >> _unsignedBigEndian: aByteArray
-  | n |
-  "An oid, 16 bytes, is read as two 64-bit words: two LargeInteger operations instead of
-   sixteen (every order key of an atom comes here)."
-  (aByteArray class == ByteArray and: [aByteArray size = 16]) ifTrue: [
-    ^ ((aByteArray unsignedLong64At: 1 bigEndian: true) bitShift: 64)
-      + (aByteArray unsignedLong64At: 9 bigEndian: true)].
-  n := 0.
-  aByteArray do: [:b | n := n * 256 + b].
-  ^ n.
+  "The unsigned Integer the bytes spell, most significant byte first, in one protoST
+   primitive (every order key of an atom comes here, an oid being 16 bytes)."
+  ^ aByteArray unsignedIntegerFrom: 1 to: aByteArray size bigEndian: true.
 
 "Payloads of one rank."
 PBKeys class >> _comparePayload: a with: b rank: aRank

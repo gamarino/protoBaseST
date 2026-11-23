@@ -28,13 +28,31 @@ The database 'queries' (seed SEED) holds these roots, written in one transaction
   plain     the List of the records without indexes
   tiny      a List of two records; by_city (the planner scans it: an index costs more)
 
+and, since the vectors phase's V7 (Addendum V 5.3), the vector roots, written in the same
+transaction from their own generator (random.Random(VEC_SEED), so the roots above draw the same
+data as before): VEC_N records {id, g = id mod 3, vec}, vec a tuple of VEC_DIM floats in [-1, 1),
+except one in twenty without vec and one in twenty with a vec of another dimension (invalid
+elements, never answered); each a List with by_id (RangeIndex on id), by_g (EqualityIndex on g)
+and one vector index on vec, added after the records (one build, one training):
+
+  vec_l2, vec_cosine, vec_ip    an exact index of that metric
+  vec_ivf_part                  ivf_flat, l2, nlist 8, nprobe 2 (approximate)
+  vec_ivf_full                  ivf_flat, l2, nlist 8, nprobe 8 (every list: exact)
+  vec_hnsw                      hnsw, l2 (planned as VectorHnsw; its search needs hnswlib, which is
+                                blocked here, so its execution is refused, as protoBaseST refuses
+                                it: deviation DV1)
+
+proto_db runs in its reference mode: numpy and hnswlib are blocked before it is imported
+(sys.modules), so IVF training is its pure-Python k-means and the hnsw search refuses.
+
 A record has id (0..PEOPLE-1), name 'p<id>', city (absent in about one in ten, None in one in ten),
 age (absent in one in ten, None in one in twenty, otherwise an int, a float or a Decimal of the
 same number or a half), score (an int 0..9, or a list or a map: unorderable, in one in fifteen) and
 tags (a list of strings: unorderable).
 
-queries.msgpack is a msgpack map: 'tag', 'seed', 'extractor' (the extractor's name) and 'cases',
-an array of maps:
+queries.msgpack is a msgpack map: 'tag', 'seed', 'extractor' (the extractor's name), 'mode' (the
+mode the cases were generated in: 'numpy: blocked', 'hnswlib: blocked', the CPython version and the
+C library, platform.libc_ver()) and 'cases', an array of maps:
 
   id        a name for the case
   root      the root it queries
@@ -53,13 +71,34 @@ an array of maps:
             (the same maps of its sources, in order)
   rows      the rows of plan.execute(), in order, each the msgpack bytes of ['id', id] for a
             record, ['n', n] for the row of a Count, ['v', wire form] for any other value
+  error     (vector cases only) nil, or the class proto_db refuses the case with
+            ('ProtoNotSupportedError'); error_at is then 'plan' (plan_query refused: plan is nil)
+            or 'execute' (the plan was built and recorded, its execution refused); rows is empty
+  error_text (vector cases only) nil, or str() of proto_db's refusal
+  recall    (vector cases over vec_ivf_part without a window or a wrap) [the rows the case shares
+            with its oracle, the oracle's rows], for the record: an approximate answer is not
+            checked against the oracle
 
 The oracle: the elements of the source for which evaluate holds, sorted as test_index_equals_scan.py
 sorts them (a stable pass per key, last key first, unorderable keys last); the planned rows must be
 its multiset (no window), carry its key sequence (an order), and be a window of it; Count must count
 it, Distinct keep its distinct identities, Project project it, Intersect answer the elements both
 conditions hold for, PythonFilter its even ids.
+
+The vector cases have their own oracle (Addendum V 5.3; a scan refuses near[]): near_oracle (the
+brute-force answer, S36) composed as the planner's rules define the answer. A bare near[] term is
+near_oracle of its query; a conjunction with one bare near[] term with k is near_oracle with the
+other conjuncts as its predicate (ruling R27); any other conjunction is the intersection (minimum
+multiplicity) of its near[] conjuncts' answers filtered by the others; a disjunction the union
+(maximum multiplicity) of its branches' answers, a branch without near[] being a scan. Over the
+exact roots and vec_ivf_full every recorded result must be that answer, in order where proto_db
+defines one (a VectorSearch nearest first, ties by member key, and a Filter over one), as a
+multiset otherwise (the key sequence too when ordered, the window of the sorted answer when
+limited); the generator refuses to write otherwise. Over vec_ivf_part the answer is approximate by
+design (nprobe < nlist): it is recorded with its recall, and protoBaseST must return exactly it,
+both sides reading the same stored centroids. A refusal must be the expected one.
 """
+import platform
 import hashlib
 import random
 import sys
@@ -68,16 +107,28 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-import msgpack
+# The reference mode (Addendum V 5.2): numpy and hnswlib blocked before proto_db is imported, so
+# numpy_module() answers None (IVF training is the pure-Python k-means) and the hnsw search refuses.
+sys.modules["numpy"] = None
+sys.modules["hnswlib"] = None
 
-from proto_db import FileStorage, ObjectSpace
-from proto_db.core import codec
-from proto_db.core.dbobject import DBObject
-from proto_db.indexing import EqualityIndex, KeySpec, RangeIndex, element_identity, register_extractor
-from proto_db.query.expressions import Expression, evaluate
-from proto_db.query.planner import plan_query
-from proto_db.query.plans import Count, Distinct, Intersect, Project, PythonFilter
-from proto_db.values import MISSING, FrozenList, exact_token, is_orderable, order_key
+import msgpack  # noqa: E402
+
+from proto_db import FileStorage, ObjectSpace  # noqa: E402
+from proto_db.core import codec  # noqa: E402
+from proto_db.core.dbobject import DBObject  # noqa: E402
+from proto_db.indexing import EqualityIndex, KeySpec, RangeIndex, element_identity, register_extractor  # noqa: E402
+from proto_db.query.expressions import Expression, evaluate  # noqa: E402
+from proto_db.query.planner import plan_query  # noqa: E402
+from proto_db.query.plans import Count, Distinct, Intersect, Project, PythonFilter  # noqa: E402
+from proto_db.values import MISSING, FrozenList, exact_token, is_orderable, order_key  # noqa: E402
+from proto_db.errors import ProtoNotSupportedError  # noqa: E402
+from proto_db.indexing import vector_backends  # noqa: E402
+from proto_db.indexing.vector import VectorIndex, near_oracle  # noqa: E402
+from proto_db.query.expressions import And, Or, iter_terms  # noqa: E402
+from proto_db.query.planner import normalize  # noqa: E402
+from proto_db.query.plans import Filter, VectorSearch  # noqa: E402
+from proto_db.query.terms import NEAR, Term  # noqa: E402
 
 TAG = "v2.0.0rc4"
 SEED = 20261119
@@ -85,6 +136,20 @@ PEOPLE = 240
 EXTRACTOR = "queries.vectors.name_len"
 HERE = Path(__file__).resolve().parent
 CITIES = ("Oslo", "Rome", "Paris", "Lima", "Kyiv", "Quito")
+VEC_SEED = 20261122
+VEC_N = 120
+VEC_DIM = 4
+#: root -> (metric, backend, params) of its vector index 'by_vec' (the module docstring)
+VEC_ROOTS = {
+    "vec_l2": ("l2", "exact", {}),
+    "vec_cosine": ("cosine", "exact", {}),
+    "vec_ip": ("ip", "exact", {}),
+    "vec_ivf_part": ("l2", "ivf_flat", {"nlist": 8, "nprobe": 2}),
+    "vec_ivf_full": ("l2", "ivf_flat", {"nlist": 8, "nprobe": 8}),
+    "vec_hnsw": ("l2", "hnsw", {}),
+}
+#: a threshold per metric: a similarity of at least t (cosine, ip), a distance of at most t (l2)
+VEC_THRESHOLDS = {"l2": 0.9, "cosine": 0.6, "ip": 0.4}
 
 
 def check_pinned() -> None:
@@ -157,6 +222,15 @@ def build(directory: Path, rng: random.Random) -> None:
                 for _ in range(rng.randrange(1, 4)):
                     counted = counted.add(v)
         tiny = tr.new_list().append_last(people[0]).append_last(people[1])
+        vec_rng = random.Random(VEC_SEED)
+        vec_records = []
+        for i in range(VEC_N):
+            attrs = {"id": i, "g": i % 3}
+            if i % 20 == 13:
+                attrs["vec"] = tuple(vec_rng.uniform(-1.0, 1.0) for _ in range(VEC_DIM - 1))
+            elif i % 20 != 7:
+                attrs["vec"] = tuple(vec_rng.uniform(-1.0, 1.0) for _ in range(VEC_DIM))
+            vec_records.append(tr.new_object(**attrs))
         roots = {
             "list": lst,
             "dict": d.add_index(by_city).add_index(by_age),
@@ -168,6 +242,13 @@ def build(directory: Path, rng: random.Random) -> None:
             "plain": plain,
             "tiny": tiny.add_index(by_city),
         }
+        for name, (metric, backend, params) in VEC_ROOTS.items():
+            vlist = tr.new_list()
+            for r in vec_records:
+                vlist = vlist.append_last(r)
+            roots[name] = vlist.add_index(RangeIndex("by_id", KeySpec.path("id"))).add_index(
+                EqualityIndex("by_g", KeySpec.path("g"))).add_index(
+                VectorIndex("by_vec", KeySpec.path("vec"), VEC_DIM, metric, backend, **params))
         for name, coll in roots.items():
             tr.set_root_object(name, coll)
         tr.commit()
@@ -275,6 +356,146 @@ def cases():
     return out
 
 
+def vector_queries() -> tuple:
+    """The two query vectors of the vector cases (lists: the mapping form is MessagePack-neutral);
+    the second near the first, so that their k nearest overlap and an Intersect answers rows."""
+    rng = random.Random(VEC_SEED + 1)
+    q1 = [rng.uniform(-1.0, 1.0) for _ in range(VEC_DIM)]
+    return q1, [x + rng.uniform(-0.3, 0.3) for x in q1]
+
+
+def vector_cases():
+    """(id, root, source, where, order, limit, offset, wrap, expected error, error_at) over the
+    vector roots (Addendum V 5.3)."""
+    q1, q2 = vector_queries()
+
+    def near(q, **fields):
+        return ["vec", "near[]", {"vector": q, **fields}]
+
+    out = []
+    for root, (metric, backend, _) in VEC_ROOTS.items():
+        t = VEC_THRESHOLDS[metric]
+        other = "cosine" if metric != "cosine" else "l2"
+        refused_at_execution = "execute" if backend == "hnsw" else None
+        cases = [
+            ("near k5", near(q1, k=5), None, None, 0, None),
+            ("near threshold", near(q1, threshold=t), None, None, 0, None),
+            ("near k5 threshold", near(q1, k=5, threshold=t), None, None, 0, None),
+            ("near k5 and g == 1", near(q1, k=5) + ["g", "==", 1], None, None, 0, None),
+            ("near k5 and g == 1 and id < 60", near(q1, k=5) + ["g", "==", 1, "id", "<", 60], None, None, 0, None),
+            ("near threshold and g == 1", near(q1, threshold=t) + ["g", "==", 1], None, None, 0, None),
+            ("near k12 and near k12 (two queries)", near(q1, k=12) + near(q2, k=12), None, None, 0, None),
+            ("near k3 or id == 7", ["|"] + near(q1, k=3) + ["id", "==", 7], None, None, 0, None),
+            ("near k3 or g == 1 and id > 100", ["|"] + near(q1, k=3) + ["&", "g", "==", 1, "id", ">", 100],
+             None, None, 0, None),
+            ("near k5 order id desc", near(q1, k=5), [["id", True]], None, 0, None),
+            ("near k5 order id limit 3", near(q1, k=5), [["id", False]], 3, 0, None),
+            ("near k50 and id < 7", near(q1, k=50) + ["id", "<", 7], None, None, 0, None),
+            ("near k5 count", near(q1, k=5), None, None, 0, "count"),
+        ]
+        for name, where, order, limit, offset, wrap in cases:
+            out.append((f"{root}: {name}", root, "collection", where, order, limit, offset, wrap,
+                        "ProtoNotSupportedError" if refused_at_execution else None, refused_at_execution))
+        for name, where in (("near k5 metric " + other + " (no index supports it)", near(q1, k=5, metric=other)),
+                            ("not near k3", ["!"] + near(q1, k=3)),
+                            ("not (near k3 and g == 1)", ["!", ["&"] + near(q1, k=3) + ["g", "==", 1]])):
+            out.append((f"{root}: {name}", root, "collection", where, None, None, 0, None, "ProtoNotSupportedError", "plan"))
+    out += [
+        ("vec_cosine: near 0.1 list form (cosine threshold)", "vec_cosine", "collection", ["vec", "near[]", q1, 0.6],
+         None, None, 0, None, None, None),
+        ("vec_l2: near 0.1 list form (cosine: no index supports it)", "vec_l2", "collection", ["vec", "near[]", q1, 0.6],
+         None, None, 0, None, "ProtoNotSupportedError", "plan"),
+        ("vec_l2 scan: near k5", "vec_l2", "scan", near(q1, k=5), None, None, 0, None, None, None),
+        ("vec_l2 distinct source: near k5 (no index)", "vec_l2", "distinct", near(q1, k=5), None, None, 0, None,
+         "ProtoNotSupportedError", "plan"),
+        ("list: near k5 (no vector index)", "list", "collection", ["name", "near[]", {"vector": q1, "k": 5}],
+         None, None, 0, None, "ProtoNotSupportedError", "plan"),
+    ]
+    return out
+
+
+def _has_near(expr) -> bool:
+    return any(t.op == NEAR for t in iter_terms(expr))
+
+
+def _bag(elements) -> Counter:
+    return Counter(map(ident, elements))
+
+
+def vector_answer(elements, expr, metric):
+    """The answer of a normalised condition holding near[], as the planner's rules define it (the
+    module docstring): a list, ordered where a single search or its post-filter orders it."""
+    spec = KeySpec.path("vec")
+    if isinstance(expr, Term) and expr.op == NEAR:
+        return near_oracle(elements, spec, expr.value, metric)
+    if isinstance(expr, And):
+        conjuncts = list(dict.fromkeys(expr.operands))
+        near = [c for c in conjuncts if _has_near(c)]
+        rest = [c for c in conjuncts if not _has_near(c)]
+        if not near:
+            return [e for e in elements if evaluate(expr, e)]
+        if len(near) == 1 and rest and isinstance(near[0], Term) and near[0].value.k is not None:
+            return near_oracle(elements, spec, near[0].value, metric, rest[0] if len(rest) == 1 else And(*rest))
+        answers = [vector_answer(elements, c, metric) for c in near]
+        if len(answers) == 1:
+            base = answers[0]
+        else:
+            # Intersect (D36): the first source's rows, each identity at most its minimum multiplicity
+            common = _bag(answers[0])
+            for a in answers[1:]:
+                common &= _bag(a)
+            base, taken = [], Counter()
+            for e in answers[0]:
+                if taken[ident(e)] < common[ident(e)]:
+                    taken[ident(e)] += 1
+                    base.append(e)
+        return [e for e in base if all(evaluate(c, e) for c in rest)]
+    if isinstance(expr, Or):
+        union = Counter()
+        for branch in expr.operands:
+            union |= _bag(vector_answer(elements, branch, metric) if _has_near(branch)
+                          else [e for e in elements if evaluate(branch, e)])
+        out, taken = [], Counter()
+        for e in elements:
+            if taken[ident(e)] < union[ident(e)]:
+                taken[ident(e)] += 1
+                out.append(e)
+        return out
+    return [e for e in elements if evaluate(expr, e)]
+
+
+def check_vector(case_id, plan, got, elements, where, order, limit, offset, wrap, metric) -> None:
+    """Refuses (exits) unless got is the vector oracle's answer (the module docstring)."""
+    def refuse(why):
+        sys.exit(f"py_query_vectors: {case_id}: {why}; nothing written")
+    expected = vector_answer(elements, normalize(Expression.compile(where)), metric)
+    if wrap == "count":
+        if got != [len(expected)]:
+            refuse(f"count {got} is not {len(expected)}")
+        return
+    if order:
+        for path, descending in reversed(order):
+            expected = sorted(expected, key=lambda e: slot(KeySpec.for_term_path(path).extract(e)), reverse=descending)
+        stop = None if limit is None else offset + limit
+        window = expected[offset:stop]
+        if [key_slots(e, order) for e in got] != [key_slots(e, order) for e in window]:
+            refuse("the key sequence differs from the sorted oracle")
+        if limit is None and not offset and _bag(got) != _bag(expected):
+            refuse("rows differ from the oracle")
+        return
+    ordered = isinstance(plan, VectorSearch) or (isinstance(plan, Filter) and isinstance(plan.source, VectorSearch))
+    if ordered and list(map(ident, got)) != list(map(ident, expected)):
+        refuse("rows differ from the oracle's, in order")
+    if _bag(got) != _bag(expected):
+        refuse("rows differ from the oracle's")
+
+
+def recall(got, elements, where, metric) -> list:
+    """[shared rows, oracle rows] of an approximate answer against the oracle (for the record)."""
+    expected = vector_answer(elements, normalize(Expression.compile(where)), metric)
+    return [sum((_bag(got) & _bag(expected)).values()), len(expected)]
+
+
 def wire_bytes(value) -> bytes:
     return msgpack.packb(codec.encode_value(value, lambda a: (_ for _ in ()).throw(ValueError("an atom"))),
                          use_bin_type=True)
@@ -362,8 +583,57 @@ def check(case_id, got, expected, order, limit, offset, wrap, elements, where2) 
         refuse("an unordered window holds rows the scan does not")
 
 
+def run_vector_cases(tr) -> list:
+    """The vector cases (Addendum V 5.3): planned, executed, checked by check_vector, recorded."""
+    out = []
+    for case_id, root, source_kind, where, order, limit, offset, wrap, error, error_at in vector_cases():
+        coll = tr.get_root_object(root)
+        source = {"collection": coll, "scan": coll.as_query_plan(), "distinct": Distinct(coll.as_query_plan())}[source_kind]
+        metric = VEC_ROOTS[root][0] if root in VEC_ROOTS else "l2"
+        record = {"id": case_id, "root": root, "source": source_kind, "where": wire_bytes(where),
+                  "order": order, "limit": limit, "offset": offset, "wrap": wrap, "plan": None, "rows": [],
+                  "error": error, "error_at": error_at, "error_text": None}
+        try:
+            plan = plan_query(source, where, order_by=[tuple(k) for k in order] if order else None,
+                              limit=limit, offset=offset)
+        except ProtoNotSupportedError as exc:
+            if error_at != "plan":
+                raise
+            record["error_text"] = str(exc)
+            out.append(record)
+            continue
+        if error_at == "plan":
+            sys.exit(f"py_query_vectors: {case_id}: planned, where a refusal was expected; nothing written")
+        if wrap == "count":
+            plan = Count(plan)
+        record["plan"] = tree(plan)
+        if error_at == "execute":
+            try:
+                list(plan.execute())
+            except ProtoNotSupportedError as exc:
+                record["error_text"] = str(exc)
+                out.append(record)
+                continue
+            sys.exit(f"py_query_vectors: {case_id}: executed, where a refusal was expected; nothing written")
+        got = list(plan.execute())
+        if list(plan.execute()) != got:
+            sys.exit(f"py_query_vectors: {case_id}: a second execution differs; nothing written")
+        elements = list(coll.elements())
+        if root == "vec_ivf_part":
+            if wrap is None and limit is None and not offset:
+                record["recall"] = recall(got, elements, where, metric)
+        else:
+            check_vector(case_id, plan.source if wrap == "count" else plan, got, elements, where, order, limit,
+                         offset, wrap, metric)
+        record["rows"] = [row_bytes(r, wrap == "count") for r in got]
+        out.append(record)
+    return out
+
+
 def main() -> None:
     check_pinned()
+    if vector_backends.numpy_module() is not None:
+        sys.exit("py_query_vectors: numpy is importable although blocked")
     register_extractor(EXTRACTOR, name_len, version="1")
     out = Path(sys.argv[1])
     if out.exists():
@@ -413,19 +683,30 @@ def main() -> None:
                              "where": None if where is None else wire_bytes(where),
                              "order": order, "limit": limit, "offset": offset, "wrap": stored_wrap,
                              "plan": tree(plan), "rows": [row_bytes(r, wrap == "count") for r in got]})
+        rows_out += run_vector_cases(tr)
         tr.abort()
     finally:
         space.close()
-    blob = msgpack.packb({"tag": TAG, "seed": SEED, "extractor": EXTRACTOR, "cases": rows_out}, use_bin_type=True)
+    mode = ["numpy: blocked", "hnswlib: blocked", f"CPython {platform.python_version()}",
+            "libc " + " ".join(platform.libc_ver())]
+    blob = msgpack.packb({"tag": TAG, "seed": SEED, "extractor": EXTRACTOR, "mode": mode, "cases": rows_out},
+                         use_bin_type=True)
     (out / "queries.msgpack").write_bytes(blob)
     files = sorted([out / "queries.msgpack"] + [p for p in (out / "space").rglob("*") if p.is_file()])
     manifest = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(out).as_posix()}\n" for p in files)
     (out / "manifest.sha256").write_text(manifest)
     names = Counter(name for case in rows_out for name in _names(case["plan"]))
-    print(f"wrote {len(rows_out)} cases to {out}; plan nodes {dict(sorted(names.items()))}")
+    print(f"wrote {len(rows_out)} cases to {out}; mode {', '.join(mode)}; plan nodes {dict(sorted(names.items()))}")
+    for case in rows_out:
+        if case.get("error") is None and case["id"].startswith("vec_") and "Intersect" in str(case["plan"]):
+            print(f"rows {case['id']}: {len(case['rows'])}")
+        if "recall" in case:
+            print(f"recall {case['id']}: {case['recall'][0]} of {case['recall'][1]}")
 
 
 def _names(node):
+    if node is None:
+        return
     yield msgpack.unpackb(node["node"], raw=False, strict_map_key=False)["plan"]
     for child in node["children"]:
         yield from _names(child)

@@ -70,8 +70,8 @@ lesson check: 'a cluster directory (no cluster mode here)'
 ```
 
 `PBNotSupportedError` means valid data or a valid operation outside what the prototype handles:
-a cluster directory, a write to a collection holding a vector index or an index of an unknown
-kind (equality and range indexes are maintained, [chapter 17](17-indexes.md)), a wall clock in an IANA time
+a cluster directory, a write to a collection holding an index of an unknown kind (equality,
+range and vector indexes are maintained, [chapter 17](17-indexes.md)), a wall clock in an IANA time
 zone (protoST has no time-zone database), a record of a type with no class here beyond reading its
 attributes. Data that is damaged is `PBCorruptionError`. The complete list, with the cost of each
 refusal, is [deviations.md](../deviations.md); what is missing altogether is

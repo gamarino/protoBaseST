@@ -14,7 +14,8 @@
  (7) removeIndex: of a loaded version rebased onto a version with a concurrent write keeps the
  write and drops the index; onto a version where the index was removed already, a no-op
  (proto_db test_collection_base.py test_rebase_index_removal). (8) A merge onto a current that
- holds a vector index is PBNotSupportedError naming it (design spec 3.3, ruling IQ5). (9) The
+ holds a vector index merges (ruling IQ5a, vectors phase V5): the replayed writes maintain it, its
+ entries those of build: over the merged elements. (9) The
  index operations are replayed per name, as proto_db's: removed then added redefines the index
  over the merged elements; added then removed leaves the current version's index untouched
  (test_rebase_index_redefinition, test_rebase_index_added_then_removed_is_no_op); addIndex: and
@@ -26,7 +27,7 @@ Import from: '_check'.
 Import from: '_queries'.
 
 | c dir space db entries agree person city age seed blind outcomes merged names a b err stored mine
-  theirs vector hnsw vspace redefined untouched logged list ops |
+  theirs vector hnsw vspace emb redefined untouched logged list ops |
 c := Check new.
 dir := 'out/idx_merge' asFileReference / ('run-' , Smalltalk pid printString , '-'
   , Time microsecondClockValue printString).
@@ -134,14 +135,21 @@ c that: 'removeIndex: replayed onto a concurrent write keeps the write and drops
     (mine rebaseOnto: (stored removeIndex: 'by_x')) indexNames }
   equals: { #('by_age' 'by_city' 'by_id' 'by_y'). true. 17. true. #('by_age' 'by_city' 'by_id' 'by_y') }.
 
-"(8) A Dictionary whose index set holds the vector index of the conformance vector's 'hnsw'."
+"(8) A Dictionary indexed by the vector index of the conformance vector's 'hnsw' (its definition:
+ addIndex: builds it over the dictionary's elements), the current of a blind write."
 (dir / 'vector') ensureCreateDirectory.
 '../conformance/vectors/database' asFileReference files do: [:f | f copyTo: dir / 'vector' / f basename].
 vspace := PBObjectSpace storage: (PBFileStorage path: (dir / 'vector') pathString).
 hnsw := ((vspace openDatabase: 'db') newTransaction getRootObject: 'hnsw') getIndex: 'hnsw'.
-vector := PBDictionary new _withChanges: { 'indexes' -> (PBIndexSet new withIndex: hnsw) }.
-c that: 'a merge onto a current holding a vector index is PBNotSupportedError naming it'
-  signals: PBNotSupportedError containing: '''hnsw''' during: [(PBDictionary new setAt: 1 value: 2) rebaseOnto: vector].
+emb := [:anArray | PBObject withAll: { 'emb' -> (PBTuple withAll: anArray) }].
+vector := ((PBDictionary new addIndex: hnsw) setAt: 'a' value: (emb value: #(1 2))) setAt: 'b' value: (emb value: #(2 1)).
+merged := (((PBDictionary new setAt: 'c' value: (emb value: #(0.5 0.5))) setAt: 'd' value: (emb value: #(1 2 3)))
+  removeAt: 'a') rebaseOnto: vector.
+c that: 'a merge onto a current holding a vector index merges: the replayed writes maintain it as build: (ruling IQ5a)'
+  is: { merged keys asArray. (merged getIndex: 'hnsw') memberCount. (merged getIndex: 'hnsw') invalidCount.
+    ((merged getIndex: 'hnsw') storeEntries collect: [:a | a key]) = (((merged getIndex: 'hnsw') empty build: merged) storeEntries collect: [:a | a key]).
+    merged validate == merged }
+  equals: { #('b' 'c' 'd'). 2. 1. true. true }.
 vspace close.
 
 "(9)"

@@ -1,6 +1,7 @@
 # Selectors the documentation cites before they exist (plan call IP5), and the plan task whose
 # Interfaces block produces each. Read by tests/docs/reference_selectors.sh; each task removes its
-# own lines when it defines them; the list is empty at release (PENDING_FINAL=1, Task 10).
+# own lines when it defines them; the list is empty at release (PENDING_FINAL=1, Task 10 of the
+# queries plan; V9 of the vectors phase, whose lines name their task V1-V10).
 # Columns: selector<TAB>task
 # Task 2: key specs and the extractor registry
 # Task 3: key-group indexes
@@ -8,3 +9,6 @@
 # Task 5: terms and expressions
 # Task 7: the planner
 # Task 9: PBPager
+# Vectors phase (Addendum V, docs/superpowers/specs/2026-11-19-vectors-addendum.md), drafted by V0.
+# V6: vector search plans
+# V7: the front end

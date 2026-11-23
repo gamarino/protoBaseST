@@ -18,10 +18,11 @@ from pathlib import Path
 
 from proto_db.collections.lists import List
 from proto_db.core.dbobject import DBObject
-from proto_db.indexing import EqualityIndex, KeySpec, RangeIndex
+from proto_db.indexing import EqualityIndex, KeySpec, RangeIndex, VectorIndex
 from proto_db.query.expressions import Expression
 from proto_db.query.planner import plan_query
 from proto_db.query.plans import Filter, Sort
+from proto_db.query.terms import NearQuery
 
 HERE = Path(__file__).resolve().parent
 
@@ -43,6 +44,42 @@ def people(n):
     for j in range(n):
         coll = coll.append_last(DBObject(city=("Lima", "Oslo", "Paris", "Rome")[j % 4], age=18 + j % 60))
     return coll
+
+
+def documents(n):
+    """vector_plans.st's documents: Park and Miller's generator, seed 7, 8 components each."""
+    topics, seed, docs = ("sports", "music", "science"), 7, []
+    for i in range(n):
+        vec = []
+        for _ in range(8):
+            seed = seed * 16807 % 2147483647
+            vec.append(seed / 2147483647.0 * 2.0 - 1.0)
+        docs.append(DBObject(i=i, topic=topics[i % 3], vec=vec))
+    return docs
+
+
+def vector_plans():
+    """The worked vector plan (docs/queries.md, 'A worked vector plan'; examples/queries/vector_plans.st)."""
+    docs = documents(300)
+    both = (List().add_index(VectorIndex("by_vec", "vec", 8, "cosine"))
+            .add_index(VectorIndex("by_vec_ivf", KeySpec.path("vec"), 8, "cosine", "ivf_flat", nlist=8, nprobe=2)))
+    for d in docs:
+        both = both.append_last(d)
+    exact = both.remove_index("by_vec_ivf")
+    q = docs[42].vec  # vector_plans.st: (docs at: 43), document 42
+    cases = {"vplan1": ["vec", "near[]", NearQuery(q, k=5)],
+             "vplan2": ["vec", "near[]", NearQuery(q, k=3), "topic", "==", "music"],
+             "vplan3": ["vec", "near[]", NearQuery(q, threshold=0.6)]}
+    for key, cond in cases.items():
+        for suffix, coll, name in (("", both, "by_vec_ivf"), (".exact", exact, "by_vec")):
+            info = plan_query(coll, cond).explain()
+            assert (info["plan"], info["index"]["index"]) == ("VectorSearch", name), (key, info["plan"], info["index"])
+            assert ("where" in info) == (key == "vplan2"), (key, info.keys())
+            out(f"{key}{suffix}.rows", info["estimate"]["rows"])
+            out(f"{key}{suffix}.cost", info["estimate"]["cost"])
+    found = {d.i for d in plan_query(both, cases["vplan1"]).execute()}
+    truth = {d.i for d in plan_query(exact, cases["vplan1"]).execute()}
+    out("vplan1.overlap", len(found & truth))
 
 
 def out(key, value):
@@ -117,6 +154,8 @@ def main():
         out(f"tiny{n}.lookup.cost", est(lookup)[1])
         out(f"tiny{n}.scan.cost", est(scan)[1])
         print(f"tiny{n}.chosen {chosen['plan']}")
+
+    vector_plans()
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ pending today, and its README says why the directory is kept.
 ## Run them
 
 ```sh
-export PROTOST=../protoST/build_release/protost        # protoST 0.12.0 or newer
+export PROTOST=../protoST/build_release/protost        # protoST 0.16.1 or newer
 tests/run_tests.sh examples/cluster                     # from the repository root
 cd examples/cluster && STPATH=$PWD/../../src $PROTOST 14_three_nodes.st
 ```

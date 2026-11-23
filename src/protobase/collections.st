@@ -102,12 +102,16 @@ reads back included.
                                every index's validate: against the elements
 
 What cannot be maintained keeps its collection read only (design spec 3.3 and
-5.4): an index that is a PBVectorIndex, or of a kind protoBaseST does not know
-(an opaque atom), makes every change PBNotSupportedError naming it; an index on
-an extractor this process has not registered fails any change that evaluates
-the extractor (PBValidationError naming it, from PBKeySpec extract:), as in
-proto_db; a blind write, removeIndex: or an addIndex: of another index pass.
-Nothing is rebuilt or dropped silently.
+5.4; ruling IQ5a): an index of a kind protoBaseST does not know (an opaque
+atom) makes every change PBNotSupportedError naming it. A PBVectorIndex is
+maintained like a key-group index (vectors phase V5, Addendum V 2.10): its hooks
+run in every mutator, a format-3 one is rebuilt at the first change, a replayed
+add in a merge can retrain an ivf_flat index (k-means inside the commit's
+build). An index on an extractor this process has not registered fails any
+change that evaluates the extractor (PBValidationError naming it, from PBKeySpec
+extract:), as in proto_db; a blind write, removeIndex: or an addIndex: of
+another index pass. Nothing is rebuilt or dropped silently, beyond the format-3
+rebuild (rebuiltStale:, D58).
 
 Operation logs (ProtoBase ConcurrentOptimized, D33; design spec 7.2). A
 PBDictionary, a PBHashDictionary, a PBSet and a PBCountedSet are
@@ -157,8 +161,9 @@ persisted, and a cell:
                                current's; created then removed leaves current
                                untouched. current must be of the receiver's
                                exact class (PBValidationError otherwise), and
-                               writable (a vector index or an index of an
-                               unknown kind: PBNotSupportedError). The
+                               writable (an index of an unknown kind:
+                               PBNotSupportedError; a vector index is
+                               maintained, ruling IQ5a). The
                                answer's log is current's extended by the
                                replay, so a rebase onto a loaded current (what
                                a commit meets) is incomplete, and one onto a
@@ -295,7 +300,7 @@ PBIndexSet >> _map: aBlock
 
 "anIndex, an index protoBaseST can maintain the hooks of; an opaque atom (a custom proto_db index
  kind) is PBNotSupportedError naming it: its collection is read only (design spec 3.3, ruling
- IQ5). A PBVectorIndex refuses in its own hooks."
+ IQ5a)."
 PBIndexSet >> _known: anIndex name: aName
   (anIndex isClassObject not and: [anIndex isKindOf: PBIndex]) ifTrue: [^ anIndex].
   ^ PBNotSupportedError signal: 'The index ' , (PBCodec repr: aName) , ' is of the type '
@@ -569,7 +574,7 @@ PBIndexedCollection >> markConsumed
  checks is protoBaseST's own: a class without a log (PBList) is refused first,
  where ProtoBase's List has no rebase_onto at all (an AttributeError); then a
  current of another class (ProtoBase's type check), then a current that cannot
- be written (_checkWritable:: a vector index or an index of an unknown kind)."
+ be written (_checkWritable:: an index of an unknown kind)."
 PBIndexedCollection >> rebaseOnto: current
   | ops target |
   self class _logsOperations ifFalse: [
@@ -699,27 +704,27 @@ PBIndexedCollection >> _elementsOf: aCollection for: aSelector
   aCollection do: [:each | out addLast: each].
   ^ out asArray.
 
-"Signals when the collection cannot be written (design spec 3.3, ruling IQ5): an
- index that is a PBVectorIndex, or not a PBIndex at all (an opaque atom: an index
- kind protoBaseST does not know), is PBNotSupportedError naming it, since
- maintaining the other indexes and not that one would write a stale index.
- Nothing is rebuilt or dropped. Every change sends it first, addIndex: and
- removeIndex: included. An extractor this process has not registered is not
- checked here: as in proto_db (keyspec.py 232), only a change that evaluates the
- extractor fails, PBValidationError naming it (PBKeySpec extract:)."
+"Signals when the collection cannot be written (design spec 3.3, ruling IQ5 as narrowed by
+ IQ5a): an index that is not a PBIndex at all (an opaque atom: an index kind protoBaseST does not
+ know) is PBNotSupportedError naming it, since maintaining the other indexes and not that one would
+ write a stale index. Every PBIndex is maintained, a PBVectorIndex included (exact, hnsw and
+ ivf_flat; vectors phase V5, Addendum V 2.10). Nothing is rebuilt or dropped. Every change sends it
+ first, addIndex: and removeIndex: included. An extractor this process has not registered is not
+ checked here: as in proto_db (keyspec.py 232), only a change that evaluates the extractor fails,
+ PBValidationError naming it (PBKeySpec extract:)."
 PBIndexedCollection >> _checkWritable: aSelector
   | set |
   set := self indexes.
   (set isNil or: [set isEmpty]) ifTrue: [^ self].
   PBAvl keysAndValuesDo: [:name :index |
-    ((index isClassObject not and: [index isKindOf: PBIndex]) and: [(index isKindOf: PBVectorIndex) not])
+    (index isClassObject not and: [index isKindOf: PBIndex])
       ifFalse: [
         ^ PBNotSupportedError signal: self class name , ' ' , aSelector , ': the index ' , (PBCodec repr: name)
           , ' is of the type '
           , ((index isClassObject not and: [index isKindOf: PBOpaqueAtom])
             ifTrue: [index typeName]
             ifFalse: [(index isClassObject not and: [index isKindOf: PBAtom]) ifTrue: [index class typeName] ifFalse: [index class name]])
-          , ', which protoBaseST reads but never writes: a collection holding it is read only (design spec 3.3, ruling IQ5)']]
+          , ', which protoBaseST reads but never writes: a collection holding it is read only (design spec 3.3, ruling IQ5a)']]
     over: (set stateAt: 'root').
   ^ self.
 
@@ -771,8 +776,8 @@ PBIndexedCollection >> _withIndexChanges: aChanges op: anOp
  (_checkPlacement: PBMisfiledError for an entry its own key does not place,
  PBCorruptionError for a broken tree), then every index against the elements
  (PBIndex >> validate:). An index of a kind protoBaseST does not know is
- PBNotSupportedError, and so is a vector index (it never validates); an
- unregistered extractor is PBValidationError naming it. Loads every node: O(n log n).
+ PBNotSupportedError; a vector index validates as any other (vectors phases V3 to V5);
+ an unregistered extractor is PBValidationError naming it. Loads every node: O(n log n).
  Answers the receiver."
 PBIndexedCollection >> validate
   | set elements |

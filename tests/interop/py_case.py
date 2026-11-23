@@ -23,15 +23,24 @@ expected  prints the outcome line and the dump the JSON records (ProtoBase's out
 
 Exit 0 when the mode ran, whatever the outcomes; any other failure exits non-zero.
 """
-import json
-import os
-import shutil
-import subprocess
 import sys
-from pathlib import Path
+
+# Addendum V 5.2: a generator that must reproduce IVF training blocks numpy (and hnswlib), so the
+# vector rows' centroids are proto_db's pure-Python ones whatever the venv holds; 'mode' prints the
+# mode line. Never on stderr in the other modes: concurrency.sh compares their whole output.
+sys.modules["numpy"] = None
+sys.modules["hnswlib"] = None
+
+import json  # noqa: E402
+import os  # noqa: E402
+import platform  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 from proto_db import CountedSet, DBObject, Dictionary, FileStorage, List, ObjectSpace, Set
-from proto_db.indexing import EqualityIndex
+from proto_db.indexing import EqualityIndex, KeySpec
+from proto_db.indexing.vector import VectorIndex
 from proto_db.errors import ProtoDBError
 
 HERE = Path(__file__).resolve().parent
@@ -78,8 +87,22 @@ def setup_value(value):
             return Set.from_iterable(content)
         if kind == "counted set":
             return CountedSet.from_iterable(content)
+        if kind == "vector dict":
+            result = Dictionary()
+            for index in vector_indexes():
+                result = result.add_index(index)
+            for key, item in content.items():
+                result = result.set_at(key, item)
+            return result
         raise SystemExit(f"py_case.py: unknown setup value {value!r}")
     return value
+
+
+def vector_indexes():
+    """The indexes of a {'vector dict': ...} setup value, on the element (a 2-vector): an exact
+    cosine index, and an ivf_flat l2 index trained at 2 members and retrained at 3, 5, ..."""
+    return [VectorIndex("exact", KeySpec.element(), 2, "cosine"),
+            VectorIndex("ivf", KeySpec.element(), 2, "l2", "ivf_flat", nlist=2, retrain_growth=1.5, seed=1)]
 
 
 def prepare(db, steps):
@@ -191,8 +214,26 @@ def dump_lines(db, case):
     lines = [f"root {name} = {render(tr.get_root_object(name))}" for name in case["roots"]]
     lines += [f"mutable {name} = {render(tr.get_mutable(name))}" for name in case["mutables"]]
     lines += [f"indexes {name} = {','.join(tr.get_root_object(name).index_names())}" for name in case.get("indexes", [])]
+    lines += [vector_line(name, tr.get_root_object(name)) for name in case.get("vectors", [])]
     tr.abort()
     return lines
+
+
+def vector_line(name, collection):
+    """A root holding vector indexes: validate()'s outcome, its keys, and per index its members, its
+    invalid occurrences, its trained size and its centroids (Python's repr)."""
+    try:
+        collection.validate()
+        valid = "ok"
+    except ProtoDBError as error:
+        valid = outcome_name(error)
+    parts = [f"vectors {name} = validate {valid}; keys {', '.join(render(k) for k in sorted(collection.keys()))}"]
+    for index_name in collection.index_names():
+        index = collection.get_index(index_name)
+        members = 0 if index.store is None else index.store.count
+        parts.append(f"{index_name} members {members} invalid {index.invalid[1]} trained {index.trained_size} "
+                     f"centroids {index.centroids!r}")
+    return "; ".join(parts)
 
 
 # -- the modes --------------------------------------------------------------------------------
@@ -274,7 +315,17 @@ def expected(case, variant):
         print(line)
 
 
+def mode_line():
+    """The mode of this process (Addendum V 5.2): numpy blocked, CPython, libc."""
+    from proto_db.indexing.vector_backends import numpy_module
+    numpy_text = "blocked" if numpy_module() is None and sys.modules.get("numpy", 0) is None else "importable"
+    return f"numpy: {numpy_text}; CPython {platform.python_version()}; libc {' '.join(platform.libc_ver())}"
+
+
 def main(argv):
+    if argv == ["mode"]:
+        print(mode_line())
+        return 0
     mode, case_id, directory = argv
     {"setup": setup, "both": both, "a": as_a, "b": as_b, "dump": dump,
      "expected": expected}[mode](load_case(case_id), directory)

@@ -28,6 +28,7 @@ PBMapKeyIndex>>_setIds:zoned:
 PBIdentityKey>>_setObject:
 _PBValueFrame>>_setKind:source:items:depth:
 PBMissing class>>_initializeDefault
+PBVectorMath class>>_initializeKernel
 PBMutableObject>>_setCellName:
 PBAtomPointer>>_setSegmentBytes:offset:
 PBUnresolvedRef>>_setPointer:tag:
@@ -137,9 +138,9 @@ _PBTransportRun>>_setNodeId:key:handler:inbox:senders:listener:
 _PBInProcessInbox>>_setTransport:nodeId:key:handler:
 PBTcpTransport>>_setListener:port:requestTimeout:run:inbound:counters:
 _PBInbound>>_setClosed:entries:
-_PBTcpListener>>_setTransport:server:
-_PBTcpReader>>_setTransport:socket:nodeId:key:handler:
-_PBTcpSender>>_setTransport:peer:queue:link:proxy:
+_PBTcpListener>>_setTransport:server:proxy:ended:
+_PBTcpReader>>_setTransport:socket:nodeId:key:handler:proxy:partial:ended:closing:
+_PBTcpSender>>_setTransport:peer:queue:link:writing:proxy:ended:
 _PBSendQueue>>_setFrames:bytes:draining:closed:
 PBLogDetached>>_setLog:
 _PBNodeCells>>_setConfig:node:acceptorState:committed:counters:fence:stopped:waiters:dispatcher:acceptor:transport:dispatchMax:tokens:critical:own:persistFailure:
@@ -161,6 +162,7 @@ PBIndexPart>>_setKind:producer:estimate:details:rank:sortedRank:
 PBSortKey>>_setKey:descending:spec:description:
 PBCollectionScan>>_setCollection:
 PBIndexPlan>>_setIndex:term:part:
+PBVectorSearch>>_setIndex:term:where:inner:
 _PBOneSourcePlan>>_setSource:
 PBFilter>>_setPredicate:
 PBBlockFilter>>_setPredicate:
@@ -173,3 +175,4 @@ PBPlanner>>_setBase:indexes:
 PBField>>_setPath:spec:
 PBQuery>>_setSource:ops:
 PBPager>>_setPlan:pageSize:rows:ranked:
+PBNearQuery>>_setVector:k:threshold:metric:

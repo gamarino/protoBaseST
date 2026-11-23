@@ -8,13 +8,14 @@ teaches and which chapter explains it. Each one **proves what it shows**: it pri
 
 protoBaseST is a proposal prototype for the FAST Smalltalk workshop (2026-12-03), not a product.
 Lessons 01 to 12 use only what v0.1.0 does; lessons 17 to 19 and lesson 11's indexed part use the
-indexed-query API of 0.3.0. Where something is not supported, the example says so and
+indexed-query API of 0.3.0; lesson 20, and the vector index of lesson 11's indexed part, use the
+vector search of 0.4.0. Where something is not supported, the example says so and
 checks the refusal.
 
 ## Run them
 
 ```sh
-export PROTOST=../protoST/build_release/protost        # protoST 0.10.0 or newer
+export PROTOST=../protoST/build_release/protost        # protoST 0.16.1 or newer
 cd examples/tutorial
 STPATH=$PWD/../../src $PROTOST 01_first_commit.st      # one lesson
 cd ../..
@@ -34,7 +35,7 @@ check; a lesson that stops on an unexpected error leaves that directory behind.
 | 01 | [01_first_commit.st](01_first_commit.st) | A space, a database, roots and a first commit; reading it back from a new space | [01](../../docs/tutorial/01-first-commit.md) |
 | 02 | [02_values_and_versions.st](02_values_and_versions.st) | Collections are values: every change answers a new version; zero-based lists | [02](../../docs/tutorial/02-values-and-versions.md) |
 | 03 | [03_records.st](03_records.st) | Record classes (`PBObject` subclasses), type names, reserved behaviour names, new versions of records | [03](../../docs/tutorial/03-records.md) |
-| 04 | [04_collections_and_queries.st](04_collections_and_queries.st) | Dictionaries, sets, counted sets, tuple keys; queries as walks and hand-kept indexes; `proto_db`'s indexes are read only | [04](../../docs/tutorial/04-collections-and-queries.md) |
+| 04 | [04_collections_and_queries.st](04_collections_and_queries.st) | Dictionaries, sets, counted sets, tuple keys; queries as walks and hand-kept indexes; `proto_db`'s indexes read (maintained and queried from chapter 17 on) | [04](../../docs/tutorial/04-collections-and-queries.md) |
 | 05 | [05_transactions_and_conflicts.st](05_transactions_and_conflicts.st) | Snapshots, read sets, `PBConflictError`, abort, `run:` retries | [05](../../docs/tutorial/05-transactions-and-conflicts.md) |
 | 06 | [06_blind_writes.st](06_blind_writes.st) | Blind writes merge; counted sets compose; `replace: true`; lists replace | [06](../../docs/tutorial/06-blind-writes.md) |
 | 07 | [07_mutables_and_history.st](07_mutables_and_history.st) | `PBMutableObject` cells, history, `snapshotAt:`, as-of reads | [07](../../docs/tutorial/07-mutables-and-history.md) |
@@ -43,10 +44,11 @@ check; a lesson that stops on an unexpected error leaves that directory behind.
 | 10 | [10_crash_recovery.st](10_crash_recovery.st) | A torn tail, a torn `space.root.tmp`, and a writer killed with `SIGKILL` | [10](../../docs/tutorial/10-crash-recovery.md) |
 | 11 | [11_python_interop.sh](11_python_interop.sh) | protoST and Python's `proto_db` on one directory | [11](../../docs/tutorial/11-python-interop.md) |
 | 12 | [12_refusals.st](12_refusals.st) | What is refused, and what each refusal protects | [12](../../docs/tutorial/12-refusals.md) |
-| 11 | [11_indexed_interop.sh](11_indexed_interop.sh) | Indexes written by Python, changed and merged onto by protoST, validated by Python (0.3.0) | [11](../../docs/tutorial/11-python-interop.md#indexes-from-both-sides) |
+| 11 | [11_indexed_interop.sh](11_indexed_interop.sh) | Indexes written by Python, changed and merged onto by protoST, validated by Python (0.3.0); a vector index the same way, queried by Python (0.4.0) | [11](../../docs/tutorial/11-python-interop.md#indexes-from-both-sides) |
 | 17 | [17_indexes.st](17_indexes.st) | Indexes are part of the collection version; key specs; extractors (0.3.0) | [17](../../docs/tutorial/17-indexes.md) |
 | 18 | [18_queries_and_plans.st](18_queries_and_plans.st) | `PBQuery`, `PBField`, `explain`, and why the planner sometimes scans (0.3.0) | [18](../../docs/tutorial/18-queries-and-plans.md) |
 | 19 | [19_ordered_reads_and_pages.st](19_ordered_reads_and_pages.st) | Ordered reads, windows by rank, the obvious paging against a pager, stable pages over one snapshot (0.3.0) | [19](../../docs/tutorial/19-ordered-reads-and-pages.md) |
+| 20 | [20_vector_search.st](20_vector_search.st) | Vector indexes, nearest neighbours with and without conditions, thresholds, correctly rounded scores, `x ** 2` against `x * x`, IVF-Flat recall, hnsw refused (0.4.0) | [20](../../docs/tutorial/20-vector-search.md) |
 
 Helpers (never run as tests, because their names start with `_`): `_lesson.st` (the checks),
 `_crash_writer.st` (the process lesson 10 kills), `_interop_write.st` and `_interop_read.st` (the

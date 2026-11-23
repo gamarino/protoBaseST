@@ -1,16 +1,18 @@
 "EXPECT: ok 13"
-"What an indexed collection refuses (design spec 3.3 and 7.4; indexed queries, plan Task 4a). Run on a copy of the database vector: its root 'people' is a Dictionary with the
- key-group indexes by_age and by_city, 'hnsw' a List with the vector index hnsw, 'tags' a List
- without indexes.
+"What an indexed collection refuses (design spec 3.3 and 7.4; indexed queries, plan Task 4a;
+ ruling IQ5 as narrowed by IQ5a, vectors phase V5). Run on a copy of the database vector: its root
+ 'people' is a Dictionary with the key-group indexes by_age and by_city, 'hnsw' a List with the
+ vector index hnsw, 'tags' a List without indexes.
 
  Key-group indexes are maintained: setAt:value: and removeAt: on 'people' answer versions whose
- indexes agree with their elements. A vector index, or an index of a kind protoBaseST does not
- know (an opaque atom, written here with SpaceBuilder), keeps its collection read only: every
- change, addIndex: and removeIndex: included, is PBNotSupportedError naming it; extend: of
- nothing answers the receiver, as proto_db returns before it touches the indexes. Merges onto
- indexed currents are not refused (plan Task 4b, tests/unit/idx_merge.st), except onto one
- holding a vector index (idx_merge.st check 8) or an index of an unknown kind (here, on a
- Dictionary written with the same opaque index)."
+ indexes agree with their elements. So is a vector index (ruling IQ5a): appendLast: on 'hnsw'
+ answers a version whose index validates. An index of a kind protoBaseST does not know (an opaque
+ atom, written here with SpaceBuilder into a List) keeps its collection read only: every change,
+ addIndex: and removeIndex: included, is PBNotSupportedError naming it; extend: of nothing answers
+ the receiver, as proto_db returns before it touches the indexes. Merges onto indexed currents are
+ not refused (plan Task 4b, tests/unit/idx_merge.st), a vector-indexed one included (idx_merge.st
+ check 8), except onto one holding an index of an unknown kind (here, on a Dictionary written with
+ the same opaque index)."
 Import from: 'protobase'.
 Import from: '_check'.
 Import from: '_spaces'.
@@ -37,17 +39,14 @@ c that: 'setAt:value: on the indexed root maintains its indexes'
 c that: 'removeAt: too' is: { (removed getIndex: 'by_age') count. removed validate == removed } equals: { people count. true }.
 c that: 'the receiver keeps its indexes' is: (people getIndex: 'by_age') count equals: people count.
 
-"A vector index: read only."
-c that: 'an indexed List: appendLast:' signals: PBNotSupportedError containing: 'hnsw' during: [hnsw appendLast: 1].
-c that: 'an indexed List: sliceFrom:to:' signals: PBNotSupportedError containing: 'hnsw' during: [hnsw head: 1].
-c that: 'addIndex: and removeIndex: on it' is: {
-    [hnsw addIndex: (PBEqualityIndex name: 'by_x' path: 'x'). nil] on: PBNotSupportedError do: [:e | e return: #refused].
-    [hnsw removeIndex: 'hnsw'. nil] on: PBNotSupportedError do: [:e | e return: #refused] }
-  equals: #(#refused #refused).
-c that: 'extend: nothing on an indexed list answers it, as proto_db' isTrue: (hnsw extend: #()) == hnsw.
+"A vector index: written (ruling IQ5a)."
+changed := hnsw appendLast: (PBObject withAll: { 'emb' -> (PBTuple withAll: #(3 4)) }).
+c that: 'a vector index no longer keeps its collection read only: appendLast: maintains it'
+  is: { changed count. (changed getIndex: 'hnsw') memberCount. changed validate == changed }
+  equals: { hnsw count + 1. 3. true }.
 c that: 'reads still work' is: people count equals: (people keys size).
 
-"An index of a kind protoBaseST does not know: an opaque atom in the index set."
+"An index of a kind protoBaseST does not know: an opaque atom in the index set of a List."
 b := SpaceBuilder segment: (ByteArray fromHex: '4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4b').
 opaque := b add: 'acme.indexing.CustomIndex' oid: 1 state: { 'name' -> 'custom' }.
 setRef := b add: 3 oid: 2 state: { 'root' -> (b add: 0 oid: 3 state: { 'key' -> 'custom'. 'value' -> opaque.
@@ -58,6 +57,13 @@ st := PBFileStorage path: (dir / 'opaque') pathString.
 custom := PBTypeRegistry unloadedAtomFor: listRef tag at: listRef pointer storage: st.
 c that: 'an unknown index kind: appendLast:' signals: PBNotSupportedError containing: 'acme.indexing.CustomIndex'
   during: [custom appendLast: 1].
+c that: 'an unknown index kind: sliceFrom:to:' signals: PBNotSupportedError containing: '''custom'''
+  during: [custom head: 1].
+c that: 'addIndex: and removeIndex: on it' is: {
+    [custom addIndex: (PBEqualityIndex name: 'by_x' path: 'x'). nil] on: PBNotSupportedError do: [:e | e return: #refused].
+    [custom removeIndex: 'custom'. nil] on: PBNotSupportedError do: [:e | e return: #refused] }
+  equals: #(#refused #refused).
+c that: 'extend: nothing on it answers it, as proto_db' isTrue: (custom extend: #()) == custom.
 st close.
 "The same opaque index on a Dictionary: a merge onto it is refused, naming it (plan Task 4b)."
 b := SpaceBuilder segment: (ByteArray fromHex: '4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4c').

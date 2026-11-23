@@ -3,7 +3,7 @@
  v2.0.0rc4, lines 461-647; equality.py, range.py and base.py). The plan halves of
  tests/unit/test_equality_index.py and test_range_index.py, and test_index_base.py's supports, plan,
  estimate, ordered-scan and IndexPlan behaviours: supports: per operator per kind on the index's
- own key (a vector index supports nothing), PBNotSupportedError for the rest; plans that answer
+ own key (a vector index near[] on its own key only, vectors phase V6), PBNotSupportedError for the rest; plans that answer
  what a scan answers (1 = 1.0 = Decimal 1, true is not 1, PBMissing matches only '?N', ranges stay
  within the operand's type rank, unorderable keys only '!=' and '?!N'), the stored values and not
  an equal representative; ordered scans in the total order, descending its exact reverse; the D30
@@ -59,10 +59,11 @@ c that: 'supports: answers per operator and per kind, on the index''s own key on
     (PBRangeIndex name: 'r' path: 'age') supports: (t value: 'other' value: '<' value: 1).
     { range supportsOrder: (PBKeySpec path: 'age'). range supportsOrder: (PBKeySpec path: 'other').
       range supportsOrder: PBKeySpec element. byCity supportsOrder: (PBKeySpec path: 'city') }.
-    PBVectorIndex basicNew supports: (t value: 'city' value: '==' value: 'x') }
+    { (PBVectorIndex name: 'v' path: 'city' dim: 2 metric: 'l2') supports: (t value: 'city' value: 'near[]' value: (PBNearQuery vector: #(1 2) k: 1)).
+      (PBVectorIndex name: 'v' path: 'city' dim: 2 metric: 'l2') supports: (t value: 'city' value: '==' value: 'x') } }
   equals: { { #(true true). #(true true). #(true true). #(true true). #(true true). #(false true). #(false true). #(false true).
       #(false true). #(false true). #(false true). #(false true). #(false true). #(false false). #(false false). #(false false) }.
-    false. false. false. #(true false false false). false }.
+    false. false. false. #(true false false false). #(true false) }.
 
 "=== unsupported terms and orders (test_plan_on_unsupported_term_raises_not_supported,
      test_estimate_on_unsupported_term_raises_not_supported, test_ordered_iteration_is_unsupported_by_default) ==="
@@ -222,8 +223,9 @@ elIndexes := PBFrozenDict withAssociations: {
   'RangeIndex on r' -> ((PBRangeIndex name: 'r' path: 'r') build: values) }.
 kinds := elIndexes keys asArray.
 ordered := { 'RangeIndex' -> PBKeySpec element. 'RangeIndex on r' -> (PBKeySpec path: 'r') }.
-"near[] is refused when the term is made (spec 3.3), so its case is left out."
-cases := (data at: 'cases') select: [:case | (case at: 'index') notNil and: [((case at: 'id') includesSubstring: 'near[]') not]].
+"The near[] terms are among the cases (vectors phase V2): no key-group index supports one, as in
+ proto_db."
+cases := (data at: 'cases') select: [:case | (case at: 'index') notNil].
 tokensOf := [:case | PBExpression compile: (atoms decode: (case at: 'tokens'))].
 "explain less its estimate, as MessagePack bytes (py_term_cases.py explained)"
 explainOf := [:aPlan | MessagePack encode: (TermAtoms tree: (PBFrozenDict withAssociations:
@@ -242,7 +244,7 @@ cases do: [:case |
       ((QData bagOf: got) = (scan value: values value: expr) and: [got size = (theirs at: 'rows')]) ifFalse: [
         fails add: (case at: 'id') , ' on ' , k]]]].
 c that: 'plan: answers what a scan finds for every operator of the vector, as many rows as proto_db''s plan'
-  is: { cases size. pathPairs. fails asArray } equals: { 175. 14. #() }.
+  is: { cases size. pathPairs. fails asArray } equals: { 183. 14. #() }.
 
 fails := OrderedCollection new.
 cases do: [:case |

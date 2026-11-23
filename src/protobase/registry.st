@@ -681,7 +681,7 @@ PBAtom >> _absentField: aName
 
 "As state at: aName ifAbsent: aBlock, without making the state of an atom
  that keeps its slots (plan Task 12): the per-row field read of a key path
- (PBKeySpec >> _step:name:)."
+ (PBKeySpec >> _step:name:recordName:)."
 PBAtom >> _stateAt: aName ifAbsent: aBlock
   | m i |
   m := memo.

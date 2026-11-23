@@ -33,6 +33,7 @@ Contents:
 [Ordered reads, windows and pages](#ordered-reads-windows-and-pages) |
 [Index maintenance under immutability and the commit](#index-maintenance-under-immutability-and-the-commit) |
 [Cluster mode](#cluster-mode) |
+[Vector search (0.4.0)](#vector-search) |
 [What it costs](#what-it-costs) |
 [Sources](#sources)
 
@@ -126,15 +127,20 @@ Every node of both trees carries a *weight*, the number of occurrences below it,
 is found by one descent. That is what gives windows and pages their O(log n + page size) cost
 ([below](#ordered-reads-windows-and-pages)).
 
-A `PBVectorIndex` and any index kind protoBaseST does not know are read and kept, never maintained:
-a collection holding one keeps refusing every change with `PBNotSupportedError` naming it, because
-maintaining its other indexes and not that one would write a stale index (spec 3.3, ruling IQ5).
-Vector search (`near[]`) is out of scope; a term with that operator is `PBNotSupportedError` when
-built. That includes a custom index kind written by another `proto_db` program
+An index kind protoBaseST does not know is read and kept, and a collection holding one keeps
+refusing every change with `PBNotSupportedError` naming it, because maintaining its other indexes
+and not that one would write a stale index (spec 3.3, ruling IQ5 as narrowed by IQ5a). A
+`PBVectorIndex` is not such a kind: it is maintained by its hooks in every mutator, validated and
+explained, with all three backends, and its collections are written and merged like any other
+(vectors phase V5; [Vector search](#vector-search)). Unknown kinds include a custom index kind
+written by another `proto_db` program
 (`indexing-framework.rst`, "Writing a custom index"): protoBaseST reads it as an opaque atom, keeps
 it, and its collection refuses changes. `proto_db`'s index contract is ported as tests of the two
 built-in kinds (`tests/unit/idx_contract.st`, `tests/unit/idx_contract_plans.st`), not as an
-extension point for new kinds.
+extension point for new kinds. Vector search (`near[]`) is answered by a vector index's plans and
+by `PBVectorSearch` (the vectors phase's V6), which the planner builds with `proto_db`'s `near[]`
+rules (V7; [Vector search](#vector-search)): a query naming `near[]` that no index supports is
+refused when it is planned (`PBNotSupportedError`), never answered by a scan.
 
 ## Key specs, MISSING and nil
 
@@ -359,14 +365,16 @@ collection version: nothing is cached between calls, and the plan it answers is 
 Its argument errors are `proto_db`'s (`planner.py:278-343`): a source that is neither an indexed
 collection nor a plan, a condition that is not an expression or the list syntax, sort keys that are
 not a non-empty list of `PBSortKey`s, and a limit or an offset that is not an Integer >= 0 are each
-`PBValidationError`. Two kinds of index are never consulted: an index of a kind protoBaseST does not
-know (loaded as an opaque atom) and a `PBVectorIndex` (design spec 3.3); another index or a scan
-answers the query instead, exactly. Three properties are tested: the 38 behaviours of `proto_db`'s
-`test_planner.py` (`tests/unit/qry_planner.st`); a planned query answers what a scan answers, as a
+`PBValidationError`. An index of a kind protoBaseST does not know (loaded as an opaque atom) is
+never consulted; another index or a scan answers the query instead, exactly. A `PBVectorIndex` is
+consulted since the vectors phase's V7, for `near[]` terms only, which nothing else answers
+([Vector search](#vector-search)). Three properties are tested: the 38 behaviours of `proto_db`'s
+`test_planner.py` (`tests/unit/qry_planner.st`) and its four `near[]` behaviours
+(`tests/unit/vec_planner.st`); a planned query answers what a scan answers, as a
 multiset, and in the order of its keys, over random collections of every kind, random index sets
 and random conditions of every operator, read back from a file and by concurrent actors
-(`tests/unit/qry_prop_equals_scan.st`); and the plans of 314 recorded queries, node for node and
-cost for cost, are `proto_db`'s own (`tests/conformance/queries.st`, vectors written by
+(`tests/unit/qry_prop_equals_scan.st`); and the plans of 415 recorded queries (101 of them `near[]` queries over vector indexes,
+refusals included), node for node and cost for cost, are `proto_db`'s own (`tests/conformance/queries.st`, vectors written by
 `tests/interop/py_query_vectors.py`; 0 near ties).
 
 **1. Normalise** (`planner.py:98-126`). `&` and `|` are flattened; negations are pushed inward by De
@@ -831,6 +839,302 @@ Indexes change nothing in cluster mode's protocol (spec 5.8):
 - **No new safety argument.** The build is deterministic given the transaction and the current
   root; replaying it after a lost round gives the same root, as today. An extractor's purity is
   what makes that true for an extractor index.
+
+## Vector search
+
+<!-- example: examples/queries/vector_search.st -->
+<!-- example: examples/queries/vector_plans.st -->
+
+> **protoBaseST 0.4.0.** This section describes
+> [Addendum V](superpowers/specs/2026-11-19-vectors-addendum.md) to the indexed-queries spec, which
+> ports `proto_db`'s vector indexes and vector search (`proto_db/indexing/vector.py`,
+> `vector_backends.py`; the `near[]` parts of `proto_db/query/terms.py`, `plans.py`, `planner.py`
+> and `linq.py`, all at `v2.0.0rc4`). The vectors tasks V1 to V7 built the API: the kernel (V1),
+> `near[]` terms (V2), the index (V3, V4), its collections written and merged (V5), vector search
+> (V6), and the planner's `near[]` rules with `PBField near:` (V7). Its code blocks come from
+> [vector_search.st](../examples/queries/vector_search.st), a port of `proto_db`'s
+> `examples/vector_search.py` that runs as a test since V7, and, for the worked plan,
+> [vector_plans.st](../examples/queries/vector_plans.st). Every figure is from
+> [deviations.md](deviations.md#vectors). The tutorial is [chapter 20](tutorial/20-vector-search.md).
+
+**The obvious solution, and why it fails.** "The five documents nearest to this one" can be
+answered by a walk: score every element, sort, take five. That is correct, and it is the exact
+backend's algorithm. It fails as a design in three ways. Combined with a condition, the obvious
+"five nearest, then filter" answers fewer than five (chapter 20). Written as a loop of `+`, the
+score depends on the order of the terms, so two implementations, or two runs of a parallel one,
+disagree on near ties, and a stored IVF list number computed by one is "misfiled" for the other.
+And a walk in the program cannot be planned with the query's other conditions. `proto_db`'s answer
+is an index kind with its own plan node, scores defined as correctly rounded sums, and planner
+rules for `near[]`. protoBaseST ports all three.
+
+### The index model for vectors
+
+A `PBVectorIndex` (`proto_db`'s `VectorIndex`, persisted under the same type name with the same
+fields: `'name'`, `'key_spec'`, `'dim'`, `'metric'`, `'backend'`, `'params'`) is part of the collection version,
+like the key-group indexes above, and every mutator maintains it. Its state
+(`docs/source/format-spec.rst:1411-1423`):
+
+- **The store**: a key tree mapping `(list number, member key)` to `(element, count, vector)`, where
+  the vector is the element's key converted to a tuple of floats. The list number is 0 for the
+  `'exact'` and `'hnsw'` backends, -1 for an IVF index not trained yet, and otherwise the number of
+  the IVF centroid nearest to the vector, the lowest number on ties
+  (`format-spec.rst:1439-1446`). The member key is the one the key-group indexes use, so equal
+  elements are one member with a count.
+- **The invalid group**: elements whose key is not a valid vector (missing, `nil`, the wrong
+  length, a component that is not a finite number, or a squared norm that overflows). They are
+  kept, so that `validate` accounts for every element, and never returned by a search
+  (`vector_backends.py:100-122`). An Integer component beyond the float range is invalid; a
+  signalling-NaN `Decimal` component is not invalid but an error, as it is in `proto_db`, whose
+  `float()` raises there (refused with `PBValidationError`, deviation DV7).
+- **The centroids** of an IVF index, and the member count it was trained at (`'trained_size'`).
+
+The store is one tree, ordered by list number first, so one IVF list is one key range, read
+without a separate structure. `proto_db` also keeps a process-wide cache of derived structures
+(flat snapshots, grouped lists, hnsw graphs); protoBaseST keeps none and reads the tree (DV4).
+
+**Node identity.** Same bytes means the same keys, the same values, the same tree shapes and node
+classes, and the same hook order (Addendum V, 2.11). One trap is recorded there: the invalid group
+is a `KeyNode` tree when built in bulk and a `CountedKeyNode` tree when grown from empty, and a new
+node always takes the class of the existing root, so the two histories give different bytes in
+`proto_db`, and must in protoBaseST. Both histories, `build:` and seeded hook sequences over
+records and plain values of every numeric form are compared atom by atom with `proto_db`'s by
+`tests/interop/vector_index_identical.sh` (V3: equal, for the exact and hnsw backends; V4: equal for
+`'ivf_flat'` too, every training of four growth histories that cross `'nlist'` and
+`'retrain_growth'` included, `proto_db` running without numpy).
+
+### Scores, and why a correctly rounded sum
+
+Three metrics (`vector_backends.py:125-137`; `format-spec.rst:1432-1437`): `'ip'`, the inner product;
+`'l2'`, minus the Euclidean distance (so that larger is nearer for every metric); `'cosine'`, the
+inner product divided by the query's norm and then by the vector's (in that order), 0 when either
+norm is 0. Every sum is `math.fsum`: the exact sum, rounded once, whatever the order of its terms.
+protoBaseST ports CPython's `math.fsum` line for line, special values and overflow included, on IEEE
+doubles, whose `+`, `-`, `*` and `/` are one rounding each in protoST. Nothing else is needed for
+correctness: no protoST primitive, no change to protoCore. The cost of the port is measured:
+on 10^4 vectors (bench VB0, 2026-11-20, minimum of 5 runs), protoBaseST's fsum costs 4.9, 8.8 and 10.0 times a naive sum at dim 8, 32 and 128, and takes 68%, 84% and 87% of an inner-product score's time (in `proto_db` the C `math.fsum` takes 25% to 34%); a score is 69.5 to 161.1 times `proto_db`'s pure-Python one ([Performance, Vectors](deviations.md#vectors)). A protoST primitive for these sums was specified, to be built only if the measurement
+of V8 showed the interpreted kernel dominating search time (ruling VQ2). The maintainer decided it
+ahead of V8 (on 0.14.1 V8 then measured the kernel at 72 to 118 per cent of an exact query): protoST 0.15.0 has Float fsum:, fsumOfProducts:with: and
+fsumOfSquaredDifferences:with: (protoST's), and `PBVectorMath` uses them (behind a feature probe
+while the floor was protoST 0.14.1; always since the floor is 0.16.1), with the same answers to the
+bit (the vendored cases run on both paths). On 0.15.0 a score costs 16
+to 60 us per vector at dim 8 to 128, 2.5 to 18.3 times `proto_db`'s pure-Python score, and the sum is
+no longer most of it (bench VB0 on 0.15.0, same section). On 0.16.0, with one scorer per query
+(the metric dispatch, the query's copy and the cosine query norm done once, `PBVectorMath
+scorerFor:query:`), a score costs 8.2 to 27.7 us per vector at dim 8 to 128, and the kernel is 22 to
+33 per cent of an exact query (VB0 and VB1, 2026-11-22, same section). The Smalltalk kernel stays
+as the primitives' oracle in the tests.
+
+Ranking is nearest first, ties by the member key's order (`vector_backends.py:147-163`). For records
+the member key is the oid, so the order is the same in both implementations on the same database.
+
+### The backends
+
+| Backend | Search | Persisted | Deterministic |
+|---|---|---|---|
+| `'exact'` (default) | Ranks every stored vector. `proto_db` screens with numpy and re-scores every candidate that could matter exactly, so its answer is the brute force answer bit for bit; protoBaseST computes the brute force directly (its `'numpy'` parameter is kept and written, with no effect, DV2). | The store. | Yes. |
+| `'ivf_flat'` | Probes the `'nprobe'` non-empty lists whose centroids are nearest to the query (and list -1 when present; a list that removals emptied does not count), widens by doubling while fewer than k matching members are found, then ranks the candidates exactly (`vector_backends.py:663-721`). `'nprobe'` equal to `'nlist'` is exact. | The store and the centroids. | Training is: same data and seed, same centroids (R128). |
+| `'hnsw'` | **Refused** (`PBNotSupportedError` at the first execution of its plan; ruling VQ1, DV1). `proto_db` searches an hnswlib graph rebuilt in each process, never stored, and refuses the same way when hnswlib is not installed. | The store (list 0). | `proto_db`'s graph is not. |
+
+The parameters are `proto_db`'s and are written as it writes them, a tuple of `(name, value)` pairs
+sorted by name: `'exact'` takes `'numpy'` (true; `vector_backends.py:485-490`); `'ivf_flat'` takes
+`'nlist'` (16), `'nprobe'` (`min(4, nlist)`), `'train_iters'` (10), `'seed'` (0) and
+`'retrain_growth'` (4.0) (`vector_backends.py:571-586`); `'hnsw'` takes `'M'` (16),
+`'ef_construction'` (200), `'ef_search'` (64) and `'seed'` (0) (`vector_backends.py:757-770`). The
+defaults are those of each backend's check method, which also states them in its docstring. They are
+validated in `proto_db`'s order, so a definition with two faults reports the same one.
+
+### Training and its determinism
+
+An IVF index trains when it first holds `'nlist'` members, and retrains when its members reach
+`'retrain_growth'` times the size it was trained at; a retrain refiles every member, in bulk, inside
+the mutator (and so inside a merge or a cluster round's build) that crossed the threshold
+(`vector_backends.py:636-642`). Training is `proto_db`'s pure-Python k-means, step by step:
+
+1. The members' vectors, sorted by their IEEE big-endian bytes (not by stored order: oids differ
+   every run, so stored order made training irreproducible; R128), normalised for cosine.
+2. The initial centroids: `random.Random(seed).sample(range(n), nlist)`, sorted. protoBaseST ports
+   CPython's Mersenne Twister seeding, `random.getrandbits` and both branches of `random.sample`, because
+   protoST's own generator is a different one.
+3. `'train_iters'` Lloyd iterations; each distance is a sum of `(a - b) ** 2` terms. Python's `**` on a
+   float is the C library's pow function, which is not correctly rounded, and it differs from
+   `(a - b) * (a - b)` on half-way squares (measured: 55,729 of 117,197 such squares while
+   designing this phase, Addendum V 2.5). protoBaseST squares with protoST's `raisedTo: 2`, which
+   calls the same function, and adds a centroid's members with plain `+` in data order, as Python
+   does. On protoST 0.15.0 the correctly rounded sums (each distance's `_sum_nonnegative`, and the
+   norm in the cosine normalisation of the vectors and the centroids) run in protoST's fsum
+   primitive and answer the same bits; on 0.16.0 each whole distance, the libm pow squares included,
+   is one primitive call, with the same bits again; the plain sums
+   stay Smalltalk.
+
+So "the same centroids" has a precise scope: the same history, `proto_db` without numpy (with numpy
+it trains with numpy's own arithmetic), and the same C library on the same host. Whoever trained
+them, both implementations compute list numbers, probes and rankings from the stored centroids, so
+on one stored database they answer alike, and each validates the other's index (DV3).
+
+### `near[]` terms and their semantics
+
+`(PBField path: 'vec') near: aVector k: 5` builds the term `'vec' near[] aQuery`, whose value is a
+`PBNearQuery`: a non-empty vector of finite numbers (stored as floats), `k` (an Integer of at least
+1), a threshold (finite), a metric (or `nil`: the index's own), with at least one of `k` and the
+threshold (`proto_db/query/terms.py:92-137`). Two near queries are equal when their fields are, with
+Python's float equality (`0.0` equals `-0.0`), because the planner drops duplicate conjuncts.
+
+- **k** counts members: all occurrences of a member come back together.
+- **A threshold** keeps a cosine similarity of at least t, an l2 distance of at most t, an inner
+  product of at least t. With k, the k nearest of those.
+- **No per-element meaning.** A `near[]` term cannot be evaluated against one element:
+  `matches:` and `evaluate:` refuse it (`PBNotSupportedError`), and so does a `Filter` given one
+  (`PBValidationError`, as `proto_db`'s `plans.py:452-462`). Only a `VectorSearch` over an index
+  that supports it answers it.
+
+An index supports a `near[]` term on its own key spec, whose metric is absent or equal to the
+index's, and whose vector is valid for the index's `dim` (`vector.py:272-282`).
+
+### The planner's rules for `near[]`
+
+`proto_db`'s planner (`planner.py:15-26`, `98-135`, `194-275`), ported rule by rule:
+
+1. A negated `near[]` term is refused, directly or through De Morgan (`not (near and P)`). So is a
+   `near[]` conjunct that no index supports: there is no scan to fall back to. Both are
+   `PBNotSupportedError` with `proto_db`'s texts, when the query is planned.
+2. **One bare `near[]` with k, and other conjuncts**: the k nearest among the elements that satisfy
+   the others (ruling R27 of `proto_db`). The other conjuncts become the `'where'` of the
+   `VectorSearch`, never a post-filter, which would answer fewer than k; among the indexes that
+   support the term, the cheapest that can restrict its search (`supportsFiltered:`, every
+   `PBVectorIndex`) answers it, and when none can, the query is refused.
+3. A `near[]` with only a threshold keeps a post-filter (both readings agree); several `near[]`
+   conjuncts intersect their searches (`Intersect`); a `near[]` in a disjunction forces a `Union`,
+   whose other branches may be filtered scans.
+4. An order over a condition holding `near[]` always sorts: no ordered index scan.
+
+The front end adds `proto_db`'s mixing rule: with exactly one bare `near[]` with k among the
+conditions of the leading `where:` steps, a block given to those steps joins the search's `'where'`
+too (`linq.py:53-58`). The rule covers only the leading run of `where:` and `orderBy:` steps: a
+block given to a `where:` after `skip:` or `take:` filters that window's rows, as it does without
+`near[]`. A `near[]` term inside an OR or a NOT holding a block (a `PBBlockPredicate`) has no
+per-element meaning: `where:` refuses it when it is sent, `PBNotSupportedError`, as `proto_db`
+refuses it (`linq.py:344-353`). The program
+([vector_search.st](../examples/queries/vector_search.st)) checks each answer against a brute
+force:
+
+```smalltalk
+    nearest := (PBQuery from: coll) where: ((PBField path: 'vec') near: query k: 5).
+    plan := nearest explain.
+    lesson check: pair value , ': the plan is a VectorSearch' is: (plan at: 'plan') equals: 'VectorSearch'.
+    lesson check: pair value , ': its backend' is: ((plan at: 'index') at: 'backend') equals: pair value.
+```
+
+```smalltalk
+    music := ((PBQuery from: coll) where: (((PBField path: 'vec') near: query k: 3) & ((PBField path: 'topic') eq: 'music'))) asArray.
+```
+
+The `VectorSearch` node's `explain` is `proto_db`'s: `'plan'`, `'index'` (the index's own
+`explain`), `'term'`, `'where'` when filtered, `'estimate'`, and its one child, the index plan
+(`'VectorExact'`, `'VectorIvfFlat'` or `'VectorHnsw'`). A block in `'where'` is described as
+`{ 'block' -> description }`, where `proto_db` writes `{ 'python' -> ... }` (DV5). A worked vector
+plan follows the cost model below.
+
+### The cost model for vectors
+
+Each figure below is a **model estimate**, in the units of the cost model above (D30), not a
+measurement (`vector_backends.py:377-383`, `520-524`, `723-730`, `815-821`). With m the members of
+the index, a filtered search (rule 2) doubles the members term:
+
+| Backend | rows | cost |
+|---|---|---|
+| any, with k | min (k, m), halved with a threshold too | (backend term) + rows + 1 |
+| any, threshold only | m × 0.5 | (backend term) + rows + 1 |
+| `'exact'` | | m (× 2 filtered) |
+| `'ivf_flat'` | | centroids + m × fraction (× 2 filtered); fraction = `nprobe / nlist` when trained, else 1 |
+| `'hnsw'` | | min (m, ef × log2 (m + 2)) (× 2 filtered); ef = max (`'ef_search'`, k) |
+
+The arithmetic is Python's: `nprobe / nlist` is one correctly rounded division, the estimates are
+floats, and the hnsw log2 is `PBCost log2:`, the deviation R2 of the key-group plans (DV6).
+
+### A worked vector plan
+
+The data: the 300 documents of [vector_search.st](../examples/queries/vector_search.st), in one
+collection with **two** vector indexes on `'vec'`: `'by_vec'`, exact, and `'by_vec_ivf'`, IVF-Flat
+with 8 lists of which a search probes 2. The query vector is document 42's. **Every figure here is a
+model estimate**, the output of the cost model above, never a measurement and never a promise of
+time. As for the plans of "Reading a plan", ruling CR10 requires each to equal `proto_db`'s own
+planner output for the same data: `tests/interop/py_guide_plans.py` generates it,
+`tests/docs/guide_plans.sh` checks every figure below against it, and the program
+([vector_plans.st](../examples/queries/vector_plans.st)) checks that protoBaseST's planner computes
+the same.
+
+```smalltalk
+nearest := (PBQuery from: both) where: (vec near: query k: 5).
+plan := nearest explain.
+lesson check: 'cost: 8 centroids + 300 x 2/8 + rows + 1' is: (est value: plan value: 'cost') equals: 89.0.
+exactOnly := (PBQuery from: (both removeIndex: 'by_vec_ivf')) where: (vec near: query k: 5).
+lesson check: 'its cost: 300 + rows + 1' is: (est value: exactOnly explain value: 'cost') equals: 306.0.
+```
+
+Reading it (model estimates). Both indexes support the term, so the planner prices both and keeps
+the cheaper. The `VectorSearch` over `'by_vec_ivf'` is estimated at 5.0 rows (k) and a cost of
+89.0: 8 for the centroids, 300 × 2/8 = 75 for the members of the probed fraction of the lists, then
+the rows and 1. The rejected candidate, made visible by removing the IVF index as plan 2 of
+"Reading a plan" does, is the exact search: 300 + 5 + 1 = 306.0.
+
+```smalltalk
+music := (PBQuery from: both) where: ((vec near: query k: 3) & ((PBField path: 'topic') eq: 'music')).
+lesson check: 'its cost: 8 + 300 x 2/8 x 2 + 3 + 1' is: (est value: filtered value: 'cost') equals: 162.0.
+```
+
+With a condition (rule 2), the condition is the search's `'where'` and each member the search
+reaches is counted twice, once to evaluate the condition and once to score it: 8 + 150 + 3 + 1 =
+162.0 for the IVF index, 2 × 300 + 3 + 1 = 604.0 for the exact one. A threshold alone has no k, so
+the model guesses half the members, 150.0 rows: 8 + 75 + 150 + 1 = 234.0 against 300 + 150 + 1 =
+451.0.
+
+What the model does not price is recall. The cheaper plan is the approximate one: in this data,
+3 of the IVF search's 5 documents are among the exact 5, in `proto_db` as here. The
+planner chooses the IVF index because it reads less; whether its answer is good enough is the
+application's call, made by choosing the index and its `'nprobe'` (chapter 20 measures recall on its
+own data), not by the planner.
+
+### Writes, merges and the cluster
+
+Nothing new: a vector index is maintained in the mutators, so a merge of a blind write maintains
+the current version's vector indexes as it maintains its key-group indexes, and nothing on the
+cluster's wire changes. One cost is new: a mutator that crosses an IVF retrain threshold runs
+k-means inside that commit, standalone in the publisher, and in a cluster in the round's build under
+the cluster-wide write permission. Measured (bench VB3, 200 appends committed one by one to a list of 600
+vectors of dim 8, protoST 0.16.0, the full comparison of 2026-11-22; commits per second = 200 over
+the minimum time): 34.5, 15.2 and 4.6 commits per second with no index, an exact index and an IVF
+index retraining at every 3 % of growth (`proto_db` 152.5, 130.2 and 49.3 in its reference mode,
+139.0, 116.4 and 66.7 with numpy), and about the same over 5000 vectors (30.2, 13.8 and 4.6); a
+retrain (k-means over every member, then the members rebuilt with their lists) takes about
+1.6 to 1.9 s for 630 to 700 members on protoST 0.16.0, about half of it k-means and most of the
+rest the store walk and rebuild (indicative), against 0.2 s for `proto_db`'s pure-path k-means and about 4 ms with numpy (indicative single timings,
+[deviations.md](deviations.md#vectors)). Bench VB5, 120 blind writes merged onto a vector-indexed
+dictionary of 600 (the same run, 120 commits over the minimum time): 15.4 and 4.3 commits per
+second standalone with an exact and an IVF index (`proto_db` 131.0 and 49.6, with numpy 114.3 and
+72.1), 7.7 and 3.4 in a three-member cluster
+([deviations.md](deviations.md#vectors)). In a cluster the retrain runs under the write
+permission, which `proto_db`'s default 2000 ms lease lets a member believe for 667 ms: a retrain
+that takes longer never commits (every attempt outlasts its permission and is refused as a
+retryable conflict), so an IVF index retrained in a cluster needs a longer lease
+(`leaseDuration`), more than four times the measured retrain for its size (the permission is a
+third of the lease, less a twelfth kept to send). The cost per member grows with the size, 2.5 ms
+at 631 members rising to 3.7 ms at 5150 on protoST 0.16.0 at dim 8, so over that range count up
+to about 4 ms per member: a lease above 16 ms per member, about 11 s for 700 members and 80 s for
+5000; VB5's IVF cluster unit runs with 90 s. That rule is the break-even point, a lower bound with
+no margin (a retrain of a quarter of the lease leaves nothing over, and retrains slow by about half
+as a process ages, [deviations.md](deviations.md#vectors)): size the lease at twice it, 32 ms per
+member (22 s for 700 members, 160 s for 5000). Only liveness is at stake: a refused commit is a
+retryable conflict that writes nothing (`tests/unit/cluster_vector_retrain.st`). The longer lease
+costs availability: when the permission's holder dies, no member writes until its lease and
+drift margin have passed. A
+format-3 vector index (written before member tokens existed) is rebuilt at the first change of its
+collection, as `proto_db`'s `rebuilt_stale()` does: `empty build:` over the elements, a training
+included for IVF. An index of a kind protoBaseST does not know still keeps its collection read
+only: since V5 that is the only kind that does (ruling IQ5a). The identity of every mutator and
+merge with `proto_db`'s trees is tested at the collection level
+(`tests/interop/vector_ops_identical.sh`), and `tests/interop/vector_both_directions.sh` hands
+vector-indexed collections back and forth with `proto_db` in its default mode (numpy), both sides
+validating what the other wrote (DV3).
 
 ## What it costs
 

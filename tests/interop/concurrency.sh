@@ -11,7 +11,11 @@
 # a 'protobasest' entry; plan Task 4b removed the last one, the blind write onto an indexed root,
 # row 13, which now merges as ProtoBase's). Rows index-add-same-name and index-add-different-names
 # run concurrent addIndex: with each language as the first and as the second committer (runs 2 and
-# 3). Every step is a process run to completion, so nothing depends on timing. Exit 77 without the
+# 3). Rows vector-indexed-root and vector-indexed-root-invalid (vectors phase V5) blind-write a
+# Dictionary root holding an exact and an ivf_flat index, each language first and second: the
+# merge replays the writes through the vector-indexed current (training and retraining the ivf
+# index inside a commit), and the dump states validate's outcome, the members and the centroids.
+# Every step is a process run to completion, so nothing depends on timing. Exit 77 without the
 # interop venv.
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,7 +65,9 @@ for id in $ids; do
     count=$((count + 1))
 done
 # The 13 rows of design spec 10.4, row 7 with its roles swapped (fix round 1), the counted set
-# blind adds and the 12 further counted set cases (plan Task 22 and its review), and the two
-# concurrent addIndex: cases (indexed queries plan Task 4b).
-[[ "$count" -eq 29 ]] || fail "expected the 13 rows of design spec 10.4, the swapped row 7, the 13 counted set cases and the 2 addIndex: cases, ran $count"
+# blind adds and the 12 further counted set cases (plan Task 22 and its review), the two
+# concurrent addIndex: cases (indexed queries plan Task 4b) and the two vector-indexed roots
+# (vectors phase V5).
+[[ "$count" -eq 31 ]] || fail "expected the 13 rows of design spec 10.4, the swapped row 7, the 13 counted set cases, the 2 addIndex: cases and the 2 vector-indexed roots, ran $count"
+echo "NOTE: py_case.py ran with $(step "$PY" py_case.py mode)"
 echo "concurrency table: $count cases, ProtoBase's outcomes in both assignments"

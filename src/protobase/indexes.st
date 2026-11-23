@@ -7,9 +7,15 @@ Task 3: a port of base.py's Index and keyed.py's KeyGroupIndex): every hook
 answers a new, unsaved index version and never changes its receiver, and the
 trees it builds are node-identical to proto_db's for the same operations
 (build and the hooks, both kinds, path, element and extractor key specs:
-tests/interop/index_build_identical.sh). The
-vector index is read only (design spec 3.3, ruling IQ5): each of its hooks is
-PBNotSupportedError naming it.
+tests/interop/index_build_identical.sh). The vector index is a port of vector.py
+(vectors phase V3, Addendum V 2.3): its definition, hooks, validate: and explain,
+node-identical to proto_db's for the exact and hnsw backends
+(tests/interop/vector_index_identical.sh), and so are the ivf_flat lists,
+training and retraining (V4); its backends are in vectors.st, and so is vector
+search (V6: supports:, estimate:, plan: and filteredPlan:where: of near[] terms).
+Collections holding vector indexes are written and merged like any other
+(V5, ruling IQ5a): their mutators run these hooks, node-identical to proto_db's at the
+collection level too (tests/interop/vector_ops_identical.sh).
 
   PBIndex           proto_db.indexing.Index (abstract): name, key_spec
   PBKeyGroupIndex   proto_db.indexing.keyed.KeyGroupIndex (abstract): groups,
@@ -62,11 +68,17 @@ IP15), answering the plan classes of plans.st:
 
   supports: aTerm    whether plan: answers aTerm exactly as a scan would: a key-group index
                      answers the operators of supportedOperators on its own key spec only;
-                     a vector index nothing (a non-term is PBValidationError)
+                     a vector index near[] on its own key spec, of its dimension, with its
+                     metric or none (a non-term is PBValidationError)
   estimate: aTerm    its PBEstimate (the cost model D30, keyed.py estimate)
   plan: aTerm        a PBIndexPlan: an IndexLookup ('==', 'in', '?N'), an IndexRange ('?!N'
                      and the range operators) or an IndexComplement ('!='); with rank access
                      (windowFrom:to:, exactRows) when the index is weighted
+  supportsFiltered: aTerm, filteredPlan: aTerm where: anExpression
+                     aTerm answered among the elements anExpression accepts only (base.py,
+                     ruling R27): a vector index restricts every term it supports (VectorExact,
+                     VectorIvfFlat and VectorHnsw plans, the residual predicate in their
+                     details); a key-group index restricts none (PBNotSupportedError)
   supportsOrder: aKeySpec, orderedPlan: aKey descending: aBoolean
                      PBRangeIndex only: every occurrence in key order (IndexOrderedScan),
                      descending its exact reverse
@@ -79,9 +91,13 @@ side the group of every element whose key is unorderable. Its reads:
 groupCount, count, countOfKey: aKey, membersDo: [:element :count] (groups in
 key order, the side group last).
 
-PBVectorIndex also answers centroids, trainedSize and storeEntries (the store
-tree's key -> (element, count, vector) Associations, in key order: the list
-number of a member is its key's first item)."
+A vector index (its section below) is defined by name:keySpec:dim:metric:backend:params: and its
+conveniences, and answers dim, metric, backend, params, paramAt:, store, invalid, centroids,
+trainedSize, memberCount, invalidCount and storeEntries (the store tree's key -> (element, count,
+vector) Associations, in key order: the list number of a member is its key's first item).
+PBVectorIndex nearOracle: elements keySpec: aKeySpec query: aPBNearQuery metric: aMetric
+predicate: aPredicateOrNil is vector.py near_oracle, the brute-force answer to a near[] query (the
+vector scan oracle of the tests)."
 
 Import from: 'protobase/errors'.
 Import from: 'protobase/values'.
@@ -91,6 +107,7 @@ Import from: 'protobase/codec'.
 Import from: 'protobase/keyspec'.
 Import from: 'protobase/avl'.
 Import from: 'protobase/keygroups'.
+Import from: 'protobase/vectors'.
 
 "=== PBIndex ================================================================="
 
@@ -127,7 +144,12 @@ PBIndex class >> isAbstract
  anything else, a String included, is PBValidationError). The fields are set in proto_db's
  constructor order, persistedFields."
 PBIndex class >> name: aString keySpec: aPBKeySpec
-  | index |
+  self _checkName: aString keySpec: aPBKeySpec.
+  ^ self _newWithFields: (self _emptyFieldsName: aString keySpec: aPBKeySpec) keySpec: aPBKeySpec.
+
+"The checks of base.py Index.__init__, in its order: a concrete class, a non-empty String name
+ with no lone surrogate, a PBKeySpec."
+PBIndex class >> _checkName: aString keySpec: aPBKeySpec
   self isAbstract ifTrue: [
     ^ PBUserError signal: self name , ' is abstract: make a PBEqualityIndex or a PBRangeIndex'].
   ((aString isString and: [aString isSymbol not]) and: [aString notEmpty]) ifFalse: [
@@ -135,7 +157,12 @@ PBIndex class >> name: aString keySpec: aPBKeySpec
   PBCodec _checkUTF8: aString.
   (aPBKeySpec isClassObject not and: [aPBKeySpec isKindOf: PBKeySpec]) ifFalse: [
     ^ PBValidationError signal: 'key_spec must be a PBKeySpec, not a ' , aPBKeySpec class name].
-  index := self _unsavedWithState: (PBFrozenDict withAssociations: (self _emptyFieldsName: aString keySpec: aPBKeySpec)).
+
+"A new unsaved index holding the fields anArray (Associations, in persistedFields order), with
+ aPBKeySpec, already checked, as its parsed key spec."
+PBIndex class >> _newWithFields: anArray keySpec: aPBKeySpec
+  | index |
+  index := self _unsavedWithState: (PBFrozenDict withAssociations: anArray).
   index _publishKeySpec: aPBKeySpec.
   ^ index.
 
@@ -193,6 +220,19 @@ PBIndex >> hasMemberTokens
 
 PBIndex >> totalCount
   ^ _PBTree integer: (self stateAt: 'total_count') field: 'total_count' of: self.
+
+"PBCorruptionError naming the index (keyed.py and vector.py _corrupt)."
+PBIndex >> _corrupt: aString
+  ^ PBCorruptionError signal: self _subject , ' is corrupt: ' , aString.
+
+"Whether aKey is the member key of anElement (keyed.py member_key_matches, used by the key-group
+ and the vector indexes): the whole key on an index with current tokens; on one written by format
+ 3 everything but the token, which is only checked to be a tuple."
+PBIndex >> _memberKey: aKey matches: anElement current: aBoolean
+  ((aKey isClassObject not and: [aKey isKindOf: PBTuple]) and: [aKey size = 2]) ifFalse: [^ false].
+  aBoolean ifTrue: [^ (PBKeys orderKey: aKey) = (PBKeys orderKey: (PBMemberKeys memberKeyOf: anElement))].
+  ^ ((aKey at: 2) isKindOf: PBTuple)
+    and: [(PBKeys orderKey: (aKey at: 1)) = (PBKeys orderKey: (PBMemberKeys _equalityPart: anElement))].
 
 "A new unsaved index of this class (base.py Index._with): the receiver's persisted state, in its
  order, with the fields aFields names (an Array of Associations, or a PBFrozenDict) changed. A
@@ -313,6 +353,17 @@ PBIndex >> _checkSupported: aTerm
     ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: self name) , ' (' , self class kindName , ' on '
       , self keySpecObject describe , ') does not support ' , (PBKeySpec _repr: aTerm op) , ' on '
       , (PBKeySpec _repr: aTerm path)].
+
+"Whether filteredPlan:where: answers aTerm restricted to a predicate (base.py supports_filtered:
+ false by default)."
+PBIndex >> supportsFiltered: aTerm
+  ^ false.
+
+"aTerm answered over the elements satisfying aWhere only (base.py filtered_plan): by default
+ PBNotSupportedError, base.py's sentence."
+PBIndex >> filteredPlan: aTerm where: aWhere
+  ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: self name) , ' (' , self class kindName
+    , ') cannot answer ' , (PBKeySpec _repr: aTerm op) , ' restricted to a predicate'.
 
 "=== PBKeyGroupIndex (keyed.py KeyGroupIndex) ================================="
 
@@ -715,9 +766,6 @@ PBKeyGroupIndex >> _explained
   ^ super _explained , {
     'entries' -> self totalCount. 'keys' -> self groupCount. 'unorderable' -> (self side at: 2) }.
 
-PBKeyGroupIndex >> _corrupt: aString
-  ^ PBCorruptionError signal: self _subject , ' is corrupt: ' , aString.
-
 PBKeyGroupIndex >> _misfiled: aString
   ^ PBMisfiledError signal: self _subject , ' holds a misfiled entry: ' , aString
     , '. Format 3 wrote built-in subclasses (a (str, Enum) member) through their own conversion but filed them '
@@ -729,15 +777,6 @@ PBKeyGroupIndex >> _misfiled: aString
 PBKeyGroupIndex >> _slot: aKey
   (PBMemberKeys orderKeyOrNil: aKey) isNil ifTrue: [^ PBTuple withAll: #(1)].
   ^ PBTuple _trustedOn: { 0. aKey }.
-
-"Whether aKey is the member key of anElement (keyed.py member_key_matches): the whole key on an
- index with current tokens; on one written by format 3 everything but the token, which is only
- checked to be a tuple."
-PBKeyGroupIndex >> _memberKey: aKey matches: anElement current: aBoolean
-  ((aKey isKindOf: PBTuple) and: [aKey size = 2]) ifFalse: [^ false].
-  aBoolean ifTrue: [^ (PBKeys orderKey: aKey) = (PBKeys orderKey: (PBMemberKeys memberKeyOf: anElement))].
-  ^ ((aKey at: 2) isKindOf: PBTuple)
-    and: [(PBKeys orderKey: (aKey at: 1)) = (PBKeys orderKey: (PBMemberKeys _equalityPart: anElement))].
 
 "The occurrences of aGroup filed under aSlot, counted into aStored (keyed.py _check_group)."
 PBKeyGroupIndex >> _checkGroup: aGroup slot: aSlot into: aStored
@@ -851,7 +890,31 @@ PBRangeIndex >> supportsOrder: aKeySpec
   ^ aKeySpec = self keySpecObject.
 
 
-"=== PBVectorIndex (read only: design spec 3.3, ruling IQ5) ================="
+"=== PBVectorIndex (vector.py VectorIndex; Addendum V, 2.3) ==================
+
+A vector index files each element under the vector its key spec extracts (vector.py:1-41):
+
+  store        a PBKeyNode tree from the store key (list number, member key) to the PBTuple
+               (element, count, vector): the member key is the exact one of keygroups.st (an
+               element held twice is one member with count 2), the vector a PBTuple of Floats
+               (PBVectorMath canonicalVector:dim:), the list number the backend's (0 for exact
+               and hnsw; the IVF list, -1 while untrained, for ivf_flat)
+  invalid      the group (keygroups.st) of the elements whose key is not a vector of dim finite
+               numbers: never returned by a search, counted by explain, checked by validate:
+  total_count  every stored occurrence; centroids and trained_size the IVF training (the empty
+               PBTuple and 0 for the other backends)
+
+Node classes (Addendum V, 2.11 item 3): a new node takes the class of the tree's root, and the
+class given only when the tree is empty (PBAvl keyPut:, avl.py key_put). build: and a retrain make
+PBKeyNode trees (the store and the invalid members); withAdded: grows the store with PBKeyNodes and
+the invalid group as keyed.py group_add does (PBCountedKeyNode on an empty tree): an index built
+with invalid elements keeps its PBKeyNode invalid tree, one built without grows a PBCountedKeyNode
+tree from its first invalid element, as proto_db's does; so does one whose built invalid tree was
+emptied by removals.
+
+Texts: every refusal quotes the values proto_db quotes as Python's repr renders them (PBCodec
+_pyRepr:), and validate: compares a stored total or vector component with Python's == (true is 1,
+6.0 is 6: _number:equals:)."
 
 PBIndex subclass: #PBVectorIndex.
 
@@ -865,6 +928,72 @@ PBVectorIndex class >> persistedFields
   ^ #('name' 'key_spec' 'dim' 'metric' 'backend' 'params' 'store' 'invalid' 'total_count' 'centroids'
       'trained_size' 'member_tokens').
 
+"vector.py STORE_KEY_WRAPPING: the containers the store key (list number, member key) adds around
+ a member key."
+PBVectorIndex class >> storeKeyWrapping
+  ^ 2.
+
+"The metrics, in proto_db's order (vector_backends.py METRICS)."
+PBVectorIndex class >> metrics
+  ^ #('cosine' 'l2' 'ip').
+
+"aMetric, or PBValidationError with proto_db's text (vector.py _check_metric)."
+PBVectorIndex class >> _checkMetric: aMetric
+  ((PBNearQuery _isText: aMetric) and: [self metrics includes: aMetric]) ifFalse: [
+    ^ PBValidationError signal: 'Unknown vector metric ' , (PBCodec _pyRepr: aMetric)
+      , '; expected one of [''cosine'', ''l2'', ''ip'']'].
+  ^ aMetric.
+
+"--- definition (vector.py:141-168) ---"
+
+"An empty unsaved vector index named aString on aPBKeySpec (vector.py VectorIndex.__init__):
+ aDim an Integer >= 1 (not a Boolean), aMetric 'cosine', 'l2' or 'ip', aBackend 'exact',
+ 'ivf_flat' or 'hnsw', aParams nil (the defaults) or a Dictionary or PBFrozenDict of the backend's
+ parameters, validated, completed and stored as proto_db stores them, a PBTuple of (name, value)
+ PBTuples sorted by name (PBVectorBackend normalize:backend:). Checked in proto_db's order, so
+ the first fault a definition holds is the one reported: the name and the key spec, the dim, the
+ metric, the backend, the parameter names, the backend's own checks (PBValidationError with
+ proto_db's texts)."
+PBVectorIndex class >> name: aString keySpec: aPBKeySpec dim: aDim metric: aMetric backend: aBackend params: aParams
+  | params |
+  self _checkName: aString keySpec: aPBKeySpec.
+  ((PBVectorBackend _isInt: aDim) and: [aDim >= 1]) ifFalse: [
+    ^ PBValidationError signal: 'A vector index needs an int dim >= 1, not ' , (PBCodec _pyRepr: aDim)].
+  self _checkMetric: aMetric.
+  params := PBVectorBackend normalize: aParams backend: aBackend.
+  ^ self _newWithFields: {
+      'name' -> aString. 'key_spec' -> aPBKeySpec asData. 'dim' -> aDim. 'metric' -> aMetric copy.
+      'backend' -> aBackend copy. 'params' -> params. 'store' -> nil. 'invalid' -> PBKeyGroups empty.
+      'total_count' -> 0. 'centroids' -> (PBTuple withAll: #()). 'trained_size' -> 0.
+      'member_tokens' -> PBKeyGroupIndex memberTokens }
+    keySpec: aPBKeySpec.
+
+"The cosine exact index (proto_db's defaults)."
+PBVectorIndex class >> name: aString keySpec: aPBKeySpec dim: aDim
+  ^ self name: aString keySpec: aPBKeySpec dim: aDim metric: 'cosine' backend: 'exact' params: nil.
+
+"An exact index with aMetric."
+PBVectorIndex class >> name: aString keySpec: aPBKeySpec dim: aDim metric: aMetric
+  ^ self name: aString keySpec: aPBKeySpec dim: aDim metric: aMetric backend: 'exact' params: nil.
+
+"The convenience for a single path: name: aString keySpec: (PBKeySpec path: aPath) dim: aDim
+ metric: aMetric."
+PBVectorIndex class >> name: aString path: aPath dim: aDim metric: aMetric
+  ^ self name: aString keySpec: (PBKeySpec path: aPath) dim: aDim metric: aMetric.
+
+"A vector index needs its dimension: the definition of the other kinds is refused
+ (PBValidationError; proto_db's constructor has no default dim)."
+PBVectorIndex class >> name: aString keySpec: aPBKeySpec
+  ^ PBValidationError signal: 'A vector index needs a dim: make it with PBVectorIndex name:keySpec:dim: or '
+    , 'name:keySpec:dim:metric:backend:params:'.
+
+"An empty index of the same definition, its parameters validated again (vector.py empty)."
+PBVectorIndex >> empty
+  ^ self class name: self name keySpec: self keySpecObject dim: self dim metric: self metric backend: self backend
+    params: (PBFrozenDict withAssociations: ((self stateAt: 'params') asArray collect: [:pair | (pair at: 1) -> (pair at: 2)])).
+
+"--- readers ---"
+
 PBVectorIndex >> dim
   ^ _PBTree integer: (self stateAt: 'dim') field: 'dim' of: self.
 
@@ -874,8 +1003,23 @@ PBVectorIndex >> metric
 PBVectorIndex >> backend
   ^ self stateAt: 'backend'.
 
+"The validated parameters, a PBTuple of (name, value) PBTuples sorted by name."
 PBVectorIndex >> params
   ^ self stateAt: 'params'.
+
+"The value of the parameter aName, or nil when the backend has no such parameter (dict(params))."
+PBVectorIndex >> paramAt: aName
+  (self stateAt: 'params') do: [:pair | (pair at: 1) = aName ifTrue: [^ pair at: 2]].
+  ^ nil.
+
+"The store tree: nil or a PBKeyNode tree from (list number, member key) to (element, count,
+ vector)."
+PBVectorIndex >> store
+  ^ _PBTree node: (self stateAt: 'store') kind: PBKeyNode in: self.
+
+"The group of the elements whose key is not a vector, the PBTuple (members, total)."
+PBVectorIndex >> invalid
+  ^ self stateAt: 'invalid'.
 
 "The trained centroids, a tuple of vectors (empty when untrained)."
 PBVectorIndex >> centroids
@@ -883,6 +1027,14 @@ PBVectorIndex >> centroids
 
 PBVectorIndex >> trainedSize
   ^ _PBTree integer: (self stateAt: 'trained_size') field: 'trained_size' of: self.
+
+"The distinct members with a valid vector (the store's node count, vector.py:327)."
+PBVectorIndex >> memberCount
+  ^ _PBTree count: (self stateAt: 'store') kind: PBKeyNode in: self.
+
+"The occurrences kept in the invalid group."
+PBVectorIndex >> invalidCount
+  ^ self invalid at: 2.
 
 "The store tree's key -> value Associations, in key order: the key is
  (list number, member key), the value (element, count, vector)."
@@ -892,42 +1044,439 @@ PBVectorIndex >> storeEntries
   _PBTree nodesOf: (self stateAt: 'store') kind: PBKeyNode in: self do: [:node | out add: node key -> node value].
   ^ out asArray.
 
-"--- the refusals: protoBaseST reads a vector index and never writes, builds or validates one ---"
+"The backend class of this index (vector.py _impl, backend_for)."
+PBVectorIndex >> _backend
+  ^ PBVectorBackend named: self backend.
 
-"A vector index is never made here: PBNotSupportedError."
-PBVectorIndex class >> name: aString keySpec: aPBKeySpec
-  ^ PBNotSupportedError signal: 'PBVectorIndex name:keySpec:: protoBaseST reads vector indexes but never makes, '
-    , 'writes, rebuilds or validates them (design spec 3.3, ruling IQ5)'.
+"The canonical vector of anElement's key, or nil (vector.py _vector). A signalling-NaN Decimal
+ component is PBValidationError (DV7 b)."
+PBVectorIndex >> _vector: anElement
+  ^ PBVectorMath canonicalVector: (self keySpecObject extract: anElement) dim: self dim.
 
-PBVectorIndex >> _refuse: aSelector
-  ^ PBNotSupportedError signal: self _subject , ' ' , aSelector , ': protoBaseST reads vector indexes but never '
-    , 'writes, rebuilds or validates them; a collection holding one is read only (design spec 3.3, ruling IQ5)'.
+"The order key of the store key (aListNumber, member key) from the member key's order key
+ (vector_backends.py store_key_okey): the tuple-rank key of the two order keys, which is PBKeys
+ orderKey: of the PBTuple, without computing the member key's again."
+PBVectorIndex class >> _storeOrderKey: aListNumber memberOrderKey: anOrderKey
+  ^ PBOrderKey rank: PBMemberKeys _tupleRank payload: { PBKeys orderKey: aListNumber. anOrderKey }.
 
+"--- element hooks (vector.py:183-268) ---"
+
+"The index after one more occurrence of anElement (vector.py with_added): an element whose key is
+ not a vector goes to the invalid group; one with a vector is one more occurrence of its member in
+ the store, under the list the backend gives it. A new member can trigger a retrain (an IVF index:
+ PBVectorIvfFlat needsTraining:, then _retrained). An element whose member key would nest too deep
+ is PBValidationError naming the index."
 PBVectorIndex >> withAdded: anElement
-  ^ self _refuse: 'withAdded:'.
+  | vector pair member mokey backend listNo okey node old value grown |
+  vector := self _vector: anElement.
+  pair := PBMemberKeys memberKeyAndOrderKeyOf: anElement.
+  member := pair at: 1.
+  mokey := pair at: 2.
+  vector isNil ifTrue: [
+    PBMemberKeys checkDepth: anElement memberKey: member index: self outer: 0.
+    ^ self _with: {
+      'invalid' -> (PBKeyGroups group: self invalid with: anElement memberKey: member orderKey: mokey).
+      'total_count' -> (self totalCount + 1) }].
+  PBMemberKeys checkDepth: anElement memberKey: member index: self outer: self class storeKeyWrapping.
+  backend := self _backend.
+  listNo := backend listFor: self vector: vector.
+  okey := self class _storeOrderKey: listNo memberOrderKey: mokey.
+  node := PBAvl keyAt: self store orderKey: okey.
+  value := node isNil
+    ifTrue: [PBTuple _trustedOn: { anElement. 1. vector }]
+    ifFalse: [
+      old := node value.
+      PBTuple _trustedOn: { old at: 1. (old at: 2) + 1. old at: 3 }].
+  grown := self _with: {
+    'store' -> ((PBAvl keyPut: self store key: (PBTuple _trustedOn: { listNo. member }) orderKey: okey value: value
+      nodeClass: PBKeyNode) at: 1).
+    'total_count' -> (self totalCount + 1) }.
+  (node isNil and: [backend needsTraining: grown]) ifTrue: [^ grown _retrained].
+  ^ grown.
 
+"The index after one occurrence of anElement fewer (vector.py with_removed): only the member whose
+ store key is (the list of its vector, its member key) is taken, never an equal member with another
+ token (D58). An element the index does not hold is PBValidationError."
 PBVectorIndex >> withRemoved: anElement
-  ^ self _refuse: 'withRemoved:'.
+  | vector invalid pair okey node entry store |
+  vector := self _vector: anElement.
+  vector isNil ifTrue: [
+    invalid := PBKeyGroups group: self invalid without: anElement.
+    invalid isNil ifTrue: [^ self _notHeld: anElement].
+    ^ self _with: { 'invalid' -> invalid. 'total_count' -> (self totalCount - 1) }].
+  pair := PBMemberKeys memberKeyAndOrderKeyOf: anElement.
+  okey := self class _storeOrderKey: (self _backend listFor: self vector: vector) memberOrderKey: (pair at: 2).
+  node := PBAvl keyAt: self store orderKey: okey.
+  node isNil ifTrue: [^ self _notHeld: anElement].
+  entry := node value.
+  store := (entry at: 2) = 1
+    ifTrue: [(PBAvl keyRemove: self store orderKey: okey) at: 1]
+    ifFalse: [(PBAvl keyPut: self store key: node key orderKey: okey
+      value: (PBTuple _trustedOn: { entry at: 1. (entry at: 2) - 1. entry at: 3 }) nodeClass: PBKeyNode) at: 1].
+  ^ self _with: { 'store' -> store. 'total_count' -> (self totalCount - 1) }.
 
-PBVectorIndex >> withReplaced: anOld with: aNew
-  ^ self _refuse: 'withReplaced:with:'.
+PBVectorIndex >> _notHeld: anElement
+  ^ PBValidationError signal: self _subject , ' does not hold ' , (PBCodec _pyRepr: anElement)
+    , '; an index can only remove an element it holds'.
 
-PBVectorIndex >> empty
-  ^ self _refuse: 'empty'.
-
+"An index over exactly the elements of aCollection (anything answering do:), built in bulk
+ (vector.py build): the members grouped by the order key of their member key, valid and invalid
+ apart, the invalid group a balanced PBKeyNode tree, then _withMembers: trains once and builds the
+ store balanced. The receiver's content is never kept; the builders are local Dictionaries."
 PBVectorIndex >> build: aCollection
-  ^ self _refuse: 'build:'.
+  | empty members invalid total ordered group index |
+  empty := self empty.
+  members := Dictionary new.
+  invalid := Dictionary new.
+  total := 0.
+  aCollection do: [:element |
+    | vector pair target slot |
+    total := total + 1.
+    vector := empty _vector: element.
+    pair := PBMemberKeys memberKeyAndOrderKeyOf: element.
+    PBMemberKeys checkDepth: element memberKey: (pair at: 1) index: self
+      outer: (vector isNil ifTrue: [0] ifFalse: [self class storeKeyWrapping]).
+    target := vector isNil ifTrue: [invalid] ifFalse: [members].
+    slot := target at: (pair at: 2) ifAbsent: [nil].
+    slot isNil
+      ifTrue: [target at: (pair at: 2) put: { pair at: 2. pair at: 1. element. 1. vector }]
+      ifFalse: [slot at: 4 put: (slot at: 4) + 1]].
+  group := PBKeyGroups empty.
+  invalid isEmpty ifFalse: [
+    ordered := self class _sortedMembers: invalid.
+    group := PBTuple _trustedOn: {
+      PBAvl keyFromSortedOrderKeys: (ordered collect: [:m | { m at: 1. m at: 2. PBTuple _trustedOn: { m at: 3. m at: 4 } }])
+        nodeClass: PBKeyNode.
+      ordered inject: 0 into: [:sum :m | sum + (m at: 4)] }].
+  index := empty _with: { 'invalid' -> group. 'total_count' -> total }.
+  ^ index _withMembers: (self class _sortedMembers: members).
 
-PBVectorIndex >> validate: aCollection
-  ^ self _refuse: 'validate:'.
+"The member slots { member order key. member key. element. count. vector } of aDictionary, sorted
+ by member order key."
+PBVectorIndex class >> _sortedMembers: aDictionary
+  ^ aDictionary values asArray sort: [:a :b | (a at: 1) <= (b at: 1)].
 
-"No term is answered by a vector index here: vector search is out of scope (ruling IQ5), so the
- planner never uses one as an access path."
+"This index trained on and holding exactly the members anArray of { member order key. member key.
+ element. count. vector }, sorted by member order key (vector.py _with_members): the backend trains
+ on their vectors (or not), then the store is built balanced from the entries sorted by store key."
+PBVectorIndex >> _withMembers: anArray
+  | backend centroids index triples |
+  backend := self _backend.
+  centroids := backend train: self vectors: (anArray collect: [:m | m at: 5]).
+  index := self _with: { 'centroids' -> centroids. 'trained_size' -> (centroids isEmpty ifTrue: [0] ifFalse: [anArray size]) }.
+  triples := anArray collect: [:m | | listNo |
+    listNo := backend listFor: index vector: (m at: 5).
+    { self class _storeOrderKey: listNo memberOrderKey: (m at: 1). PBTuple _trustedOn: { listNo. m at: 2 }.
+      PBTuple _trustedOn: { m at: 3. m at: 4. m at: 5 } }].
+  triples := triples asArray sort: [:a :b | (a at: 1) <= (b at: 1)].
+  ^ index _with: { 'store' -> (PBAvl keyFromSortedOrderKeys: triples nodeClass: PBKeyNode) }.
+
+"This index retrained on its own members (vector.py _retrained, the IVF retrain policy)."
+PBVectorIndex >> _retrained
+  | members |
+  members := OrderedCollection new.
+  PBAvl keysAndValuesDo: [:key :entry |
+    members addLast: { PBKeys orderKey: (key at: 2). key at: 2. entry at: 1. entry at: 2. entry at: 3 }] over: self store.
+  ^ self _withMembers: (members asArray sort: [:a :b | (a at: 1) <= (b at: 1)]).
+
+"--- terms and plans (vector.py:272-319; vectors phase V6) ---"
+
+"near[] on this index's key spec, of its dimension, with its metric or none (vector.py supports);
+ a non-term is PBValidationError."
 PBVectorIndex >> supports: aTerm
-  ^ false.
+  | query |
+  self _checkTerm: aTerm.
+  (aTerm op = PBTerm nearOperator and: [aTerm keySpecObject = self keySpecObject]) ifFalse: [^ false].
+  query := aTerm value.
+  ^ (query metric isNil or: [query metric = self metric])
+    and: [(PBVectorMath canonicalVector: query vector dim: self dim) notNil].
 
-"proto_db's VectorIndex.explain adds its training state, which protoBaseST does not compute."
-PBVectorIndex >> explain
-  ^ self _refuse: 'explain'.
+"Every supported term can be restricted to a residual predicate (ruling R27)."
+PBVectorIndex >> supportsFiltered: aTerm
+  ^ self supports: aTerm.
+
+"The backend's estimate of aTerm (D30 units); PBNotSupportedError for a term it does not support."
+PBVectorIndex >> estimate: aTerm
+  self _checkSupported: aTerm.
+  ^ self _backend estimate: self k: aTerm value k threshold: aTerm value threshold filtered: false.
+
+"The members answering aTerm, nearest first (ties by the member key), each occurrence once: a
+ PBIndexPlan of kind VectorExact, VectorIvfFlat or VectorHnsw (vector.py plan). The search runs
+ when the plan does, on this version; an hnsw plan is refused then (ruling VQ1)."
+PBVectorIndex >> plan: aTerm
+  self _checkSupported: aTerm.
+  ^ self _plan: aTerm where: nil.
+
+"aTerm answered among the elements satisfying aWhere only (vector.py filtered_plan, ruling R27):
+ aWhere is compiled (PBExpression compile:) and may not hold a near[] term (PBValidationError)."
+PBVectorIndex >> filteredPlan: aTerm where: aWhere
+  | expr near |
+  self _checkSupported: aTerm.
+  expr := PBExpression compile: aWhere.
+  near := false.
+  expr termsDo: [:each | each op = PBTerm nearOperator ifTrue: [near := true]].
+  near ifTrue: [
+    ^ PBValidationError signal: 'A residual predicate cannot hold a ''near[]'' term (' , (PBCodec _pyRepr: expr) , ')'].
+  ^ self _plan: aTerm where: expr.
+
+"vector.py _plan: the plan's producer runs the backend's search on this version, the estimate is
+ the backend's, the details name the backend, the metric and, when restricted, the predicate."
+PBVectorIndex >> _plan: aTerm where: anExpressionOrNil
+  | query q k threshold backend eligible details index |
+  query := aTerm value.
+  q := PBVectorMath canonicalVector: query vector dim: self dim.
+  k := query k.
+  threshold := query threshold.
+  backend := self _backend.
+  index := self.
+  eligible := self class _predicate: anExpressionOrNil.
+  details := { 'backend' -> self backend. 'metric' -> self metric }.
+  anExpressionOrNil isNil ifFalse: [details := details , { 'where' -> anExpressionOrNil describe }].
+  ^ PBIndexPlan index: self term: aTerm part: (PBIndexPart kind: backend kindName
+    producer: [:aBlock |
+      (backend search: index query: q k: k threshold: threshold eligible: eligible) do: [:pair |
+        (pair at: 2) timesRepeat: [aBlock value: (pair at: 1)]]]
+    estimate: (backend estimate: self k: k threshold: threshold filtered: anExpressionOrNil notNil)
+    details: (PBFrozenDict withAssociations: details) rank: nil sortedRank: nil).
+
+"vector.py _predicate: nil for none; a block is applied and its answer taken as Python's bool
+ (PBTerm _truthy:); anything else is compiled (PBExpression compile:, the 0.1 list syntax
+ included) and evaluated. A block of one element answering a Boolean, or nil."
+PBVectorIndex class >> _predicate: aWhere
+  | expr |
+  aWhere isNil ifTrue: [^ nil].
+  (aWhere isClassObject not and: [aWhere isKindOf: BlockClosure]) ifTrue: [
+    ^ [:element | PBTerm _truthy: (aWhere value: element)]].
+  expr := PBExpression compile: aWhere.
+  ^ [:element | expr evaluate: element].
+
+"vector.py near_oracle: the exact answer to aQuery over anElements by brute force (the vector scan
+ oracle). aMetric is the index metric, used when the query names none; aPredicate (nil, an
+ expression, the 0.1 list syntax or a block) restricts the search to the elements satisfying it.
+ Keys that are not vectors of the query's dimension are ignored. Elements are grouped into members
+ by exact member key; the answer lists each selected member's occurrences, nearest member first,
+ ties by the member key. Refusals are PBValidationError with proto_db's texts."
+PBVectorIndex class >> nearOracle: anElements keySpec: aKeySpec query: aQuery metric: aMetric predicate: aPredicate
+  | metric q dim satisfies members slots out |
+  (aQuery isClassObject not and: [aQuery isKindOf: PBNearQuery]) ifFalse: [
+    ^ PBValidationError signal: 'near_oracle needs a NearQuery, not ' , (PBCodec _pyRepr: aQuery)].
+  metric := self _checkMetric: (aQuery metric isNil ifTrue: [aMetric] ifFalse: [aQuery metric]).
+  (aKeySpec isClassObject not and: [aKeySpec isKindOf: PBKeySpec]) ifFalse: [
+    ^ PBValidationError signal: 'near_oracle needs a KeySpec, not ' , (PBCodec _pyRepr: aKeySpec)].
+  q := aQuery vector.
+  dim := q size.
+  satisfies := self _predicate: aPredicate.
+  members := Dictionary new.
+  slots := OrderedCollection new.
+  anElements do: [:element | | vector |
+    vector := PBVectorMath canonicalVector: (aKeySpec extract: element) dim: dim.
+    (vector isNil or: [satisfies notNil and: [(satisfies value: element) not]]) ifFalse: [ | pair slot |
+      pair := PBMemberKeys memberKeyAndOrderKeyOf: element.
+      slot := members at: (pair at: 2) ifAbsent: [nil].
+      slot isNil
+        ifTrue: [
+          slot := { pair at: 1. element. 1. vector. pair at: 2 }.
+          members at: (pair at: 2) put: slot.
+          slots addLast: slot]
+        ifFalse: [slot at: 3 put: (slot at: 3) + 1]]].
+  out := OrderedCollection new.
+  (PBVectorMath rank: slots query: q metric: metric k: aQuery k threshold: aQuery threshold) do: [:pair |
+    (pair at: 2) timesRepeat: [out addLast: (pair at: 1)]].
+  ^ out asArray.
+
+"--- the store's entries, as the backends' searches read them ---"
+
+"The entry of a store node, as PBVectorMath rank:query:metric:k:threshold: takes it: { member key.
+ element. count. vector. the member key's order key } (the node caches its order key, the store
+ key's, whose second item is the member key's: read in place, since payload copies a tuple's)."
+PBVectorIndex >> _entryOf: aNode
+  | key value |
+  key := aNode key.
+  value := aNode value.
+  ^ { key at: 2. value at: 1. value at: 2. value at: 3. aNode orderKey _payload at: 2 }.
+
+"Evaluates aBlock with each store entry, in store key order (vector_backends.py iter_entries)."
+PBVectorIndex >> _entriesDo: aBlock
+  PBAvl nodeDo: [:node | aBlock value: (self _entryOf: node)] over: self store
+    fromOrderKey: nil inclusive: false toOrderKey: nil inclusive: false.
+
+"The entries of list aListNumber, in store key order (empty for a list that holds no member): the
+ store keys (aListNumber, member key), the range of vector_backends.py list_bounds."
+PBVectorIndex >> _listEntries: aListNumber
+  | out |
+  out := OrderedCollection new.
+  self _listNodesOf: aListNumber do: [:node | out addLast: (self _entryOf: node)].
+  ^ out asArray.
+
+"The store nodes of list aListNumber, in store key order. The store is ordered by (list number,
+ member key) and the list numbers are Integers (-1 to nlist - 1), whose Integer order is their
+ order keys' order, so the walk bounds on the key's list number, an Integer compare, and visits
+ the nodes that list_bounds' tuple order keys, (j) and (j, a key above every rank), both
+ exclusive, bound, in the same order (tests/unit/vec_ivf.st checks this node for node)."
+PBVectorIndex >> _listNodesOf: aListNumber do: aBlock
+  PBAvl nodeDo: aBlock over: self store side: [:node | | j |
+    j := node key at: 1.
+    j < aListNumber ifTrue: [-1] ifFalse: [j > aListNumber ifTrue: [1] ifFalse: [0]]].
+
+"--- explain and validate (vector.py:323-425) ---"
+
+"The base entries plus dim, metric, backend, params (a PBFrozenDict of the pairs), entries (every
+ occurrence), vectors (the occurrences with a valid vector), members (distinct ones), invalid, and
+ the backend's own entries (vector.py explain)."
+PBVectorIndex >> _explained
+  | invalidCount |
+  invalidCount := self invalidCount.
+  ^ super _explained , {
+    'dim' -> self dim. 'metric' -> self metric. 'backend' -> self backend.
+    'params' -> (PBFrozenDict withAssociations: (self params asArray collect: [:pair | (pair at: 1) -> (pair at: 2)])).
+    'entries' -> self totalCount. 'vectors' -> (self totalCount - invalidCount). 'members' -> self memberCount.
+    'invalid' -> invalidCount } , (self _backend explainOf: self).
+
+"Whether aValue is an Integer that is not a Boolean, and at least aMinimum (Python's
+ type(v) is int and v >= minimum)."
+PBVectorIndex >> _isInt: aValue atLeast: aMinimum
+  ^ (PBVectorBackend _isInt: aValue) and: [aValue >= aMinimum].
+
+"Whether aVector, a stored vector, equals anActual, a canonical vector, as Python compares tuples:
+ both tuples, of one length, item by item with Python's == (_number:equals:)."
+PBVectorIndex >> _vector: aVector equals: anActual
+  (aVector isClassObject not and: [aVector isKindOf: PBTuple]) ifFalse: [^ false].
+  aVector size = anActual size ifFalse: [^ false].
+  1 to: aVector size do: [:i | (self class _number: (anActual at: i) equals: (aVector at: i)) ifFalse: [^ false]].
+  ^ true.
+
+"Whether aNumber (an Integer or a Float) equals aValue, a stored value, as Python's == compares
+ them: a Boolean is the int 1 or 0 (bool is a subclass of int), an Integer, a Float or a Decimal
+ compares exactly (0.0 = -0.0, a NaN equals nothing), and any other value is unequal."
+PBVectorIndex class >> _number: aNumber equals: aValue
+  aValue == true ifTrue: [^ aNumber = 1].
+  aValue == false ifTrue: [^ aNumber = 0].
+  (aValue isClassObject not and: [aValue isNumber or: [aValue isKindOf: Decimal]]) ifFalse: [^ false].
+  ^ aNumber = aValue.
+
+"The training state (vector.py _check_centroids): a tuple of centroids and an Integer
+ trained_size >= 0; none on a backend without lists; on ivf_flat, nlist centroids or none, a
+ trained_size that agrees, and each centroid a canonical vector of dim components."
+PBVectorIndex >> _checkCentroids
+  | centroids trained nlist |
+  centroids := self stateAt: 'centroids'.
+  trained := self stateAt: 'trained_size'.
+  ((centroids isClassObject not and: [centroids isKindOf: PBTuple]) and: [self _isInt: trained atLeast: 0]) ifFalse: [
+    ^ self _corrupt: 'malformed training state ' , (PBCodec _pyRepr: centroids) , ' / ' , (PBCodec _pyRepr: trained)].
+  self backend = 'ivf_flat' ifFalse: [
+    (centroids isEmpty and: [trained = 0]) ifFalse: [
+      ^ self _corrupt: 'a ' , (PBCodec _pyRepr: self backend) , ' index holds IVF centroids'].
+    ^ self].
+  nlist := self paramAt: 'nlist'.
+  (centroids notEmpty and: [centroids size ~= nlist]) ifTrue: [
+    ^ self _corrupt: centroids size printString , ' centroids for nlist=' , nlist printString].
+  centroids isEmpty = (trained = 0) ifFalse: [
+    ^ self _corrupt: 'trained_size ' , trained printString , ' does not match ' , centroids size printString , ' centroids'].
+  centroids do: [:c | | canonical |
+    canonical := PBVectorMath canonicalVector: c dim: self dim.
+    (canonical notNil and: [self _vector: c equals: canonical]) ifFalse: [
+      ^ self _corrupt: 'malformed centroid ' , (PBCodec _pyRepr: c)]].
+
+"The store's occurrences, counted into aStored (vector.py _check_store): the AVL invariants, then
+ for each entry a (list number, member key) key, an (element, count, vector) value, a positive
+ count, the element's own member key, its own vector, and the list its vector belongs to."
+PBVectorIndex >> _checkStore: aStored
+  | current backend seen |
+  PBAvl check: (self stateAt: 'store').
+  current := self hasMemberTokens.
+  backend := self _backend.
+  seen := 0.
+  PBAvl keysAndValuesDo: [:key :entry |
+    | element n vector actual expected id |
+    ((key isClassObject not and: [key isKindOf: PBTuple]) and: [key size = 2 and: [PBVectorBackend _isInt: (key at: 1)]]) ifFalse: [
+      ^ self _corrupt: 'malformed store key ' , (PBCodec _pyRepr: key)].
+    ((entry isClassObject not and: [entry isKindOf: PBTuple]) and: [entry size = 3]) ifFalse: [
+      ^ self _corrupt: 'malformed store entry ' , (PBCodec _pyRepr: entry)].
+    element := entry at: 1.
+    n := entry at: 2.
+    vector := entry at: 3.
+    (self _isInt: n atLeast: 1) ifFalse: [
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' has the count ' , (PBCodec _pyRepr: n)].
+    (self _memberKey: (key at: 2) matches: element current: current) ifFalse: [
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' is stored under the wrong member key '
+        , (PBCodec _pyRepr: (key at: 2))].
+    actual := self _vector: element.
+    (actual notNil and: [self _vector: vector equals: actual]) ifFalse: [
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' is stored with the vector ' , (PBCodec _pyRepr: vector)
+        , ', its key gives ' , (PBCodec _pyRepr: actual)].
+    expected := backend listFor: self vector: vector.
+    (key at: 1) = expected ifFalse: [
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' is in list ' , (key at: 1) printString
+        , ', its vector belongs to ' , expected printString].
+    id := self class _storedIdentity: element valid: true.
+    aStored at: id put: (aStored at: id ifAbsent: [0]) + n.
+    seen := seen + n] over: (self stateAt: 'store').
+  ^ seen.
+
+"The invalid group's occurrences, counted into aStored (vector.py _check_invalid): a (members,
+ total) pair, the AVL invariants, each entry an (element, count) pair with a positive count under
+ the element's own member key, no element with a valid vector, and a total that adds up."
+PBVectorIndex >> _checkInvalid: aStored
+  | group members total current seen |
+  group := self stateAt: 'invalid'.
+  ((group isClassObject not and: [group isKindOf: PBTuple]) and: [group size = 2]) ifFalse: [
+    ^ self _corrupt: 'malformed invalid group ' , (PBCodec _pyRepr: group)].
+  members := group at: 1.
+  total := group at: 2.
+  PBAvl check: members.
+  current := self hasMemberTokens.
+  seen := 0.
+  PBAvl keysAndValuesDo: [:key :entry |
+    | element n id |
+    ((entry isClassObject not and: [entry isKindOf: PBTuple]) and: [entry size = 2]) ifFalse: [
+      ^ self _corrupt: 'malformed invalid entry ' , (PBCodec _pyRepr: entry)].
+    element := entry at: 1.
+    n := entry at: 2.
+    (self _isInt: n atLeast: 1) ifFalse: [
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' has the count ' , (PBCodec _pyRepr: n)].
+    (self _memberKey: key matches: element current: current) ifFalse: [
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' is kept under the wrong member key '
+        , (PBCodec _pyRepr: key)].
+    (self _vector: element) isNil ifFalse: [
+      ^ self _corrupt: 'element ' , (PBCodec _pyRepr: element) , ' has a valid vector but is kept as invalid'].
+    id := self class _storedIdentity: element valid: false.
+    aStored at: id put: (aStored at: id ifAbsent: [0]) + n.
+    seen := seen + n] over: members.
+  (self class _number: seen equals: total) ifFalse: [
+    ^ self _corrupt: 'the invalid group records ' , (PBCodec _pyRepr: total) , ' occurrences but holds ' , seen printString].
+  ^ seen.
+
+"The identity of an occurrence in the stored multiset, ('vector' or 'invalid', element identity,
+ exact token): one order key, that of (the tag, member key)."
+PBVectorIndex class >> _storedIdentity: anElement valid: aBoolean
+  ^ PBKeys orderKey: (PBTuple _trustedOn: { aBoolean ifTrue: ['vector'] ifFalse: ['invalid']. PBMemberKeys memberKeyOf: anElement }).
+
+"Checks this index against the elements of aCollection (anything answering do:), as vector.py
+ validate does, in its order: the training state, the store, the invalid group, the total, and the
+ stored multiset of (valid or not, element, exact token) against that of the elements; anything
+ else is PBCorruptionError naming the index with proto_db's text. On an index written by format 3
+ (hasMemberTokens false) the member keys' tokens are not compared. A signalling-NaN Decimal
+ component is PBValidationError (DV7 b). Answers the index."
+PBVectorIndex >> validate: aCollection
+  | stored total expected extra missing |
+  self _checkCentroids.
+  stored := Dictionary new.
+  total := (self _checkStore: stored) + (self _checkInvalid: stored).
+  (self class _number: total equals: (self stateAt: 'total_count')) ifFalse: [
+    ^ self _corrupt: 'total_count is ' , (PBCodec _pyRepr: (self stateAt: 'total_count')) , ' but ' , total printString
+      , ' occurrences are stored'].
+  expected := Dictionary new.
+  aCollection do: [:element |
+    | id |
+    id := self class _storedIdentity: element valid: (self _vector: element) notNil.
+    expected at: id put: (expected at: id ifAbsent: [0]) + 1].
+  extra := 0.
+  missing := 0.
+  stored keysAndValuesDo: [:id :n | extra := extra + (n - (expected at: id ifAbsent: [0]) max: 0)].
+  expected keysAndValuesDo: [:id :n | missing := missing + (n - (stored at: id ifAbsent: [0]) max: 0)].
+  (extra = 0 and: [missing = 0]) ifFalse: [
+    ^ self _corrupt: extra printString , ' stored occurrences no element accounts for, ' , missing printString
+      , ' element occurrences not stored'].
+  ^ self.
 
 { PBIndex. PBKeyGroupIndex. PBEqualityIndex. PBRangeIndex. PBVectorIndex } do: [:each | PBTypeRegistry register: each].

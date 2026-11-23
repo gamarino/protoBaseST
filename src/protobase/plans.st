@@ -1,8 +1,8 @@
 "-- plans.st: the physical query plans, their estimates and explain --
 
 A port of proto_db's proto_db/query/plans.py at v2.0.0rc4, lines 75-880 (spec section 10, rulings
-R5 and R19, decisions D29, D30, D36 and D56), less ValuesScan, VectorSearch, GroupBy, Join and
-Unnest (design spec 3.2 and 3.3).
+R5 and R19, decisions D29, D30, D36 and D56), less ValuesScan, GroupBy, Join and Unnest (design
+spec 3.2 and 3.3); VectorSearch is the vectors phase's V6 (Addendum V, 2.7).
 
 Every plan is a PBQueryPlan, immutable once built and holding only immutable inputs (collection
 and index versions, frozen expressions, the caller's blocks), so it runs many times and on any
@@ -30,6 +30,9 @@ The nodes, by explain name:
   IndexLookup, IndexRange, IndexComplement, IndexOrderedScan
                       PBIndexPlan index: anIndex term: aTermOrNil part: aPBIndexPart, built by the
                       indexes' plan: and orderedPlan:descending:
+  VectorSearch        PBVectorSearch index: anIndex term: aNearTerm where: anExpressionOrNil:
+                      the elements an index answers for a near[] term, among those satisfying
+                      the residual predicate when there is one (ruling R27)
   Filter              PBFilter source: aPlan terms: anArray (the conjunction of anArray's
                       expressions, or the 0.1 list syntax: PBExpression compile:)
   BlockFilter         PBBlockFilter source: aPlan predicate: aPBBlockPredicate (proto_db's
@@ -66,6 +69,7 @@ Object subclass: #PBSortKey instanceVariableNames: 'key descending spec descript
 Object subclass: #PBQueryPlan.
 PBQueryPlan subclass: #PBCollectionScan instanceVariableNames: 'collection'.
 PBQueryPlan subclass: #PBIndexPlan instanceVariableNames: 'index term part'.
+PBQueryPlan subclass: #PBVectorSearch instanceVariableNames: 'index term where inner'.
 PBQueryPlan subclass: #_PBOneSourcePlan instanceVariableNames: 'source'.
 _PBOneSourcePlan subclass: #PBFilter instanceVariableNames: 'predicate'.
 _PBOneSourcePlan subclass: #PBBlockFilter instanceVariableNames: 'predicate'.
@@ -501,6 +505,75 @@ PBIndexPlan >> exactRows
 PBIndexPlan >> sortedRank: aKeySpec descending: aBoolean
   ^ part sortedRank: aKeySpec descending: aBoolean.
 
+"=== PBVectorSearch (plans.py VectorSearch, 389-436) =========================="
+
+"The elements anIndex answers for aTerm, a near[] term, optionally among those satisfying
+ aWhere, a residual predicate (an expression or the 0.1 list syntax, without near[]; ruling R27):
+ near(k) with aWhere is the k nearest among the elements satisfying it, not a post-filtered kNN.
+ Works with any index whose supports: accepts the term: it runs anIndex plan: aTerm, or
+ anIndex filteredPlan: aTerm where: aWhere, which then requires supportsFiltered: aTerm. Checked
+ in proto_db's order, with its texts: aTerm a near[] PBTerm (PBValidationError), supported
+ (PBNotSupportedError), aWhere free of near[] (PBValidationError) and restrictable
+ (PBNotSupportedError); the inner plan a PBQueryPlan."
+PBVectorSearch class >> index: anIndex term: aTerm where: aWhere
+  | expr near inner |
+  ((aTerm isClassObject not and: [aTerm isKindOf: PBTerm]) and: [aTerm op = PBTerm nearOperator]) ifFalse: [
+    ^ PBValidationError signal: 'VectorSearch needs a ''near[]'' term, not ' , (PBCodec _pyRepr: aTerm)].
+  (anIndex supports: aTerm) ifFalse: [
+    ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: (anIndex explain at: 'index' ifAbsent: [nil]))
+      , ' does not support ' , (PBCodec _pyRepr: aTerm)].
+  expr := nil.
+  aWhere isNil ifFalse: [
+    expr := PBExpression compile: aWhere.
+    near := nil.
+    expr termsDo: [:each | (near isNil and: [each op = PBTerm nearOperator]) ifTrue: [near := each]].
+    near isNil ifFalse: [
+      ^ PBValidationError signal: 'A VectorSearch residual predicate cannot hold ''near[]'' terms (' , (PBCodec _pyRepr: near) , ')'].
+    (anIndex supportsFiltered: aTerm) ifFalse: [
+      ^ PBNotSupportedError signal: 'Index ' , (PBKeySpec _repr: (anIndex explain at: 'index' ifAbsent: [nil]))
+        , ' cannot answer ' , (PBCodec _pyRepr: aTerm) , ' restricted to a predicate']].
+  inner := expr isNil ifTrue: [anIndex plan: aTerm] ifFalse: [anIndex filteredPlan: aTerm where: expr].
+  ^ self basicNew _setIndex: anIndex term: aTerm where: expr inner: (PBQueryPlan _check: inner owner: 'VectorSearch').
+
+PBVectorSearch >> _setIndex: anIndex term: aTerm where: anExpression inner: aPlan
+  "Runs once, on a fresh instance."
+  inner isNil ifFalse: [^ PBUserError signal: 'PBVectorSearch is immutable'].
+  index := anIndex.
+  term := aTerm.
+  where := anExpression.
+  inner := aPlan.
+  ^ self.
+
+PBVectorSearch >> index
+  ^ index.
+
+PBVectorSearch >> term
+  ^ term.
+
+"The residual predicate, a PBExpression, or nil."
+PBVectorSearch >> where
+  ^ where.
+
+"The index plan, the node's only child."
+PBVectorSearch >> inner
+  ^ inner.
+
+"The inner index plan's elements."
+PBVectorSearch >> do: aBlock
+  inner do: aBlock.
+
+"The inner plan's estimate."
+PBVectorSearch >> _estimateWith: aMemo
+  ^ inner _estimateIn: aMemo.
+
+"{ 'plan' -> 'VectorSearch'. 'index'. 'term'. ['where'.] 'estimate'. 'children' -> { the index
+ plan } }."
+PBVectorSearch >> _explainWith: aMemo
+  | params |
+  params := { 'index' -> index explain. 'term' -> term describe }.
+  where isNil ifFalse: [params := params , { 'where' -> where describe }].
+  ^ self _explain: 'VectorSearch' params: params children: { inner } memo: aMemo.
+
 "=== the nodes over one source ================================================"
 
 _PBOneSourcePlan >> _setSource: aPlan
@@ -516,11 +589,18 @@ _PBOneSourcePlan >> source
 
 "The source rows for which the conjunction of anArray's expressions holds: PBExpression compile:
  anArray, so anArray holds expressions or is the 0.1 list syntax; a lone expression is accepted as
- itself."
+ itself. A near[] term has no per-element semantics: an expression holding one is
+ PBValidationError (plans.py:458-462; a PBVectorSearch answers it). Checked in proto_db's order:
+ the expression is compiled, then checked for near[], then the source."
 PBFilter class >> source: aPlan terms: anArray
-  | expr |
-  PBQueryPlan _check: aPlan owner: 'PBFilter'.
+  | expr near |
+  "proto_db's order: compile, refuse near[], then check the source."
   expr := PBExpression compile: anArray.
+  near := nil.
+  expr termsDo: [:each | (near isNil and: [each op = PBTerm nearOperator]) ifTrue: [near := each]].
+  near isNil ifFalse: [
+    ^ PBValidationError signal: 'A Filter cannot evaluate ''near[]'' terms (' , (PBCodec _pyRepr: near) , '); use a VectorSearch plan'].
+  PBQueryPlan _check: aPlan owner: 'PBFilter'.
   ^ (self basicNew _setSource: aPlan) _setPredicate: expr.
 
 PBFilter >> _setPredicate: anExpression

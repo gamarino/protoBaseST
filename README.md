@@ -43,8 +43,8 @@ disjoint roots, and a third as many on one hot key ([docs/deviations.md](docs/de
 **Indexed queries (0.3.0).** Equality and range indexes that are part of a collection
 version, maintained by every mutator and by merges; the query front end (`PBQuery`, `PBField`),
 `proto_db`'s cost-based planner with the same plans and model costs, ordered reads, pages and
-counts by rank, all from `proto_db` `v2.0.0rc4`, on the same disk format. Vector indexes are
-excluded. Checked: `proto_db`'s query and plan vectors, its index contract over 200 seeds, a
+counts by rank, all from `proto_db` `v2.0.0rc4`, on the same disk format. Vector indexes came
+in 0.4.0 (below). Checked: `proto_db`'s query and plan vectors, its index contract over 200 seeds, a
 planned-equals-scan property over 5000 seeds and every collection kind, and its tests, each ported
 or justified (`tests/unit/queries_checklist.tsv`). The atom weight work that came with it (plan
 Tasks 11 and 12) cut the cells a stored index node keeps by about a third (stage 2 alone). Measured on one
@@ -52,6 +52,22 @@ quiet machine against `proto_db`: 3.5 to 35 times slower on every unit, and an i
 spends most of its time on index work (65 % with one index, 85 % with three)
 ([docs/deviations.md](docs/deviations.md#the-final-comparison-plan-task-10)). Start with
 [chapter 17](docs/tutorial/17-indexes.md) and [docs/queries.md](docs/queries.md).
+
+**Vector search (0.4.0).** Vector indexes (`'exact'` and `'ivf_flat'` searched; `'hnsw'` maintained,
+its search refused) that are part of a collection version like the others, `near[]` queries alone
+and combined with conditions, and the planner's `near[]` rules, all from `proto_db` `v2.0.0rc4`,
+on the same disk format. Every score is a correctly rounded sum, ported from CPython's `math.fsum`,
+and IVF training is `proto_db`'s pure-Python k-means operation for operation, so both
+implementations answer the same neighbours and write the same index bytes (on the same C library,
+for training). Checked against `proto_db`: index trees node by node and refusal texts byte for byte
+(101 indexes, every training of five growth histories), 4021 vector-math cases, 101 vector cases
+among the query vectors, its index contract for vector indexes, and its vector tests, each ported
+or justified. Measured on one machine against `proto_db`'s pure-Python mode, protoST 0.16.0: an
+exact query over 10^4 vectors takes 3.4 to 5.1 times as long, an IVF build 2.4 times, a commit to
+a vector-indexed collection 8.5 to 12.3 times
+([docs/deviations.md](docs/deviations.md#vectors)). An IVF index retrained in a cluster needs a
+lease longer than four times its retrain. Start with
+[chapter 20](docs/tutorial/20-vector-search.md).
 
 ## What it shows
 
@@ -103,17 +119,31 @@ spends most of its time on index work (65 % with one index, 85 % with three)
 
 | Component | Version | Source |
 |---|---|---|
-| protoCore | v3.6.0 | https://github.com/numaes/protoCore |
-| protoIO | v0.7.0 | https://github.com/gamarino/protoIO |
-| protoST | v0.12.0 | https://github.com/gamarino/protoST |
+| protoCore | v3.6.1 | https://github.com/numaes/protoCore |
+| protoIO | v0.7.1 | https://github.com/gamarino/protoIO |
+| protoST | v0.16.1 | https://github.com/gamarino/protoST |
 
-These are the minimum versions. The 0.3.0 suite, both soaks and the benchmarks ran on exactly
-these versions; the 0.2.0 suite also passed on protoCore 3.6.1 with protoST 0.13.0.
+These are the minimum versions: protoST 0.16.1 is the floor, and it is checked when the package
+loads: on an older protoST, `Import from: 'protobase'` signals `PBNotSupportedError` ("protoBaseST
+0.4.0 requires protoST 0.16.1 or later (protoIO 0.7.1)", with the missing capabilities;
+`src/protobase/floor.st`). A TCP cluster needs it: its helping
+waits run one message at a time (protoST S48), and protoIO 0.7.1 bounds a whole socket write by its
+timeout and reports how many bytes it wrote (S49), which together let `PBTcpTransport` end every
+turn, so an actor that waits while a connection is open is never buried under it (CHANGELOG,
+0.4.0, "Fixed"). The vector kernel calls protoST's `Float` fsum primitives (0.15.0) and its k-means
+distance primitive (0.16.0) directly; the Smalltalk kernel they replace is kept as the tests'
+oracle. The final 0.4.0 suite ran on protoST 0.16.1, protoCore 3.6.1 and protoIO 0.7.1 (the 0.3.0
+release was tested on protoCore 3.6.0 with protoST 0.12.0). The vector benchmarks of 0.4.0 ran on
+0.16.0, whose vector primitives 0.16.1 keeps unchanged.
 
-Build protoST 0.12.0 against protoCore 3.6.0 and protoIO 0.7.0 (see its own README); it provides
-`lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S40 and
+Build protoST 0.16.1 against protoCore 3.6.1 and protoIO 0.7.1 (see its own README); it provides
+`lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S49,
 `BinaryFile >> linkCount` and `FileReference >> realPath` (the hard-link refusal and the lock
-naming of the cluster logs), which this code relies on. The Python interop tests and the ERP demo also need a checkout of the
+naming of the cluster logs), the exact `Fraction` comparison and the ByteArray primitive that
+reads an unsigned Integer of any width from bytes (both from protoST 0.14.0), the `Float` fsum and
+k-means distance primitives (0.15.0 and 0.16.0), and the bounded helping wait and write timeout
+(0.16.1), which this code
+relies on. The Python interop tests and the ERP demo also need a checkout of the
 [protoBase repository](https://github.com/gamarino/ProtoDB), at the tag `v2.0.0rc4` (`v2.0.0rc2`
 before the cluster branch), and Python 3.12 or newer (3.11 before it; tested with 3.14):
 
@@ -161,6 +191,7 @@ program that checks its own results and is run by the tests.
 | [The tutorial, chapters 1-12](docs/tutorial/README.md) | A single process: first commit, values and versions, records, collections and queries, transactions and conflicts, blind writes, mutables and history, bytes, actors, crash recovery, Python interop, refusals. |
 | [Cluster mode, chapters 13-16](docs/tutorial/13-cluster-concepts.md) | Several processes sharing one database: [the ideas](docs/tutorial/13-cluster-concepts.md), [a three-node cluster](docs/tutorial/14-a-three-node-cluster.md), [failures and recovery](docs/tutorial/15-failures-and-recovery.md), [operating a cluster](docs/tutorial/16-operating-a-cluster.md). |
 | [Queries, chapters 17-19](docs/tutorial/17-indexes.md) **(0.3.0)** | [Indexes](docs/tutorial/17-indexes.md) and [queries and the planner](docs/tutorial/18-queries-and-plans.md) and [ordered reads and pages](docs/tutorial/19-ordered-reads-and-pages.md) run. |
+| [Vector search, chapter 20](docs/tutorial/20-vector-search.md) **(0.4.0)** | Nearest-neighbour search with vector indexes, combined with conditions; why the scores are correctly rounded sums; why `x ** 2` is not `x * x`; IVF-Flat and its recall. |
 | [A small ERP](docs/tutorial/erp.md) | A guided build of a real application, with the reasoning at each step. |
 | [Coming from GemStone/S](docs/tutorial/gemstone.md), [Coming from Soil](docs/tutorial/soil.md) | Orientation for readers who know those systems. |
 
@@ -182,12 +213,14 @@ SmallInteger milliseconds, not float seconds.
 | `DBObject`, `MutableObject` | `PBObject`, `PBMutableObject` |
 | `List`, `Dictionary`, `HashDictionary` | `PBList`, `PBDictionary`, `PBHashDictionary` |
 | `Set`, `CountedSet`, `RepeatedKeysDictionary` | `PBSet`, `PBCountedSet`, `PBRepeatedKeysDictionary` |
-| `EqualityIndex`, `RangeIndex`, `VectorIndex` | `PBEqualityIndex`, `PBRangeIndex`, `PBVectorIndex` (read only) |
+| `EqualityIndex`, `RangeIndex`, `VectorIndex` | `PBEqualityIndex`, `PBRangeIndex`, `PBVectorIndex` (0.4.0: maintained, its collections written and merged, searched; hnsw search refused) |
 | `FrozenList`, `FrozenDict`, `MISSING`, a Python tuple | `PBFrozenList`, `PBFrozenDict`, `PBMissing`, `PBTuple` |
 | `OpaqueAtom` | `PBOpaqueAtom` |
 | `KeySpec`, `Term`, `And`, `Or`, `Not`, `PythonPredicate` | `PBKeySpec`, `PBTerm`, `PBAnd`, `PBOr`, `PBNot`, `PBBlockPredicate` |
 | `F`, `Field`; `Queryable` | `PBField`; `PBQuery` |
 | `PythonFilter` (an `explain` node) | `BlockFilter` (`PBBlockFilter`) |
+| `NearQuery`, `VectorSearch` **(0.4.0)** | `PBNearQuery`, `PBVectorSearch` (chosen by the planner; [Addendum V](docs/superpowers/specs/2026-11-19-vectors-addendum.md)) |
+| `F.vec.near(v, k=5)` **(0.4.0)** | `(PBField path: 'vec') near: v k: 5` |
 | `ProtoValidationError`, `ProtoCorruptionError`, `ProtoNotSupportedError`, `ProtoConflictError`, `ProtoTimeoutError`, `ProtoOutcomeUnknownError`, `ProtoUserError`, `ProtoClosedError` | `PBValidationError`, `PBCorruptionError`, `PBNotSupportedError`, `PBConflictError`, `PBTimeoutError`, `PBOutcomeUnknownError`, `PBUserError`, `PBClosedError` |
 
 ### Messages
@@ -236,7 +269,7 @@ because `proto_db` has none; the tutorial shows the three-line helper.
 
 If a value, type, version or operation cannot be stored or done exactly, protoBaseST signals an
 error naming it. It does not store something else in its place. A `Symbol` longer than six bytes,
-a protoST `Dictionary` (its order is unspecified), a `Fraction`, a write to a collection holding a vector index,
+a protoST `Dictionary` (its order is unspecified), a `Fraction`, a write to a collection holding an unknown index kind,
 a wall clock in an IANA zone: each is refused, and each refusal protects a specific property of
 the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cost of each.
 
@@ -245,12 +278,12 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 | | |
 |---|---|
 | [docs/tutorial/erp.md](docs/tutorial/erp.md) | A guided build of a small ERP, with the reasoning at each step. Every snippet is run by the tests. |
-| [docs/tutorial/](docs/tutorial/README.md) | The chaptered tutorial: chapters 1-12 on a single process, chapters 13-16 on cluster mode, chapters 17-19 on indexed queries, each quoting a program of `examples/tutorial/` or `examples/cluster/`; and two orientation chapters, coming from GemStone/S and coming from Soil, with their sources. |
+| [docs/tutorial/](docs/tutorial/README.md) | The chaptered tutorial: chapters 1-12 on a single process, chapters 13-16 on cluster mode, chapters 17-19 on indexed queries, chapter 20 on vector search (0.4.0), each quoting a program of `examples/tutorial/` or `examples/cluster/`; and two orientation chapters, coming from GemStone/S and coming from Soil, with their sources. |
 | [examples/cluster/](examples/cluster/README.md) | The cluster chapters' programs, run by the tests; `pending/` is for those that need API still being built (none today). |
 | [examples/tutorial/](examples/tutorial/README.md) | Small programs, one concept each, each checking its own results; run by the tests. |
 | [docs/reference.md](docs/reference.md) | Every public class and message, the indexed-query API and pagers included. |
-| [docs/queries.md](docs/queries.md) | **0.3.0:** indexed queries and the query planner, the conceptual guide, including how to read `explain`. |
-| [examples/queries/](examples/queries/README.md) | **0.3.0:** the programs of the guide, run as tests; `pending/` is empty. |
+| [docs/queries.md](docs/queries.md) | **0.3.0:** indexed queries and the query planner, the conceptual guide, including how to read `explain`; **0.4.0:** vector search, with a worked vector plan. |
+| [examples/queries/](examples/queries/README.md) | **0.3.0:** the programs of the guide, run as tests; **0.4.0:** `vector_search.st` and `vector_plans.st`; `pending/` is empty. |
 | [docs/deviations.md](docs/deviations.md) | Every refusal and every difference from `proto_db`. |
 | [docs/not-done.md](docs/not-done.md) | What is not done, and what is not proven. |
 | [docs/decisions.md](docs/decisions.md) | The choices, with what each costs if it is wrong. |
@@ -260,12 +293,13 @@ the file. [docs/deviations.md](docs/deviations.md) lists all of them and the cos
 
 ## Running the tests
 
-The tests need protoST 0.12.0 or newer (see Requirements). Point `PROTOST` at the binary:
+The tests need protoST 0.16.1 or newer (see Requirements). Point `PROTOST` at the binary:
 
 ```sh
 export PROTOST=../protoST/build_release/protost      # default: protost from PATH
 tests/conformance/fetch_vectors.sh                    # only to re-vendor the format-4 vectors (they are already in the repository)
 PYTHON=python3.14 tests/interop/setup_venv.sh         # Python side of the interop tests (needs the checkout above)
+PYTHON=python3.14 tests/interop/setup_venv_numpy.sh   # proto_db in its default mode, with numpy (the vector tests that hand spaces both ways)
 tests/run_tests.sh                                    # everything under tests/ and examples/, less tests/audit
 tests/run_tests.sh tests/unit tests/docs              # or chosen paths
 tests/run_tests.sh tests/audit                        # the cluster's timer audit alone (measured: 2 h 22 min)

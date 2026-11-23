@@ -12,10 +12,12 @@
  PBMisfiledError (D58). The format-3 index rebuild after a change (indexed queries,
  plan Task 4a): the only format-3 key-group index, 'e' of 'numbers', indexes those
  zone datetimes, so the first change, which rebuilds it from the elements, is the
- fourth expected refusal (PBNotSupportedError naming the zone)."
+ fourth expected refusal (PBNotSupportedError naming the zone). The format-3 vector index 'near'
+ of 'vectors' (vectors phase V5) is rebuilt by the first change of its List, node for node as
+ proto_db's rebuilt_stale (empty build:, then the change's hook)."
 Import from: 'protobase'.
 Import from: '_vectors'.
-| manifest section contents dir space db snap failures refusals expectedRefusals check rebuild |
+| manifest section contents dir space db snap failures refusals expectedRefusals check rebuild vectorsRebuild |
 manifest := Vectors manifest.
 section := manifest at: 'legacy_database'.
 contents := section at: 'contents'.
@@ -80,6 +82,36 @@ rebuild := [((snap getRootObject: 'numbers') getIndex: 'e') hasMemberTokens
 rebuild isNil ifFalse: [
   failures := failures + 1.
   ('FAIL index rebuild of numbers: ' , rebuild) displayNl].
+"The format-3 vector index 'near' of 'vectors' (an exact l2 index, generate.py _fill_legacy):
+ vectors phase V5. A blind change (extend: of nothing) keeps it, the same object; the first
+ change (appendLast: of its first element again) rebuilds it as proto_db's rebuilt_stale does:
+ empty build: over the elements, then the change's hook (withAdded:). The rebuilt index must be
+ that one node for node (every node's key, value, height and count, recursively), hold current
+ tokens and validate. tests/interop/vector_ops_identical.sh compares the same rebuild with
+ proto_db's own, byte for byte."
+vectorsRebuild := [
+  | old blind first changed rebuilt expected shape |
+  old := snap getRootObject: 'vectors'.
+  blind := old extend: #().
+  first := old getAt: 0.
+  changed := old appendLast: first.
+  rebuilt := changed getIndex: 'near'.
+  expected := ((old getIndex: 'near') empty build: old) withAdded: first.
+  shape := nil.
+  shape := [:node | node isNil
+    ifTrue: [nil]
+    ifFalse: [{ node key. node value. node height. node count. shape value: node left. shape value: node right }]].
+  { (old getIndex: 'near') hasMemberTokens. blind == old. rebuilt hasMemberTokens. rebuilt totalCount.
+    rebuilt memberCount. rebuilt invalidCount.
+    (shape value: rebuilt store) = (shape value: expected store).
+    (shape value: ((rebuilt invalid at: 1))) = (shape value: (expected invalid at: 1)).
+    changed validate == changed }]
+  on: Error do: [:e | e return: e class name , ': ' , e messageText].
+vectorsRebuild = #(false true true 4 2 1 true true true)
+  ifTrue: ['REBUILT format-3 vector index near of vectors: node for node as empty build: then withAdded:' displayNl]
+  ifFalse: [
+    failures := failures + 1.
+    ('FAIL format-3 vector index rebuild of vectors: ' , vectorsRebuild printString) displayNl].
 space close.
 dir deleteAll.
 failures > 0

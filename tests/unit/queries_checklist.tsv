@@ -89,10 +89,10 @@ test_terms.py::test_in	ported	tests/unit/qry_terms.st	in over sequences and sets
 test_terms.py::test_unorderable_keys_only_match_presence_and_not_equal	ported	tests/unit/qry_terms.st	unorderable keys, the element itself and paths
 test_terms.py::test_path_none_is_the_element_itself	ported	tests/unit/qry_terms.st	unorderable keys, the element itself and paths
 test_terms.py::test_dotted_and_extractor_paths	ported	tests/unit/qry_terms.st	unorderable keys, the element itself and paths
-test_terms.py::test_near_is_not_answered_by_the_scan_oracle	n/a	excluded: vector	The near[] operator is excluded by spec 3.3 and refuses with PBNotSupportedError.
-test_terms.py::test_near_values_are_canonical_and_hashable	n/a	excluded: vector	The near[] operator is excluded by spec 3.3 and refuses with PBNotSupportedError.
-test_terms.py::test_near_query_validation	n/a	excluded: vector	The near[] operator is excluded by spec 3.3 and refuses with PBNotSupportedError.
-test_terms.py::test_near_terms_need_a_near_query	n/a	excluded: vector	The near[] operator is excluded by spec 3.3 and refuses with PBNotSupportedError.
+test_terms.py::test_near_is_not_answered_by_the_scan_oracle	ported	tests/unit/vec_terms.st	matches: of a near[] term is PBNotSupportedError
+test_terms.py::test_near_values_are_canonical_and_hashable	ported	tests/unit/vec_terms.st	near queries are frozen values with Python's float equality
+test_terms.py::test_near_query_validation	ported	tests/unit/vec_terms.st	PBNearQuery validation is proto_db's
+test_terms.py::test_near_terms_need_a_near_query	ported	tests/unit/vec_terms.st	near[] terms take a PBNearQuery or a mapping of its fields
 test_terms.py::test_in_over_a_set_is_stored_in_a_canonical_order	ported	tests/unit/qry_terms.st	in over sequences and sets
 test_terms.py::test_invalid_terms_are_rejected	ported	tests/unit/qry_terms.st	invalid terms are refused
 test_terms.py::test_describe	ported	tests/unit/qry_terms.st	describe and display values
@@ -114,7 +114,7 @@ test_expressions.py::test_evaluate_truth_tables	ported	tests/unit/qry_expression
 test_expressions.py::test_not_of_a_comparison_on_a_missing_key_is_true	ported	tests/unit/qry_expressions.st	evaluate: is the scan oracle and short-circuits
 test_expressions.py::test_mixed_types_and_equal_but_distinct_values	ported	tests/unit/qry_expressions.st	evaluate: is the scan oracle and short-circuits
 test_expressions.py::test_and_or_short_circuit	ported	tests/unit/qry_expressions.st	evaluate: is the scan oracle and short-circuits
-test_expressions.py::test_evaluate_near_is_not_a_scan_predicate	n/a	excluded: vector	The near[] operator is excluded by spec 3.3 and refuses with PBNotSupportedError.
+test_expressions.py::test_evaluate_near_is_not_a_scan_predicate	ported	tests/unit/vec_terms.st	evaluate: refuses a near[] term it reaches
 test_expressions.py::test_evaluate_rejects_non_expressions	n/a	Python-only API	evaluate is a function of any object in proto_db; in protoST evaluate: is a message every PBExpression answers, so no other object reaches it to be refused.
 test_expressions.py::test_contains_semantics	ported	tests/unit/qry_expressions.st	contains and truthiness
 test_expressions.py::test_truthiness_operators	ported	tests/unit/qry_expressions.st	contains and truthiness
@@ -152,10 +152,10 @@ test_planner.py::test_order_by_two_keys_sorts_even_with_an_index_on_the_first	po
 test_planner.py::test_selective_where_then_sort_beats_ordered_scan	ported	tests/unit/qry_planner.st	a selective condition then a Sort beats an ordered scan; on one key, the cost decides
 test_planner.py::test_range_and_order_on_the_same_key_picks_by_cost	ported	tests/unit/qry_planner.st	a selective condition then a Sort beats an ordered scan; on one key, the cost decides
 test_planner.py::test_limit_and_offset_apply_after_ordering	ported	tests/unit/qry_planner.st	limit and offset apply after the order
-test_planner.py::test_near_without_index_raises	n/a	excluded: vector	The kNN planner rules are excluded by spec 3.3, never ported.
-test_planner.py::test_near_with_index_uses_vector_search_never_a_filter	n/a	excluded: vector	The kNN planner rules are excluded by spec 3.3, never ported.
-test_planner.py::test_near_in_a_disjunction_forces_a_union_with_a_filtered_scan_branch	n/a	excluded: vector	The kNN planner rules are excluded by spec 3.3, never ported.
-test_planner.py::test_near_where_with_order_by_never_filters_on_the_ordered_scan	n/a	excluded: vector	The kNN planner rules are excluded by spec 3.3, never ported.
+test_planner.py::test_near_without_index_raises	ported	tests/unit/vec_planner.st	a near[] term no index supports is PBNotSupportedError, never a filtered scan
+test_planner.py::test_near_with_index_uses_vector_search_never_a_filter	ported	tests/unit/vec_planner.st	near[] is answered by a VectorSearch, near(k) AND P inside it, never by a filter
+test_planner.py::test_near_in_a_disjunction_forces_a_union_with_a_filtered_scan_branch	ported	tests/unit/vec_planner.st	near[] in a disjunction forces a Union; a negated near[] is PBNotSupportedError
+test_planner.py::test_near_where_with_order_by_never_filters_on_the_ordered_scan	ported	tests/unit/vec_planner.st	an order over near[] sorts the VectorSearch, never an ordered index scan
 test_planner.py::test_explain_is_exactly_the_executed_node_tree	ported	tests/unit/qry_planner.st	explain is exactly the node tree the plan runs, and is deterministic
 test_planner.py::test_planning_is_per_version	ported	tests/unit/qry_planner.st	planning is per version: a plan keeps answering for its version
 test_planner.py::test_property_planned_result_equals_the_scan	ported	tests/unit/qry_prop_equals_scan.st	the planned result equals the scan, as a multiset and sorted by the order keys, over every collection kind, reloaded and read by concurrent actors
@@ -184,7 +184,7 @@ test_linq.py::test_mixed_and_with_several_parts	ported	tests/unit/qry_query.st	t
 test_linq.py::test_or_or_not_with_a_lambda_is_one_whole_python_filter	ported	tests/unit/qry_query.st	the mixing rule: a block is a BlockFilter; a top-level AND sends its pure conjuncts to the planner and each block to its own BlockFilter on top; an OR or NOT holding a block is one BlockFilter
 test_linq.py::test_untranslatable_field_extras_become_python_filters	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_computed_values_follow_missing_and_none_semantics	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
-test_linq.py::test_near_without_a_vector_index_raises_instead_of_falling_back	n/a	excluded: vector	The near[] operator is excluded by spec 3.3, never ported.
+test_linq.py::test_near_without_a_vector_index_raises_instead_of_falling_back	ported	tests/unit/vec_query.st	near[] without a vector index is PBNotSupportedError, never a scan, nor run inside a block
 test_linq.py::test_errors_raised_by_user_code_propagate	ported	tests/unit/qry_query.st	errors raised by user code propagate from where:, collect: and orderBy: blocks, through every terminal
 test_linq.py::test_between_inclusive_default	ported	tests/unit/qry_query.st	between:and: includes both bounds, betweenOpen:and: neither, the half-open forms one
 test_linq.py::test_between_exclusive	ported	tests/unit/qry_query.st	between:and: includes both bounds, betweenOpen:and: neither, the half-open forms one
@@ -213,10 +213,10 @@ test_linq.py::test_iteration_executes_the_explained_plan	ported	tests/unit/qry_q
 test_linq.py::test_values_scan_and_distinct_nodes	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_missing_is_public_api	n/a	Python-only API	Checks Python module exports or bound-method misuse, with no protoST equivalent.
 test_linq.py::test_builder_names_are_child_fields_not_internals	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
-test_linq.py::test_bound_builder_methods_are_rejected_as_keys_and_predicates	n/a	Python-only API	Checks Python module exports or bound-method misuse, with no protoST equivalent.
+test_linq.py::test_bound_builder_methods_are_rejected_as_keys_and_predicates	n/a	Python-only API	A Python bound method such as F.v.near passed as a key or predicate has no protoST counterpart: a selector is not a value, so PBField near: cannot be passed unsent, and every key or condition PBQuery takes is checked by its kind.
 test_linq.py::test_group_by_key_rename_keeps_any_aggregation_name	n/a	deferred: spec 3.2	GroupBy, Join, Unnest, ValuesScan and computed values are deferred by spec section 3.2.
 test_linq.py::test_impure_leading_predicate_still_lets_the_planner_order	ported	tests/unit/qry_query.st	the mixing rule: a block is a BlockFilter; a top-level AND sends its pure conjuncts to the planner and each block to its own BlockFilter on top; an OR or NOT holding a block is one BlockFilter
-test_linq.py::test_near_and_lambda_split_like_two_wheres	n/a	excluded: vector	The near[] operator is excluded by spec 3.3, never ported.
+test_linq.py::test_near_and_lambda_split_like_two_wheres	ported	tests/unit/vec_query.st	near(k) and a block: accepted by where:, refused by the planner without a vector index; near[] OR a block refused by where:
 test_linq.py::test_in_rejects_a_mapping	ported	tests/unit/qry_field.st	in: takes a collection of values, never a map or a String; any other collection is read as a sequence; a between needs bounds of one rank
 test_linq.py::test_queryable_of_a_queryable_keeps_its_operators	ported	tests/unit/qry_query.st	sources: a collection, its scan, another plan or a query (answered as is); anything else is PBValidationError; a query over a collection answers its rows
 test_pager.py::test_ranked_pages_equal_the_ordered_result	ported	tests/unit/qry_pager.st	ranked pages equal the ordered result
@@ -238,36 +238,36 @@ test_pager.py::test_extractor_tokens_resume_in_processes_with_other_hash_seeds	n
 test_pager.py::test_a_forged_atom_operand_in_a_token_is_a_client_error	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
 test_pager.py::test_a_pager_whose_plan_has_no_structured_digest_has_no_token	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
 test_pager.py::test_resume_reads_the_database_identity_once_per_handle	n/a	deferred: tokens	Portable pager tokens and snapshot references are deferred by spec 3.2 (IQ7).
-test_vector_index.py::test_definition_type_names_and_validation	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_supports_only_near_on_its_key_with_matching_dimension_and_metric	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_exact_backend_equals_brute_force	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_exact_backend_equals_brute_force_at_extreme_magnitudes	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_results_are_nearest_first_and_ties_follow_the_member_key	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_duplicates_are_counted_and_equal_values_come_back_exactly	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_invalid_vectors_are_kept_aside_and_never_returned	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_zero_vectors_have_cosine_similarity_zero	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_with_removed_of_an_absent_element_raises	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_ivf_flat_with_full_probe_equals_exact	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_ivf_flat_trains_on_growth_and_stays_consistent	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_ivf_flat_partial_probe_has_good_recall_and_widens_for_k	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_ivf_flat_training_depends_on_the_data_and_seed_only	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_ivf_flat_round_trip_through_file_storage_keeps_centroids	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_validate_detects_structural_corruption	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_near_k_and_predicate_returns_k_among_the_matching	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_near_k_with_threshold_and_predicate_and_threshold_only_post_filter	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_several_near_terms_and_disjunctions_keep_set_semantics	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_oracle_with_predicate_callable_and_expression_agree	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_commit_through_a_transaction_and_query_after_reopen	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_linq_near_k_and_lambda_is_k_nearest_among_the_lambda_matches	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_python_predicate_expression_node	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_eight_threads_query_one_version	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_missing_hnswlib_raises_not_supported_at_first_use	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_importing_the_vector_modules_does_not_import_hnswlib	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_hnsw_recall_at_10_on_2000_random_vectors	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_hnsw_index_contract_in_a_child_process	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_hnsw_cache_under_eight_concurrent_readers_and_predicates	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_vector_contract_rejects_broken_variants	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
-test_vector_index.py::test_closing_a_space_releases_its_derived_vector_structures	n/a	excluded: vector	PBVectorIndex writes, training and search are excluded by spec 3.3, never ported.
+test_vector_index.py::test_definition_type_names_and_validation	ported	tests/unit/vec_index.st	the definition is validated in proto_db's order, with its texts
+test_vector_index.py::test_supports_only_near_on_its_key_with_matching_dimension_and_metric	ported	tests/unit/vec_exact.st	supports: answers near[] on its own key, its dimension and its metric only
+test_vector_index.py::test_exact_backend_equals_brute_force	ported	tests/unit/vec_exact.st	the exact backend answers what the brute force answers, for every metric, k and threshold
+test_vector_index.py::test_exact_backend_equals_brute_force_at_extreme_magnitudes	ported	tests/unit/vec_exact.st	the exact backend answers what the brute force answers at extreme magnitudes
+test_vector_index.py::test_results_are_nearest_first_and_ties_follow_the_member_key	ported	tests/unit/vec_exact.st	results come nearest first and ties follow the member key
+test_vector_index.py::test_duplicates_are_counted_and_equal_values_come_back_exactly	ported	tests/unit/vec_exact.st	duplicates are counted and equal values come back exactly
+test_vector_index.py::test_invalid_vectors_are_kept_aside_and_never_returned	ported	tests/unit/vec_exact.st	invalid vectors are kept aside and never returned
+test_vector_index.py::test_zero_vectors_have_cosine_similarity_zero	ported	tests/unit/vec_math.st	zero vectors have cosine similarity zero; l2 and ip of small vectors
+test_vector_index.py::test_with_removed_of_an_absent_element_raises	ported	tests/unit/vec_index.st	withRemoved: of an element the index does not hold is PBValidationError
+test_vector_index.py::test_ivf_flat_with_full_probe_equals_exact	ported	tests/unit/vec_ivf.st	an ivf_flat index probing every list answers what the exact index answers
+test_vector_index.py::test_ivf_flat_trains_on_growth_and_stays_consistent	ported	tests/unit/vec_ivf.st	an ivf_flat index grown and shrunk answers what the brute force answers
+test_vector_index.py::test_ivf_flat_partial_probe_has_good_recall_and_widens_for_k	ported	tests/unit/vec_ivf.st	a partial probe has good recall and widens for k
+test_vector_index.py::test_ivf_flat_training_depends_on_the_data_and_seed_only	ported	tests/unit/vec_ivf.st	ivf_flat answers depend on the data and the seed only
+test_vector_index.py::test_ivf_flat_round_trip_through_file_storage_keeps_centroids	ported	tests/unit/vec_ivf.st	an ivf_flat index keeps its centroids and answers through a file storage
+test_vector_index.py::test_validate_detects_structural_corruption	ported	tests/unit/vec_ivf.st	validate: catches tampering on an ivf_flat index, a removed centroid included
+test_vector_index.py::test_near_k_and_predicate_returns_k_among_the_matching	ported	tests/unit/vec_plans.st	near(k) with a residual predicate answers k among the matching
+test_vector_index.py::test_near_k_with_threshold_and_predicate_and_threshold_only_post_filter	ported	tests/unit/vec_plans.st	a threshold with a predicate, and a threshold-only search under a Filter, answer the oracle
+test_vector_index.py::test_several_near_terms_and_disjunctions_keep_set_semantics	ported	tests/unit/vec_plans.st	several near[] terms and disjunctions keep set semantics
+test_vector_index.py::test_oracle_with_predicate_callable_and_expression_agree	ported	tests/unit/vec_plans.st	the oracle restricted by an expression, the list syntax or a block agrees
+test_vector_index.py::test_commit_through_a_transaction_and_query_after_reopen	ported	tests/unit/vec_query.st	a vector-indexed list committed, reopened and queried through the planner and the front end
+test_vector_index.py::test_linq_near_k_and_lambda_is_k_nearest_among_the_lambda_matches	ported	tests/unit/vec_query.st	near(k) and a block in the leading where: steps is the k nearest among the block's matches
+test_vector_index.py::test_python_predicate_expression_node	ported	tests/unit/vec_query.st	a block predicate is an opaque, comparable expression node a filter evaluates
+test_vector_index.py::test_eight_threads_query_one_version	ported	tests/unit/vec_plans.st	eight actors reading one version, and its loaded stub, get the twin's answers
+test_vector_index.py::test_missing_hnswlib_raises_not_supported_at_first_use	ported	tests/unit/vec_plans.st	an hnsw search is refused at its first execution, not before
+test_vector_index.py::test_importing_the_vector_modules_does_not_import_hnswlib	n/a	Python-only API	Python import mechanics and the GIL state of CPython 3.14t have no protoST counterpart.
+test_vector_index.py::test_hnsw_recall_at_10_on_2000_random_vectors	n/a	deviation: DV1	It searches an hnsw index, and hnsw search is refused (ruling VQ1, DV1).
+test_vector_index.py::test_hnsw_index_contract_in_a_child_process	n/a	deviation: DV1	It searches an hnsw index, and hnsw search is refused (ruling VQ1, DV1).
+test_vector_index.py::test_hnsw_cache_under_eight_concurrent_readers_and_predicates	n/a	deviation: DV1	It searches an hnsw index, and hnsw search is refused (ruling VQ1, DV1).
+test_vector_index.py::test_vector_contract_rejects_broken_variants	ported	tests/unit/vec_contract_ivf.st	every planted vector defect is rejected by planMatchesScan
+test_vector_index.py::test_closing_a_space_releases_its_derived_vector_structures	n/a	deviation: DV4	protoBaseST keeps no derived-structure cache to release (DV4, Addendum V section 4).
 test_query_cache.py::test_equal_queries_on_one_version_share_a_key_and_an_entry	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
 test_query_cache.py::test_a_commit_to_the_collection_changes_the_key_and_another_root_does_not	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
 test_query_cache.py::test_exact_operands_give_distinct_keys	n/a	deferred: cache	The query result cache is deferred by spec 3.2 until the planner is measured.
@@ -301,3 +301,61 @@ test_index_weights_concurrency.py::test_weights_are_exact_after_concurrent_merge
 test_indexed_roots.py::test_appends_to_an_indexed_list	ported	tests/unit/idx_indexed_roots.st	appends to an indexed List from 4 actors: each record once, in its writer's order; the indexes answer like a scan
 test_indexed_roots.py::test_blind_set_at_on_an_indexed_dictionary	ported	tests/unit/idx_indexed_roots.st	blind setAt: into an indexed Dictionary from 4 actors: every own key, a written value on each shared key, no conflict; the indexes answer like a scan
 test_pager_stability.py::test_pagers_and_cached_queries_stay_on_their_snapshot_under_writers	ported	tests/unit/qry_pager_stability.st	every reader saw exactly its snapshot's rows on every pager: none twice, none skipped
+
+# Vectors phase (Addendum V, section 5.4): the files with vector tests the list did not name, and (V0 fix round 1) the query-scope tests it never listed.
+# test_plans.py: the plan operators (queries Task 6) and its two vector tests.
+test_plans.py::test_collection_scan_explain_has_estimate_and_children	ported	tests/unit/qry_plans.st	a collection scan executes, estimates and explains as proto_db, empty or not
+test_plans.py::test_index_plan_lookup_range_and_ordered_scan	ported	tests/unit/qry_index_plans.st	presence, equality and unorderable keys answer like a scan; ordered scans follow the total order
+test_plans.py::test_vector_search_wraps_the_index_plan	ported	tests/unit/vec_plans.st	PBVectorSearch wraps the index plan; the estimates are proto_db's, bit for bit
+test_plans.py::test_filter_matches_reference_and_estimates_selectivity	ported	tests/unit/qry_plans.st	Filter keeps half per term: And multiplies, Or is 1 - prod(1 - s), Not is 1 - s; BlockFilter is one term
+test_plans.py::test_filter_accepts_prefix_lists_and_rejects_near	ported	tests/unit/vec_terms.st	PBFilter takes prefix lists and refuses near[]
+test_plans.py::test_python_filter_is_explicit_and_never_swallows	ported	tests/unit/qry_plans.st	a BlockFilter is explicit and never swallows an error of its block
+test_plans.py::test_union_max_multiplicity_and_equal_but_distinct_values	ported	tests/unit/qry_plans.st	Union keeps the largest multiplicity and Intersect the smallest, by element identity
+test_plans.py::test_union_of_same_element_from_two_branches_yields_it_once	ported	tests/unit/qry_plans.st	Union keeps the largest multiplicity and Intersect the smallest, by element identity
+test_plans.py::test_intersect_min_multiplicity	ported	tests/unit/qry_plans.st	Union keeps the largest multiplicity and Intersect the smallest, by element identity
+test_plans.py::test_union_intersect_need_two_plans	ported	tests/unit/qry_plans.st	Union keeps the largest multiplicity and Intersect the smallest, by element identity
+test_plans.py::test_union_intersect_with_unorderable_elements_and_atoms	ported	tests/unit/qry_plans.st	Union and Intersect keep unorderable elements: lists, maps and NaN
+test_plans.py::test_project_fields_mapping_and_function	ported	tests/unit/qry_plans.st	Project of fields answers maps without the absent fields, and of a block its answers
+test_plans.py::test_sort_is_stable_total_and_puts_unorderable_last	ported	tests/unit/qry_plans.st	Sort is stable and total, unorderable keys last; descending reverses the keys, ties in input order
+test_plans.py::test_sort_multi_key_and_function_keys	ported	tests/unit/qry_plans.st	Sort is stable and total, unorderable keys last; descending reverses the keys, ties in input order
+test_plans.py::test_limit_offset_and_estimate	ported	tests/unit/qry_plans.st	Limit seeks its window by rank over an ordered scan, and skips rows otherwise
+test_plans.py::test_count_yields_one_int	ported	tests/unit/qry_plans.st	Count reads the count of an index plan by rank and counts any other source
+test_plans.py::test_group_by_with_aggregations	n/a	deferred: spec 3.2	GroupBy is not ported: spec 3.2 defers it with Join and Unnest.
+test_plans.py::test_group_by_merges_equal_keys_and_keeps_missing_apart	n/a	deferred: spec 3.2	GroupBy is not ported: spec 3.2 defers it with Join and Unnest.
+test_plans.py::test_group_by_rejects_bad_specs_and_values	n/a	deferred: spec 3.2	GroupBy is not ported: spec 3.2 defers it with Join and Unnest.
+test_plans.py::test_join_inner_and_left	n/a	deferred: spec 3.2	Join is not ported: spec 3.2 defers it with GroupBy and Unnest.
+test_plans.py::test_unnest	n/a	deferred: spec 3.2	Unnest is not ported: spec 3.2 defers it with GroupBy and Join.
+test_plans.py::test_plans_are_immutable	ported	tests/unit/qry_plans.st	plans are immutable, and a composed plan explains as nested children
+test_plans.py::test_composed_plan_explain_is_nested	ported	tests/unit/qry_plans.st	plans are immutable, and a composed plan explains as nested children
+test_plans.py::test_concurrent_execution_gives_identical_results	ported	tests/unit/qry_plans.st	one composed plan gives identical results on 8 actors at once
+test_plans.py::test_explain_computes_each_estimate_once	ported	tests/unit/qry_plans.st	one explain computes each estimate once
+test_plans.py::test_sort_and_group_by_label_each_callable	ported	tests/unit/qry_plans.st	each sort key is labelled on its own: a path, a described block, or block (the GroupBy half is spec 3.2)
+test_plans.py::test_display_value_keeps_dict_keys_distinct	ported	tests/unit/qry_terms.st	describe and display values
+test_plans.py::test_join_kinds_exported	n/a	deferred: spec 3.2	The Join kinds are not ported: spec 3.2 defers Join.
+# test_plan_windows.py: rank access through the plan protocol (queries Tasks 6 and 8).
+test_plan_windows.py::test_list_and_dictionary_scans_offer_windows	ported	tests/unit/qry_rank.st	sorts by the index key, one-term filters over its ordered scan, list and dictionary scans and Limits window by rank
+test_plan_windows.py::test_other_scans_do_not_claim_windows	ported	tests/unit/qry_rank.st	sorts by the index key, one-term filters over its ordered scan, list and dictionary scans and Limits window by rank
+test_plan_windows.py::test_positional_iteration_from_a_position	ported	tests/unit/idx_avl.st	from position
+test_plan_windows.py::test_limit_over_a_window_does_not_run_the_producer	ported	tests/unit/qry_plans.st	a Limit served by rank produces no row before its window
+test_plan_windows.py::test_count_uses_exact_rows	ported	tests/unit/qry_plans.st	Count reads the count of an index plan by rank and counts any other source
+test_plan_windows.py::test_filters_seek_only_for_one_indexed_term_over_an_ordered_scan	ported	tests/unit/qry_rank.st	sorts by the index key, one-term filters over its ordered scan, list and dictionary scans and Limits window by rank
+test_plan_windows.py::test_linq_skip_take_over_an_ordered_index	ported	tests/unit/qry_query.st	skip: and take: compose like slicing into one window, where: after take: filters the window, the leading order and window go into the planner
+test_plan_windows.py::test_window_arguments_are_validated	ported	tests/unit/qry_rank.st	window bounds are validated
+test_plan_windows.py::test_a_subclass_redefining_elements_is_not_windowed	ported	tests/unit/qry_plans.st	a collection whose class redefines do: offers no window
+# test_format_neutral.py: the index tests only (member tokens, format-3 indexes).
+test_format_neutral.py::test_removing_a_decoded_value_removes_that_member_not_an_equal_one	ported	tests/unit/idx_depth_tokens.st	removing a decoded value removes that member, not an equal one
+test_format_neutral.py::test_removing_an_equal_but_different_value_is_refused	ported	tests/unit/idx_depth_tokens.st	removing an equal but different value is refused by the equality and the range index
+test_format_neutral.py::test_vector_removal_is_exact_too	ported	tests/unit/vec_index.st	removal is exact: an equal value with another token is not removed
+test_format_neutral.py::test_validate_reports_a_member_under_another_token	ported	tests/unit/idx_depth_tokens.st	validate: reports a member under another token
+test_format_neutral.py::test_the_reviewers_end_to_end_repro	ported	tests/unit/idx_depth_tokens.st	the reviewers' end-to-end case: after a reopen the scan and the index answer the same element
+test_format_neutral.py::test_an_index_with_format_3_tokens_is_rebuilt_at_its_first_change	ported	tests/unit/idx_depth_tokens.st	an index with format-3 tokens is rebuilt at the first change of its collection
+test_format_neutral.py::test_validate_accepts_an_index_with_format_3_tokens	ported	tests/unit/idx_depth_tokens.st	validate: accepts an index with format-3 tokens and still checks the rest
+test_format_neutral.py::test_validate_accepts_a_vector_index_with_format_3_tokens	ported	tests/unit/vec_index.st	validate: accepts a vector index with format-3 tokens and still checks the rest
+# test_structure_depth.py: the index tests only (the member key wraps the element).
+test_structure_depth.py::test_an_orderable_element_of_an_index_may_nest_the_limit_less_the_member_key	ported	tests/unit/idx_depth_tokens.st	an orderable element may nest the limit less the member key
+test_structure_depth.py::test_an_unorderable_element_nests_through_its_surrogate	ported	tests/unit/idx_depth_tokens.st	an unorderable element nests through its surrogate: lists and maps
+test_structure_depth.py::test_the_member_key_limit_is_exact	ported	tests/unit/idx_depth_tokens.st	the member-key limit is exact at every leaf width
+test_structure_depth.py::test_a_field_index_over_plain_maps_stores_the_maps_through_their_surrogates	ported	tests/unit/idx_depth_tokens.st	a field index over plain maps stores the maps through their surrogates
+test_structure_depth.py::test_a_vector_index_store_key_adds_its_own_tuple	ported	tests/unit/vec_collections.st	the store key of a vector index adds its own tuple; an invalid member is stored under its member key alone
+test_structure_depth.py::test_an_index_added_over_existing_data_refuses_the_same_way	ported	tests/unit/vec_collections.st	addIndex: of a vector index over data it cannot store refuses the same way, and the transaction goes on
+test_structure_depth.py::test_a_refusal_leaves_the_transaction_usable	ported	tests/unit/idx_depth_tokens.st	a refusal leaves the transaction usable

@@ -26,11 +26,28 @@
              checksum is proto_db's for the same commits, which the caller passes in
              CLUSTER_M3_EXPECTED as '<rows>:<commits>:<checksum>' (bench/run_query.sh M3 does): a run
              without it fails; the verifier's checksum is then that same triple.
+   vb5-exact, vb5-ivf
+             the vector workload VB5 (bench/vector_workload.st, vectors phase task V5): the root
+             'vecs' is VB5's dictionary of 600 vectors of dim 8 (keys 0 to 599) with the plan's
+             vector index (bench/_vector_bench.st), the vectors read from QUERY_VECTOR_DATA (600 +
+             TOTAL of them, bench/py_vector_data.py); one writer per process; member j commits keys
+             600 + j * each to 600 + j * each + each - 1, each a blind write of a new dictionary
+             holding that key and its vector alone, merged by the commit onto the current version,
+             which maintains its vector index (the IVF one retrains inside a merge, in the round's
+             build); retried as M3's. The verifier validates 'vecs', requires the IVF index to have
+             retrained, counts the keys >= 600 and computes VectorBench checksumOf: without the
+             centroids (which depend on the commit order); the caller passes proto_db's standalone
+             '<rows>:<commits>:<checksum>' in CLUSTER_VB5_EXPECTED (bench/run_query.sh VB5 does).
+             A merge that retrains runs k-means in the round's build, under the write permission,
+             which is believed for a third of the lease: with the default lease (667 ms) a
+             retrain that takes longer outlasts the permission at every attempt (a truthful
+             retryable conflict, R121) and never commits, so vb5-ivf needs CLUSTER_LEASE_MS
+             (bench/run_query.sh passes it).
  A standalone run is one process with the TOTAL of the profile and the writers of one member.
 
  A node binds a PBTcpTransport on 127.0.0.1 (port 0), writes <out>/<id>.port, waits for
  <out>/peers ('<id> <port>' per member), starts its coordinator with proto_db's default options
- (a 2000 ms lease, a 250 ms request timeout), opens the shared space (PBFileStorage clusterPath:)
+ (a 2000 ms lease, a 250 ms request timeout; CLUSTER_LEASE_MS sets another lease), opens the shared space (PBFileStorage clusterPath:)
  and waits until it has joined. n0 creates the database 'bench' and its roots, then writes
  <out>/created; every other member waits for it and passes a barrier (newDatabase:) so that it
  knows 'bench'. Each writes <out>/<id>.ready, waits for <out>/go, and runs its transactions: that
@@ -67,6 +84,7 @@
  Every wait on a file is bounded (300 s); no duration is asserted."
 Import from: 'protobase'.
 Import from: '_query_bench'.
+Import from: '_vector_bench'.
 
 "The split of the root-independent work: PBClusterRound >> enqueue: saves the atoms of the
  commit, then hands the core PBRoundEnqueued (cluster/round.st); the time between the two is the
@@ -124,7 +142,7 @@ BenchWriter >> hot: each db: aDb
 
 | args role id out spaceDir profile nodes scale total each writers fail say writeFile until
   waitFor ids peers rank listener transport node space db options stats0 stats1 t0 t1 attempts
-  commits line delta crit expected checksumOf tinyRun hotRun setupRoots m3 m3Run peakRss |
+  commits line delta crit expected checksumOf tinyRun hotRun setupRoots m3 m3Run peakRss vb5 vectors |
 args := Smalltalk arguments.
 role := args isEmpty ifTrue: [''] ifFalse: [args first].
 (role = 'standalone' and: [args size = 4]) | (role = 'node' and: [args size = 6]) ifFalse: [
@@ -150,11 +168,12 @@ until := [:aBlock :aSeconds | | deadline |
 waitFor := [:aName |
   (until value: [(out / aName) exists] value: 300) ifFalse: [fail value: 'no ' , aName , ' within 300 s']].
 
-(#('tiny' 'conc-hot' 'm3-idx0' 'm3-idx1' 'm3-idx3') includes: profile) ifFalse: [fail value: 'unknown profile ' , profile].
-m3 := profile beginsWith: 'm3-'.
+(#('tiny' 'conc-hot' 'm3-idx0' 'm3-idx1' 'm3-idx3' 'vb5-exact' 'vb5-ivf') includes: profile) ifFalse: [fail value: 'unknown profile ' , profile].
+vb5 := profile beginsWith: 'vb5-'.
+m3 := (profile beginsWith: 'm3-') | vb5.
 "Every member registers M3's extractor: a merge onto the indexed current runs it in whichever
  member's commit builds the merge."
-m3 ifTrue: [QueryBench indexesOf: (profile copyFrom: 4 to: profile size)].
+(m3 and: [vb5 not]) ifTrue: [QueryBench indexesOf: (profile copyFrom: 4 to: profile size)].
 (nodes notNil and: [nodes >= 1]) ifFalse: [fail value: 'nodes must be a positive Integer'].
 scale := ((Smalltalk getenv: 'CLUSTER_SCALE') ifNil: ['1']) asInteger.
 total := 120 * scale.
@@ -162,12 +181,18 @@ total \\ nodes = 0 ifFalse: [fail value: 'the total ' , total printString , ' do
 writers := profile = 'tiny' ifTrue: [1] ifFalse: [4].
 each := total // nodes.
 each \\ writers = 0 ifFalse: [fail value: 'the transactions of a member do not split over its writers'].
-(m3 and: [total > 600]) ifTrue: [fail value: 'M3 writes distinct keys of 600: at most 600 transactions, not ' , total printString].
+(m3 and: [vb5 not and: [total > 600]]) ifTrue: [fail value: 'M3 writes distinct keys of 600: at most 600 transactions, not ' , total printString].
+vb5 ifTrue: [
+  [vectors := VectorBench vectorsFrom: ((Smalltalk getenv: 'QUERY_VECTOR_DATA') ifNil: [fail value: 'VB5 needs QUERY_VECTOR_DATA'])
+     n: 600 + total dim: 8]
+    on: Error do: [:e | fail value: e messageText]].
 peakRss := [(('/proc/self/status' asFileReference contents lines detect: [:l | l beginsWith: 'VmHWM:']) subStrings at: 2)].
 
 "The checksum the read-back must give, for the profile, the member count and each."
 expected := m3
-  ifTrue: [(Smalltalk getenv: 'CLUSTER_M3_EXPECTED') ifNil: [fail value: 'M3 needs CLUSTER_M3_EXPECTED, proto_db''s rows:commits:checksum']]
+  ifTrue: [vb5
+    ifTrue: [(Smalltalk getenv: 'CLUSTER_VB5_EXPECTED') ifNil: [fail value: 'VB5 needs CLUSTER_VB5_EXPECTED, proto_db''s rows:commits:checksum']]
+    ifFalse: [(Smalltalk getenv: 'CLUSTER_M3_EXPECTED') ifNil: [fail value: 'M3 needs CLUSTER_M3_EXPECTED, proto_db''s rows:commits:checksum']]]
   ifFalse: [profile = 'tiny'
   ifTrue: [| s |
     s := 0.
@@ -176,7 +201,16 @@ expected := m3
   ifFalse: ['1:' , total printString]].
 "Answers { count. checksum } of the transaction tr, for the profile."
 checksumOf := [:tr |
-  m3
+  vb5 ifTrue: [| vecs c |
+    vecs := tr getRootObject: 'vecs'.
+    vecs validate.
+    (profile = 'vb5-ivf' and: [(vecs getIndex: 'near') trainedSize <= 600]) ifTrue: [
+      fail value: 'the IVF index never retrained'].
+    c := 0.
+    vecs keysAndValuesDo: [:k :v | k >= 600 ifTrue: [c := c + 1]].
+    { c. vecs count printString , ':' , c printString , ':'
+      , (VectorBench checksumOf: vecs keyed: true centroids: false) printString }]
+  ifFalse: [m3
     ifTrue: [| people c |
       people := tr getRootObject: 'people'.
       people validate.
@@ -189,16 +223,24 @@ checksumOf := [:tr |
       0 to: nodes - 1 do: [:j |
         (tr getRootObject: 'kv-' , j printString) keysAndValuesDo: [:k :v | c := c + 1. s := s + (k * v)]].
       { c. c printString , ':' , s printString }]
-    ifFalse: [| n | n := (tr getRootObject: 'hot') getAt: 0. { n. '1:' , n printString }]]].
-"M3: member j's blind writes; answers { block runs. commits }."
+    ifFalse: [| n | n := (tr getRootObject: 'hot') getAt: 0. { n. '1:' , n printString }]]]].
+"M3 and VB5: member j's blind writes; answers { block runs. commits }."
 m3Run := [:aDb :j | | runs done |
   runs := 0. done := 0.
   0 to: each - 1 do: [:i | | change |
-    change := QueryBench change: j * each + i size: 600.
-    aDb run: [:tr |
-      runs := runs + 1.
-      tr setRootObject: 'people' value: (tr newDictionary setAt: (change at: 1) value: (change at: 2))]
-      retries: 1000.
+    vb5
+      ifTrue: [| key |
+        key := 600 + (j * each) + i.
+        aDb run: [:tr |
+          runs := runs + 1.
+          tr setRootObject: 'vecs' value: (tr newDictionary setAt: key value: (vectors at: key + 1))]
+          retries: 1000]
+      ifFalse: [
+        change := QueryBench change: j * each + i size: 600.
+        aDb run: [:tr |
+          runs := runs + 1.
+          tr setRootObject: 'people' value: (tr newDictionary setAt: (change at: 1) value: (change at: 2))]
+          retries: 1000].
     done := done + 1].
   { runs. done }].
 "The member's transactions; answer { block runs. commits }, a commit counted when run: returns
@@ -222,7 +264,10 @@ setupRoots := [:aDb |
   aDb run: [:tr |
     0 to: nodes - 1 do: [:j | tr setRootObject: 'kv-' , j printString value: tr newDictionary].
     tr setRootObject: 'hot' value: (tr newDictionary setAt: 0 value: 0).
-    m3 ifTrue: [tr setRootObject: 'people' value: (QueryBench people: 600 plan: (profile copyFrom: 4 to: profile size))]]].
+    vb5
+      ifTrue: [tr setRootObject: 'vecs' value: (VectorBench dictionary: (vectors copyFrom: 1 to: 600)
+        plan: (profile copyFrom: 5 to: profile size) dim: 8)]
+      ifFalse: [m3 ifTrue: [tr setRootObject: 'people' value: (QueryBench people: 600 plan: (profile copyFrom: 4 to: profile size))]]]].
 
 role = 'standalone' ifTrue: [
   [space := PBObjectSpace storage: (PBFileStorage path: spaceDir).
@@ -260,6 +305,13 @@ ids := (peers collect: [:p | p nodeId]) asSortedCollection asArray.
 rank := (ids indexOf: id) - 1.
 rank < 0 ifTrue: [fail value: id , ' is not in peers'].
 options := Dictionary new at: #transport put: transport; yourself.
+"CLUSTER_LEASE_MS, when set, replaces proto_db's default lease (2000 ms); the drift margin stays
+ its default, two thirds of it, so a write permission is believed for a third of the lease. A new
+ member grants nothing for its startup grace (the lease plus the margin), longer than the default
+ acquire timeout (30 s) once the lease is long, so the acquire timeout becomes three leases."
+(Smalltalk getenv: 'CLUSTER_LEASE_MS') isNil ifFalse: [
+  options at: #leaseDuration put: (Smalltalk getenv: 'CLUSTER_LEASE_MS') asInteger.
+  options at: #acquireTimeout put: (Smalltalk getenv: 'CLUSTER_LEASE_MS') asInteger * 3].
 [node := PBClusterCoordinator nodeId: id peers: peers options: options.
  node start.
  space := BenchSpace storage: (PBFileStorage clusterPath: spaceDir) coordinator: node]

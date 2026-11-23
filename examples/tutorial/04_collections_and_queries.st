@@ -9,8 +9,10 @@
  - a PBTuple is an ordered, composite key;
  - there is no query language and no index query in this prototype: a question is a walk
    over a collection, or a lookup in a second collection that the program keeps up to date
-   in the same transaction (a hand-made index). The prototype reads proto_db's indexes but
-   does not query or maintain them; a collection that has one refuses every change.
+   in the same transaction (a hand-made index). Since 0.3.0 protoBaseST also maintains
+   and queries proto_db's equality and range indexes (chapters 17-19), and since 0.4.0 it
+   maintains its vector indexes; only a collection holding an index of a kind it does not
+   know refuses every change.
 
  Run it: STPATH=<repository>/src protost 04_collections_and_queries.st"
 Import from: 'protobase'.

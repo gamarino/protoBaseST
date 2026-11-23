@@ -39,7 +39,7 @@ Import from: 'protobase/errors'.
 Import from: 'protobase/values'.
 Import from: 'protobase/codec'.
 
-Object subclass: #PBKeySpec instanceVariableNames: 'kind arg segments' classVariableNames: 'Extractors'.
+Object subclass: #PBKeySpec instanceVariableNames: 'kind arg segments recordNames' classVariableNames: 'Extractors'.
 
 "=== the registry ============================================================"
 
@@ -218,6 +218,10 @@ PBKeySpec >> _setKind: aKind arg: anArg segments: anArray
   kind := aKind.
   arg := anArg.
   segments := anArray.
+  "Whether each segment is a name a record may carry (PBAtomEnvelope _nameProblem: answers nil): a
+   pure function of the name that never signals (a segment is a non-empty String), so it is
+   computed once here, not on every record _step: reads."
+  recordNames := anArray collect: [:name | (PBAtomEnvelope _nameProblem: name) isNil].
   ^ self.
 
 "=== use ====================================================================="
@@ -237,21 +241,22 @@ PBKeySpec >> extract: anElement
   kind = 'element' ifTrue: [^ anElement].
   kind = 'extractor' ifTrue: [^ PBCodec canonical: (((self class _entry: arg) at: 1) value: anElement)].
   value := anElement.
-  segments do: [:name |
-    value := self _step: value name: name.
+  1 to: segments size do: [:i |
+    value := self _step: value name: (segments at: i) recordName: (recordNames at: i).
     value == PBMissing default ifTrue: [^ value]].
   ^ value.
 
 "One path step (keyspec.py _step): the attribute aName of an atom (a record's own ones) or the
- key aName of a map, else PBMissing default."
-PBKeySpec >> _step: aValue name: aName
+ key aName of a map, else PBMissing default. aBoolean is whether a record may carry aName, computed
+ when the key spec was built (the recordNames of _setKind:arg:segments:)."
+PBKeySpec >> _step: aValue name: aName recordName: aBoolean
   aValue isClassObject ifTrue: [^ PBMissing default].
   ((aValue isKindOf: PBFrozenDict) or: [aValue isKindOf: Dictionary]) ifTrue: [
     ^ aValue at: aName ifAbsent: [PBMissing default]].
   (aValue isKindOf: PBAtom) ifTrue: [
     "A name no record may carry is missing; otherwise the field the state holds, read through
      the memo (a PBObject's hasDefinedAttr: and at: answer the same, checking the name again)."
-    (PBAtomEnvelope _nameProblem: aName) isNil ifFalse: [^ PBMissing default].
+    aBoolean ifFalse: [^ PBMissing default].
     ^ aValue _stateAt: aName ifAbsent: [PBMissing default]].
   ^ PBMissing default.
 

@@ -14,12 +14,14 @@
 # docs/queries.md (the indexed-queries guide) is guarded too. Documentation is written before the
 # API it describes (plan call IP5): tests/docs/pending_selectors.tsv lists, one per line, a
 # selector the documents cite before it exists and the plan task (1-9) whose Interfaces block
-# produces it ("<selector><TAB><task>"; "#" lines and blank lines are comments). A pending
+# produces it ("<selector><TAB><task>"; "#" lines and blank lines are comments); a selector the
+# vectors phase builds names its task as the addendum does, V1 to V10 (Addendum V, section 7;
+# docs/superpowers/specs/2026-11-19-vectors-addendum.md). A pending
 # selector, and each keyword part of one, is accepted like a defined selector. A listed selector
 # that is now defined in src/protobase, or that no document cites any more, is an error (a stale
 # line: the task that builds it removes it), and so is a malformed line, a task outside 1-9 or a
 # duplicate. With PENDING_FINAL=1 (the final task) any line left is an error. The marker
-# "[measured in T<n>: ...]" (tests/docs/measured_markers.sh) and a file citation
+# "[measured in T<n>: ...]" or "[measured in V<n>: ...]" (tests/docs/measured_markers.sh) and a file citation
 # (`keyed.py:596-622`) are not selectors and are skipped.
 # Granularity limits of the pending list: a selector is listed once, under the first task whose
 # Interfaces block produces it (`describe` is Task 2's although Task 5 defines it on terms too;
@@ -71,6 +73,7 @@ register_atom_class is_active committed_at lock_timeout retries backoff keys val
 asFrozenDict asOf: tr: asActor wait EXPECT: protost bytes date ensure:
 flock fsync nil true false proto_db remove aName atom_pointer context cluster_term current pair n i v repr
 avl calendar codec collections decimal errors framing net notation publisher registry roots round store transactions uuid zonekeys
+raisedTo: squared asFloat
 """.split())
 # selectors of GemStone/S and Soil, cited from their documentation by the chapters of
 # docs/tutorial/ (mainly gemstone.md and soil.md) to compare them; they are not protoBaseST's and
@@ -99,13 +102,13 @@ for n, line in enumerate(open(pending_file, encoding="utf-8"), 1):
     line = line.rstrip("\n")
     if not line.strip() or line.startswith("#"):
         continue
-    m = re.fullmatch(r"((?:[A-Za-z_]\w*:)+|[a-z]\w*)\t([1-9])", line)
+    m = re.fullmatch(r"((?:[A-Za-z_]\w*:)+|[a-z]\w*)\t([1-9]|V(?:[1-9]|10))", line)
     if not m:
-        bad.append("tests/docs/pending_selectors.tsv:%d: malformed line (want <selector><TAB><task 1-9>): %r" % (n, line)); continue
+        bad.append("tests/docs/pending_selectors.tsv:%d: malformed line (want <selector><TAB><task 1-9 or V1-V10>): %r" % (n, line)); continue
     sel = m.group(1)
     if sel in pending:
         bad.append("tests/docs/pending_selectors.tsv:%d: %s is listed twice" % (n, sel)); continue
-    pending[sel] = int(m.group(2))
+    pending[sel] = m.group(2)
     if sel in defined:
         bad.append("tests/docs/pending_selectors.tsv:%d: %s is defined in src/protobase now: remove the stale line (task %s)" % (n, sel, m.group(2)))
     if os.environ.get("PENDING_FINAL") == "1":
@@ -131,7 +134,7 @@ for doc in docs:
         text = re.sub(r"`Import from: 'protobase'\.` loads, in order,.*?(?:\n\n|\Z)", "", text, flags=re.S)
     for span in re.findall(r"`([^`\n]+)`", text):
         # a message pattern: keep the keyword parts (drop arguments), e.g. "setAt: k value: v"
-        if re.fullmatch(r"\[measured in T<n>: [^\]]*\]", span):
+        if re.fullmatch(r"\[measured in [TV]<n>: [^\]]*\]", span):
             continue   # the marker convention, not a selector
         if re.fullmatch(r"[\w./-]+\.(?:py|rst|st|md|sh)(?::\d+(?:-\d+)?)?", span):
             continue   # a file citation (keyed.py:596-622), not a selector
@@ -157,10 +160,13 @@ for doc in docs:
                 used.add(span); continue
             bad.append("%s: `%s` is not a unary selector defined in src/protobase" % (doc, span))
 for sel in sorted(set(pending) - used - defined):
-    bad.append("tests/docs/pending_selectors.tsv: %s (task %d) is cited by no document: remove the line" % (sel, pending[sel]))
+    bad.append("tests/docs/pending_selectors.tsv: %s (task %s) is cited by no document: remove the line" % (sel, pending[sel]))
 if bad:
     print("\n".join(sorted(set(bad)))); sys.exit(1)
+def task_order(t):
+    # the queries plan's tasks 1-9 first, then the vectors phase's V1-V10
+    return (0, int(t)) if t.isdigit() else (1, int(t[1:]))
 print("every backticked selector of %d documents is defined in src/protobase, or pending (%d selectors: %s)"
-      % (len(docs), len(pending), ", ".join("T%d %d" % (t, sum(1 for v in pending.values() if v == t))
-                                            for t in sorted(set(pending.values())))))
+      % (len(docs), len(pending), ", ".join("%s %d" % ("T" + t if t.isdigit() else t, sum(1 for v in pending.values() if v == t))
+                                            for t in sorted(set(pending.values()), key=task_order))))
 PY
