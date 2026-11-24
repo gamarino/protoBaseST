@@ -22,8 +22,8 @@ c that: 'the probes name the write-once CAS, the transport capability and the fo
     'Float class >> fsumOfSquaredDifferences:with: (protoST 0.15.0)'
     'Float class >> fsumOfPowSquaredDifferences:with: (protoST 0.16.0)').
 c that: 'the requirement names the release, the protoST floor and its protoIO'
-  is: PBFloor requirement equals: 'protoBaseST 0.5.0 requires protoST 0.17.0 or later (protoIO 0.7.1)'.
+  is: PBFloor requirement equals: 'protoBaseST 0.4.1 requires protoST 0.17.0 or later (protoIO 0.7.1)'.
 c that: 'the refusal states the requirement, then every missing capability'
   is: (PBFloor refusalFor: #('A' 'B'))
-  equals: 'protoBaseST 0.5.0 requires protoST 0.17.0 or later (protoIO 0.7.1); this protoST lacks A, B. Build protoST 0.17.0 or later against protoIO 0.7.1 (README, Requirements).'.
+  equals: 'protoBaseST 0.4.1 requires protoST 0.17.0 or later (protoIO 0.7.1); this protoST lacks A, B. Build protoST 0.17.0 or later against protoIO 0.7.1 (README, Requirements).'.
 c report displayNl.

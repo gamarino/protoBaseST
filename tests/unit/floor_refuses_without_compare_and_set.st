@@ -1,4 +1,4 @@
-"EXPECT-ERROR: protoBaseST 0.5.0 requires protoST 0.17.0 or later (protoIO 0.7.1); this protoST lacks Object >> compareAndSet:from:to: (protoST 0.17.0)."
+"EXPECT-ERROR: protoBaseST 0.4.1 requires protoST 0.17.0 or later (protoIO 0.7.1); this protoST lacks Object >> compareAndSet:from:to: (protoST 0.17.0)."
 "The floor check (src/protobase/floor.st): on a protoST that does not understand
  compareAndSet:from:to: (protoST 0.16.1 and older, where the write-once publishers' only CAS
  was setInstVar:from:to:), Import from: 'protobase' refuses with PBNotSupportedError naming the

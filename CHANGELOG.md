@@ -1,9 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 (2026-11-24)
 
-Proposed as 0.5.0: the floor moves, as it did from 0.3.0 to 0.4.0 (a minor release), and a program
-on protoST 0.16.1 stops loading the package. The version and the release await the maintainer.
+A patch release that moves the floor: a program on protoST 0.16.1 stops loading the package. The
+number 0.5.0 stays with the migration the explicit-state specification plans for protoST 0.18.0
+(protoST `docs/superpowers/specs/2026-11-23-explicit-state-design.md`, §13.2: value classes, declared
+write-once and atomic fields, a reflective allowlist test); this release only replaces the
+deprecated selector, with no change of behaviour.
 
 ### Requirements
 
@@ -15,7 +18,7 @@ on protoST 0.16.1 stops loading the package. The version and the release await t
   (it captures 2>&1) report exercises 1 to 5 as differing.
 - **The floor check probes the new selector** (`src/protobase/floor.st`): `Object >>
   compareAndSet:from:to: (protoST 0.17.0)` is a capability like the others, so a protoST that
-  lacks it is refused when the package loads: "protoBaseST 0.5.0 requires protoST 0.17.0 or later
+  lacks it is refused when the package loads: "protoBaseST 0.4.1 requires protoST 0.17.0 or later
   (protoIO 0.7.1); this protoST lacks ...". Tests: `floor_check.st` and the new
   `floor_refuses_without_compare_and_set.st`.
 

@@ -125,7 +125,7 @@ lease longer than four times its retrain. Start with
 
 These are the minimum versions: protoST 0.17.0 is the floor, and it is checked when the package
 loads: on an older protoST, `Import from: 'protobase'` signals `PBNotSupportedError` ("protoBaseST
-0.5.0 requires protoST 0.17.0 or later (protoIO 0.7.1)", with the missing capabilities;
+0.4.1 requires protoST 0.17.0 or later (protoIO 0.7.1)", with the missing capabilities;
 `src/protobase/floor.st`). A TCP cluster needs it: its helping
 waits run one message at a time (protoST S48), and protoIO 0.7.1 bounds a whole socket write by its
 timeout and reports how many bytes it wrote (S49), which together let `PBTcpTransport` end every
@@ -133,7 +133,8 @@ turn, so an actor that waits while a connection is open is never buried under it
 0.4.0, "Fixed"). The vector kernel calls protoST's `Float` fsum primitives (0.15.0) and its k-means
 distance primitive (0.16.0) directly; the Smalltalk kernel they replace is kept as the tests'
 oracle. The final 0.4.0 suite ran on protoST 0.16.1, protoCore 3.6.1 and protoIO 0.7.1 (the 0.3.0
-release was tested on protoCore 3.6.0 with protoST 0.12.0). The vector benchmarks of 0.4.0 ran on
+release was tested on protoCore 3.6.0 with protoST 0.12.0); the 0.4.1 suite ran on protoST 0.17.0, protoCore
+3.6.1 and protoIO 0.7.1 (315 passed, 0 failed, 3 skipped, with the interop venv). The vector benchmarks of 0.4.0 ran on
 0.16.0, whose vector primitives 0.16.1 keeps unchanged.
 
 Build protoST 0.17.0 against protoCore 3.6.1 and protoIO 0.7.1 (see its own README); it provides

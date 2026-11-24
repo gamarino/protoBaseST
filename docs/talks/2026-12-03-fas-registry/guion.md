@@ -15,10 +15,9 @@ cifra no está ahí, no se dice.
 
 ## Antes de empezar
 
-- protoST 0.17.0 (o 0.16.1) en el `PATH`, con este repositorio clonado.
+- protoST 0.17.0 en el `PATH`, con este repositorio clonado.
 - Demo 1 (el ejercicio 2 del taller):
   `cd docs/talks/2026-12-03-fas-workshop/ejercicios && STPATH=../../../../src protost 02-conflicto-y-reintento.st`.
-  Con 0.17.0 la primera línea es el aviso de `setInstVar:from:to:`: es parte de la charla (slide 18).
 - Demo 2 (el diamante): `cd docs/talks/2026-12-03-fas-registry/demos && protost orden-de-resolucion.st`;
   la salida esperada está en `demos/esperado.out` (corrida el 24/11/2026 con protoST 0.17.0).
 - Si una demo falla en vivo, mostrar la slide: tiene la salida real.
@@ -73,9 +72,9 @@ cifra no está ahí, no se dice.
 
 - Estado explícito: `constantNames:`, `writeOnceNames:`, `atomicNames:`, `update:with:`,
   `compareAndSet:from:to:`. Las clases de valor son 0.18.0, planeadas.
-- Lo encontrado hoy: `setInstVar:from:to:` está deprecado y se va en 0.18.0; protoBaseST lo llama
-  en 8 lugares de 3 archivos. La migración de 0.5.0 no es opcional. La suite completa sobre 0.17.0
-  no se corrió.
+- Lo encontrado preparando la charla: `setInstVar:from:to:` está deprecado y se va en 0.18.0;
+  protoBaseST 0.4.0 lo llamaba en 8 lugares de 3 archivos. 0.4.1 lo migró el mismo día y subió el
+  piso a 0.17.0 (suite 315/0/3). La migración de fondo sigue siendo 0.5.0.
 - 0.5.0 planeada (especificación de estado explícito §13.2); el resto son candidatos sin fecha, y
   el último es el registro.
 - Lo que no hace y lo que no está probado.

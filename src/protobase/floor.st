@@ -1,6 +1,6 @@
 "-- floor.st: the protoST floor of protoBaseST, checked when the package loads --
 
-protoBaseST 0.5.0 needs protoST 0.17.0 (with protoIO 0.7.1; README, Requirements). On an older
+protoBaseST 0.4.1 needs protoST 0.17.0 (with protoIO 0.7.1; README, Requirements). On an older
 protoST it does not fail at once: the TCP sender's write timeout asks ConnectionTimedOut for
 bytesWritten, which protoST 0.16.0 does not answer, and a frame is then dropped without a word
 naming the cause; below 0.15.0 the first vector score signals MessageNotUnderstood; below 0.17.0
@@ -23,7 +23,7 @@ PBFloor comment: 'The protoST floor of protoBaseST (0.17.0, with protoIO 0.7.1),
 
 "The requirement the refusal states, word for word."
 PBFloor class >> requirement
-  ^ 'protoBaseST 0.5.0 requires protoST 0.17.0 or later (protoIO 0.7.1)'.
+  ^ 'protoBaseST 0.4.1 requires protoST 0.17.0 or later (protoIO 0.7.1)'.
 
 "The capabilities the floor guarantees, as an Array of { description. block answering whether
  this protoST has it }. A global missing altogether (an older protoST) is a missing capability,
