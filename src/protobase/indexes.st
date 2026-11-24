@@ -178,7 +178,7 @@ PBIndex class >> _emptyFieldsName: aString keySpec: aPBKeySpec
  nothing), by a compare-and-swap from nil (PBAtom's write-once publishers); answers the installed
  one, or nil while none is."
 PBIndex >> _publishKeySpec: aPBKeySpec
-  aPBKeySpec isNil ifFalse: [self setInstVar: #keySpecObject from: nil to: aPBKeySpec].
+  aPBKeySpec isNil ifFalse: [self compareAndSet: #keySpecObject from: nil to: aPBKeySpec].
   ^ keySpecObject.
 
 "The index name."

@@ -28,7 +28,7 @@ La mitad de protoST tiene sus propias slides y ejercicios, en el repositorio de 
 
 ## Preparación
 
-Necesitan protoST 0.16.1 o posterior (sobre protoCore 3.6.1 y protoIO 0.7.1): protoBaseST 0.4.0 lo verifica al cargar y, con uno anterior, `Import from: 'protobase'` señala `PBNotSupportedError` nombrando lo que falta. Cómo compilarlo está en el README de protoST; los requisitos, en el [README de protoBaseST](../../../README.md#requirements). Clonen este repositorio: los ejercicios usan su `src/`.
+Necesitan protoST 0.17.0 o posterior (sobre protoCore 3.6.1 y protoIO 0.7.1): protoBaseST 0.5.0 lo verifica al cargar y, con uno anterior, `Import from: 'protobase'` señala `PBNotSupportedError` nombrando lo que falta. Cómo compilarlo está en el README de protoST; los requisitos, en el [README de protoBaseST](../../../README.md#requirements). Clonen este repositorio: los ejercicios usan su `src/`.
 
 El ejercicio 6 (Python y Smalltalk sobre el mismo directorio) necesita además Python 3.12 o posterior y un clon de [protoBase](https://github.com/gamarino/ProtoDB) para armar el venv de `proto_db`:
 

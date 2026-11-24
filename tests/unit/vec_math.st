@@ -20,7 +20,7 @@
  raisedTo: 2 in k-means, on a half-way case, with a k-means witness whose centroids change if the
  square multiplies); trainingOrderOf: against byte order; and the IEEE self-test of 2.2.3 (error-free
  transformations, signed zeros, subnormals, half-way products, sqrt, the libm pow square). Then the
- fsum primitives of protoST 0.15.0 (Addendum V, 2.2.4; task VP-adopt): the floor (protoST 0.16.1)
+ fsum primitives of protoST 0.15.0 (Addendum V, 2.2.4; task VP-adopt): the floor (protoST 0.17.0)
  has them and the kernel calls them, and the test-only switch forces the Smalltalk kernel, their
  oracle; on both paths the kernel answers alike and the primitives' errors become
  the kernel's (PBValidationError with CPython's text, infinity in sumNonNegative:), an Integer term
@@ -336,7 +336,7 @@ PBVectorMath _forceSmalltalkKernel: true.
 paths add: PBVectorMath usesPrimitives.
 PBVectorMath _forceSmalltalkKernel: false.
 paths add: PBVectorMath usesPrimitives.
-c that: 'the floor (protoST 0.16.1) has the fsum primitives, the kernel calls them, and the switch forces the Smalltalk kernel'
+c that: 'the floor (protoST 0.17.0) has the fsum primitives, the kernel calls them, and the switch forces the Smalltalk kernel'
   is: { { Float respondsTo: #fsum:. Float respondsTo: #fsumOfProducts:with:. Float respondsTo: #fsumOfSquaredDifferences:with: }. paths asArray }
   equals: #(#(true true true) #(true false true)).
 

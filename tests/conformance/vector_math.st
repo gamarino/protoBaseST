@@ -21,7 +21,7 @@
  and list_for (the best-scoring centroid under the assignment metric, cosine for cosine and l2
  otherwise, lowest number on ties: IvfFlatBackend.list_for, which PBVectorIvfFlat listFor:vector:
  ports; here it pins that the scores pick proto_db's list). Every group runs twice (task VP-adopt,
- Addendum V 2.2.4): with protoST's Float fsum primitives, which the floor (0.16.1) always has, and
+ Addendum V 2.2.4): with protoST's Float fsum primitives, which the floor (0.17.0) always has, and
  with the Smalltalk kernel forced (PBVectorMath _forceSmalltalkKernel:, a test-only switch), their
  oracle; both runs must agree with CPython. It
  prints the generator's CPython, libc and numpy lines, then per run its kernel and the number of

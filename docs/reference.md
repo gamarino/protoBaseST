@@ -1447,7 +1447,7 @@ signal `PBValidationError` with CPython's text (DV7). Every result is pinned bit
 `tests/unit/vec_math.st`, `tests/unit/vec_random.st` and the `proto_db` vectors of
 `tests/conformance/vector_math.st`. The sums run in protoST's `Float` fsum primitives (Float fsum:,
 fsumOfProducts:with: and fsumOfSquaredDifferences:with:, protoST 0.15.0), always present on the
-protoST 0.16.1 floor; `usesPrimitives` answers whether the kernel calls them, true unless a test
+protoST 0.17.0 floor; `usesPrimitives` answers whether the kernel calls them, true unless a test
 forced the Smalltalk kernel with `_forceSmalltalkKernel:` (tests only), so that every vendored case
 runs on both paths. The Smalltalk kernel is the primitives' oracle, and answers where a primitive
 cannot (an Integer term, sequences of unequal sizes). `normalized:`, which k-means uses for cosine
@@ -1464,6 +1464,6 @@ per call, so the query is copied to an Array once per call, not once per scored 
 
 `Import from: 'protobase'.` loads, in order, `errors`, `floor`, `keys`, `values`, `registry`, `codec`, `keyspec`, `notation`, `framing`, `store`, `cluster/log`, `cluster/members`, `cluster/rootlog`, `cluster/protocol`, `cluster/config`, `cluster/transport`, `cluster/lease`, `cluster/core`, `cluster/acceptor`, `cluster/proposer`, `cluster/owner`, `cluster/holder`, `cluster/rejoin`, `cluster/coordinator`, `avl`, `keygroups`, `collections`, `records`, `indexes`, `vectors`, `terms`, `plans`, `planner`, `query`, `pager`, `roots`, `publisher`, `cluster/round`, `round`, `cluster/tier`, `space` and `transactions` (`src/protobase.st`, `src/protobase/*.st`, `src/protobase/cluster/*.st`); the codec itself imports
 `zonekeys`. `floor` checks the protoST floor when it loads, before any module after it: on a
-protoST below 0.16.1 the import signals `PBNotSupportedError` naming the floor and each missing
+protoST below 0.17.0 the import signals `PBNotSupportedError` naming the floor and each missing
 capability (`PBFloor check`, `missing`, `probes`, `requirement` and `refusalFor:`; see the
 README's Requirements). The protoST libraries it uses are `decimal`, `calendar`, `uuid` and `net`.
