@@ -525,15 +525,15 @@ PBAtom >> _setOid: anOid pointer: aPointer storage: aStorage
  field then holds: the argument, or the value an earlier or a racing
  publication installed (the loser of a race answers the winner's)."
 PBAtom >> _publishOid: anOid
-  self setInstVar: #oid from: nil to: anOid.
+  self compareAndSet: #oid from: nil to: anOid.
   ^ oid.
 
 PBAtom >> _publishSaved: aPBPlace
-  self setInstVar: #saved from: nil to: aPBPlace.
+  self compareAndSet: #saved from: nil to: aPBPlace.
   ^ saved.
 
 PBAtom >> _publishMemo: aMemo
-  self setInstVar: #memo from: nil to: aMemo.
+  self compareAndSet: #memo from: nil to: aMemo.
   ^ memo.
 
 "The load of a record the atom keeps as its slots (PBAtom class >>
@@ -543,7 +543,7 @@ PBAtom >> _publishMemo: aMemo
  field keeps the first, and every racer answers the installed memo."
 PBAtom >> _publishOid: anOid slots: anArray memo: aShape
   self _publishOid: anOid.
-  self setInstVar: #slots from: nil to: anArray.
+  self compareAndSet: #slots from: nil to: anArray.
   ^ self _publishMemo: aShape.
 
 "The load of a record the atom keeps as an envelope (PBAtom class >>
@@ -553,7 +553,7 @@ PBAtom >> _publishOid: anOid slots: anArray memo: aShape
 PBAtom >> _publishEnvelope: anEnvelope
   | installed |
   installed := self _publishMemo: anEnvelope.
-  self setInstVar: #slots from: nil to: installed slots.
+  self compareAndSet: #slots from: nil to: installed slots.
   ^ installed.
 
 "A reference to an atom, for PBCodec."
@@ -639,7 +639,7 @@ PBAtom >> _loadedWithin: aChain
 PBAtom >> _slots
   | m |
   m := self _loaded.
-  slots == nil ifTrue: [self setInstVar: #slots from: nil to: m slots].
+  slots == nil ifTrue: [self compareAndSet: #slots from: nil to: m slots].
   ^ slots.
 
 "The slot anIndex (_PBRecordShape): what a literal accessor reads. The

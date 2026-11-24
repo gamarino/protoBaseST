@@ -1,4 +1,4 @@
-"EXPECT-ERROR: protoBaseST 0.4.0 requires protoST 0.16.1 or later (protoIO 0.7.1); this protoST lacks ConnectionTimedOut >> bytesWritten (protoST 0.16.1, protoIO 0.7.1)."
+"EXPECT-ERROR: protoBaseST 0.4.1 requires protoST 0.17.0 or later (protoIO 0.7.1); this protoST lacks ConnectionTimedOut >> bytesWritten (protoST 0.16.1, protoIO 0.7.1)."
 "The floor check (src/protobase/floor.st, final review I1): on a protoST whose ConnectionTimedOut
  does not answer bytesWritten (protoST 0.16.0 and older), Import from: 'protobase' refuses with
  PBNotSupportedError naming the floor and the missing capability, before any other module loads;

@@ -260,7 +260,7 @@ PBKeyNode >> knownOrderKey
  compare-and-swap from nil (PBAtom's write-once publishers); answers the
  installed order key."
 PBKeyNode >> _publishOrderKey: anOrderKey
-  self setInstVar: #orderKey from: nil to: anOrderKey.
+  self compareAndSet: #orderKey from: nil to: anOrderKey.
   ^ orderKey.
 
 "As PBAtom >> _installSlots:memo:, for a node a write builds: its slots, its

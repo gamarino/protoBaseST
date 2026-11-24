@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.4.1 (2026-11-24)
+
+A patch release that moves the floor: a program on protoST 0.16.1 stops loading the package. The
+number 0.5.0 stays with the migration the explicit-state specification plans for protoST 0.18.0
+(protoST `docs/superpowers/specs/2026-11-23-explicit-state-design.md`, §13.2: value classes, declared
+write-once and atomic fields, a reflective allowlist test); this release only replaces the
+deprecated selector, with no change of behaviour.
+
+### Requirements
+
+- **protoST 0.17.0** (was 0.16.1); protoCore 3.6.1 and protoIO 0.7.1 are unchanged. protoST 0.17.0
+  deprecates `setInstVar:from:to:` (STATUS D63; it is removed in 0.18.0) in favour of
+  `compareAndSet:from:to:`, the same identity compare-and-swap (nil matches an unset variable) plus a
+  check that the name is a declared instance variable and the modifier checks. The first call of
+  the old selector in a process prints a warning on stderr, which made the workshop's `verificar.sh`
+  (it captures 2>&1) report exercises 1 to 5 as differing.
+- **The floor check probes the new selector** (`src/protobase/floor.st`): `Object >>
+  compareAndSet:from:to: (protoST 0.17.0)` is a capability like the others, so a protoST that
+  lacks it is refused when the package loads: "protoBaseST 0.4.1 requires protoST 0.17.0 or later
+  (protoIO 0.7.1); this protoST lacks ...". Tests: `floor_check.st` and the new
+  `floor_refuses_without_compare_and_set.st`.
+
+### Changed
+
+- The eight write-once call sites (`PBAtom >> _publishOid:`, `_publishSaved:`, `_publishMemo:`,
+  `_publishOid:slots:memo:`, `_publishEnvelope:`, `_slots`, `PBKeyNode >> _publishOrderKey:`,
+  `PBIndex >> _publishKeySpec:`) call `compareAndSet:from:to:` instead of `setInstVar:from:to:`. The names they
+  pass (`oid`, `saved`, `memo`, `slots`, `orderKey`, `keySpecObject`) are declared instance variables of
+  the receiver's class. The behaviour is the same; the deprecation warning is gone.
+- `values_immutable.st` scans for `compareAndSet:` sends where it scanned for `setInstVar:` (a
+  symbol literal, such as the floor probe's, is not a send); the allowlist comment follows.
+
 ## 0.4.0 (2026-11-23)
 
 ### Requirements

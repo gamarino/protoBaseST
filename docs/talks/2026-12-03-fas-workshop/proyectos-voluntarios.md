@@ -61,7 +61,7 @@ Los proyectos 1 a 3 y 8 a 10 cierran cosas que protoBaseST 0.4.0 dejó escritas 
 
 - **Repositorio:** protoST y protoIO (los dos issues ya existen).
 - **Por qué.** `IOStream >> close` prueba y pone una variable de instancia común (`closed`), así que dos hilos pueden pasar los dos y liberar dos veces el descriptor, la segunda quizás después de que el número se le dio a otro archivo. protoBaseST lo esquivó con un compare-and-set propio (`_PBTcpReader >> closeSocket`), pero cualquier programa protoST que cierre un stream desde dos hilos está expuesto. En protoIO, el cierre de un descriptor que nunca se leyó ni escribió por un estado tiene la misma carrera.
-- **Tamaño:** S–M. **Primer issue:** el arreglo en protoST es un CAS (`setInstVar:from:to:`) y un test con dos actores.
+- **Tamaño:** S–M. **Primer issue:** el arreglo en protoST es un CAS (`compareAndSet:from:to:`) y un test con dos actores.
 - **Requisitos:** Smalltalk; para protoIO, C++.
 - **Primer paso.** Leer `IOStream >> close` en `lib/kernel/io.st` de protoST y el issue; escribir el test que lo reproduce con dos actores y correrlo junto a los tests de entrada y salida, `ctest --test-dir build_release -R cli_io --output-on-failure`.
 - **Mentor:** a confirmar; se conversa en los issues.
@@ -91,7 +91,7 @@ Los proyectos 1 a 3 y 8 a 10 cierran cosas que protoBaseST 0.4.0 dejó escritas 
 ## 6. Estado explícito: variables `writeOnce` y `constant`
 
 - **Repositorio:** protoST (y la migración de protoBaseST 0.5.0 después).
-- **Por qué.** protoBaseST ya necesita decir qué estado no cambia, y hoy lo dice por convención: un test que busca `:=` en el código contra una lista de 59 excepciones, y cinco métodos `_publish…:` escritos a mano que llenan un campo una vez con `setInstVar: #f from: nil to: x`. La especificación (§6.2, §6.3, §15) los vuelve lenguaje: `writeOnceNames:` (una asignación es un CAS desde nil que responde el valor instalado) y `constantNames:` (asignable solo durante la construcción). Es la primera mitad de protoST 0.17.0.
+- **Por qué.** protoBaseST ya necesita decir qué estado no cambia, y hoy lo dice por convención: un test que busca `:=` en el código contra una lista de 59 excepciones, y cinco métodos `_publish…:` escritos a mano que llenan un campo una vez con `compareAndSet: #f from: nil to: x`. La especificación (§6.2, §6.3, §15) los vuelve lenguaje: `writeOnceNames:` (una asignación es un CAS desde nil que responde el valor instalado) y `constantNames:` (asignable solo durante la construcción). Es la primera mitad de protoST 0.17.0.
 - **Tamaño:** L. Se parte: el compilador y los dos opcodes (`STORE_ONCE_INSTVAR`, `STORE_CONST_INSTVAR`), los chequeos al instalar un método, la reflexión.
 - **Requisitos:** C++20; leer el compilador y la VM de protoST (`docs/VM.md`).
 - **Primer paso.** Leer los §6.2 y §6.3 de la especificación y cómo se emite `STORE_INSTVAR` en `src/frontend/Compiler.cpp`; correr `protost --disasm docs/vm-examples/05-fib.st` para ver el bytecode.

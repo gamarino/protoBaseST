@@ -29,10 +29,10 @@ mismas respuestas, planes y bytes), y para poner a prueba protoST con una aplica
 No es un producto.
 
 **¿Corre sobre protoST 0.17.0?**
-Los ejercicios 1 a 5 del taller dan la salida esperada sobre 0.17.0 (24/11/2026), más una línea de
-aviso: `setInstVar:from:to:` está deprecado y se quita en 0.18.0. protoBaseST lo llama en 8 lugares
-de 3 archivos. La suite completa no se corrió sobre 0.17.0; el piso declarado es 0.16.1. Con 0.18.0,
-0.4.0 deja de funcionar: la migración de 0.5.0 tiene que llegar antes.
+Sí, y lo exige desde 0.4.1 (24/11/2026). 0.4.0 imprimía sobre 0.17.0 el aviso de que
+`setInstVar:from:to:` está deprecado y se quita en 0.18.0; lo llamaba en 8 lugares de 3 archivos.
+0.4.1 los pasa a `compareAndSet:from:to:` y sube el piso a 0.17.0. La suite completa sobre 0.17.0:
+315 pasan, 0 fallan, 3 salteados; los 6 ejercicios del taller dan lo esperado.
 
 **¿Cuándo sale 0.5.0?**
 No hay fecha. Está planeada (especificación de estado explícito de protoST, §13.2) y no empezó.

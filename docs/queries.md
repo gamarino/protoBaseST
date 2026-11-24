@@ -915,7 +915,7 @@ on 10^4 vectors (bench VB0, 2026-11-20, minimum of 5 runs), protoBaseST's fsum c
 of V8 showed the interpreted kernel dominating search time (ruling VQ2). The maintainer decided it
 ahead of V8 (on 0.14.1 V8 then measured the kernel at 72 to 118 per cent of an exact query): protoST 0.15.0 has Float fsum:, fsumOfProducts:with: and
 fsumOfSquaredDifferences:with: (protoST's), and `PBVectorMath` uses them (behind a feature probe
-while the floor was protoST 0.14.1; always since the floor is 0.16.1), with the same answers to the
+while the floor was protoST 0.14.1; always since the floor is 0.17.0), with the same answers to the
 bit (the vendored cases run on both paths). On 0.15.0 a score costs 16
 to 60 us per vector at dim 8 to 128, 2.5 to 18.3 times `proto_db`'s pure-Python score, and the sum is
 no longer most of it (bench VB0 on 0.15.0, same section). On 0.16.0, with one scorer per query

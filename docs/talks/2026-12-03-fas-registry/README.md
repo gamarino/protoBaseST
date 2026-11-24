@@ -36,9 +36,8 @@ cd docs/talks/2026-12-03-fas-registry/demos
 protost orden-de-resolucion.st
 ```
 
-Con protoST 0.17.0 los programas de protoBaseST imprimen primero, por stderr, el aviso de que
-`setInstVar:from:to:` está deprecado y se quita en 0.18.0 (slide 18). La demo del diamante no usa
-protoBaseST.
+protoBaseST 0.4.1 necesita protoST 0.17.0 y ya no usa `setInstVar:from:to:`, que 0.17.0 depreca: los
+ejercicios corren sin aviso (slide 18). La demo del diamante no usa protoBaseST.
 
 ## Fuentes
 

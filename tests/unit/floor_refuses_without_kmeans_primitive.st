@@ -1,4 +1,4 @@
-"EXPECT-ERROR: protoBaseST 0.4.0 requires protoST 0.16.1 or later (protoIO 0.7.1); this protoST lacks Float class >> fsumOfPowSquaredDifferences:with: (protoST 0.16.0)."
+"EXPECT-ERROR: protoBaseST 0.4.1 requires protoST 0.17.0 or later (protoIO 0.7.1); this protoST lacks Float class >> fsumOfPowSquaredDifferences:with: (protoST 0.16.0)."
 "The floor check (src/protobase/floor.st, final review I1): on a protoST without the k-means
  distance primitive Float fsumOfPowSquaredDifferences:with: (older than 0.16.0), Import from:
  'protobase' refuses with PBNotSupportedError naming the floor and the missing capability; without
