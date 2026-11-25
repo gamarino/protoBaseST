@@ -137,6 +137,14 @@ release was tested on protoCore 3.6.0 with protoST 0.12.0); the 0.4.1 suite ran 
 3.6.1 and protoIO 0.7.1 (315 passed, 0 failed, 3 skipped, with the interop venv). The vector benchmarks of 0.4.0 ran on
 0.16.0, whose vector primitives 0.16.1 keeps unchanged.
 
+**Recommended: protoST 0.17.2** (built against protoCore 3.6.2). It fixes S51: on arm64, notably
+macOS on Apple silicon, a message sent to an actor could be left in its mailbox unscheduled, so a
+program waiting on the reply hung (measured on loaded macOS runners: about 1 run in 7,500 before
+the fix, none in 183,271 runs after it). Every protoBaseST write goes through the space's round
+runner, an actor (and the cluster roles and transports are actors too), so it is exposed to that
+hang. The floor stays protoST 0.17.0, since 0.17.2 changes no API;
+the 0.4.1 suite has not been re-run on 0.17.2.
+
 Build protoST 0.17.0 against protoCore 3.6.1 and protoIO 0.7.1 (see its own README); it provides
 `lib/decimal.st`, `lib/calendar.st`, `lib/uuid.st`, the fixes for protoST issues S37 to S49,
 `BinaryFile >> linkCount` and `FileReference >> realPath` (the hard-link refusal and the lock
