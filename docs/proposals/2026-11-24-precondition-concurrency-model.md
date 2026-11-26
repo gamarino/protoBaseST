@@ -40,7 +40,9 @@ nothing but engine code and format comparisons runs while the space root is held
 For a Smalltalk audience the closest picture is the one GemStone opened: optimistic transactions
 over a persistent object graph, with conflicts detected at commit. As we understand it, GemStone
 detects conflicts per object and offers reduced-conflict classes (`RcCounter`, `RcIdentityBag`,
-`RcKeyValueDictionary`, `RcQueue`) for hot shared collections. The model proposed here reaches a
+`RcKeyValueDictionary`, `RcQueue`) for hot shared collections. GemStone also offers explicit
+object locks for the cases where optimism does not fit; the model here keeps locks out of its core
+(P-D), and they can be built on top as lock cells (the specification's section 13). The model proposed here reaches a
 similar effect by a different route: there is no special class to choose; the unit follows from
 the **operation** the program sent (`setAt:value:` on a key, `add:` of an element), and an operation
 the engine cannot prove safe falls back to the whole collection. We would value the group's
@@ -79,8 +81,9 @@ publisher under the root lock (standalone) or in the cluster round's build:
   and the extractors in the commit's build, at protoBaseST's index speed";
 - `docs/deviations.md:189` records the consequence for group commit: an extractor's exception is
   a build error of that commit alone, reaching the caller as a copy;
-- `docs/deviations.md:990` ("Worth knowing") records that, in a cluster round, an extractor's
-  exception fails the whole round, a deviation by the maintainer's decision of 2026-11-19;
+- `docs/deviations.md:990` ("Worth knowing") records that an extractor's exception fails only its
+  own commit, in a cluster round too, where `proto_db` rc4 fails the whole round: in the cluster
+  case a deviation by the maintainer's decision of 2026-11-19;
 - `src/protobase/publisher.st` says it plainly: "An extractor must be pure and quick: a slow one
   delays the round, under the root lock."
 
@@ -191,11 +194,14 @@ case a reviewer would ask about (spec section 15):
 | `getRootObject:` of an object root | holds its base value |
 | `getRootObject:` of a collection root | still present and of the same class; content not recorded |
 | `rootNames`, `mutableNames` | the set of names unchanged (today they record nothing) |
-| `getMutable:` | cell holds its base value |
+| `getMutable:` | cell holds its base value, absent included |
 | Dictionary, HashDictionary `getAt:`, `has:` | that key unchanged |
 | Set `has:` | presence or absence unchanged |
 | CountedSet `has:`, `countOf:` | that count unchanged |
+| RepeatedKeysDictionary `getAt:`, `has:` | the set of records of that key unchanged |
 | List `getAt:` of a base position | that position unchanged |
+| `indexNames` | the set of index definitions unchanged |
+| `getIndex:` | whole collection, and the index definitions |
 | a query answered by an equality-index lookup | the group of that key unchanged |
 | a query answered by a range-index scan, a window of dictionary keys | no key inside the range changed (a range, R67-R68) |
 | `size`, `count`, iteration (`do:`), `keys`, an unindexed query, a vector search, a pager | whole collection |
@@ -266,7 +272,8 @@ section [Unreleased], decision D73). At the time of writing it is not released.
   in commit order on an in-memory model, and every read and the final state must match. It found
   amendment A-1 above;
 - **full-versus-delta equivalence runs**: the delta validation of step 4 checked against a full
-  re-validation, 11,492 delta checks with 0 mismatches;
+  re-validation, 11,492 delta checks with 0 mismatches (ten runs of the checker, during the
+  implementation);
 - **86 conformance scenarios** (`tests/conformance/concurrency_scenarios.json`, section 7), run in
   standalone mode, with group commit and in a cluster;
 - the whole `proto_db` suite, 8394 passing tests.
@@ -377,11 +384,15 @@ declared as a method of a value class (8.3)? What would the group accept as "pur
 Smalltalk where every object can be sent any message?
 
 **8.3 Should stored records become protoST value classes?** protoST's explicit-state
-specification (approved 2026-11-19; value classes are planned for protoST 0.18.0) gives classes
-whose instances cannot be changed by any path. protoBaseST's records are immutable by convention
-only (decision 3). The model relies on values being immutable (R20: what is reachable from a read
-value needs no further record). Value classes would make that a property the compiler enforces,
-and would give extractors a natural pure home. Is that worth making protoBaseST depend on 0.18.0,
+specification (a draft for review whose scope the maintainer approved on 2026-11-19; value
+classes are planned for protoST 0.18.0) gives classes whose instances' fields can never be
+rebound: a write signals `ModificationForbidden` (the spec's section 5.6). That immutability is
+shallow: a field may still refer to a mutable object, and a value immutable all the way down is
+the recommended form, not a checked one. protoBaseST's records are immutable by convention only
+(decision 3). The model relies on values being immutable (R20: what is reachable from a read
+value needs no further record). Value classes would enforce the first level of that, and
+protoBaseST could check the rest when a record is stored; they would also give extractors a
+natural pure home. Is that worth making protoBaseST depend on 0.18.0,
 and does it read as a gain or as a constraint to a Smalltalk programmer used to mutable domain
 objects?
 
@@ -421,7 +432,7 @@ In the protoBase repository (`proto_db`), on the branch to be released as 2.0.0r
 - `docs/superpowers/specs/2026-11-24-precondition-concurrency-model-design.md`: the specification;
   sections 11 (protoBaseST), 14 (amendments, R62-R70) and 15 (amendments A-1 to A-6);
 - `docs/source/concurrency-model.rst`: the reference page;
-- `docs/decisions.md`, D73 (amending D9, D26, D33, D34, D35);
+- `docs/decisions.md`, D73 (amending D9, D26, D33, D34, D35 and D67);
 - `docs/source/format-spec.rst`, "Format stability" and the version-7 root mark;
 - `docs/source/performance.rst`: no figure measures the model;
 - `tests/conformance/concurrency_scenarios.json`: the 86 scenarios;
